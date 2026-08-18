@@ -1,0 +1,16 @@
+services:
+  smokey-vault:
+    build: .
+    image: the-smokey-vault:latest
+    container_name: smokey-vault
+    restart: unless-stopped
+    ports:
+      - "6616:8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DB_PATH: /data/smokeyvault.db
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-on-your-server}
+      DEFAULT_PIN: ${DEFAULT_PIN:-1234}
+    volumes:
+      - ./data:/data

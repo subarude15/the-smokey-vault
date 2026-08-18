@@ -1,0 +1,35 @@
+# The Smokey Vault
+
+A private, self-hosted bar, wine cellar, brewery log, cocktail matcher, and AI mixologist. Guests get a read-only digital menu; the master PIN unlocks inventory and maintenance.
+
+## Run with Docker
+
+```bash
+docker compose up -d --build
+```
+
+Open `http://localhost:6616`. The initial master PIN is `1234`; change it after first launch. Set a strong `SESSION_SECRET` and `DEFAULT_PIN` in a local `.env` before exposing the service.
+
+The SQLite database and daily snapshots live in `./data`. Camera streaming works on `localhost` or HTTPS; plain LAN HTTP automatically supports photo capture instead.
+
+## Local development
+
+Requires Node.js 24+ and native build tools for `better-sqlite3`.
+
+```bash
+npm install
+npm run dev
+```
+
+Frontend: `http://localhost:5173`  
+API: `http://localhost:8080`  
+OpenAPI: `http://localhost:8080/api/docs`
+
+## Production build
+
+```bash
+npm run build
+npm start
+```
+
+Supported AI providers are OpenAI, Anthropic, OpenRouter, and Ollama. Configure your own key, model, and optional base URL under Admin → Settings.

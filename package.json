@@ -1,0 +1,48 @@
+{
+  "name": "the-smokey-vault",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "concurrently \"tsx watch src/server.ts\" \"vite --config client/vite.config.ts\"",
+    "build": "npm run build:client && tsc -p tsconfig.server.json",
+    "build:client": "vite build --config client/vite.config.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "latest",
+    "@fastify/multipart": "latest",
+    "@fastify/static": "latest",
+    "@fastify/swagger": "latest",
+    "@fastify/swagger-ui": "latest",
+    "@zxing/browser": "latest",
+    "@zxing/library": "^0.23.0",
+    "better-sqlite3": "latest",
+    "fastify": "latest",
+    "lucide-react": "latest",
+    "nanoid": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "latest",
+    "@types/better-sqlite3": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "autoprefixer": "latest",
+    "concurrently": "latest",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vite-plugin-pwa": "latest"
+  }
+}
