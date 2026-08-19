@@ -15,10 +15,10 @@ const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
 const tables = new Set(["spirits", "taps", "brews", "packaged_beer", "wines"]);
 const publicTables = new Set([...tables, "cocktails"]);
 const tableFields: Record<string, string[]> = {
-  spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url"],
+  spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count"],
   taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l"],
   brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes"],
-  packaged_beer: ["brewery","name","style","count","pack_date","abv"],
+  packaged_beer: ["brewery","name","style","count","pack_date","abv","upc"],
   wines: ["producer","name","varietal","vintage","type","region","sweetness","body","bottle_count","drink_by_date","pairings","notes"]
 };
 
@@ -120,25 +120,45 @@ app.get("/api/cocktails/match", async () => {
 });
 
 app.get<{ Params: { upc: string } }>("/api/scan/upc/:upc", async (request, reply) => {
-  const local = db.prepare("SELECT * FROM spirits WHERE upc=?").get(request.params.upc);
-  if (local) return { source: "vault", product: local };
-  const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(request.params.upc)}.json`);
+  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(request.params.upc);
+  if (spirit) return { source: "vault", table: "spirits", upc: request.params.upc, product: spirit };
+  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(request.params.upc);
+  if (beer) return { source: "vault", table: "packaged_beer", upc: request.params.upc, product: beer };
+  let response: Response;
+  try {
+    response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(request.params.upc)}.json`);
+  } catch {
+    return reply.code(503).send({ error: "Product lookup service is unavailable" });
+  }
   if (!response.ok) return reply.code(404).send({ error: "Product not found" });
   const data = await response.json() as { status: number; product?: Record<string, unknown> };
   if (!data.status || !data.product) return reply.code(404).send({ error: "Product not found" });
-  return { source: "openfoodfacts", product: data.product };
+  return { source: "openfoodfacts", upc: request.params.upc, product: data.product };
 });
+
+class AiRequestError extends Error {
+  constructor(message: string, readonly statusCode = 502) {
+    super(message);
+  }
+}
 
 async function callLlm(prompt: string, image?: string) {
   const provider = getSetting("aiProvider") ?? "ollama";
   const key = getSetting("aiApiKey") ?? "";
   const baseUrl = getSetting("aiBaseUrl") ?? (provider === "ollama" ? "http://host.docker.internal:11434" : provider === "anthropic" ? "https://api.anthropic.com" : provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
   const model = getSetting("aiModel") ?? (provider === "ollama" ? "llama3.2-vision" : provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini");
+  if (provider !== "ollama" && !key) {
+    throw new AiRequestError("Please configure your AI Provider API key in Settings.", 400);
+  }
   if (provider === "anthropic") {
     const content: unknown[] = [{ type: "text", text: prompt }];
     if (image) content.unshift({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } });
     const response = await fetch(`${baseUrl}/v1/messages`, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: "user", content }] }) });
-    const data = await response.json() as { content?: Array<{ text: string }> };
+    const data = await response.json() as { content?: Array<{ text: string }>; error?: { message?: string } };
+    if (!response.ok) {
+      const message = response.status === 401 ? "Your AI Provider API key is invalid. Update it in Settings." : data.error?.message ?? "Anthropic could not generate a recipe.";
+      throw new AiRequestError(message, response.status);
+    }
     return data.content?.[0]?.text ?? "";
   }
   const isOllama = provider === "ollama";
@@ -150,16 +170,73 @@ async function callLlm(prompt: string, image?: string) {
       : { model, messages: [{ role: "user", content: image ? [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image}` } }] : prompt }] })
   });
   const data = await response.json() as { message?: { content: string }; choices?: Array<{ message: { content: string } }>; error?: unknown };
-  if (!response.ok) throw new Error(JSON.stringify(data.error ?? data));
+  if (!response.ok) {
+    const providerMessage = typeof data.error === "object" && data.error && "message" in data.error ? String((data.error as { message: unknown }).message) : "";
+    const message = response.status === 401 ? "Your AI Provider API key is invalid. Update it in Settings." : providerMessage || `${provider} could not generate a recipe.`;
+    throw new AiRequestError(message, response.status);
+  }
   return data.message?.content ?? data.choices?.[0]?.message.content ?? "";
+}
+
+type GeneratedRecipe = {
+  name: string;
+  ingredients: string[];
+  method: string;
+  glassware: string;
+  garnish: string;
+  season: string;
+  notes: string;
+};
+
+function parseGeneratedRecipe(result: string): GeneratedRecipe {
+  const cleaned = result.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new AiRequestError("The AI returned an incomplete recipe. Please try again.");
+  let value: Partial<GeneratedRecipe>;
+  try {
+    value = JSON.parse(cleaned.slice(start, end + 1)) as Partial<GeneratedRecipe>;
+  } catch {
+    throw new AiRequestError("The AI returned a recipe in an unexpected format. Please try again.");
+  }
+  if (!value.name || !Array.isArray(value.ingredients) || !value.ingredients.every((ingredient) => typeof ingredient === "string") || !value.method) {
+    throw new AiRequestError("The AI recipe was missing required details. Please try again.");
+  }
+  return {
+    name: value.name,
+    ingredients: value.ingredients,
+    method: value.method,
+    glassware: value.glassware || "Rocks",
+    garnish: value.garnish || "None",
+    season: ["Spring","Summer","Fall","Winter","Holiday"].includes(value.season ?? "") ? value.season! : "All",
+    notes: value.notes || ""
+  };
 }
 
 app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, reply) => {
   const inventory = db.prepare("SELECT name,brand,category,fill_level FROM spirits WHERE fill_level > 1").all();
   try {
-    const result = await callLlm(`You are a concise expert mixologist. Available inventory: ${JSON.stringify(inventory)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return a name, exact recipe, method, glass, garnish, and one substitution.`);
-    return { result };
-  } catch (error) { return reply.code(502).send({ error: error instanceof Error ? error.message : "AI request failed" }); }
+    const result = await callLlm(`You are an expert mixologist. Available inventory: ${JSON.stringify(inventory)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
+    return { recipe: parseGeneratedRecipe(result) };
+  } catch (error) {
+    const status = error instanceof AiRequestError ? error.statusCode : 502;
+    const message = error instanceof AiRequestError ? error.message : "The AI service could not be reached. Check your provider settings and network connection.";
+    return reply.code(status).send({ error: message });
+  }
+});
+
+app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const recipe = request.body;
+  if (!recipe.name || !Array.isArray(recipe.ingredients) || !recipe.ingredients.length || !recipe.method) {
+    return reply.code(400).send({ error: "A name, ingredients, and method are required." });
+  }
+  db.prepare(`INSERT INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season)
+    VALUES(?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET collection='Custom Cocktails',ingredients=excluded.ingredients,
+    glassware=excluded.glassware,garnish=excluded.garnish,method=excluded.method,notes=excluded.notes,season=excluded.season`)
+    .run(recipe.name.trim(), JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "", recipe.method, recipe.notes || "", recipe.season || "All");
+  return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(recipe.name.trim()));
 });
 
 app.post("/api/ai/vision", async (request, reply) => {

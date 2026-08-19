@@ -3,7 +3,14 @@ import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
 import { Camera, ScanBarcode, Sparkles, X } from "lucide-react";
 import { api } from "./api";
 
-type Props = { onClose: () => void; onProduct: (product: Record<string, unknown>) => void };
+export type ScanResult = {
+  source: "vault" | "openfoodfacts" | "vision" | "unresolved";
+  upc?: string;
+  table?: "spirits" | "packaged_beer";
+  product: Record<string, unknown>;
+};
+
+type Props = { onClose: () => void; onProduct: (result: ScanResult) => void };
 
 export function Scanner({ onClose, onProduct }: Props) {
   const video = useRef<HTMLVideoElement>(null);
@@ -35,11 +42,17 @@ export function Scanner({ onClose, onProduct }: Props) {
   async function lookup(upc: string) {
     setStatus(`Looking up ${upc}…`);
     try {
-      const data = await api<{ product: Record<string, unknown> }>(`/scan/upc/${upc}`);
-      onProduct(data.product);
+      const data = await api<ScanResult>(`/scan/upc/${upc}`);
+      onProduct(data);
       setStatus(batch ? "Saved result. Ready for the next barcode." : `Found ${upc}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Product not found");
+      const message = error instanceof Error ? error.message : "Product not found";
+      if (message === "Product not found") {
+        onProduct({ source: "unresolved", upc, product: {} });
+        setStatus("No catalog match. Add the item details manually.");
+      } else {
+        setStatus(message);
+      }
     }
   }
 
@@ -53,7 +66,7 @@ export function Scanner({ onClose, onProduct }: Props) {
       try {
         const data = await api<{ result: string }>("/ai/vision", { method: "POST", body });
         const json = JSON.parse(data.result.replace(/```json|```/g, "").trim());
-        onProduct(json);
+        onProduct({ source: "vision", product: json });
         setStatus("Label recognized");
       } catch (error) { setStatus(error instanceof Error ? error.message : "Could not read label"); }
       return;

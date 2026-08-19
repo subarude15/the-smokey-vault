@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Beer, BottleWine as Bottle, ChevronRight, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Lock, LockOpen, Menu, Moon, Plus, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
+  Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
+  LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
-import { Scanner } from "./Scanner";
+import { Scanner, ScanResult } from "./Scanner";
 
 type Field = { key: string; label: string; type?: string; options?: string[] };
 type Module = { id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string; fields: Field[]; primary: string; secondary: string };
@@ -14,7 +14,7 @@ const modules: Module[] = [
     { key:"name",label:"Name" },{ key:"brand",label:"Brand" },{ key:"category",label:"Category",options:["Bourbon","Rye","Scotch","Irish","Gin","Tequila","Mezcal","Rum","Amaro","Liqueur","Bitters","Mixer","Vodka","Cognac"] },
     { key:"sub_category",label:"Sub-category" },{ key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level %",type:"range" },
     { key:"purchase_date",label:"Purchase date",type:"date" },{ key:"opened_date",label:"Date opened",type:"date" },{ key:"shelf_location",label:"Shelf location" },{ key:"upc",label:"UPC" },
-    { key:"image_url",label:"Image URL",type:"url" },{ key:"notes",label:"Notes",type:"textarea" }
+    { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Image URL",type:"url" },{ key:"notes",label:"Notes",type:"textarea" }
   ]},
   { id: "taps", label: "Draft Taps", singular: "Tap", icon: Beer, title: "On Tap", subtitle: "Live pours and keg levels at a glance.", primary: "brewery_batch", secondary: "style", fields: [
     {key:"tap_number",label:"Tap #",type:"number"},{key:"keg_size_l",label:"Keg size (L)",type:"number"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},{key:"brewery_batch",label:"Brewery / Batch"},
@@ -26,7 +26,7 @@ const modules: Module[] = [
     {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},{key:"status",label:"Status",options:["Planned","Fermenting","Conditioning","Ready to Keg","Archived"]},{key:"notes",label:"Brew notes",type:"textarea"}
   ]},
   { id: "packaged_beer", label: "Packaged Beer", singular: "Beer", icon: Beer, title: "Packaged Beer", subtitle: "The cold-room count for cans and bottles.", primary: "name", secondary: "brewery", fields: [
-    {key:"brewery",label:"Brewery"},{key:"name",label:"Name"},{key:"style",label:"Style"},{key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"}
+    {key:"brewery",label:"Brewery"},{key:"name",label:"Name"},{key:"style",label:"Style"},{key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"}
   ]},
   { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and ideal drinking windows.", primary: "name", secondary: "producer", fields: [
     {key:"producer",label:"Producer / Winery"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},{key:"type",label:"Type",options:["Red","White","Rosé","Sparkling","Dessert","Fortified"]},
@@ -47,6 +47,31 @@ function applyTheme(theme: string, tokens?: Record<string,string>) {
   document.documentElement.dataset.theme = theme;
 }
 
+type ScanDraft = { moduleId: "spirits" | "packaged_beer"; values: Record<string,unknown>; key: number };
+type ExistingScan = { table: "spirits" | "packaged_beer"; item: Item };
+
+function scannedInventoryDraft(result: ScanResult): ScanDraft {
+  const product = result.product;
+  const text = (...keys:string[]) => keys.map((key)=>product[key]).find((value)=>typeof value==="string"&&value.trim()) as string|undefined;
+  const categories = text("categories","category") ?? "";
+  const isBeer = /beer|ale|lager|stout|porter|ipa|cider/i.test(categories);
+  const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string,unknown>|undefined)?.alcohol_100g;
+  const abv = typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")) || 0;
+  const name = text("product_name","product_name_en","name") ?? "";
+  const brand = text("brands","brand","producer") ?? "";
+  const upc = result.upc ?? text("code","upc") ?? "";
+  const image = text("image_front_url","image_url") ?? "";
+  return isBeer ? {
+    moduleId:"packaged_beer",
+    key:Date.now(),
+    values:{name,brewery:brand,style:categories.split(",")[0]??"",abv,count:1,upc}
+  } : {
+    moduleId:"spirits",
+    key:Date.now(),
+    values:{name,brand,category:categories.split(",")[0]||"Mixer",abv,upc,image_url:image,stock_count:1,fill_level:100}
+  };
+}
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [admin, setAdmin] = useState(tokenExists());
@@ -56,6 +81,9 @@ export default function App() {
   const [theme, setTheme] = useState(localStorage.getItem("smokey-theme") ?? "dark");
   const [counts, setCounts] = useState<Record<string,number>>({});
   const [backupDue, setBackupDue] = useState(false);
+  const [scanDraft, setScanDraft] = useState<ScanDraft>();
+  const [existingScan, setExistingScan] = useState<ExistingScan>();
+  const [notice, setNotice] = useState("");
   const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
@@ -79,6 +107,26 @@ export default function App() {
   }, [admin, lock]);
 
   const navigate = (next: string) => { setPage(next); setMobileNav(false); };
+  function handleScan(result: ScanResult) {
+    setScanner(false);
+    if (result.source==="vault"&&result.table) {
+      setExistingScan({table:result.table,item:result.product as Item});
+      return;
+    }
+    const draft = scannedInventoryDraft(result);
+    setScanDraft(draft);
+    navigate(draft.moduleId);
+    if (!admin) setUnlock(true);
+  }
+  async function incrementScannedStock() {
+    if (!existingScan) return;
+    if (!admin) { setUnlock(true); return; }
+    const field = existingScan.table==="spirits"?"stock_count":"count";
+    const next = Number(existingScan.item[field]??1)+1;
+    await api(`/inventory/${existingScan.table}/${existingScan.item.id}`,{method:"PUT",body:JSON.stringify({[field]:next})});
+    setNotice(`${String(existingScan.item.name??"Item")} stock increased to ${next}.`);
+    setExistingScan(undefined);
+  }
   const nav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"cocktails",label:"Cocktail Book",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },{ id:"settings",label:"Settings",icon:Settings,admin:true }
@@ -109,15 +157,17 @@ export default function App() {
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
         <div className="page">
           {page === "dashboard" && <Dashboard counts={counts} admin={admin} go={navigate}/>}
-          {modules.map((module) => page === module.id && <Inventory key={module.id} module={module} admin={admin}/>)}
+          {modules.map((module) => page === module.id && <Inventory key={module.id} module={module} admin={admin} scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined} consumeScanDraft={()=>setScanDraft(undefined)}/>)}
           {page === "cocktails" && <Cocktails/>}
-          {page === "mixologist" && <Mixologist/>}
+          {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
-      {scanner && <Scanner onClose={() => setScanner(false)} onProduct={() => { setScanner(false); navigate("spirits"); }}/>}
+      {scanner && <Scanner onClose={() => setScanner(false)} onProduct={handleScan}/>}
       {unlock && <Unlock onClose={() => setUnlock(false)} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
+      {existingScan&&<div className="toast action-toast"><div><strong>Already in the vault</strong><span>{String(existingScan.item.name??"This item")} is already tracked.</span></div><button className="primary" onClick={incrementScannedStock}>+1 stock</button><button className="icon-button" onClick={()=>setExistingScan(undefined)}><X/></button></div>}
+      {notice&&<div className="toast notice-toast"><span>{notice}</span><button className="icon-button" onClick={()=>setNotice("")}><X/></button></div>}
     </div>
   );
 }
@@ -140,12 +190,17 @@ function Dashboard({ counts, admin, go }: { counts: Record<string,number>; admin
   </>;
 }
 
-function Inventory({ module, admin }: { module:Module; admin:boolean }) {
+function Inventory({ module, admin, scanDraft, consumeScanDraft }: { module:Module; admin:boolean; scanDraft?:ScanDraft; consumeScanDraft:()=>void }) {
   const [items,setItems] = useState<Item[]>([]);
   const [search,setSearch] = useState("");
   const [editing,setEditing] = useState<Item | null | undefined>();
   const load = useCallback(() => api<Item[]>(`/inventory/${module.id}`).then(setItems), [module.id]);
   useEffect(() => { load().catch(() => {}); }, [load]);
+  useEffect(() => {
+    if (!admin||!scanDraft) return;
+    setEditing({id:0,...scanDraft.values} as Item);
+    consumeScanDraft();
+  },[admin,scanDraft,consumeScanDraft]);
   const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(search.toLowerCase()));
   async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); load(); }
   return <>
@@ -167,8 +222,9 @@ function Inventory({ module, admin }: { module:Module; admin:boolean }) {
 function ItemForm({ module,item,close,saved }:{module:Module;item:Item|null;close:()=>void;saved:()=>void}) {
   const [form,setForm] = useState<Record<string,unknown>>(item ?? {});
   const [error,setError] = useState("");
-  async function submit(e:React.FormEvent) { e.preventDefault(); try { await api(`/inventory/${module.id}${item ? `/${item.id}` : ""}`,{method:item?"PUT":"POST",body:JSON.stringify(form)}); saved(); } catch(err){setError(err instanceof Error?err.message:"Could not save");} }
-  return <div className="modal-backdrop"><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{item?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{item ? String(item[module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  const existing = Boolean(item?.id);
+  async function submit(e:React.FormEvent) { e.preventDefault(); try { await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(form)}); saved(); } catch(err){setError(err instanceof Error?err.message:"Could not save");} }
+  return <div className="modal-backdrop"><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
       {field.options ? <select value={String(form[field.key]??field.options[0])} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}>{field.options.map((v)=><option key={v}>{v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :
@@ -201,11 +257,17 @@ function RecipeModal({drink,close}:{drink:CocktailDrink;close:()=>void}){
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${drink.name} recipe`}><section className="modal recipe-modal"><header className="modal-header"><div><span className="eyebrow">{drink.collection}{drink.season!=="All"?` · ${drink.season}`:""}</span><h2>{drink.name}</h2><p>{drink.method} · {drink.glassware}</p></div><button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button></header><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{drink.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{drink.method}</strong></div><div><span>GLASS</span><strong>{drink.glassware}</strong></div><div><span>GARNISH</span><strong>{drink.garnish||"None"}</strong></div></div></div>{drink.missing.length>0&&<p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}<footer className="modal-footer"><button className="primary" onClick={close}>Cheers</button></footer></section></div>
 }
 
-function Mixologist() {
-  const [prompt,setPrompt] = useState(""); const [result,setResult] = useState(""); const [loading,setLoading] = useState(false);
-  async function ask(){setLoading(true);setResult("");try{const data=await api<{result:string}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt})});setResult(data.result);}catch(e){setResult(e instanceof Error?e.message:"AI request failed");}finally{setLoading(false);}}
+type GeneratedRecipe = { name:string; ingredients:string[]; method:string; glassware:string; garnish:string; season:string; notes:string };
+
+function Mixologist({admin,goSettings}:{admin:boolean;goSettings:()=>void}) {
+  const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
+  async function ask(){setLoading(true);setRecipe(undefined);setError("");setSaved(false);try{const data=await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt})});setRecipe(data.recipe);}catch(e){setError(e instanceof Error?e.message:"The AI service could not generate a recipe.");}finally{setLoading(false);}}
+  async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
   return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Tell us a flavor, feeling, occasion, or ingredient. Your inventory shapes every recommendation."/>
-    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><button className="primary" disabled={loading||!prompt} onClick={ask}><Sparkles/> {loading?"Thinking…":"Create my cocktail"}</button>{result&&<div className="ai-result">{result}</div>}</div>
+    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><button className="primary" disabled={loading||!prompt} onClick={ask}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button>
+    {loading&&<div className="ai-loading"><LoaderCircle className="spinner"/><div><strong>The mixologist is measuring…</strong><span>Balancing your inventory, flavors, and request.</span></div></div>}
+    {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div>{admin&&/Settings|API key|provider/i.test(error)&&<button className="secondary" onClick={goSettings}>Open Settings</button>}</div>}
+    {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}</div>
   </>;
 }
 

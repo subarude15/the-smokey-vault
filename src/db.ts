@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS spirits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, brand TEXT DEFAULT '', category TEXT NOT NULL,
   sub_category TEXT DEFAULT '', abv REAL DEFAULT 0, volume_ml REAL DEFAULT 750, fill_level REAL DEFAULT 100,
   purchase_date TEXT, opened_date TEXT, shelf_location TEXT DEFAULT '', upc TEXT DEFAULT '', notes TEXT DEFAULT '',
-  image_url TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  image_url TEXT DEFAULT '', stock_count INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS taps (
   id INTEGER PRIMARY KEY AUTOINCREMENT, tap_number INTEGER NOT NULL UNIQUE, keg_size_l REAL DEFAULT 19,
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS brews (
 );
 CREATE TABLE IF NOT EXISTS packaged_beer (
   id INTEGER PRIMARY KEY AUTOINCREMENT, brewery TEXT DEFAULT '', name TEXT NOT NULL, style TEXT DEFAULT '',
-  count INTEGER DEFAULT 0, pack_date TEXT, abv REAL DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  count INTEGER DEFAULT 1, pack_date TEXT, abv REAL DEFAULT 0, upc TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS wines (
@@ -51,6 +52,14 @@ CREATE TABLE IF NOT EXISTS cocktails (
 );
 `;
 db.exec(schema);
+const spiritColumns = db.prepare("PRAGMA table_info(spirits)").all() as Array<{ name: string }>;
+if (!spiritColumns.some((column) => column.name === "stock_count")) {
+  db.exec("ALTER TABLE spirits ADD COLUMN stock_count INTEGER DEFAULT 1");
+}
+const packagedBeerColumns = db.prepare("PRAGMA table_info(packaged_beer)").all() as Array<{ name: string }>;
+if (!packagedBeerColumns.some((column) => column.name === "upc")) {
+  db.exec("ALTER TABLE packaged_beer ADD COLUMN upc TEXT DEFAULT ''");
+}
 const cocktailColumns = db.prepare("PRAGMA table_info(cocktails)").all() as Array<{ name: string }>;
 if (!cocktailColumns.some((column) => column.name === "season")) {
   db.exec("ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
