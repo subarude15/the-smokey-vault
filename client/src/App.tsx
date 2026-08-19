@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Beer, BottleWine as Bottle, ChevronRight, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Lock, LockOpen, Menu, Moon, Plus, Search, Settings, Sparkles, Sun, Trash2, Upload, Wine, X
+  Lock, LockOpen, Menu, Moon, Plus, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { Scanner } from "./Scanner";
@@ -177,15 +177,28 @@ function ItemForm({ module,item,close,saved }:{module:Module;item:Item|null;clos
     {error && <p className="error">{error}</p>}<footer className="modal-footer"><button type="button" className="secondary" onClick={close}>Cancel</button><button className="primary">Save to vault</button></footer></form></div>;
 }
 
+type CocktailDrink = Item & { ingredients:string[]; missing:string[]; readiness:string; season:string; garnish:string; method:string; glassware:string; collection:string };
+
 function Cocktails() {
-  const [drinks,setDrinks] = useState<Array<Item & {ingredients:string[];missing:string[];readiness:string}>>([]);
+  const [drinks,setDrinks] = useState<CocktailDrink[]>([]);
   const [filter,setFilter] = useState("ready");
+  const [season,setSeason] = useState("All");
+  const [selected,setSelected] = useState<CocktailDrink>();
   useEffect(()=>{api<typeof drinks>("/cocktails/match").then(setDrinks).catch(()=>{});},[]);
-  const shown = drinks.filter((d)=>filter==="all"||d.readiness===filter);
+  const inSeason = drinks.filter((drink)=>season==="All"||drink.season===season);
+  const shown = inSeason.filter((drink)=>filter==="all"||drink.readiness===filter);
+  const ready = inSeason.filter((drink)=>drink.readiness==="ready");
+  function surprise(){if(!ready.length)return;setSelected(ready[Math.floor(Math.random()*ready.length)]);}
   return <><PageTitle eyebrow="THE RECIPE INDEX" title="What can I make?" subtitle="Live matches against your shelves, including pantry staples and smart spirit substitutions."/>
-    <div className="segmented cocktail-filters">{[["ready","Ready now"],["almost","Missing one"],["all","All recipes"]].map(([id,label])=><button key={id} className={filter===id?"active":""} onClick={()=>setFilter(id)}>{label}</button>)}</div>
-    <div className="recipe-grid">{shown.map((drink)=><article className="recipe-card" key={drink.id}><span className={`status ${drink.readiness}`}>{drink.readiness==="ready"?"READY TO POUR":drink.readiness==="almost"?"ONE ITEM AWAY":"BUILD THE SHELF"}</span><h3>{drink.name}</h3><p>{drink.method} · {drink.glassware}</p><ul>{drink.ingredients.map((i)=><li key={i}>{i}</li>)}</ul>{drink.missing.length>0&&<small>Missing: {drink.missing.join(", ")}</small>}</article>)}</div>
+    <div className="cocktail-toolbar"><div className="segmented cocktail-filters">{[["ready","Ready now"],["almost","Missing one"],["all","All recipes"]].map(([id,label])=><button key={id} className={filter===id?"active":""} onClick={()=>setFilter(id)}>{label}</button>)}</div><button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button></div>
+    <section className="season-section"><span className="eyebrow">SEASONAL COCKTAILS</span><div className="season-filters">{["All","Spring","Summer","Fall","Winter","Holiday"].map((value)=><button key={value} className={season===value?"active":""} onClick={()=>setSeason(value)}>{value==="All"?"All seasons":value}</button>)}</div></section>
+    {!shown.length?<Empty icon={Wine} title="No matching cocktails" text={season==="All"?"Stock a few more ingredients and check back.":`No ${season.toLowerCase()} recipes match this readiness filter.`}/>:<div className="recipe-grid">{shown.map((drink)=><button className="recipe-card" key={drink.id} onClick={()=>setSelected(drink)}><span className={`status ${drink.readiness}`}>{drink.readiness==="ready"?"READY TO POUR":drink.readiness==="almost"?"ONE ITEM AWAY":"BUILD THE SHELF"}</span>{drink.season!=="All"&&<span className="season-tag">{drink.season}</span>}<h3>{drink.name}</h3><p>{drink.method} · {drink.glassware}</p><ul>{drink.ingredients.map((i)=><li key={i}>{i}</li>)}</ul>{drink.missing.length>0&&<small>Missing: {drink.missing.join(", ")}</small>}</button>)}</div>}
+    {selected&&<RecipeModal drink={selected} close={()=>setSelected(undefined)}/>}
   </>;
+}
+
+function RecipeModal({drink,close}:{drink:CocktailDrink;close:()=>void}){
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${drink.name} recipe`}><section className="modal recipe-modal"><header className="modal-header"><div><span className="eyebrow">{drink.collection}{drink.season!=="All"?` · ${drink.season}`:""}</span><h2>{drink.name}</h2><p>{drink.method} · {drink.glassware}</p></div><button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button></header><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{drink.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{drink.method}</strong></div><div><span>GLASS</span><strong>{drink.glassware}</strong></div><div><span>GARNISH</span><strong>{drink.garnish||"None"}</strong></div></div></div>{drink.missing.length>0&&<p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}<footer className="modal-footer"><button className="primary" onClick={close}>Cheers</button></footer></section></div>
 }
 
 function Mixologist() {

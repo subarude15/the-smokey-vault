@@ -47,10 +47,14 @@ CREATE TABLE IF NOT EXISTS wines (
 CREATE TABLE IF NOT EXISTS cocktails (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, collection TEXT DEFAULT 'IBA Classics',
   ingredients TEXT NOT NULL, glassware TEXT DEFAULT 'Coupe', garnish TEXT DEFAULT '', method TEXT DEFAULT 'Shake',
-  notes TEXT DEFAULT ''
+  notes TEXT DEFAULT '', season TEXT DEFAULT 'All'
 );
 `;
 db.exec(schema);
+const cocktailColumns = db.prepare("PRAGMA table_info(cocktails)").all() as Array<{ name: string }>;
+if (!cocktailColumns.some((column) => column.name === "season")) {
+  db.exec("ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
+}
 
 function hashPin(pin: string, salt = randomBytes(16).toString("hex")) {
   return `${salt}:${scryptSync(pin, salt, 64).toString("hex")}`;
@@ -80,26 +84,27 @@ if (!getSetting("pinHash")) setPin(process.env.DEFAULT_PIN ?? "1234");
 if (!getSetting("theme")) setSetting("theme", "dark");
 if (!getSetting("lastBackupDownload")) setSetting("lastBackupDownload", new Date().toISOString());
 
-type Cocktail = { name: string; ingredients: string[]; glassware?: string; garnish?: string; method?: string; collection?: string };
+type Season = "All" | "Spring" | "Summer" | "Fall" | "Winter" | "Holiday";
+type Cocktail = { name: string; ingredients: string[]; glassware?: string; garnish?: string; method?: string; collection?: string; season?: Season };
 const classics: Cocktail[] = [
-  { name: "Old Fashioned", ingredients: ["45 ml bourbon or rye", "1 sugar cube", "2 dashes Angostura bitters"], glassware: "Rocks", garnish: "Orange twist", method: "Stir" },
+  { name: "Old Fashioned", ingredients: ["45 ml bourbon or rye", "1 sugar cube", "2 dashes Angostura bitters"], glassware: "Rocks", garnish: "Orange twist", method: "Stir", season: "Fall" },
   { name: "Dry Martini", ingredients: ["60 ml gin", "10 ml dry vermouth"], garnish: "Lemon twist or olive", method: "Stir" },
-  { name: "Margarita", ingredients: ["50 ml tequila", "20 ml triple sec", "15 ml lime juice"], glassware: "Margarita", garnish: "Salt rim", method: "Shake" },
-  { name: "Daiquiri", ingredients: ["60 ml white rum", "20 ml lime juice", "2 tsp sugar"], garnish: "Lime wheel", method: "Shake" },
-  { name: "Manhattan", ingredients: ["50 ml rye whiskey", "20 ml sweet vermouth", "1 dash bitters"], garnish: "Cherry", method: "Stir" },
+  { name: "Margarita", ingredients: ["50 ml tequila", "20 ml triple sec", "15 ml lime juice"], glassware: "Margarita", garnish: "Salt rim", method: "Shake", season: "Summer" },
+  { name: "Daiquiri", ingredients: ["60 ml white rum", "20 ml lime juice", "2 tsp sugar"], garnish: "Lime wheel", method: "Shake", season: "Summer" },
+  { name: "Manhattan", ingredients: ["50 ml rye whiskey", "20 ml sweet vermouth", "1 dash bitters"], garnish: "Cherry", method: "Stir", season: "Winter" },
   { name: "Negroni", ingredients: ["30 ml gin", "30 ml Campari", "30 ml sweet vermouth"], glassware: "Rocks", garnish: "Orange peel", method: "Stir" },
   { name: "Whiskey Sour", ingredients: ["45 ml bourbon", "25 ml lemon juice", "20 ml sugar syrup", "egg white"], glassware: "Rocks", garnish: "Cherry", method: "Shake" },
-  { name: "Mojito", ingredients: ["45 ml white rum", "20 ml lime juice", "6 mint sprigs", "soda water", "2 tsp sugar"], glassware: "Highball", garnish: "Mint", method: "Build" },
-  { name: "Moscow Mule", ingredients: ["45 ml vodka", "10 ml lime juice", "ginger beer"], glassware: "Mug", garnish: "Lime", method: "Build" },
-  { name: "French 75", ingredients: ["30 ml gin", "15 ml lemon juice", "15 ml sugar syrup", "60 ml Champagne"], glassware: "Flute", garnish: "Lemon twist", method: "Shake and top" },
-  { name: "Espresso Martini", ingredients: ["50 ml vodka", "30 ml coffee liqueur", "10 ml sugar syrup", "espresso"], garnish: "Coffee beans", method: "Shake" },
-  { name: "Mai Tai", ingredients: ["30 ml amber rum", "30 ml Martinique rum", "15 ml orange curaçao", "15 ml orgeat", "30 ml lime juice"], glassware: "Rocks", garnish: "Mint", method: "Shake" },
-  { name: "Tom Collins", ingredients: ["45 ml gin", "30 ml lemon juice", "15 ml sugar syrup", "60 ml soda water"], glassware: "Collins", garnish: "Lemon", method: "Shake and top" },
+  { name: "Mojito", ingredients: ["45 ml white rum", "20 ml lime juice", "6 mint sprigs", "soda water", "2 tsp sugar"], glassware: "Highball", garnish: "Mint", method: "Build", season: "Summer" },
+  { name: "Moscow Mule", ingredients: ["45 ml vodka", "10 ml lime juice", "ginger beer"], glassware: "Mug", garnish: "Lime", method: "Build", season: "Fall" },
+  { name: "French 75", ingredients: ["30 ml gin", "15 ml lemon juice", "15 ml sugar syrup", "60 ml Champagne"], glassware: "Flute", garnish: "Lemon twist", method: "Shake and top", season: "Spring" },
+  { name: "Espresso Martini", ingredients: ["50 ml vodka", "30 ml coffee liqueur", "10 ml sugar syrup", "espresso"], garnish: "Coffee beans", method: "Shake", season: "Holiday" },
+  { name: "Mai Tai", ingredients: ["30 ml amber rum", "30 ml Martinique rum", "15 ml orange curaçao", "15 ml orgeat", "30 ml lime juice"], glassware: "Rocks", garnish: "Mint", method: "Shake", season: "Summer" },
+  { name: "Tom Collins", ingredients: ["45 ml gin", "30 ml lemon juice", "15 ml sugar syrup", "60 ml soda water"], glassware: "Collins", garnish: "Lemon", method: "Shake and top", season: "Spring" },
   { name: "Sidecar", ingredients: ["50 ml cognac", "20 ml triple sec", "20 ml lemon juice"], garnish: "Orange twist", method: "Shake" },
-  { name: "Boulevardier", ingredients: ["45 ml bourbon", "30 ml Campari", "30 ml sweet vermouth"], glassware: "Rocks", garnish: "Orange twist", method: "Stir" },
-  { name: "Aperol Spritz", ingredients: ["90 ml prosecco", "60 ml Aperol", "30 ml soda water"], glassware: "Wine", garnish: "Orange slice", method: "Build" },
-  { name: "Gimlet", ingredients: ["60 ml gin", "30 ml lime cordial"], garnish: "Lime wheel", method: "Shake" },
-  { name: "Sazerac", ingredients: ["50 ml cognac or rye", "10 ml absinthe", "1 sugar cube", "2 dashes Peychaud's bitters"], glassware: "Rocks", garnish: "Lemon peel", method: "Stir" },
+  { name: "Boulevardier", ingredients: ["45 ml bourbon", "30 ml Campari", "30 ml sweet vermouth"], glassware: "Rocks", garnish: "Orange twist", method: "Stir", season: "Winter" },
+  { name: "Aperol Spritz", ingredients: ["90 ml prosecco", "60 ml Aperol", "30 ml soda water"], glassware: "Wine", garnish: "Orange slice", method: "Build", season: "Summer" },
+  { name: "Gimlet", ingredients: ["60 ml gin", "30 ml lime cordial"], garnish: "Lime wheel", method: "Shake", season: "Spring" },
+  { name: "Sazerac", ingredients: ["50 ml cognac or rye", "10 ml absinthe", "1 sugar cube", "2 dashes Peychaud's bitters"], glassware: "Rocks", garnish: "Lemon peel", method: "Stir", season: "Winter" },
   { name: "Pisco Sour", ingredients: ["60 ml pisco", "30 ml lemon juice", "20 ml sugar syrup", "egg white"], garnish: "Bitters", method: "Shake" },
   { name: "Paloma", ingredients: ["50 ml tequila", "5 ml lime juice", "grapefruit soda", "salt"], glassware: "Highball", garnish: "Lime", method: "Build" }
 ];
@@ -119,12 +124,28 @@ const moreNames = [
   "Maple Old Fashioned","Cranberry Mule","Apple Cider Sour","Hot Toddy","Coquito","Kentucky Buck","Basil Smash"
 ];
 
-const insertCocktail = db.prepare("INSERT OR IGNORE INTO cocktails(name,collection,ingredients,glassware,garnish,method) VALUES(?,?,?,?,?,?)");
+function seasonFor(name: string): Season {
+  if (/Coquito|Cranberry|Champagne Cocktail|Alexander|Golden Dream|White Russian/.test(name)) return "Holiday";
+  if (/Maple|Apple Cider|Paper Plane|Kentucky Buck|New York Sour|Gold Rush/.test(name)) return "Fall";
+  if (/Piña Colada|Painkiller|Jungle Bird|Sea Breeze|Tequila Sunrise|Zombie|Cuba Libre|Navy Grog|Saturn/.test(name)) return "Summer";
+  if (/Bee's Knees|Basil Smash|Bramble|Clover Club|Aviation|Mimosa|South Side|Gin Fizz/.test(name)) return "Spring";
+  if (/Hot Toddy|Irish Coffee|Penicillin|Rusty Nail|Vieux Carré|God Father|Porto Flip/.test(name)) return "Winter";
+  return "All";
+}
+
+const insertCocktail = db.prepare("INSERT OR IGNORE INTO cocktails(name,collection,ingredients,glassware,garnish,method,season) VALUES(?,?,?,?,?,?,?)");
+const updateSeason = db.prepare("UPDATE cocktails SET season=? WHERE name=?");
 const seed = db.transaction(() => {
-  for (const c of classics) insertCocktail.run(c.name, c.collection ?? "IBA Classics", JSON.stringify(c.ingredients), c.glassware ?? "Coupe", c.garnish ?? "", c.method ?? "Shake");
+  for (const c of classics) {
+    const season = c.season ?? seasonFor(c.name);
+    insertCocktail.run(c.name, c.collection ?? "IBA Classics", JSON.stringify(c.ingredients), c.glassware ?? "Coupe", c.garnish ?? "", c.method ?? "Shake", season);
+    if (season !== "All") updateSeason.run(season, c.name);
+  }
   for (const name of moreNames) {
     const seasonal = /Maple|Cranberry|Apple|Hot|Coquito/.test(name);
-    insertCocktail.run(name, seasonal ? "Seasonal" : "IBA & Modern Classics", JSON.stringify(["45 ml base spirit", "22 ml citrus or modifier", "15 ml sweetener"]), "Coupe", "Seasonal garnish", "Shake");
+    const season = seasonFor(name);
+    insertCocktail.run(name, seasonal ? "Seasonal" : "IBA & Modern Classics", JSON.stringify(["45 ml base spirit", "22 ml citrus or modifier", "15 ml sweetener"]), "Coupe", "Seasonal garnish", "Shake", season);
+    if (season !== "All") updateSeason.run(season, name);
   }
 });
 seed();
