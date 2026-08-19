@@ -119,63 +119,43 @@ app.get("/api/cocktails/match", async () => {
   });
 });
 
-function parseJsonObject(value: string): Record<string, unknown> | undefined {
-  const cleaned = value.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start < 0 || end <= start) return;
-  try { return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>; } catch { return; }
-}
-
-function hasConfiguredAi() {
-  const config = resolveAiConfig();
-  return config.provider === "ollama" ? Boolean(config.fromEnvironment || getSetting("aiProvider")) : Boolean(config.key);
-}
-
-app.get<{ Params: { upc: string } }>("/api/scan/upc/:upc", async (request) => {
-  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(request.params.upc);
-  if (spirit) return { source: "vault", table: "spirits", upc: request.params.upc, product: spirit };
-  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(request.params.upc);
-  if (beer) return { source: "vault", table: "packaged_beer", upc: request.params.upc, product: beer };
+app.get<{ Params: { code: string } }>("/api/scan/upc/:code", async (request, reply) => {
+  const code = request.params.code;
+  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(code);
+  if (spirit) return { source: "vault", table: "spirits", upc: code, product: spirit };
+  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(code);
+  if (beer) return { source: "vault", table: "packaged_beer", upc: code, product: beer };
 
   try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(request.params.upc)}.json`);
-    if (response.ok) {
-      const data = await response.json() as { status: number; product?: Record<string, unknown> };
-      if (data.status && data.product) return { source: "openfoodfacts", upc: request.params.upc, product: data.product };
-    }
-  } catch {
-    app.log.warn("Open Food Facts lookup unavailable");
-  }
-
-  try {
-    const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(request.params.upc)}`);
+    const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`);
     if (response.ok) {
       const data = await response.json() as { items?: Array<{ title?: string; brand?: string; category?: string; images?: string[] }> };
       const item = data.items?.[0];
       if (item?.title) return {
         source: "upcitemdb",
-        upc: request.params.upc,
-        product: { product_name: item.title, brands: item.brand ?? "", categories: item.category ?? "", image_url: item.images?.[0] ?? "" }
+        upc: code,
+        product: { name: item.title, brand: item.brand ?? "", category: item.category ?? "", image_url: item.images?.[0] ?? "" }
       };
+    } else {
+      app.log.warn({ status: response.status }, "UPCitemdb lookup failed");
     }
-  } catch {
-    app.log.warn("UPCitemdb lookup unavailable");
+  } catch (error) {
+    app.log.warn({ error }, "UPCitemdb lookup unavailable");
   }
 
-  if (hasConfiguredAi()) {
-    try {
-      const result = await callLlm(`Identify the retail beverage with UPC/EAN ${request.params.upc}. Return ONLY JSON: {"name":"exact product name or empty","brand":"brand or empty","category":"specific beverage type or empty","abv":number or 0}. Do not guess if unknown.`);
-      const product = parseJsonObject(result);
-      if (typeof product?.name === "string" && product.name.trim()) {
-        return { source: "ai", upc: request.params.upc, product };
-      }
-    } catch (error) {
-      app.log.warn({ error }, "AI barcode fallback unavailable");
+  try {
+    const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`);
+    if (response.ok) {
+      const data = await response.json() as { status: number; product?: Record<string, unknown> };
+      if (data.status && data.product) return { source: "openfoodfacts", upc: code, product: data.product };
+    } else {
+      app.log.warn({ status: response.status }, "Open Food Facts lookup failed");
     }
+  } catch (error) {
+    app.log.warn({ error }, "Open Food Facts lookup unavailable");
   }
 
-  return { source: "unresolved", upc: request.params.upc, product: {} };
+  return reply.code(404).send({ error: "Product not found", upc: code });
 });
 
 class AiRequestError extends Error {
