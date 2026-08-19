@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+import Fastify, { FastifyReply, FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import swagger from "@fastify/swagger";
@@ -128,11 +128,8 @@ function parseJsonObject(value: string): Record<string, unknown> | undefined {
 }
 
 function hasConfiguredAi() {
-  return Boolean(
-    getSetting("aiProvider") || process.env.AI_PROVIDER || process.env.AI_API_KEY ||
-    process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY ||
-    process.env.AI_BASE_URL || process.env.OLLAMA_HOST
-  );
+  const config = resolveAiConfig();
+  return config.provider === "ollama" ? Boolean(config.fromEnvironment || getSetting("aiProvider")) : Boolean(config.key);
 }
 
 app.get<{ Params: { upc: string } }>("/api/scan/upc/:upc", async (request) => {
@@ -187,14 +184,31 @@ class AiRequestError extends Error {
   }
 }
 
-async function callLlm(prompt: string, image?: string) {
-  const inferredProvider = process.env.ANTHROPIC_API_KEY ? "anthropic" : process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.OPENAI_API_KEY ? "openai" : "ollama";
-  const provider = (getSetting("aiProvider") || process.env.AI_PROVIDER || inferredProvider).toLowerCase();
-  const providerKey = provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : provider === "openrouter" ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY;
-  const key = getSetting("aiApiKey") || process.env.AI_API_KEY || providerKey || "";
+function resolveAiConfig() {
+  const providerFromKey = process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : "";
+  const environmentProvider = process.env.AI_PROVIDER?.trim().toLowerCase() || providerFromKey || (process.env.AI_API_KEY ? "openai" : "");
+  const provider = environmentProvider || getSetting("aiProvider")?.toLowerCase() || "ollama";
+  const environmentKey = process.env.AI_API_KEY ||
+    (provider === "openrouter" ? process.env.OPENROUTER_API_KEY : provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY) || "";
+  const key = environmentKey || getSetting("aiApiKey") || "";
   const defaultBaseUrl = provider === "ollama" ? (process.env.OLLAMA_HOST || "http://host.docker.internal:11434") : provider === "anthropic" ? "https://api.anthropic.com" : provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1";
-  const baseUrl = (getSetting("aiBaseUrl") || process.env.AI_BASE_URL || defaultBaseUrl).replace(/\/$/, "");
-  const model = getSetting("aiModel") || process.env.AI_MODEL || (provider === "ollama" ? "llama3.2-vision" : provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini");
+  const environmentBaseUrl = process.env.AI_BASE_URL?.trim() || "";
+  const baseUrl = (environmentBaseUrl || getSetting("aiBaseUrl") || defaultBaseUrl).replace(/\/$/, "");
+  const defaultModel = provider === "ollama" ? "llama3.2-vision" : provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini";
+  const environmentModel = process.env.AI_MODEL?.trim() || "";
+  const model = environmentModel || getSetting("aiModel") || defaultModel;
+  const fromEnvironment = Boolean(environmentProvider || environmentKey || environmentBaseUrl || environmentModel || process.env.OLLAMA_HOST);
+  return { provider, key, baseUrl, model, fromEnvironment, keyFromEnvironment: Boolean(environmentKey) };
+}
+
+function maskSecret(value: string) {
+  if (!value) return "not set";
+  if (value.length <= 8) return `${value.slice(0, 2)}...${value.slice(-2)}`;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+async function callLlm(prompt: string, image?: string) {
+  const { provider, key, baseUrl, model } = resolveAiConfig();
   if (provider !== "ollama" && !key) {
     throw new AiRequestError("Please configure your AI Provider API key in Settings.", 400);
   }
@@ -204,6 +218,7 @@ async function callLlm(prompt: string, image?: string) {
     const response = await fetch(`${baseUrl}/v1/messages`, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: "user", content }] }) });
     const data = await response.json() as { content?: Array<{ text: string }>; error?: { message?: string } };
     if (!response.ok) {
+      app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
       const message = response.status === 401 ? "Your AI Provider API key is invalid. Update it in Settings." : data.error?.message ?? "Anthropic could not generate a recipe.";
       throw new AiRequestError(message, response.status);
     }
@@ -219,6 +234,7 @@ async function callLlm(prompt: string, image?: string) {
   });
   const data = await response.json() as { message?: { content: string }; choices?: Array<{ message: { content: string } }>; error?: unknown };
   if (!response.ok) {
+    app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
     const providerMessage = typeof data.error === "object" && data.error && "message" in data.error ? String((data.error as { message: unknown }).message) : "";
     const message = response.status === 401 ? "Your AI Provider API key is invalid. Update it in Settings." : providerMessage || `${provider} could not generate a recipe.`;
     throw new AiRequestError(message, response.status);
@@ -267,6 +283,7 @@ app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, re
     const result = await callLlm(`You are an expert mixologist. Available inventory: ${JSON.stringify(inventory)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
     return { recipe: parseGeneratedRecipe(result) };
   } catch (error) {
+    app.log.error({ error }, "AI mixologist request failed");
     const status = error instanceof AiRequestError ? error.statusCode : 502;
     const message = error instanceof AiRequestError ? error.message : "The AI service could not be reached. Check your provider settings and network connection.";
     return reply.code(status).send({ error: message });
@@ -287,19 +304,33 @@ app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, rep
   return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(recipe.name.trim()));
 });
 
-app.post("/api/ai/vision", async (request, reply) => {
+async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
   const file = await request.file();
   if (!file) return reply.code(400).send({ error: "Image required" });
   try {
     const result = await callLlm('Read this bottle label. Return only JSON with keys "brand","name","category","abv".', (await file.toBuffer()).toString("base64"));
     return { result };
-  } catch (error) { return reply.code(502).send({ error: error instanceof Error ? error.message : "Vision request failed" }); }
-});
+  } catch (error) {
+    app.log.error({ error }, "AI vision-label request failed");
+    const status = error instanceof AiRequestError ? error.statusCode : 502;
+    return reply.code(status).send({ error: error instanceof Error ? error.message : "Vision request failed" });
+  }
+}
+
+app.post("/api/ai/vision", handleVisionLabel);
+app.post("/api/ai/vision-label", handleVisionLabel);
 
 app.get("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const rows = db.prepare("SELECT key,value,updated_at FROM settings WHERE key != 'pinHash'").all();
-  return Object.fromEntries((rows as Array<{key:string;value:string}>).map((r) => [r.key, r.value]));
+  const settings = Object.fromEntries((rows as Array<{key:string;value:string}>).map((r) => [r.key, r.value]));
+  const ai = resolveAiConfig();
+  return {
+    ...settings,
+    aiConfiguredViaEnvironment: String(ai.fromEnvironment),
+    aiEnvironmentProvider: ai.fromEnvironment ? ai.provider : "",
+    aiEnvironmentModel: ai.fromEnvironment ? ai.model : ""
+  };
 });
 
 app.put<{ Body: Record<string, string> }>("/api/settings", async (request, reply) => {
@@ -363,6 +394,13 @@ if (existsSync(root)) {
     if (request.url.startsWith("/api/")) return reply.code(404).send({ error: "Not found" });
     return reply.type("text/html").send(readFileSync(join(root, "index.html")));
   });
+}
+
+const bootAi = resolveAiConfig();
+if (bootAi.keyFromEnvironment) {
+  app.log.info({ provider: bootAi.provider, model: bootAi.model, key: maskSecret(bootAi.key) }, "Environment AI key detected");
+} else {
+  app.log.info({ detected: false, provider: bootAi.provider, model: bootAi.model }, "No environment AI key detected; using SQLite settings or keyless Ollama");
 }
 
 await app.listen({ port: Number(process.env.PORT ?? 8080), host: "0.0.0.0" });
