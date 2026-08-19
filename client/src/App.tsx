@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
   LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
-import { Scanner, ScanResult } from "./Scanner";
+import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
 type Field = { key: string; label: string; type?: string; options?: string[] };
 type Module = { id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string; fields: Field[]; primary: string; secondary: string };
@@ -48,7 +48,6 @@ function applyTheme(theme: string, tokens?: Record<string,string>) {
 }
 
 type ScanDraft = { moduleId: "spirits" | "packaged_beer"; values: Record<string,unknown>; key: number };
-type ExistingScan = { table: "spirits" | "packaged_beer"; item: Item };
 
 function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const product = result.product;
@@ -82,8 +81,7 @@ export default function App() {
   const [counts, setCounts] = useState<Record<string,number>>({});
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
-  const [existingScan, setExistingScan] = useState<ExistingScan>();
-  const [notice, setNotice] = useState("");
+  const scanReviewResolver = useRef<(outcome: ScanReviewOutcome) => void>();
   const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
@@ -108,24 +106,22 @@ export default function App() {
 
   const navigate = (next: string) => { setPage(next); setMobileNav(false); };
   function handleScan(result: ScanResult) {
-    setScanner(false);
-    if (result.source==="vault"&&result.table) {
-      setExistingScan({table:result.table,item:result.product as Item});
-      return;
-    }
-    const draft = scannedInventoryDraft(result);
+    const draft = result.source==="vault"&&result.table ? {
+      moduleId:result.table,
+      key:Date.now(),
+      values:result.product
+    } satisfies ScanDraft : scannedInventoryDraft(result);
     setScanDraft(draft);
     navigate(draft.moduleId);
     if (!admin) setUnlock(true);
+    return new Promise<ScanReviewOutcome>((resolve) => {
+      scanReviewResolver.current = resolve;
+    });
   }
-  async function incrementScannedStock() {
-    if (!existingScan) return;
-    if (!admin) { setUnlock(true); return; }
-    const field = existingScan.table==="spirits"?"stock_count":"count";
-    const next = Number(existingScan.item[field]??1)+1;
-    await api(`/inventory/${existingScan.table}/${existingScan.item.id}`,{method:"PUT",body:JSON.stringify({[field]:next})});
-    setNotice(`${String(existingScan.item.name??"Item")} stock increased to ${next}.`);
-    setExistingScan(undefined);
+  function finishScanReview(outcome:ScanReviewOutcome) {
+    setScanDraft(undefined);
+    scanReviewResolver.current?.(outcome);
+    scanReviewResolver.current = undefined;
   }
   const nav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
@@ -157,7 +153,7 @@ export default function App() {
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
         <div className="page">
           {page === "dashboard" && <Dashboard counts={counts} admin={admin} go={navigate}/>}
-          {modules.map((module) => page === module.id && <Inventory key={module.id} module={module} admin={admin} scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined} consumeScanDraft={()=>setScanDraft(undefined)}/>)}
+          {modules.map((module) => page === module.id && <Inventory key={module.id} module={module} admin={admin} scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined} finishScanReview={finishScanReview}/>)}
           {page === "cocktails" && <Cocktails/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
@@ -165,9 +161,7 @@ export default function App() {
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
       {scanner && <Scanner onClose={() => setScanner(false)} onProduct={handleScan}/>}
-      {unlock && <Unlock onClose={() => setUnlock(false)} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
-      {existingScan&&<div className="toast action-toast"><div><strong>Already in the vault</strong><span>{String(existingScan.item.name??"This item")} is already tracked.</span></div><button className="primary" onClick={incrementScannedStock}>+1 stock</button><button className="icon-button" onClick={()=>setExistingScan(undefined)}><X/></button></div>}
-      {notice&&<div className="toast notice-toast"><span>{notice}</span><button className="icon-button" onClick={()=>setNotice("")}><X/></button></div>}
+      {unlock && <Unlock onClose={() => { setUnlock(false); if(scanDraft)finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
     </div>
   );
 }
@@ -190,17 +184,18 @@ function Dashboard({ counts, admin, go }: { counts: Record<string,number>; admin
   </>;
 }
 
-function Inventory({ module, admin, scanDraft, consumeScanDraft }: { module:Module; admin:boolean; scanDraft?:ScanDraft; consumeScanDraft:()=>void }) {
+function Inventory({ module, admin, scanDraft, finishScanReview }: { module:Module; admin:boolean; scanDraft?:ScanDraft; finishScanReview:(outcome:ScanReviewOutcome)=>void }) {
   const [items,setItems] = useState<Item[]>([]);
   const [search,setSearch] = useState("");
   const [editing,setEditing] = useState<Item | null | undefined>();
+  const openedScanKey = useRef<number>();
   const load = useCallback(() => api<Item[]>(`/inventory/${module.id}`).then(setItems), [module.id]);
   useEffect(() => { load().catch(() => {}); }, [load]);
   useEffect(() => {
-    if (!admin||!scanDraft) return;
+    if (!admin||!scanDraft||openedScanKey.current===scanDraft.key) return;
+    openedScanKey.current=scanDraft.key;
     setEditing({id:0,...scanDraft.values} as Item);
-    consumeScanDraft();
-  },[admin,scanDraft,consumeScanDraft]);
+  },[admin,scanDraft]);
   const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(search.toLowerCase()));
   async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); load(); }
   return <>
@@ -215,16 +210,16 @@ function Inventory({ module, admin, scanDraft, consumeScanDraft }: { module:Modu
           {module.id === "taps" && <div className="fill"><span style={{width:`${Math.min(100,Number(item.remaining_l)/Number(item.keg_size_l)*100)}%`}}/><small>{item.remaining_l} L remaining · ~{Math.floor(Number(item.remaining_l)*2.1)} pints</small></div>}
         </div>{admin && <div className="card-actions"><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button><button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button></div>}
       </article>)}</div>}
-    {editing !== undefined && <ItemForm module={module} item={editing} close={() => setEditing(undefined)} saved={() => { setEditing(undefined); load(); }}/>}
+    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft)} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
   </>;
 }
 
-function ItemForm({ module,item,close,saved }:{module:Module;item:Item|null;close:()=>void;saved:()=>void}) {
+function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
   const [form,setForm] = useState<Record<string,unknown>>(item ?? {});
   const [error,setError] = useState("");
   const existing = Boolean(item?.id);
   async function submit(e:React.FormEvent) { e.preventDefault(); try { await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(form)}); saved(); } catch(err){setError(err instanceof Error?err.message:"Could not save");} }
-  return <div className="modal-backdrop"><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
       {field.options ? <select value={String(form[field.key]??field.options[0])} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}>{field.options.map((v)=><option key={v}>{v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :

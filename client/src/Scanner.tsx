@@ -10,18 +10,46 @@ export type ScanResult = {
   product: Record<string, unknown>;
 };
 
-type Props = { onClose: () => void; onProduct: (result: ScanResult) => void };
+export type ScanReviewOutcome = "saved" | "cancelled";
+type Props = { onClose: () => void; onProduct: (result: ScanResult) => Promise<ScanReviewOutcome> };
 
 export function Scanner({ onClose, onProduct }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const controls = useRef<IScannerControls>();
+  const isProcessing = useRef(false);
+  const isMounted = useRef(true);
   const [mode, setMode] = useState<"barcode" | "vision">("barcode");
   const [status, setStatus] = useState("Point the camera at a UPC barcode");
-  const [batch, setBatch] = useState(false);
 
-  useEffect(() => () => controls.current?.stop(), []);
+  useEffect(() => () => {
+    isMounted.current = false;
+    controls.current?.stop();
+  }, []);
+
+  function playSuccessDing() {
+    try {
+      const AudioContextClass = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const context = new AudioContextClass();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, context.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.16, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.18);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.18);
+      oscillator.addEventListener("ended", () => void context.close());
+    } catch {
+      // Audio feedback is optional when browser autoplay policy blocks it.
+    }
+  }
 
   async function startCamera() {
+    if (isProcessing.current || controls.current) return;
     if (!window.isSecureContext || !navigator.mediaDevices) {
       setStatus("Camera streaming requires HTTPS or localhost. Use photo capture below.");
       return;
@@ -30,29 +58,32 @@ export function Scanner({ onClose, onProduct }: Props) {
       const reader = new BrowserMultiFormatReader();
       controls.current = await reader.decodeFromVideoDevice(undefined, video.current!, async (result) => {
         if (!result) return;
-        await lookup(result.getText());
-        if (!batch) controls.current?.stop();
+        if (isProcessing.current) return;
+        isProcessing.current = true;
+        controls.current?.stop();
+        controls.current = undefined;
+        playSuccessDing();
+        await lookupAndReview(result.getText());
+        isProcessing.current = false;
+        if (isMounted.current && mode === "barcode") void startCamera();
       });
-      setStatus(batch ? "Speedrun mode — keep scanning" : "Scanning…");
+      setStatus("Scanning… one item at a time");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Camera unavailable");
     }
   }
 
-  async function lookup(upc: string) {
+  async function lookupAndReview(upc: string) {
     setStatus(`Looking up ${upc}…`);
     try {
       const data = await api<ScanResult>(`/scan/upc/${upc}`);
-      onProduct(data);
-      setStatus(batch ? "Saved result. Ready for the next barcode." : `Found ${upc}`);
+      setStatus("Review this item to continue scanning.");
+      const outcome = await onProduct(data);
+      setStatus(outcome === "saved" ? "Saved. Ready for the next bottle." : "Cancelled. Ready for the next bottle.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Product not found";
-      if (message === "Product not found") {
-        onProduct({ source: "unresolved", upc, product: {} });
-        setStatus("No catalog match. Add the item details manually.");
-      } else {
-        setStatus(message);
-      }
+      setStatus(message === "Product not found" ? "No catalog match. Add the item details manually." : `${message}. Review the UPC manually.`);
+      await onProduct({ source: "unresolved", upc, product: {} });
     }
   }
 
@@ -66,8 +97,8 @@ export function Scanner({ onClose, onProduct }: Props) {
       try {
         const data = await api<{ result: string }>("/ai/vision", { method: "POST", body });
         const json = JSON.parse(data.result.replace(/```json|```/g, "").trim());
-        onProduct({ source: "vision", product: json });
-        setStatus("Label recognized");
+        await onProduct({ source: "vision", product: json });
+        setStatus("Review complete");
       } catch (error) { setStatus(error instanceof Error ? error.message : "Could not read label"); }
       return;
     }
@@ -76,7 +107,11 @@ export function Scanner({ onClose, onProduct }: Props) {
       const url = URL.createObjectURL(file);
       const result = await new BrowserMultiFormatReader().decodeFromImageUrl(url);
       URL.revokeObjectURL(url);
-      await lookup(result.getText());
+      if (isProcessing.current) return;
+      isProcessing.current = true;
+      playSuccessDing();
+      await lookupAndReview(result.getText());
+      isProcessing.current = false;
     } catch { setStatus("No barcode found. Try a closer, sharper photo."); }
   }
 
@@ -94,7 +129,7 @@ export function Scanner({ onClose, onProduct }: Props) {
         {mode === "barcode" && (
           <>
             <div className="camera-frame"><video ref={video} muted playsInline /></div>
-            <label className="toggle"><input type="checkbox" checked={batch} onChange={(e) => setBatch(e.target.checked)} /><span /> Continuous speedrun mode</label>
+            <p className="scanner-hint">The camera pauses after each successful scan and resumes after review.</p>
             <button className="primary wide" onClick={startCamera}><Camera size={18}/> Start live camera</button>
           </>
         )}
