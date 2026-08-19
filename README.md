@@ -10,6 +10,8 @@ docker compose up -d --build
 
 Open `http://localhost:6616`. The initial master PIN is `1234`; change it after first launch. Set a strong `SESSION_SECRET` and `DEFAULT_PIN` in a local `.env` before exposing the service.
 
+To provision AI through Docker, copy `.env.example` to `.env` and set `AI_PROVIDER`, `AI_API_KEY`, and `AI_MODEL`. These environment values are used unless an admin saves an override in Settings.
+
 The SQLite database and daily snapshots live in `./data`. Camera streaming works on `localhost` or HTTPS; plain LAN HTTP automatically supports photo capture instead.
 
 ## Local development
@@ -32,4 +34,4 @@ npm run build
 npm start
 ```
 
-Supported AI providers are OpenAI, Anthropic, OpenRouter, and Ollama. Configure your own key, model, and optional base URL under Admin → Settings.
+Supported AI providers are OpenAI, Anthropic, OpenRouter, and Ollama. Configure them through `.env` or under Admin → Settings.

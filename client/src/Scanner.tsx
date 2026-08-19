@@ -4,7 +4,7 @@ import { Camera, ScanBarcode, Sparkles, X } from "lucide-react";
 import { api } from "./api";
 
 export type ScanResult = {
-  source: "vault" | "openfoodfacts" | "vision" | "unresolved";
+  source: "vault" | "openfoodfacts" | "upcitemdb" | "ai" | "vision" | "unresolved";
   upc?: string;
   table?: "spirits" | "packaged_beer";
   product: Record<string, unknown>;

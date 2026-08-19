@@ -119,21 +119,66 @@ app.get("/api/cocktails/match", async () => {
   });
 });
 
-app.get<{ Params: { upc: string } }>("/api/scan/upc/:upc", async (request, reply) => {
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  const cleaned = value.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start < 0 || end <= start) return;
+  try { return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>; } catch { return; }
+}
+
+function hasConfiguredAi() {
+  return Boolean(
+    getSetting("aiProvider") || process.env.AI_PROVIDER || process.env.AI_API_KEY ||
+    process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY ||
+    process.env.AI_BASE_URL || process.env.OLLAMA_HOST
+  );
+}
+
+app.get<{ Params: { upc: string } }>("/api/scan/upc/:upc", async (request) => {
   const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(request.params.upc);
   if (spirit) return { source: "vault", table: "spirits", upc: request.params.upc, product: spirit };
   const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(request.params.upc);
   if (beer) return { source: "vault", table: "packaged_beer", upc: request.params.upc, product: beer };
-  let response: Response;
+
   try {
-    response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(request.params.upc)}.json`);
+    const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(request.params.upc)}.json`);
+    if (response.ok) {
+      const data = await response.json() as { status: number; product?: Record<string, unknown> };
+      if (data.status && data.product) return { source: "openfoodfacts", upc: request.params.upc, product: data.product };
+    }
   } catch {
-    return reply.code(503).send({ error: "Product lookup service is unavailable" });
+    app.log.warn("Open Food Facts lookup unavailable");
   }
-  if (!response.ok) return reply.code(404).send({ error: "Product not found" });
-  const data = await response.json() as { status: number; product?: Record<string, unknown> };
-  if (!data.status || !data.product) return reply.code(404).send({ error: "Product not found" });
-  return { source: "openfoodfacts", upc: request.params.upc, product: data.product };
+
+  try {
+    const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(request.params.upc)}`);
+    if (response.ok) {
+      const data = await response.json() as { items?: Array<{ title?: string; brand?: string; category?: string; images?: string[] }> };
+      const item = data.items?.[0];
+      if (item?.title) return {
+        source: "upcitemdb",
+        upc: request.params.upc,
+        product: { product_name: item.title, brands: item.brand ?? "", categories: item.category ?? "", image_url: item.images?.[0] ?? "" }
+      };
+    }
+  } catch {
+    app.log.warn("UPCitemdb lookup unavailable");
+  }
+
+  if (hasConfiguredAi()) {
+    try {
+      const result = await callLlm(`Identify the retail beverage with UPC/EAN ${request.params.upc}. Return ONLY JSON: {"name":"exact product name or empty","brand":"brand or empty","category":"specific beverage type or empty","abv":number or 0}. Do not guess if unknown.`);
+      const product = parseJsonObject(result);
+      if (typeof product?.name === "string" && product.name.trim()) {
+        return { source: "ai", upc: request.params.upc, product };
+      }
+    } catch (error) {
+      app.log.warn({ error }, "AI barcode fallback unavailable");
+    }
+  }
+
+  return { source: "unresolved", upc: request.params.upc, product: {} };
 });
 
 class AiRequestError extends Error {
@@ -143,10 +188,13 @@ class AiRequestError extends Error {
 }
 
 async function callLlm(prompt: string, image?: string) {
-  const provider = getSetting("aiProvider") ?? "ollama";
-  const key = getSetting("aiApiKey") ?? "";
-  const baseUrl = getSetting("aiBaseUrl") ?? (provider === "ollama" ? "http://host.docker.internal:11434" : provider === "anthropic" ? "https://api.anthropic.com" : provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
-  const model = getSetting("aiModel") ?? (provider === "ollama" ? "llama3.2-vision" : provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini");
+  const inferredProvider = process.env.ANTHROPIC_API_KEY ? "anthropic" : process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.OPENAI_API_KEY ? "openai" : "ollama";
+  const provider = (getSetting("aiProvider") || process.env.AI_PROVIDER || inferredProvider).toLowerCase();
+  const providerKey = provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : provider === "openrouter" ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY;
+  const key = getSetting("aiApiKey") || process.env.AI_API_KEY || providerKey || "";
+  const defaultBaseUrl = provider === "ollama" ? (process.env.OLLAMA_HOST || "http://host.docker.internal:11434") : provider === "anthropic" ? "https://api.anthropic.com" : provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1";
+  const baseUrl = (getSetting("aiBaseUrl") || process.env.AI_BASE_URL || defaultBaseUrl).replace(/\/$/, "");
+  const model = getSetting("aiModel") || process.env.AI_MODEL || (provider === "ollama" ? "llama3.2-vision" : provider === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini");
   if (provider !== "ollama" && !key) {
     throw new AiRequestError("Please configure your AI Provider API key in Settings.", 400);
   }
