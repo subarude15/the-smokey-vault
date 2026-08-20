@@ -230,9 +230,15 @@ export async function lookupProduct(
     ?? db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(rawUpc);
   if (beer) return { source: "vault", table: "packaged_beer", upc, product: beer as Record<string, unknown>, quota: getLastQuota() };
 
+  let staleFallback: ProductSchema | null = null;
   if (!forceRefresh) {
     const cached = getFromCache(upc);
-    if (cached) return success("cache", upc, cached);
+    if (cached) {
+      const cacheMeta = db.prepare("SELECT source FROM cola_cache WHERE upc = ?").get(upc) as { source?: string } | undefined;
+      const fromCola = cacheMeta?.source === "cola_cloud";
+      if (fromCola || !isColaConfigured()) return success("cache", upc, cached);
+      staleFallback = cached;
+    }
   }
 
   if (isColaConfigured()) {
@@ -255,6 +261,8 @@ export async function lookupProduct(
       // Fall through to Open Food Facts when COLA is unavailable.
     }
   }
+
+  if (staleFallback) return success("cache", upc, staleFallback);
 
   try {
     const off = await lookupOpenFoodFacts(upc);
