@@ -6,9 +6,12 @@ import swaggerUi from "@fastify/swagger-ui";
 import fastifyStatic from "@fastify/static";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
+import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
+import { isColaConfigured } from "./cola_client.js";
+import { imagesDir } from "./images.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
@@ -18,8 +21,8 @@ const tableFields: Record<string, string[]> = {
   spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count"],
   taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l"],
   brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes"],
-  packaged_beer: ["brewery","name","style","count","pack_date","abv","upc"],
-  wines: ["producer","name","varietal","vintage","type","region","sweetness","body","bottle_count","drink_by_date","pairings","notes"]
+  packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url"],
+  wines: ["producer","name","varietal","vintage","type","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url"]
 };
 
 await app.register(cors, { origin: true });
@@ -79,10 +82,15 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const values = tableFields[table].filter((field) => request.body[field] !== undefined);
+  const body = { ...request.body };
+  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
+    const { localizeImage } = await import("./images.js");
+    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  }
+  const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   const result = db.prepare(`INSERT INTO ${table} (${values.join(",")}) VALUES (${values.map(() => "?").join(",")})`)
-    .run(...values.map((field) => request.body[field] as never));
+    .run(...values.map((field) => body[field] as never));
   return reply.code(201).send(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid));
 });
 
@@ -90,10 +98,15 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const values = tableFields[table].filter((field) => request.body[field] !== undefined);
+  const body = { ...request.body };
+  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
+    const { localizeImage } = await import("./images.js");
+    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  }
+  const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   db.prepare(`UPDATE ${table} SET ${values.map((f) => `${f}=?`).join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(...values.map((field) => request.body[field] as never), request.params.id);
+    .run(...values.map((field) => body[field] as never), request.params.id);
   return db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id);
 });
 
@@ -119,43 +132,92 @@ app.get("/api/cocktails/match", async () => {
   });
 });
 
-app.get<{ Params: { code: string } }>("/api/scan/upc/:code", async (request, reply) => {
-  const code = request.params.code;
-  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(code);
-  if (spirit) return { source: "vault", table: "spirits", upc: code, product: spirit };
-  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(code);
-  if (beer) return { source: "vault", table: "packaged_beer", upc: code, product: beer };
-
+async function handleBarcodeLookup(
+  request: { params: { code: string }; query: { enrich?: string; refresh?: string; force?: string } },
+  reply: { code: (n: number) => { send: (v: unknown) => unknown } }
+) {
+  const enrich = request.query.enrich !== "false" && request.query.enrich !== "0";
+  const forceRefresh = request.query.refresh === "true" || request.query.refresh === "1"
+    || request.query.force === "true" || request.query.force === "1";
   try {
-    const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`);
-    if (response.ok) {
-      const data = await response.json() as { items?: Array<{ title?: string; brand?: string; category?: string; images?: string[] }> };
-      const item = data.items?.[0];
-      if (item?.title) return {
-        source: "upcitemdb",
-        upc: code,
-        product: { name: item.title, brand: item.brand ?? "", category: item.category ?? "", image_url: item.images?.[0] ?? "" }
-      };
-    } else {
-      app.log.warn({ status: response.status }, "UPCitemdb lookup failed");
-    }
+    const result = await lookupProduct(request.params.code, { enrich, forceRefresh });
+    // Always 200 so the scanner can open a prefilled (or UPC-only) form.
+    return result;
   } catch (error) {
-    app.log.warn({ error }, "UPCitemdb lookup unavailable");
+    app.log.error({ error }, "Barcode lookup failed");
+    return reply.code(502).send({ error: "Barcode lookup failed" });
   }
+}
 
+app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string } }>(
+  "/api/scan/upc/:code",
+  { schema: { tags: ["Lookup"], summary: "Barcode lookup (vault → cache → COLA Cloud → Open Food Facts)" } },
+  handleBarcodeLookup
+);
+
+app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string } }>(
+  "/api/lookup/:code",
+  { schema: { tags: ["Lookup"], summary: "Barcode lookup pipeline" } },
+  handleBarcodeLookup
+);
+
+app.get<{ Querystring: { q?: string } }>("/api/search/bottles", {
+  schema: { tags: ["Lookup"], summary: "Search vault + COLA Cloud by bottle name" }
+}, async (request, reply) => {
+  const q = request.query.q?.trim() ?? "";
+  if (q.length < 2) return { results: [] };
   try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`);
-    if (response.ok) {
-      const data = await response.json() as { status: number; product?: Record<string, unknown> };
-      if (data.status && data.product) return { source: "openfoodfacts", upc: code, product: data.product };
-    } else {
-      app.log.warn({ status: response.status }, "Open Food Facts lookup failed");
-    }
+    return await searchBottles(q);
   } catch (error) {
-    app.log.warn({ error }, "Open Food Facts lookup unavailable");
+    app.log.error({ error }, "Bottle search failed");
+    return reply.code(502).send({ error: "Bottle search failed" });
   }
+});
 
-  return reply.code(404).send({ error: "Product not found", upc: code });
+app.get<{ Params: { ttbId: string }; Querystring: { upc?: string } }>("/api/cola/enrich/:ttbId", {
+  schema: { tags: ["Lookup"], summary: "Fetch COLA detail and localize label image" }
+}, async (request, reply) => {
+  if (!isColaConfigured()) return reply.code(400).send({ error: "COLA_API_KEY is not configured" });
+  try {
+    return await enrichColaRecord(request.params.ttbId, request.query.upc ?? "");
+  } catch (error) {
+    app.log.error({ error }, "COLA enrich failed");
+    return reply.code(502).send({ error: "Could not enrich COLA record" });
+  }
+});
+
+app.get("/api/cola/quota", {
+  schema: { tags: ["Lookup"], summary: "COLA Cloud API quota remaining" }
+}, async (_request, reply) => {
+  if (!isColaConfigured()) {
+    return { configured: false, message: "Set COLA_API_KEY to enable COLA Cloud lookups." };
+  }
+  try {
+    return await fetchColaQuota();
+  } catch (error) {
+    app.log.warn({ error }, "COLA quota check failed");
+    return reply.code(502).send({ error: "Unable to read COLA Cloud quota", configured: true });
+  }
+});
+
+const imageTypes: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif"
+};
+
+app.get<{ Params: { file: string } }>("/api/media/images/:file", {
+  schema: { tags: ["Lookup"], summary: "Serve a locally cached bottle label image" }
+}, async (request, reply) => {
+  const file = basename(request.params.file);
+  if (!file || file !== request.params.file || file.includes("..")) {
+    return reply.code(400).send({ error: "Invalid image path" });
+  }
+  const path = join(imagesDir, file);
+  if (!existsSync(path)) return reply.code(404).send({ error: "Image not found" });
+  return reply.type(imageTypes[extname(file).toLowerCase()] ?? "application/octet-stream").send(createReadStream(path));
 });
 
 class AiRequestError extends Error {

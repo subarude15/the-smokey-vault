@@ -12,6 +12,8 @@ Open `http://localhost:6616`. The initial master PIN is `1234`; change it after 
 
 To provision AI through Docker, copy `.env.example` to `.env` and set `AI_PROVIDER`, `AI_API_KEY`, and `AI_MODEL`. These environment values are used unless an admin saves an override in Settings.
 
+For alcohol barcode enrichment, set `COLA_API_KEY` (free signup at [app.colacloud.us](https://app.colacloud.us/auth/register)). Lookups run: vault → local cache → COLA Cloud → Open Food Facts. Quota status is available at `/api/cola/quota`.
+
 The SQLite database and daily snapshots live in `./data`. Camera streaming works on `localhost` or HTTPS; plain LAN HTTP automatically supports photo capture instead.
 
 ## Local development

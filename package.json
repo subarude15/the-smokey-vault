@@ -10,7 +10,8 @@
     "dev": "concurrently \"tsx watch src/server.ts\" \"vite --config client/vite.config.ts\"",
     "build": "npm run build:client && tsc -p tsconfig.server.json",
     "build:client": "vite build --config client/vite.config.ts",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "latest",
