@@ -9,6 +9,8 @@ import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
+import { fetchColaQuota, lookupProduct } from "./lookup.js";
+import { isColaConfigured } from "./cola_client.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
@@ -119,43 +121,49 @@ app.get("/api/cocktails/match", async () => {
   });
 });
 
-app.get<{ Params: { code: string } }>("/api/scan/upc/:code", async (request, reply) => {
-  const code = request.params.code;
-  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(code);
-  if (spirit) return { source: "vault", table: "spirits", upc: code, product: spirit };
-  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(code);
-  if (beer) return { source: "vault", table: "packaged_beer", upc: code, product: beer };
-
+async function handleBarcodeLookup(
+  request: { params: { code: string }; query: { enrich?: string; refresh?: string; force?: string } },
+  reply: { code: (n: number) => { send: (v: unknown) => unknown } }
+) {
+  const enrich = request.query.enrich !== "false" && request.query.enrich !== "0";
+  const forceRefresh = request.query.refresh === "true" || request.query.refresh === "1"
+    || request.query.force === "true" || request.query.force === "1";
   try {
-    const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`);
-    if (response.ok) {
-      const data = await response.json() as { items?: Array<{ title?: string; brand?: string; category?: string; images?: string[] }> };
-      const item = data.items?.[0];
-      if (item?.title) return {
-        source: "upcitemdb",
-        upc: code,
-        product: { name: item.title, brand: item.brand ?? "", category: item.category ?? "", image_url: item.images?.[0] ?? "" }
-      };
-    } else {
-      app.log.warn({ status: response.status }, "UPCitemdb lookup failed");
+    const result = await lookupProduct(request.params.code, { enrich, forceRefresh });
+    if (result.source === "not_found") {
+      return reply.code(404).send({ error: result.message ?? "Product not found", upc: result.upc, source: "not_found", quota: result.quota });
     }
+    return result;
   } catch (error) {
-    app.log.warn({ error }, "UPCitemdb lookup unavailable");
+    app.log.error({ error }, "Barcode lookup failed");
+    return reply.code(502).send({ error: "Barcode lookup failed" });
   }
+}
 
+app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string } }>(
+  "/api/scan/upc/:code",
+  { schema: { tags: ["Lookup"], summary: "Barcode lookup (vault → cache → COLA Cloud → Open Food Facts)" } },
+  handleBarcodeLookup
+);
+
+app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string } }>(
+  "/api/lookup/:code",
+  { schema: { tags: ["Lookup"], summary: "Barcode lookup pipeline" } },
+  handleBarcodeLookup
+);
+
+app.get("/api/cola/quota", {
+  schema: { tags: ["Lookup"], summary: "COLA Cloud API quota remaining" }
+}, async (_request, reply) => {
+  if (!isColaConfigured()) {
+    return { configured: false, message: "Set COLA_API_KEY to enable COLA Cloud lookups." };
+  }
   try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`);
-    if (response.ok) {
-      const data = await response.json() as { status: number; product?: Record<string, unknown> };
-      if (data.status && data.product) return { source: "openfoodfacts", upc: code, product: data.product };
-    } else {
-      app.log.warn({ status: response.status }, "Open Food Facts lookup failed");
-    }
+    return await fetchColaQuota();
   } catch (error) {
-    app.log.warn({ error }, "Open Food Facts lookup unavailable");
+    app.log.warn({ error }, "COLA quota check failed");
+    return reply.code(502).send({ error: "Unable to read COLA Cloud quota", configured: true });
   }
-
-  return reply.code(404).send({ error: "Product not found", upc: code });
 });
 
 class AiRequestError extends Error {

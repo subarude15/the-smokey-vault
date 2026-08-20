@@ -47,27 +47,56 @@ function applyTheme(theme: string, tokens?: Record<string,string>) {
   document.documentElement.dataset.theme = theme;
 }
 
-type ScanDraft = { moduleId: "spirits" | "packaged_beer"; values: Record<string,unknown>; key: number };
+type ScanDraft = { moduleId: "spirits" | "packaged_beer" | "wines"; values: Record<string,unknown>; key: number };
 
 function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const product = result.product;
   const text = (...keys:string[]) => keys.map((key)=>product[key]).find((value)=>typeof value==="string"&&value.trim()) as string|undefined;
   const categories = text("categories","category") ?? "";
-  const isBeer = /beer|ale|lager|stout|porter|ipa|cider/i.test(categories);
+  const productType = text("product_type") ?? "";
+  const isBeer = /beer|ale|lager|stout|porter|ipa|cider|seltzer|malt/i.test(`${categories} ${productType}`);
+  const isWine = /wine|sparkling|vermouth|sake|mead/i.test(`${categories} ${productType}`);
   const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string,unknown>|undefined)?.alcohol_100g;
   const abv = typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")) || 0;
   const name = text("product_name","product_name_en","name") ?? "";
   const brand = text("brands","brand","producer") ?? "";
   const upc = result.upc ?? text("code","upc") ?? "";
   const image = text("image_front_url","image_url") ?? "";
-  return isBeer ? {
-    moduleId:"packaged_beer",
-    key:Date.now(),
-    values:{name,brewery:brand,style:categories.split(",")[0]??"",abv,count:1,upc}
-  } : {
-    moduleId:"spirits",
-    key:Date.now(),
-    values:{name,brand,category:categories.split(",")[0]||"Mixer",abv,upc,image_url:image,stock_count:1,fill_level:100}
+  const notes = text("notes") ?? "";
+  const volume = typeof product.volume_ml === "number" ? product.volume_ml : Number.parseFloat(String(product.volume_ml ?? "")) || 750;
+  const moduleId = result.table === "packaged_beer" || result.table === "wines" || result.table === "spirits"
+    ? result.table
+    : isBeer ? "packaged_beer" : isWine ? "wines" : "spirits";
+  if (moduleId === "packaged_beer") {
+    return {
+      moduleId: "packaged_beer",
+      key: Date.now(),
+      values: { name, brewery: brand, style: categories.split(",")[0] ?? "", abv, count: 1, upc }
+    };
+  }
+  if (moduleId === "wines") {
+    return {
+      moduleId: "wines",
+      key: Date.now(),
+      values: { name, producer: brand, varietal: categories.split(",")[0] ?? "", type: /sparkling/i.test(categories) ? "Sparkling" : "Red", region: text("origin") ?? "", bottle_count: 1, notes }
+    };
+  }
+  return {
+    moduleId: "spirits",
+    key: Date.now(),
+    values: {
+      name,
+      brand,
+      category: categories.split(",")[0] || "Mixer",
+      sub_category: text("derived_subcategory") ?? "",
+      abv,
+      upc,
+      image_url: image,
+      stock_count: Number(product.stock_count ?? product.bottle_count ?? 1) || 1,
+      fill_level: Number(product.fill_level ?? product.fill_level_percent ?? 100) || 100,
+      volume_ml: volume,
+      notes
+    }
   };
 }
 

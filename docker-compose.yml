@@ -16,5 +16,7 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_MODEL: ${AI_MODEL:-}
+      COLA_API_KEY: ${COLA_API_KEY:-}
+      COLA_BURST_LIMIT: ${COLA_BURST_LIMIT:-10}
     volumes:
       - ./data:/data
