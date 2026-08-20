@@ -21,7 +21,7 @@ type Props = { onClose: () => void; onProduct: (result: ScanResult) => Promise<S
 
 export function Scanner({ onClose, onProduct }: Props) {
   const video = useRef<HTMLVideoElement>(null);
-  const controls = useRef<IScannerControls>();
+  const controls = useRef<IScannerControls | undefined>(undefined);
   const isProcessing = useRef(false);
   const isMounted = useRef(true);
   const [mode, setMode] = useState<"barcode" | "vision">("barcode");

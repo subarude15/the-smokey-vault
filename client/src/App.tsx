@@ -126,7 +126,7 @@ export default function App() {
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
   const [countsError, setCountsError] = useState("");
-  const scanReviewResolver = useRef<(outcome: ScanReviewOutcome) => void>();
+  const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
@@ -249,7 +249,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
   const [viewing,setViewing] = useState<Item>();
   const [finderOpen,setFinderOpen] = useState(false);
   const [loadError,setLoadError] = useState("");
-  const openedScanKey = useRef<number>();
+  const openedScanKey = useRef<number | undefined>(undefined);
   const load = useCallback(() => {
     setLoadError("");
     return api<Item[]>(`/inventory/${module.id}`).then(setItems).catch((err) => {
