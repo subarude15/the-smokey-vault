@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
 import { Camera, ScanBarcode, Sparkles, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
 export type ScanResult = {
-  source: "vault" | "cache" | "cola_cloud" | "openfoodfacts" | "upcitemdb" | "ai" | "vision" | "unresolved";
+  source: "vault" | "cache" | "cola_cloud" | "openfoodfacts" | "upcitemdb" | "ai" | "vision" | "unresolved" | "not_found";
   upc?: string;
   table?: "spirits" | "packaged_beer" | "wines";
   product: Record<string, unknown>;
+  message?: string;
   quota?: {
     detail_views_remaining?: string | null;
     list_records_remaining?: string | null;
@@ -81,25 +82,32 @@ export function Scanner({ onClose, onProduct }: Props) {
   async function lookupAndReview(upc: string) {
     setStatus(`Looking up ${upc}…`);
     try {
-      const data = await api<ScanResult>(`/scan/upc/${upc}`);
+      const data = await api<ScanResult>(`/scan/upc/${encodeURIComponent(upc)}`);
       const sourceLabel = data.source === "cola_cloud" ? "COLA Cloud"
-        : data.source === "cache" ? "cached COLA data"
+        : data.source === "cache" ? "cached catalog data"
         : data.source === "openfoodfacts" ? "Open Food Facts"
         : data.source === "upcitemdb" ? "UPC catalog"
         : data.source === "vault" ? "your vault"
+        : data.source === "not_found" ? "no catalog match"
         : data.source;
+      const hasName = Boolean(data.product?.name || data.product?.product_name);
       const quotaHint = data.quota?.detail_views_remaining != null
         ? ` · ${data.quota.detail_views_remaining} COLA detail views left`
         : "";
-      setStatus(`Matched via ${sourceLabel}${quotaHint}. Review to continue.`);
-      const outcome = await onProduct(data);
+      setStatus(hasName
+        ? `Matched via ${sourceLabel}${quotaHint}. Review to continue.`
+        : `${data.message ?? "No catalog match."} Review the UPC and fill details, or search by name.`);
+      const outcome = await onProduct({
+        ...data,
+        upc: data.upc ?? upc,
+        product: data.product ?? { upc },
+        source: data.source === "not_found" ? "not_found" : data.source
+      });
       setStatus(outcome === "saved" ? "Saved. Ready for the next bottle." : "Cancelled. Ready for the next bottle.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Product not found";
-      setStatus(message === "Product not found" || /No match for UPC/i.test(message)
-        ? "No catalog match. Add the item details manually."
-        : `${message}. Review the UPC manually.`);
-      await onProduct({ source: "unresolved", upc, product: {} });
+      setStatus(`${message}. Review the UPC manually.`);
+      await onProduct({ source: "unresolved", upc, product: { upc } });
     }
   }
 

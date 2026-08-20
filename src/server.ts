@@ -6,11 +6,12 @@ import swaggerUi from "@fastify/swagger-ui";
 import fastifyStatic from "@fastify/static";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
-import { fetchColaQuota, lookupProduct } from "./lookup.js";
+import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
+import { imagesDir } from "./images.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
@@ -81,10 +82,15 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const values = tableFields[table].filter((field) => request.body[field] !== undefined);
+  const body = { ...request.body };
+  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
+    const { localizeImage } = await import("./images.js");
+    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  }
+  const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   const result = db.prepare(`INSERT INTO ${table} (${values.join(",")}) VALUES (${values.map(() => "?").join(",")})`)
-    .run(...values.map((field) => request.body[field] as never));
+    .run(...values.map((field) => body[field] as never));
   return reply.code(201).send(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid));
 });
 
@@ -92,10 +98,15 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const values = tableFields[table].filter((field) => request.body[field] !== undefined);
+  const body = { ...request.body };
+  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
+    const { localizeImage } = await import("./images.js");
+    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  }
+  const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   db.prepare(`UPDATE ${table} SET ${values.map((f) => `${f}=?`).join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(...values.map((field) => request.body[field] as never), request.params.id);
+    .run(...values.map((field) => body[field] as never), request.params.id);
   return db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id);
 });
 
@@ -130,9 +141,7 @@ async function handleBarcodeLookup(
     || request.query.force === "true" || request.query.force === "1";
   try {
     const result = await lookupProduct(request.params.code, { enrich, forceRefresh });
-    if (result.source === "not_found") {
-      return reply.code(404).send({ error: result.message ?? "Product not found", upc: result.upc, source: "not_found", quota: result.quota });
-    }
+    // Always 200 so the scanner can open a prefilled (or UPC-only) form.
     return result;
   } catch (error) {
     app.log.error({ error }, "Barcode lookup failed");
@@ -152,6 +161,31 @@ app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: st
   handleBarcodeLookup
 );
 
+app.get<{ Querystring: { q?: string } }>("/api/search/bottles", {
+  schema: { tags: ["Lookup"], summary: "Search vault + COLA Cloud by bottle name" }
+}, async (request, reply) => {
+  const q = request.query.q?.trim() ?? "";
+  if (q.length < 2) return { results: [] };
+  try {
+    return await searchBottles(q);
+  } catch (error) {
+    app.log.error({ error }, "Bottle search failed");
+    return reply.code(502).send({ error: "Bottle search failed" });
+  }
+});
+
+app.get<{ Params: { ttbId: string }; Querystring: { upc?: string } }>("/api/cola/enrich/:ttbId", {
+  schema: { tags: ["Lookup"], summary: "Fetch COLA detail and localize label image" }
+}, async (request, reply) => {
+  if (!isColaConfigured()) return reply.code(400).send({ error: "COLA_API_KEY is not configured" });
+  try {
+    return await enrichColaRecord(request.params.ttbId, request.query.upc ?? "");
+  } catch (error) {
+    app.log.error({ error }, "COLA enrich failed");
+    return reply.code(502).send({ error: "Could not enrich COLA record" });
+  }
+});
+
 app.get("/api/cola/quota", {
   schema: { tags: ["Lookup"], summary: "COLA Cloud API quota remaining" }
 }, async (_request, reply) => {
@@ -164,6 +198,26 @@ app.get("/api/cola/quota", {
     app.log.warn({ error }, "COLA quota check failed");
     return reply.code(502).send({ error: "Unable to read COLA Cloud quota", configured: true });
   }
+});
+
+const imageTypes: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif"
+};
+
+app.get<{ Params: { file: string } }>("/api/media/images/:file", {
+  schema: { tags: ["Lookup"], summary: "Serve a locally cached bottle label image" }
+}, async (request, reply) => {
+  const file = basename(request.params.file);
+  if (!file || file !== request.params.file || file.includes("..")) {
+    return reply.code(400).send({ error: "Invalid image path" });
+  }
+  const path = join(imagesDir, file);
+  if (!existsSync(path)) return reply.code(404).send({ error: "Image not found" });
+  return reply.type(imageTypes[extname(file).toLowerCase()] ?? "application/octet-stream").send(createReadStream(path));
 });
 
 class AiRequestError extends Error {

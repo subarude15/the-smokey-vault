@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
+  ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
   LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
@@ -50,7 +50,7 @@ function applyTheme(theme: string, tokens?: Record<string,string>) {
 type ScanDraft = { moduleId: "spirits" | "packaged_beer" | "wines"; values: Record<string,unknown>; key: number };
 
 function scannedInventoryDraft(result: ScanResult): ScanDraft {
-  const product = result.product;
+  const product = result.product ?? {};
   const text = (...keys:string[]) => keys.map((key)=>product[key]).find((value)=>typeof value==="string"&&value.trim()) as string|undefined;
   const categories = text("categories","category") ?? "";
   const productType = text("product_type") ?? "";
@@ -59,7 +59,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string,unknown>|undefined)?.alcohol_100g;
   const abv = typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")) || 0;
   const name = text("product_name","product_name_en","name") ?? "";
-  const brand = text("brands","brand","producer") ?? "";
+  const brand = text("brands","brand","producer","brewery") ?? "";
   const upc = result.upc ?? text("code","upc") ?? "";
   const image = text("image_front_url","image_url") ?? "";
   const notes = text("notes") ?? "";
@@ -88,7 +88,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
       name,
       brand,
       category: categories.split(",")[0] || "Mixer",
-      sub_category: text("derived_subcategory") ?? "",
+      sub_category: text("sub_category","derived_subcategory") ?? "",
       abv,
       upc,
       image_url: image,
@@ -213,34 +213,186 @@ function Dashboard({ counts, admin, go }: { counts: Record<string,number>; admin
   </>;
 }
 
+type BottleSearchHit = {
+  source: "vault" | "cola_cloud";
+  table: "spirits" | "packaged_beer" | "wines";
+  ttb_id?: string | null;
+  product: Record<string, unknown>;
+};
+
 function Inventory({ module, admin, scanDraft, finishScanReview }: { module:Module; admin:boolean; scanDraft?:ScanDraft; finishScanReview:(outcome:ScanReviewOutcome)=>void }) {
   const [items,setItems] = useState<Item[]>([]);
   const [search,setSearch] = useState("");
   const [editing,setEditing] = useState<Item | null | undefined>();
+  const [viewing,setViewing] = useState<Item>();
+  const [finderOpen,setFinderOpen] = useState(false);
   const openedScanKey = useRef<number>();
   const load = useCallback(() => api<Item[]>(`/inventory/${module.id}`).then(setItems), [module.id]);
-  useEffect(() => { load().catch(() => {}); }, [load]);
+  useEffect(() => { load().catch(() => {}); setViewing(undefined); }, [load]);
   useEffect(() => {
     if (!admin||!scanDraft||openedScanKey.current===scanDraft.key) return;
     openedScanKey.current=scanDraft.key;
+    setViewing(undefined);
     setEditing({id:0,...scanDraft.values} as Item);
   },[admin,scanDraft]);
   const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(search.toLowerCase()));
-  async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); load(); }
+  async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); setViewing(undefined); load(); }
+
+  if (viewing) {
+    return <BottleDetail
+      module={module}
+      item={viewing}
+      admin={admin}
+      onBack={() => setViewing(undefined)}
+      onEdit={() => { setEditing(viewing); }}
+      onDelete={() => remove(viewing.id)}
+    />;
+  }
+
   return <>
     <PageTitle eyebrow={module.label.toUpperCase()} title={module.title} subtitle={module.subtitle}/>
-    <div className="toolbar"><label className="search"><Search/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder={`Search ${module.label.toLowerCase()}…`}/></label>{admin && <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>}</div>
+    <div className="toolbar">
+      <label className="search"><Search/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder={`Filter ${module.label.toLowerCase()}…`}/></label>
+      {admin && <div className="toolbar-actions">
+        {["spirits","packaged_beer","wines"].includes(module.id) && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> Find bottle</button>}
+        <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>
+      </div>}
+    </div>
     {!filtered.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."}/> :
-      <div className="inventory-grid">{filtered.map((item) => <article className="inventory-card" key={item.id}>
+      <div className="inventory-grid">{filtered.map((item) => <button type="button" className="inventory-card inventory-card-button" key={item.id} onClick={() => setViewing(item)}>
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
         <div className="card-content"><span className="eyebrow">{String(item[module.secondary] ?? item.style ?? "")}</span><h3>{String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">{item.abv ? <span>{item.abv}% ABV</span> : null}{item.status ? <span>{item.status}</span> : null}{item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}{item.count != null ? <span>{item.count} packaged</span> : null}</div>
           {module.id === "spirits" && <div className="fill"><span style={{width:`${Number(item.fill_level ?? 0)}%`}}/><small>{item.fill_level}% full</small></div>}
           {module.id === "taps" && <div className="fill"><span style={{width:`${Math.min(100,Number(item.remaining_l)/Number(item.keg_size_l)*100)}%`}}/><small>{item.remaining_l} L remaining · ~{Math.floor(Number(item.remaining_l)*2.1)} pints</small></div>}
-        </div>{admin && <div className="card-actions"><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button><button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button></div>}
-      </article>)}</div>}
-    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft)} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
+        </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button><button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button></div>}
+      </button>)}</div>}
+    {finderOpen && <BottleFinder module={module} onClose={() => setFinderOpen(false)} onPick={(values) => { setFinderOpen(false); setEditing({id:0,...values} as Item); }}/>}
+    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft)} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); setViewing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
   </>;
+}
+
+function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
+  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  return (
+    <section className="bottle-detail">
+      <button className="secondary back-button" onClick={onBack}><ArrowLeft size={17}/> Back to {module.label}</button>
+      <div className="bottle-detail-hero">
+        <div className="bottle-detail-image">
+          {item.image_url ? <img src={String(item.image_url)} alt={String(item[module.primary] ?? "")}/> : <module.icon size={64}/>}
+        </div>
+        <div>
+          <span className="eyebrow">{String(item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
+          <h1>{String(item[module.primary] ?? "Untitled")}</h1>
+          <div className="meta">
+            {item.abv ? <span>{item.abv}% ABV</span> : null}
+            {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
+            {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
+            {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
+            {item.count != null ? <span>{item.count} packaged</span> : null}
+            {item.upc ? <span>UPC {String(item.upc)}</span> : null}
+          </div>
+          {admin && <div className="bottle-detail-actions"><button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button><button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button></div>}
+        </div>
+      </div>
+      <div className="bottle-detail-grid">
+        {module.fields.filter((field) => field.key !== module.primary && field.key !== "notes" && item[field.key] != null && String(item[field.key]).trim() !== "").map((field) => (
+          <div key={field.key} className={field.type === "textarea" || field.key === "notes" || field.key === "image_url" ? "full" : ""}>
+            <span>{field.label}</span>
+            {field.key === "image_url" ? <a href={String(item.image_url)} target="_blank" rel="noreferrer">{String(item.image_url)}</a> :
+              field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong> :
+              <strong>{String(item[field.key])}</strong>}
+          </div>
+        ))}
+      </div>
+      {item.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{String(item.notes)}</p></article> : null}
+    </section>
+  );
+}
+
+function BottleFinder({ module, onClose, onPick }:{
+  module: Module;
+  onClose: () => void;
+  onPick: (values: Record<string, unknown>) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<BottleSearchHit[]>([]);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("Type at least 2 characters to search your vault and COLA Cloud.");
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setStatus("Type at least 2 characters to search your vault and COLA Cloud."); return; }
+    const timer = window.setTimeout(async () => {
+      setLoading(true); setError("");
+      try {
+        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}`);
+        setResults(data.results.filter((hit) => !module.id || hit.table === module.id || hit.source === "cola_cloud"));
+        setStatus(data.results.length ? `${data.results.length} matches` : "No matches yet — try a brand or bottle name.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Search failed");
+      } finally {
+        setLoading(false);
+      }
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [query, module.id]);
+
+  async function choose(hit: BottleSearchHit) {
+    try {
+      setLoading(true);
+      let product = hit.product;
+      if (hit.source === "cola_cloud" && hit.ttb_id) {
+        const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}`);
+        if (enriched.product) product = enriched.product;
+      }
+      const draft = scannedInventoryDraft({
+        source: hit.source === "vault" ? "vault" : "cola_cloud",
+        table: hit.table,
+        upc: String(product.upc ?? ""),
+        product
+      });
+      onPick(draft.values);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load bottle details");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <section className="modal finder-modal">
+        <header className="modal-header">
+          <div><span className="eyebrow">FIND A BOTTLE</span><h2>Search and add</h2></div>
+          <button type="button" className="icon-button" onClick={onClose}><X/></button>
+        </header>
+        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Eagle Rare, Lagavulin, Champagne…"/></label>
+        <p className="scanner-status">{loading ? "Searching…" : status}</p>
+        {error && <p className="error">{error}</p>}
+        <div className="finder-results">
+          {results.map((hit, index) => {
+            const name = String(hit.product.name ?? hit.product.product_name ?? "Untitled");
+            const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? "");
+            const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? "");
+            return (
+              <button type="button" className="finder-result" key={`${hit.source}-${hit.ttb_id ?? hit.product.id ?? index}`} onClick={() => choose(hit)}>
+                <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle/>}</div>
+                <div>
+                  <span className="eyebrow">{hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD"} · {hit.table.replace("_"," ")}</span>
+                  <strong>{name}</strong>
+                  <small>{[brand, category].filter(Boolean).join(" · ")}</small>
+                </div>
+                <ChevronRight size={16}/>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
@@ -249,11 +401,16 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   const existing = Boolean(item?.id);
   async function submit(e:React.FormEvent) { e.preventDefault(); try { await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(form)}); saved(); } catch(err){setError(err instanceof Error?err.message:"Could not save");} }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
-    <div className="form-grid">{module.fields.map((field) => <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
-      {field.options ? <select value={String(form[field.key]??field.options[0])} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}>{field.options.map((v)=><option key={v}>{v}</option>)}</select> :
+    {form.image_url ? <div className="form-image-preview"><img src={String(form.image_url)} alt=""/></div> : null}
+    <div className="form-grid">{module.fields.map((field) => {
+      const current = String(form[field.key] ?? "");
+      const options = field.options ? Array.from(new Set([...(field.options), ...(current && !field.options.includes(current) ? [current] : [])])) : undefined;
+      return <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
+      {options ? <select value={current || options[0]} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}>{options.map((v)=><option key={v}>{v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :
       field.type?.startsWith("range") ? <div className="range-wrap"><input type="range" min={field.type==="range5"?1:0} max={field.type==="range5"?5:100} value={Number(form[field.key]??(field.type==="range5"?3:100))} onChange={(e)=>setForm({...form,[field.key]:Number(e.target.value)})}/><b>{String(form[field.key]??(field.type==="range5"?3:100))}</b></div> :
-      <input type={field.type??"text"} step={field.type==="number"?"any":undefined} value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:field.type==="number"?Number(e.target.value):e.target.value})}/>}</label>)}</div>
+      <input type={field.type??"text"} step={field.type==="number"?"any":undefined} value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:field.type==="number"?Number(e.target.value):e.target.value})}/>}</label>;
+    })}</div>
     {error && <p className="error">{error}</p>}<footer className="modal-footer"><button type="button" className="secondary" onClick={close}>Cancel</button><button className="primary">Save to vault</button></footer></form></div>;
 }
 

@@ -194,11 +194,13 @@ export function mapColaToSchema(upc: string, summary: ColaSummary, detail?: Cola
 
 /** Inventory-facing fields used by the existing scan review form. */
 export function productToInventoryFields(product: ProductSchema) {
+  const spiritCategory = mapToSpiritCategory(product.category);
   return {
     upc: product.upc,
     name: product.name,
     brand: product.brand,
-    category: product.category,
+    category: spiritCategory,
+    sub_category: product.category && product.category !== spiritCategory ? product.category : "",
     abv: product.abv ?? 0,
     image_url: product.image_url ?? "",
     notes: product.notes ?? "",
@@ -215,13 +217,56 @@ export function productToInventoryFields(product: ProductSchema) {
   };
 }
 
+export function barcodeVariants(raw: string): string[] {
+  const cleaned = String(raw ?? "").replace(/\D/g, "");
+  if (!cleaned) return [];
+  const variants = new Set<string>();
+  variants.add(cleaned);
+  variants.add(cleaned.replace(/^0+/, "") || cleaned);
+  variants.add(cleaned.padStart(12, "0").slice(-12));
+  variants.add(cleaned.padStart(13, "0").slice(-13));
+  if (cleaned.length === 12) variants.add(`0${cleaned}`);
+  if (cleaned.length === 13 && cleaned.startsWith("0")) variants.add(cleaned.slice(1));
+  return [...variants];
+}
+
 export async function searchByBarcode(upc: string): Promise<ColaSummary | null> {
+  for (const candidate of barcodeVariants(upc)) {
+    const data = await colaFetch("/colas", {
+      barcode_value: candidate,
+      per_page: "1",
+      approval_date_from: "2005-01-01"
+    }) as { data?: ColaSummary[] };
+    if (data.data?.[0]) return data.data[0];
+  }
+
+  // Dedicated barcode enrichment endpoint across extracted barcode rows.
+  for (const candidate of barcodeVariants(upc).slice(0, 2)) {
+    try {
+      const payload = await colaFetch(`/barcode/${encodeURIComponent(candidate)}`) as {
+        data?: Array<ColaSummary & { cola?: ColaSummary }>;
+      };
+      const rows = payload.data ?? [];
+      const first = rows[0];
+      if (!first) continue;
+      if (first.ttb_id || first.product_name || first.brand_name) return first;
+      if (first.cola) return first.cola;
+    } catch {
+      // Try next variant / fall through.
+    }
+  }
+  return null;
+}
+
+export async function searchColasByQuery(query: string, perPage = 8): Promise<ColaSummary[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
   const data = await colaFetch("/colas", {
-    barcode_value: upc,
-    per_page: "1",
+    q,
+    per_page: String(Math.min(perPage, 20)),
     approval_date_from: "2005-01-01"
   }) as { data?: ColaSummary[] };
-  return data.data?.[0] ?? null;
+  return data.data ?? [];
 }
 
 export async function getColaDetail(ttbId: string): Promise<ColaDetail | null> {
@@ -229,6 +274,25 @@ export async function getColaDetail(ttbId: string): Promise<ColaDetail | null> {
   if (data && typeof data === "object" && "ttb_id" in data) return data as ColaDetail;
   if (data && typeof data === "object" && "data" in data) return (data as { data?: ColaDetail }).data ?? null;
   return null;
+}
+
+export function mapToSpiritCategory(raw?: string | null) {
+  const value = (raw ?? "").toLowerCase();
+  if (/bourbon/.test(value)) return "Bourbon";
+  if (/rye/.test(value)) return "Rye";
+  if (/scotch|single malt|islay|speyside/.test(value)) return "Scotch";
+  if (/irish/.test(value)) return "Irish";
+  if (/gin/.test(value)) return "Gin";
+  if (/tequila/.test(value)) return "Tequila";
+  if (/mezcal/.test(value)) return "Mezcal";
+  if (/rum/.test(value)) return "Rum";
+  if (/amaro/.test(value)) return "Amaro";
+  if (/liqueur|cordial/.test(value)) return "Liqueur";
+  if (/bitter/.test(value)) return "Bitters";
+  if (/vodka/.test(value)) return "Vodka";
+  if (/cognac|brandy|armagnac/.test(value)) return "Cognac";
+  if (/whisky|whiskey/.test(value)) return "Bourbon";
+  return raw?.trim() || "Mixer";
 }
 
 export async function fetchColaQuota(): Promise<ColaQuota & { tier?: string; configured: boolean; source: string }> {

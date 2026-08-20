@@ -11,8 +11,10 @@ import {
   normalizeUpc,
   ProductSchema,
   productToInventoryFields,
-  searchByBarcode
+  searchByBarcode,
+  searchColasByQuery
 } from "./cola_client.js";
+import { localizeImage } from "./images.js";
 
 export type LookupSource = "vault" | "cache" | "cola_cloud" | "openfoodfacts" | "upcitemdb" | "not_found";
 
@@ -23,6 +25,13 @@ export type LookupResult = {
   product: Record<string, unknown> | null;
   message?: string;
   quota?: ReturnType<typeof getLastQuota>;
+};
+
+export type BottleSearchHit = {
+  source: "vault" | "cola_cloud";
+  table: "spirits" | "packaged_beer" | "wines";
+  ttb_id?: string | null;
+  product: Record<string, unknown>;
 };
 
 type CacheRow = {
@@ -142,6 +151,12 @@ function inferTable(product: ProductSchema | Record<string, unknown>): "spirits"
   return "spirits";
 }
 
+async function withLocalImage(product: ProductSchema): Promise<ProductSchema> {
+  const local = await localizeImage(product.image_url);
+  if (!local || local === product.image_url) return product;
+  return { ...product, image_url: local };
+}
+
 function mapOffToSchema(upc: string, offProduct: Record<string, unknown>): ProductSchema {
   const nutriments = (offProduct.nutriments as Record<string, unknown> | undefined) ?? {};
   const abvRaw = offProduct.abv ?? offProduct.alcohol_100g ?? nutriments.alcohol_100g;
@@ -203,12 +218,13 @@ async function lookupUpcItemDb(upc: string): Promise<ProductSchema | null> {
   };
 }
 
-function success(source: LookupSource, upc: string, product: ProductSchema, table?: LookupResult["table"]): LookupResult {
+async function success(source: LookupSource, upc: string, product: ProductSchema, table?: LookupResult["table"]): Promise<LookupResult> {
+  const localized = await withLocalImage(product);
   return {
     source,
     upc,
-    table: table ?? inferTable(product),
-    product: productToInventoryFields(product),
+    table: table ?? inferTable(localized),
+    product: productToInventoryFields(localized),
     quota: getLastQuota()
   };
 }
@@ -222,12 +238,10 @@ export async function lookupProduct(
     return { source: "not_found", upc: rawUpc, product: null, message: "Invalid barcode." };
   }
 
-  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=?").get(upc)
-    ?? db.prepare("SELECT * FROM spirits WHERE upc=?").get(rawUpc);
+  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=? OR upc=?").get(upc, rawUpc);
   if (spirit) return { source: "vault", table: "spirits", upc, product: spirit as Record<string, unknown>, quota: getLastQuota() };
 
-  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(upc)
-    ?? db.prepare("SELECT * FROM packaged_beer WHERE upc=?").get(rawUpc);
+  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=? OR upc=?").get(upc, rawUpc);
   if (beer) return { source: "vault", table: "packaged_beer", upc, product: beer as Record<string, unknown>, quota: getLastQuota() };
 
   let staleFallback: ProductSchema | null = null;
@@ -236,7 +250,7 @@ export async function lookupProduct(
     if (cached) {
       const cacheMeta = db.prepare("SELECT source FROM cola_cache WHERE upc = ?").get(upc) as { source?: string } | undefined;
       const fromCola = cacheMeta?.source === "cola_cloud";
-      if (fromCola || !isColaConfigured()) return success("cache", upc, cached);
+      if (fromCola || !isColaConfigured()) return await success("cache", upc, cached);
       staleFallback = cached;
     }
   }
@@ -253,22 +267,23 @@ export async function lookupProduct(
             detail = null;
           }
         }
-        const product = mapColaToSchema(upc, summary, detail);
+        const product = await withLocalImage(mapColaToSchema(upc, summary, detail));
         saveToCache(product, summary, detail, "cola_cloud");
-        return success("cola_cloud", upc, product);
+        return await success("cola_cloud", upc, product);
       }
     } catch {
       // Fall through to Open Food Facts when COLA is unavailable.
     }
   }
 
-  if (staleFallback) return success("cache", upc, staleFallback);
+  if (staleFallback) return await success("cache", upc, staleFallback);
 
   try {
     const off = await lookupOpenFoodFacts(upc);
     if (off) {
-      saveToCache(off, null, null, "open_food_facts");
-      return success("openfoodfacts", upc, off);
+      const product = await withLocalImage(off);
+      saveToCache(product, null, null, "open_food_facts");
+      return await success("openfoodfacts", upc, product);
     }
   } catch {
     // Continue to upcitemdb.
@@ -277,8 +292,9 @@ export async function lookupProduct(
   try {
     const item = await lookupUpcItemDb(upc);
     if (item) {
-      saveToCache(item, null, null, "upcitemdb");
-      return success("upcitemdb", upc, item);
+      const product = await withLocalImage(item);
+      saveToCache(product, null, null, "upcitemdb");
+      return await success("upcitemdb", upc, product);
     }
   } catch {
     // Not found.
@@ -287,10 +303,82 @@ export async function lookupProduct(
   return {
     source: "not_found",
     upc,
-    product: null,
-    message: `No match for UPC ${upc}. Add manually.`,
+    product: {
+      upc,
+      name: "",
+      brand: "",
+      category: "Mixer",
+      abv: 0,
+      image_url: "",
+      notes: "",
+      fill_level: 100,
+      stock_count: 1,
+      volume_ml: 750
+    },
+    message: `No catalog match for UPC ${upc}. Add details manually or search by name.`,
     quota: getLastQuota()
   };
+}
+
+export async function enrichColaRecord(ttbId: string, upc = ""): Promise<LookupResult> {
+  const detail = await getColaDetail(ttbId);
+  if (!detail) {
+    return { source: "not_found", upc, product: null, message: "COLA record not found." };
+  }
+  const product = await withLocalImage(mapColaToSchema(upc || detail.barcodes?.[0]?.barcode_value || "", detail, detail));
+  if (product.upc) saveToCache(product, detail, detail, "cola_cloud");
+  return await success("cola_cloud", product.upc || upc, product);
+}
+
+function searchVault(query: string): BottleSearchHit[] {
+  const like = `%${query}%`;
+  const spirits = db.prepare(`
+    SELECT * FROM spirits
+    WHERE name LIKE ? OR brand LIKE ? OR category LIKE ? OR upc LIKE ?
+    ORDER BY name LIMIT 8
+  `).all(like, like, like, like) as Record<string, unknown>[];
+  const beers = db.prepare(`
+    SELECT * FROM packaged_beer
+    WHERE name LIKE ? OR brewery LIKE ? OR style LIKE ? OR upc LIKE ?
+    ORDER BY name LIMIT 5
+  `).all(like, like, like, like) as Record<string, unknown>[];
+  const wines = db.prepare(`
+    SELECT * FROM wines
+    WHERE name LIKE ? OR producer LIKE ? OR varietal LIKE ? OR region LIKE ?
+    ORDER BY name LIMIT 5
+  `).all(like, like, like, like) as Record<string, unknown>[];
+
+  return [
+    ...spirits.map((product) => ({ source: "vault" as const, table: "spirits" as const, product })),
+    ...beers.map((product) => ({ source: "vault" as const, table: "packaged_beer" as const, product })),
+    ...wines.map((product) => ({ source: "vault" as const, table: "wines" as const, product }))
+  ];
+}
+
+export async function searchBottles(query: string): Promise<{ results: BottleSearchHit[]; quota?: ReturnType<typeof getLastQuota> }> {
+  const q = query.trim();
+  if (q.length < 2) return { results: [] };
+
+  const results = searchVault(q);
+
+  if (isColaConfigured()) {
+    try {
+      const summaries = await searchColasByQuery(q, 10);
+      for (const summary of summaries) {
+        const product = productToInventoryFields(mapColaToSchema(summary.ttb_id || "", summary));
+        results.push({
+          source: "cola_cloud",
+          table: inferTable({ ...product, product_type: summary.product_type }),
+          ttb_id: summary.ttb_id ?? null,
+          product
+        });
+      }
+    } catch {
+      // Local vault results are still useful when COLA is down.
+    }
+  }
+
+  return { results: results.slice(0, 20), quota: getLastQuota() };
 }
 
 export { fetchColaQuota };
