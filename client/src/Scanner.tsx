@@ -16,7 +16,7 @@ export type ScanResult = {
   };
 };
 
-export type ScanReviewOutcome = "saved" | "cancelled";
+export type ScanReviewOutcome = "saved" | "cancelled" | "viewed";
 type Props = { onClose: () => void; onProduct: (result: ScanResult) => Promise<ScanReviewOutcome> };
 
 export function Scanner({ onClose, onProduct }: Props) {
@@ -94,16 +94,21 @@ export function Scanner({ onClose, onProduct }: Props) {
       const quotaHint = data.quota?.detail_views_remaining != null
         ? ` · ${data.quota.detail_views_remaining} COLA detail views left`
         : "";
+      const quotaWarn = data.quota?.detail_views_remaining === "0"
+        ? " COLA detail quota is exhausted."
+        : "";
       setStatus(hasName
         ? `Matched via ${sourceLabel}${quotaHint}. Review to continue.`
-        : `${data.message ?? "No catalog match."} Review the UPC and fill details, or search by name.`);
+        : `${data.message ?? "No catalog match."}${quotaWarn} Review the UPC and fill details, or search by name.`);
       const outcome = await onProduct({
         ...data,
         upc: data.upc ?? upc,
         product: data.product ?? { upc },
         source: data.source === "not_found" ? "not_found" : data.source
       });
-      setStatus(outcome === "saved" ? "Saved. Ready for the next bottle." : "Cancelled. Ready for the next bottle.");
+      setStatus(outcome === "saved" ? "Saved. Ready for the next bottle."
+        : outcome === "viewed" ? "Opened from your vault. Ready for the next bottle."
+        : "Cancelled. Ready for the next bottle.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Product not found";
       setStatus(`${message}. Review the UPC manually.`);

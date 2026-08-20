@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import {
+  barcodeVariants,
   CACHE_TTL_SECONDS,
   ColaDetail,
   ColaSummary,
@@ -238,11 +239,10 @@ export async function lookupProduct(
     return { source: "not_found", upc: rawUpc, product: null, message: "Invalid barcode." };
   }
 
-  const spirit = db.prepare("SELECT * FROM spirits WHERE upc=? OR upc=?").get(upc, rawUpc);
-  if (spirit) return { source: "vault", table: "spirits", upc, product: spirit as Record<string, unknown>, quota: getLastQuota() };
-
-  const beer = db.prepare("SELECT * FROM packaged_beer WHERE upc=? OR upc=?").get(upc, rawUpc);
-  if (beer) return { source: "vault", table: "packaged_beer", upc, product: beer as Record<string, unknown>, quota: getLastQuota() };
+  const vaultHit = findInVault(upc, rawUpc);
+  if (vaultHit) {
+    return { source: "vault", table: vaultHit.table, upc, product: vaultHit.product, quota: getLastQuota() };
+  }
 
   let staleFallback: ProductSchema | null = null;
   if (!forceRefresh) {
@@ -330,6 +330,17 @@ export async function enrichColaRecord(ttbId: string, upc = ""): Promise<LookupR
   return await success("cola_cloud", product.upc || upc, product);
 }
 
+function findInVault(upc: string, rawUpc: string): { table: NonNullable<LookupResult["table"]>; product: Record<string, unknown> } | null {
+  const candidates = [...new Set([upc, rawUpc, ...barcodeVariants(upc)].filter((value) => value))];
+  if (!candidates.length) return null;
+  const placeholders = candidates.map(() => "?").join(",");
+  for (const table of ["spirits", "packaged_beer", "wines"] as const) {
+    const row = db.prepare(`SELECT * FROM ${table} WHERE upc IN (${placeholders}) AND upc != '' LIMIT 1`).get(...candidates) as Record<string, unknown> | undefined;
+    if (row) return { table, product: row };
+  }
+  return null;
+}
+
 function searchVault(query: string): BottleSearchHit[] {
   const like = `%${query}%`;
   const spirits = db.prepare(`
@@ -344,9 +355,9 @@ function searchVault(query: string): BottleSearchHit[] {
   `).all(like, like, like, like) as Record<string, unknown>[];
   const wines = db.prepare(`
     SELECT * FROM wines
-    WHERE name LIKE ? OR producer LIKE ? OR varietal LIKE ? OR region LIKE ?
+    WHERE name LIKE ? OR producer LIKE ? OR varietal LIKE ? OR region LIKE ? OR upc LIKE ?
     ORDER BY name LIMIT 5
-  `).all(like, like, like, like) as Record<string, unknown>[];
+  `).all(like, like, like, like, like) as Record<string, unknown>[];
 
   return [
     ...spirits.map((product) => ({ source: "vault" as const, table: "spirits" as const, product })),

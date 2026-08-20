@@ -36,14 +36,15 @@ CREATE TABLE IF NOT EXISTS brews (
 );
 CREATE TABLE IF NOT EXISTS packaged_beer (
   id INTEGER PRIMARY KEY AUTOINCREMENT, brewery TEXT DEFAULT '', name TEXT NOT NULL, style TEXT DEFAULT '',
-  count INTEGER DEFAULT 1, pack_date TEXT, abv REAL DEFAULT 0, upc TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  count INTEGER DEFAULT 1, pack_date TEXT, abv REAL DEFAULT 0, upc TEXT DEFAULT '', image_url TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS wines (
   id INTEGER PRIMARY KEY AUTOINCREMENT, producer TEXT DEFAULT '', name TEXT NOT NULL, varietal TEXT DEFAULT '',
   vintage INTEGER, type TEXT DEFAULT 'Red', region TEXT DEFAULT '', sweetness INTEGER DEFAULT 3, body INTEGER DEFAULT 3,
   bottle_count INTEGER DEFAULT 1, drink_by_date TEXT, pairings TEXT DEFAULT '', notes TEXT DEFAULT '',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  upc TEXT DEFAULT '', image_url TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS cocktails (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, collection TEXT DEFAULT 'IBA Classics',
@@ -77,6 +78,16 @@ if (!spiritColumns.some((column) => column.name === "stock_count")) {
 const packagedBeerColumns = db.prepare("PRAGMA table_info(packaged_beer)").all() as Array<{ name: string }>;
 if (!packagedBeerColumns.some((column) => column.name === "upc")) {
   db.exec("ALTER TABLE packaged_beer ADD COLUMN upc TEXT DEFAULT ''");
+}
+if (!packagedBeerColumns.some((column) => column.name === "image_url")) {
+  db.exec("ALTER TABLE packaged_beer ADD COLUMN image_url TEXT DEFAULT ''");
+}
+const wineColumns = db.prepare("PRAGMA table_info(wines)").all() as Array<{ name: string }>;
+if (!wineColumns.some((column) => column.name === "upc")) {
+  db.exec("ALTER TABLE wines ADD COLUMN upc TEXT DEFAULT ''");
+}
+if (!wineColumns.some((column) => column.name === "image_url")) {
+  db.exec("ALTER TABLE wines ADD COLUMN image_url TEXT DEFAULT ''");
 }
 const cocktailColumns = db.prepare("PRAGMA table_info(cocktails)").all() as Array<{ name: string }>;
 if (!cocktailColumns.some((column) => column.name === "season")) {
