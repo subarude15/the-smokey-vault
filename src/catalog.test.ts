@@ -7,7 +7,7 @@ import {
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseGravity, prepareBrewWrite, tapsForBatch
+  onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -179,10 +179,19 @@ test("prepareBrewWrite normalizes gravity and stores calculated ABV", () => {
     target_og: 1054,
     target_fg: 12,
     measured_og: "",
-    measured_fg: ""
+    measured_fg: "",
+    hops: "Citra, Mosaic, Idaho 7",
+    flavors: "Grapefruit, pine"
   });
   assert.equal(saved.status, "Fermenting");
   assert.equal(saved.target_og, 1.054);
   assert.equal(saved.target_fg, 1.012);
   assert.equal(saved.calculated_abv, 5.5);
+  assert.equal(saved.hops, '["Citra","Mosaic","Idaho 7"]');
+  assert.equal(saved.flavors, '["Grapefruit","pine"]');
+});
+
+test("parseCommaList keeps multi-word hop names", () => {
+  assert.deepEqual(parseCommaList("Citra, Mosaic, Idaho 7"), ["Citra", "Mosaic", "Idaho 7"]);
+  assert.deepEqual(parseCommaList('["Nelson Sauvin"]'), ["Nelson Sauvin"]);
 });

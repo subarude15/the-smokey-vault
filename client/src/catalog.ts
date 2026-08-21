@@ -36,6 +36,19 @@ export const FLAVOR_OPTIONS = [
   "Roast", "Tart", "Funk", "Pine", "Earth", "Mineral", "Leather", "Brine"
 ];
 
+export const HOP_OPTIONS = [
+  "Citra", "Mosaic", "Simcoe", "Cascade", "Centennial", "Columbus", "Chinook", "Amarillo",
+  "Galaxy", "Nelson Sauvin", "El Dorado", "Strata", "Sabro", "Azacca", "Idaho 7", "Motueka",
+  "Hallertau", "Saaz", "Magnum", "Warrior", "Fuggle", "East Kent Goldings", "Willamette",
+  "Nugget", "Crystal", "Riwaka", "Nectaron", "Cashmere", "Bru-1", "Ekuanot"
+];
+
+export const BREW_FLAVOR_OPTIONS = [
+  "Citrus", "Grapefruit", "Pine", "Tropical", "Stone fruit", "Melon", "Floral",
+  "Resin", "Malt", "Biscuit", "Dough", "Caramel", "Honey", "Chocolate", "Coffee",
+  "Roast", "Banana", "Clove", "Tart", "Funk"
+];
+
 export {
   parseList, parseTagInput, serializeList,
   WINE_FAMILIES, SPARKLING_STYLES, KEG_SIZES, KEG_REMAINING_STOPS, DEFAULT_KEG_L, TAP_COUNT,

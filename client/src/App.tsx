@@ -9,7 +9,7 @@ import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSugg
 import { GuestReviews } from "./GuestReviews";
 import { BottleVotes, scoreLabel } from "./BottleVotes";
 import {
-  BASE_INGREDIENTS, BEER_STYLES, DEFAULT_KEG_L, FLAVOR_OPTIONS, KEG_REMAINING_STOPS, KEG_SIZES,
+  BASE_INGREDIENTS, BEER_STYLES, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS, KEG_REMAINING_STOPS, KEG_SIZES,
   SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
   BREW_STATUSES, defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
@@ -55,12 +55,17 @@ const modules: Module[] = [
   { id: "brews", label: "Brewery", singular: "Batch", icon: FlaskConical, title: "Brewery Lab", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
     {key:"batch_name",label:"Batch name"},{key:"maker",label:"Brewery / maker"},
     {key:"brew_date",label:"Brew date",type:"date"},{key:"status",label:"Status",type:"brewStatus"},
+    {key:"style",label:"Style",options:BEER_STYLES},{key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS},
+    {key:"hops",label:"Hops used",type:"hops"},
     {key:"target_og",label:"Target OG",type:"gravity"},{key:"target_fg",label:"Target FG",type:"gravity"},
     {key:"measured_og",label:"Measured OG",type:"gravity"},{key:"measured_fg",label:"Measured FG",type:"gravity"},
     {key:"calculated_abv",label:"Calculated ABV %",type:"brewAbv"},
+    {key:"flavors",label:"Flavor profile",type:"flavors"},
+    {key:"tasting_notes",label:"Tasting notes",type:"tasting"},
     {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},
     {key:"image_url",label:"Photo",type:"image"},
-    ...beerFields, {key:"notes",label:"Brew notes",type:"textarea"}
+    {key:"tags",label:"Tags",type:"tags"},
+    {key:"notes",label:"Brew notes",type:"textarea"}
   ]},
   { id: "packaged_beer", label: "Packaged Beer", singular: "Beer", icon: Beer, title: "Packaged Beer", subtitle: "The cold-room count for cans and bottles.", primary: "name", secondary: "brewery", makerKey: "brewery", kindKey: "style", fields: [
     {key:"brewery",label:"Brewery / maker"},{key:"name",label:"Name"},
@@ -517,6 +522,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
               : item.abv && !(module.id === "taps" && isTapEmpty(item)) ? <span>{item.abv}% ABV</span> : null}
             {item.status ? <span>{normalizeBrewStatus(item.status)}</span> : null}
             {brewTaps.length ? <span>{onTapLabel(brewTaps)}</span> : null}
+            {module.id === "brews" && parseList(item.hops).slice(0,3).map((value) => <span key={`hop-${value}`}>{value}</span>)}
+            {module.id === "brews" && parseList(item.flavors).slice(0,3).map((value) => <span key={`flavor-${value}`}>{value}</span>)}
             {module.id !== "taps" && module.id !== "brews" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
@@ -553,8 +560,9 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void; onUpdated?: (item: Item) => void; onPutOnTap?: () => void; tapNumbers?: number[];
 }) {
   const flavors = parseList(item.flavors);
+  const hops = parseList(item.hops);
   const tags = parseList(item.tags);
-  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", module.primary]);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "hops", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", module.primary]);
   const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
@@ -668,7 +676,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           </div>
         ))}
       </div>
-      {flavors.length > 0 && <div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div>}
+      {hops.length > 0 && <div className="detail-chip-block"><span className="eyebrow">HOPS</span><div className="chip-row detail-chips">{hops.map((value) => <span className="chip static" key={value}>{value}</span>)}</div></div>}
+      {flavors.length > 0 && <div className="detail-chip-block">{module.id === "brews" ? <span className="eyebrow">FLAVOR PROFILE</span> : null}<div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div></div>}
       {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
       {!(module.id === "taps" && isTapEmpty(item)) && <GuestReviews table={module.id} itemId={item.id} admin={admin}/>}
@@ -773,6 +782,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     return {
       ...defaults,
       flavors: parseList(item?.flavors),
+      hops: parseList(item?.hops),
       tags: parseList(item?.tags),
       ...(module.id === "wines" ? {
         sweetness: migrateWineSweetnessValue(defaults.sweetness, String(defaults.type ?? ""), String(defaults.style ?? ""))
@@ -781,14 +791,21 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   });
   const [tagDraft,setTagDraft] = useState("");
   const [flavorDraft,setFlavorDraft] = useState("");
+  const [hopDraft,setHopDraft] = useState("");
   const [error,setError] = useState("");
   const [suggestLock,setSuggestLock] = useState(() => String(item?.[module.primary] ?? ""));
   const existing = Boolean(item?.id);
   const flavors = parseList(form.flavors);
+  const hops = parseList(form.hops);
   const tags = parseList(form.tags);
   async function submit(e:React.FormEvent) {
     e.preventDefault();
-    const payload: Record<string, unknown> = { ...form, flavors: serializeList(flavors), tags: serializeList(parseTagInput([...tags, tagDraft].join(" "))) };
+    const payload: Record<string, unknown> = {
+      ...form,
+      flavors: serializeList(flavors),
+      hops: serializeList(hopDraft.trim() ? [...hops, hopDraft.trim()] : hops),
+      tags: serializeList(parseTagInput([...tags, tagDraft].join(" ")))
+    };
     if (module.id === "brews") {
       payload.status = normalizeBrewStatus(payload.status);
       for (const key of ["target_og", "target_fg", "measured_og", "measured_fg"] as const) {
@@ -847,16 +864,32 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
         </div>;
       }
       if (field.type === "flavors") {
-        const options = Array.from(new Set([...FLAVOR_OPTIONS, ...flavors]));
+        const catalog = module.id === "brews" ? BREW_FLAVOR_OPTIONS : FLAVOR_OPTIONS;
+        const options = Array.from(new Set([...catalog, ...flavors]));
         return <label className="full" key={field.key}><span>{field.label}</span>
           <div className="chip-row">{options.map((value) => {
             const on = flavors.some((entry) => entry.toLowerCase() === value.toLowerCase());
             return <button type="button" key={value} className={on ? "chip active" : "chip"} onClick={() => setForm({ ...form, flavors: on ? flavors.filter((entry) => entry.toLowerCase() !== value.toLowerCase()) : [...flavors, value] })}>{value}</button>;
           })}</div>
           <div className="tag-input-row">
-            <input value={flavorDraft} onChange={(e)=>setFlavorDraft(e.target.value)} placeholder="Add a custom flavor"/>
-            <button type="button" className="secondary" disabled={!flavorDraft.trim()} onClick={() => { setForm({ ...form, flavors: [...flavors, ...parseList(flavorDraft)] }); setFlavorDraft(""); }}>Add</button>
+            <input value={flavorDraft} onChange={(e)=>setFlavorDraft(e.target.value)} placeholder={module.id === "brews" ? "Add grapefruit, pine, biscuit…" : "Add a custom flavor"}/>
+            <button type="button" className="secondary" disabled={!flavorDraft.trim()} onClick={() => { setForm({ ...form, flavors: [...flavors, flavorDraft.trim()] }); setFlavorDraft(""); }}>Add</button>
           </div>
+          {module.id === "brews" ? <small className="field-hint">Tap common notes or type your own. Several are fine.</small> : null}
+        </label>;
+      }
+      if (field.type === "hops") {
+        const options = Array.from(new Set([...HOP_OPTIONS, ...hops]));
+        return <label className="full" key={field.key}><span>{field.label}</span>
+          <div className="chip-row">{options.map((value) => {
+            const on = hops.some((entry) => entry.toLowerCase() === value.toLowerCase());
+            return <button type="button" key={value} className={on ? "chip active" : "chip"} onClick={() => setForm({ ...form, hops: on ? hops.filter((entry) => entry.toLowerCase() !== value.toLowerCase()) : [...hops, value] })}>{value}</button>;
+          })}</div>
+          <div className="tag-input-row">
+            <input value={hopDraft} onChange={(e)=>setHopDraft(e.target.value)} placeholder="Add a hop name" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const next = hopDraft.trim(); if (!next) return; setForm({ ...form, hops: hops.some((entry) => entry.toLowerCase() === next.toLowerCase()) ? hops : [...hops, next] }); setHopDraft(""); } }}/>
+            <button type="button" className="secondary" disabled={!hopDraft.trim()} onClick={() => { const next = hopDraft.trim(); setForm({ ...form, hops: hops.some((entry) => entry.toLowerCase() === next.toLowerCase()) ? hops : [...hops, next] }); setHopDraft(""); }}>Add</button>
+          </div>
+          <small className="field-hint">Tap every hop in the bill, or type a name Nick uses that is not listed.</small>
         </label>;
       }
       if (field.type === "tags") {
@@ -988,6 +1021,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
                     keg_size_l: currentForm.keg_size_l ?? values.keg_size_l,
                     remaining_l: values.remaining_l ?? currentForm.keg_size_l ?? DEFAULT_KEG_L,
                     flavors: module.id === "taps" ? parseList(values.flavors ?? currentForm.flavors) : currentForm.flavors,
+                    hops: module.id === "brews" ? (existing ? currentForm.hops : parseList(values.hops ?? currentForm.hops)) : currentForm.hops,
                     tags: module.id === "taps" ? parseList(values.tags ?? currentForm.tags) : currentForm.tags,
                     status: module.id === "brews" && existing ? currentForm.status : (values.status ?? currentForm.status)
                   }));

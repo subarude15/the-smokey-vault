@@ -25,6 +25,18 @@ export function parseTagInput(input: string): string[] {
   return uniqueList(input.split(/[\s,]+/).map((part) => part.replace(/^#/, "")));
 }
 
+export function parseCommaList(value: unknown): string[] {
+  if (Array.isArray(value)) return uniqueList(value.map((entry) => String(entry)));
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) return uniqueList(parsed.map((entry) => String(entry)));
+  } catch {
+    // Comma-separated names that may contain spaces, such as Idaho 7.
+  }
+  return uniqueList(value.split(","));
+}
+
 function uniqueList(values: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -326,6 +338,8 @@ export function prepareBrewWrite(body: Record<string, unknown>, existing?: Recor
     next[field] = parseGravity(next[field]);
   }
   if (next.status !== undefined) next.status = normalizeBrewStatus(next.status);
+  if (next.hops !== undefined) next.hops = serializeList(parseCommaList(next.hops));
+  if (next.flavors !== undefined) next.flavors = serializeList(parseCommaList(next.flavors));
   const abv = brewAbv({ ...existing, ...next });
   if (abv != null) next.calculated_abv = abv;
   return next;

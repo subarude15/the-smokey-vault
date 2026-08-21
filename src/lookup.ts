@@ -363,7 +363,7 @@ function findInVault(upc: string, rawUpc: string): { table: NonNullable<LookupRe
 
 const SEARCH_FIELDS = [
   "name", "brand", "brewery", "producer", "maker", "category", "sub_category",
-  "style", "varietal", "region", "upc", "brewery_batch", "batch_name"
+  "style", "varietal", "region", "upc", "brewery_batch", "batch_name", "hops", "flavors"
 ] as const;
 
 export function foldSearch(value: string) {
