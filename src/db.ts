@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { spiritFamilyFromLabel } from "./catalog.js";
+import { migrateWineSweetnessValue, spiritFamilyFromLabel } from "./catalog.js";
 
 export const dbPath = process.env.DB_PATH ?? (process.env.NODE_ENV === "production" ? "/data/smokeyvault.db" : "./data/smokeyvault.db");
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS packaged_beer (
 );
 CREATE TABLE IF NOT EXISTS wines (
   id INTEGER PRIMARY KEY AUTOINCREMENT, producer TEXT DEFAULT '', name TEXT NOT NULL, varietal TEXT DEFAULT '',
-  vintage INTEGER, type TEXT DEFAULT 'Red', region TEXT DEFAULT '', sweetness INTEGER DEFAULT 3, body INTEGER DEFAULT 3,
+  vintage INTEGER, type TEXT DEFAULT 'Red', style TEXT DEFAULT '', region TEXT DEFAULT '', sweetness TEXT DEFAULT 'Dry', body INTEGER DEFAULT 3,
   bottle_count INTEGER DEFAULT 1, drink_by_date TEXT, pairings TEXT DEFAULT '', notes TEXT DEFAULT '',
   upc TEXT DEFAULT '', image_url TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]',
   tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -103,6 +103,7 @@ ensureColumn("wines", "tasting_notes", "ALTER TABLE wines ADD COLUMN tasting_not
 ensureColumn("wines", "flavors", "ALTER TABLE wines ADD COLUMN flavors TEXT DEFAULT '[]'");
 ensureColumn("wines", "tags", "ALTER TABLE wines ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("wines", "base_ingredient", "ALTER TABLE wines ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("wines", "style", "ALTER TABLE wines ADD COLUMN style TEXT DEFAULT ''");
 ensureColumn("taps", "maker", "ALTER TABLE taps ADD COLUMN maker TEXT DEFAULT ''");
 ensureColumn("taps", "image_url", "ALTER TABLE taps ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("taps", "notes", "ALTER TABLE taps ADD COLUMN notes TEXT DEFAULT ''");
@@ -127,6 +128,15 @@ for (const row of whiskeyRows) {
   if (mapped.family === "Whiskey" && row.category !== "Whiskey") {
     migrateWhiskey.run(mapped.family, mapped.type || row.sub_category || "", row.id);
   }
+}
+
+const migrateWineSweetness = db.prepare("UPDATE wines SET sweetness=? WHERE id=?");
+const wineRows = db.prepare("SELECT id, type, style, sweetness FROM wines").all() as Array<{
+  id: number; type: string; style: string | null; sweetness: unknown;
+}>;
+for (const row of wineRows) {
+  const next = migrateWineSweetnessValue(row.sweetness, row.type, row.style);
+  if (String(row.sweetness ?? "") !== next) migrateWineSweetness.run(next, row.id);
 }
 
 function hashPin(pin: string, salt = randomBytes(16).toString("hex")) {

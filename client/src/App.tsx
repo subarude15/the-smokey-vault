@@ -9,8 +9,9 @@ import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSugg
 import { GuestReviews } from "./GuestReviews";
 import { BottleVotes, scoreLabel } from "./BottleVotes";
 import {
-  BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
-  parseList, parseTagInput, serializeList
+  BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES,
+  WINE_FAMILIES, defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
+  parseList, parseTagInput, serializeList, wineKindLabel, wineSweetnessStops
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -58,10 +59,11 @@ const modules: Module[] = [
     {key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
-  { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and ideal drinking windows.", primary: "name", secondary: "producer", makerKey: "producer", kindKey: "type", fields: [
-    {key:"producer",label:"Producer / maker"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},{key:"type",label:"Type",options:["Red","White","Rosé","Sparkling","Dessert","Fortified"]},
-    {key:"base_ingredient",label:"Base / fruit",options:BASE_INGREDIENTS},{key:"region",label:"Region"},{key:"sweetness",label:"Sweetness (1–5)",type:"range5"},{key:"body",label:"Body (1–5)",type:"range5"},{key:"bottle_count",label:"Bottle count",type:"number"},
-    {key:"drink_by_date",label:"Drink-by date",type:"date"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
+  { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and what's on the shelf.", primary: "name", secondary: "producer", makerKey: "producer", kindKey: "type", fields: [
+    {key:"producer",label:"Producer / maker"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},
+    {key:"type",label:"Family",options:[...WINE_FAMILIES]},{key:"style",label:"Sparkling style",options:[...SPARKLING_STYLES]},
+    {key:"base_ingredient",label:"Base / fruit",options:BASE_INGREDIENTS},{key:"region",label:"Region"},{key:"sweetness",label:"Sweetness",type:"wineSweetness"},
+    {key:"bottle_count",label:"Bottle count",type:"number"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
     {key:"notes",label:"Cellar notes",type:"textarea"},{key:"tasting_notes",label:"Tasting notes",type:"tasting"},
     {key:"flavors",label:"Flavors",type:"flavors"},{key:"tags",label:"Tags",type:"tags"}
   ]}
@@ -120,11 +122,24 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
     };
   }
   if (moduleId === "wines") {
+    const inferred = inferWineFamilyAndStyle(`${name} ${brand} ${categories} ${productType}`);
     return {
       moduleId: "wines",
       key: Date.now(),
       mode: "create",
-      values: { name, producer: brand, varietal: categories.split(",")[0] ?? "", type: /sparkling/i.test(categories) ? "Sparkling" : "Red", region: text("origin") ?? "", bottle_count: 1, notes, upc, image_url: image }
+      values: {
+        name,
+        producer: brand,
+        varietal: categories.split(",")[0] ?? "",
+        type: inferred.type,
+        style: inferred.style,
+        sweetness: defaultSweetnessForWine(inferred.type, inferred.style),
+        region: text("origin") ?? "",
+        bottle_count: 1,
+        notes,
+        upc,
+        image_url: image
+      }
     };
   }
   return {
@@ -337,14 +352,19 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
   const [tag,setTag] = useState("All");
   const [flavor,setFlavor] = useState("All");
   const makers = ["All", ...uniqueValues(items, module.makerKey)];
-  const kinds = ["All", ...uniqueValues(items, module.kindKey)];
+  const kinds = ["All", ...(module.id === "wines" ? uniqueWineKinds(items) : uniqueValues(items, module.kindKey))];
   const tags = ["All", ...uniqueItemLists(items, "tags")];
   const flavors = ["All", ...uniqueItemLists(items, "flavors")];
   const filtered = items.filter((item) => {
     const haystack = JSON.stringify(item).toLowerCase();
     if (search && !haystack.includes(search.toLowerCase())) return false;
     if (maker !== "All" && String(item[module.makerKey] ?? "") !== maker) return false;
-    if (kind !== "All" && String(item[module.kindKey] ?? "") !== kind) return false;
+    if (kind !== "All") {
+      if (module.id === "wines") {
+        const label = wineKindLabel(String(item.type ?? ""), String(item.style ?? ""));
+        if (String(item.type ?? "") !== kind && label !== kind) return false;
+      } else if (String(item[module.kindKey] ?? "") !== kind) return false;
+    }
     if (tag !== "All" && !parseList(item.tags).some((value) => value.toLowerCase() === tag.toLowerCase())) return false;
     if (flavor !== "All" && !parseList(item.flavors).some((value) => value.toLowerCase() === flavor.toLowerCase())) return false;
     return true;
@@ -366,6 +386,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
       onBack={() => setViewing(undefined)}
       onEdit={() => { setEditing(viewing); setViewing(undefined); }}
       onDelete={() => remove(viewing.id)}
+      onUpdated={(next) => { setViewing(next); load(); }}
     />;
   }
 
@@ -394,7 +415,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
           <div className="meta">
             {item.category ? <span>{String(item.category)}</span> : null}
             {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
-            {item.style ? <span>{String(item.style)}</span> : null}
+            {module.id === "wines"
+              ? (wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) ? <span>{wineKindLabel(String(item.type ?? ""), String(item.style ?? ""))}</span> : null)
+              : item.style ? <span>{String(item.style)}</span> : null}
+            {module.id === "wines" && item.sweetness != null && String(item.sweetness).trim() !== ""
+              ? <span>{migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))}</span>
+              : null}
             {item.abv ? <span>{item.abv}% ABV</span> : null}
             {item.status ? <span>{item.status}</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
@@ -412,12 +438,35 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
   </>;
 }
 
-function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
-  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void;
+function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated }:{
+  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void; onUpdated?: (item: Item) => void;
 }) {
   const flavors = parseList(item.flavors);
   const tags = parseList(item.tags);
-  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", module.primary]);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", "sweetness", "body", "drink_by_date", module.primary]);
+  const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
+  const wineSweetness = module.id === "wines"
+    ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
+    : "";
+  const bottlesLeft = Number(item.bottle_count ?? 0);
+  const [drinkError, setDrinkError] = useState("");
+  const [drinking, setDrinking] = useState(false);
+  async function drinkOne() {
+    if (!admin || module.id !== "wines" || bottlesLeft <= 0 || drinking) return;
+    setDrinking(true);
+    setDrinkError("");
+    try {
+      const next = await api<Item>(`/inventory/wines/${item.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ bottle_count: bottlesLeft - 1 })
+      });
+      onUpdated?.(next);
+    } catch (err) {
+      setDrinkError(err instanceof Error ? err.message : "Could not drink one");
+    } finally {
+      setDrinking(false);
+    }
+  }
   return (
     <section className="bottle-detail">
       <button className="secondary back-button" onClick={onBack}><ArrowLeft size={17}/> Back to {module.label}</button>
@@ -431,7 +480,9 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
           <div className="meta">
             {item.category ? <span>{String(item.category)}</span> : null}
             {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
-            {item.style ? <span>{String(item.style)}</span> : null}
+            {module.id === "wines"
+              ? (wineKind ? <span>{wineKind}</span> : null)
+              : item.style ? <span>{String(item.style)}</span> : null}
             {item.abv ? <span>{item.abv}% ABV</span> : null}
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
             {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
@@ -441,10 +492,16 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
             {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
           <BottleVotes table={module.id} itemId={item.id}/>
-          {admin && <div className="bottle-detail-actions"><button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button><button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button></div>}
+          {admin && <div className="bottle-detail-actions">
+            {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || drinking} onClick={drinkOne}>{drinking ? "Drinking…" : "Drink one"}</button>}
+            <button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button>
+            <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>
+          </div>}
+          {drinkError ? <p className="error">{drinkError}</p> : null}
         </div>
       </div>
       <div className="bottle-detail-grid">
+        {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
         {module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
           <div key={field.key} className={field.type === "textarea" ? "full" : ""}>
             <span>{field.label}</span>
@@ -535,11 +592,21 @@ function BottleFinder({ module, onClose, onPick }:{
 }
 
 function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
-  const [form,setForm] = useState<Record<string,unknown>>(() => ({
-    ...(item ?? (module.id === "spirits" ? { category: "Whiskey", fill_level: 100 } : {})),
-    flavors: parseList(item?.flavors),
-    tags: parseList(item?.tags)
-  }));
+  const [form,setForm] = useState<Record<string,unknown>>(() => {
+    const defaults = (item ?? (module.id === "spirits"
+      ? { category: "Whiskey", fill_level: 100 }
+      : module.id === "wines"
+        ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1 }
+        : {})) as Record<string, unknown>;
+    return {
+      ...defaults,
+      flavors: parseList(item?.flavors),
+      tags: parseList(item?.tags),
+      ...(module.id === "wines" ? {
+        sweetness: migrateWineSweetnessValue(defaults.sweetness, String(defaults.type ?? ""), String(defaults.style ?? ""))
+      } : {})
+    };
+  });
   const [tagDraft,setTagDraft] = useState("");
   const [flavorDraft,setFlavorDraft] = useState("");
   const [error,setError] = useState("");
@@ -561,7 +628,17 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     if (field.key === "sub_category" && module.id === "spirits") {
       return SPIRIT_TYPES[String(form.category || "Whiskey")] ?? [];
     }
+    if (field.key === "style" && module.id === "wines") {
+      return [...SPARKLING_STYLES];
+    }
     return field.options ?? [];
+  }
+  function setWineFamily(type: string) {
+    const style = type === "Sparkling" ? String(form.style ?? "") : "";
+    setForm({ ...form, type, style, sweetness: defaultSweetnessForWine(type, style) });
+  }
+  function setWineStyle(style: string) {
+    setForm({ ...form, style, sweetness: defaultSweetnessForWine(String(form.type ?? "Sparkling"), style) });
   }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => {
@@ -594,6 +671,19 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       }
       if (field.type === "tasting") {
         return <label className="full" key={field.key}><span>{field.label}</span><textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})} placeholder="Peat, orange oil, a long dry finish…"/></label>;
+      }
+      if (field.type === "wineSweetness") {
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <WineSweetnessScale
+            type={String(form.type ?? "Red")}
+            style={String(form.style ?? "")}
+            value={migrateWineSweetnessValue(form.sweetness, String(form.type ?? ""), String(form.style ?? ""))}
+            onChange={(sweetness) => setForm({ ...form, sweetness })}
+          />
+        </div>;
+      }
+      if (module.id === "wines" && field.key === "style" && String(form.type) !== "Sparkling" && !String(form.style ?? "").trim()) {
+        return null;
       }
       const current = String(form[field.key] ?? "");
       const options = typeOptions(field);
@@ -637,7 +727,12 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
         </div>;
       }
       return <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
-      {optionList ? <select value={current} onChange={(e)=>setForm({...form,[field.key]:percentSelect?Number(e.target.value):e.target.value})}>{optionalSelect && <option value="">Select…</option>}{optionList.map((v)=><option key={v} value={v}>{percentSelect ? (v === "100" ? "Full (100%)" : v === "0" ? "Empty (0%)" : `${v}%`) : v}</option>)}</select> :
+      {optionList ? <select value={current} onChange={(e)=>{
+        const next = percentSelect ? Number(e.target.value) : e.target.value;
+        if (module.id === "wines" && field.key === "type") { setWineFamily(String(next)); return; }
+        if (module.id === "wines" && field.key === "style") { setWineStyle(String(next)); return; }
+        setForm({...form,[field.key]:next});
+      }}>{optionalSelect && <option value="">Select…</option>}{optionList.map((v)=><option key={v} value={v}>{percentSelect ? (v === "100" ? "Full (100%)" : v === "0" ? "Empty (0%)" : `${v}%`) : v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :
       field.type?.startsWith("range") ? <div className="range-wrap"><input type="range" min={field.type==="range5"?1:0} max={field.type==="range5"?5:100} value={Number(form[field.key]??(field.type==="range5"?3:100))} onChange={(e)=>setForm({...form,[field.key]:Number(e.target.value)})}/><b>{String(form[field.key]??(field.type==="range5"?3:100))}</b></div> :
       <input type={field.type??"text"} step={field.type==="number"?"any":undefined} value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:field.type==="number"?Number(e.target.value):e.target.value})}/>}</label>;
@@ -755,6 +850,39 @@ function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
 
 function uniqueValues(items: Item[], key: string) {
   return [...new Set(items.map((item) => String(item[key] ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function uniqueWineKinds(items: Item[]) {
+  const values = new Set<string>();
+  for (const item of items) {
+    const type = String(item.type ?? "").trim();
+    const style = String(item.style ?? "").trim();
+    if (type) values.add(type);
+    if (style) values.add(style);
+  }
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+function WineSweetnessScale({ type, style, value, onChange }:{
+  type: string; style: string; value: string; onChange?: (value: string) => void;
+}) {
+  const stops = wineSweetnessStops(type, style);
+  const all = value && !stops.includes(value) ? [...stops, value] : stops;
+  const index = Math.max(0, all.indexOf(value));
+  const pct = all.length > 1 ? (index / (all.length - 1)) * 100 : 0;
+  const readOnly = !onChange;
+  return (
+    <div className={`wine-scale${readOnly ? " read-only" : ""}`}>
+      <div className="wine-scale-track" aria-hidden="true">
+        {value ? <span className="wine-scale-marker" style={{ left: `${pct}%` }}/> : null}
+      </div>
+      <div className="wine-scale-stops" role={readOnly ? "list" : "radiogroup"} aria-label="Sweetness">
+        {all.map((stop) => readOnly ? (
+          <span role="listitem" key={stop} className={stop === value ? "wine-scale-stop active" : "wine-scale-stop"}>{stop}</span>
+        ) : (
+          <button type="button" key={stop} className={stop === value ? "wine-scale-stop active" : "wine-scale-stop"} aria-pressed={stop === value} onClick={() => onChange(stop)}>{stop}</button>
+        ))}
+      </div>
+    </div>
+  );
 }
 function uniqueItemLists(items: Item[], key: string) {
   return [...new Set(items.flatMap((item) => parseList(item[key])))].sort((a, b) => a.localeCompare(b));
