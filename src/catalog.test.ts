@@ -4,7 +4,7 @@ import {
   parseList, parseTagInput, serializeList, spiritFamilyFromLabel,
   defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
   wineKindLabel, wineSweetnessStops,
-  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent
+  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -82,4 +82,25 @@ test("keg remaining snaps to 25% stops", () => {
   assert.equal(nearestKegStop(9.75, 19.5), 50);
   assert.equal(remainingFromPercent(19.5, 25), 4.875);
   assert.equal(kegSizeLabel(19.5), "Sixth barrel · 19.5 L");
+});
+
+test("brewToTap copies a brewery batch onto a homebrew tap", () => {
+  const tap = brewToTap({
+    batch_name: "Vault IPA",
+    maker: "Nick",
+    style: "IPA",
+    calculated_abv: 6.4,
+    tasting_notes: "Citrus and pine",
+    flavors: '["Citrus"]',
+    tags: '["house"]',
+    notes: "Kegged 8/21",
+    image_url: "/api/media/images/ipa.png"
+  }, "2026-08-21");
+  assert.equal(tap.source_type, "Homebrew");
+  assert.equal(tap.brewery_batch, "Vault IPA");
+  assert.equal(tap.maker, "Nick");
+  assert.equal(tap.abv, 6.4);
+  assert.equal(tap.keg_size_l, 19.5);
+  assert.equal(tap.remaining_l, 19.5);
+  assert.equal(tap.tapped_date, "2026-08-21");
 });

@@ -4,13 +4,14 @@ import { api } from "./api";
 
 export type BottleSearchHit = {
   source: "vault" | "cola_cloud";
-  table: "spirits" | "packaged_beer" | "wines";
+  table: "spirits" | "packaged_beer" | "wines" | "brews";
   ttb_id?: string | null;
   product: Record<string, unknown>;
 };
 
 export function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
-  if (moduleId === "taps" || moduleId === "brews") return hit.table === "packaged_beer";
+  if (moduleId === "taps") return hit.table === "packaged_beer" || hit.table === "brews";
+  if (moduleId === "brews") return hit.table === "packaged_beer";
   return hit.table === moduleId;
 }
 
@@ -21,9 +22,9 @@ function searchBottlesUrl(query: string, moduleId: string) {
 }
 
 function hitLabel(hit: BottleSearchHit) {
-  const name = String(hit.product.name ?? hit.product.product_name ?? hit.product.brewery_batch ?? "Untitled");
-  const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? "");
-  const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? hit.product.varietal ?? "");
+  const name = String(hit.product.name ?? hit.product.product_name ?? hit.product.brewery_batch ?? hit.product.batch_name ?? "Untitled");
+  const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? hit.product.maker ?? "");
+  const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? hit.product.varietal ?? hit.product.status ?? "");
   return { name, brand, category };
 }
 
@@ -83,7 +84,7 @@ export function BottleSuggest({
           >
             <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle size={18}/>}</div>
             <div>
-              <span className="eyebrow">{hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD"}</span>
+              <span className="eyebrow">{hit.table === "brews" ? "BREWERY LAB" : hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD"}</span>
               <strong>{name}</strong>
               <small>{[brand, category].filter(Boolean).join(" · ")}</small>
             </div>

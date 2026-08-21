@@ -13,7 +13,7 @@ import {
   SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
   defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
-  remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops
+  remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -168,11 +168,12 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
 function mapDraftToModule(module: Module, draft: ScanDraft) {
   if (module.id === "taps") {
     return {
-      maker: draft.values.brewery ?? draft.values.brand ?? "",
-      brewery_batch: draft.values.name ?? "",
+      maker: draft.values.brewery ?? draft.values.brand ?? draft.values.maker ?? "",
+      brewery_batch: draft.values.name ?? draft.values.batch_name ?? "",
       style: draft.values.style ?? "",
-      abv: draft.values.abv ?? 0,
-      image_url: draft.values.image_url ?? ""
+      abv: draft.values.abv ?? draft.values.calculated_abv ?? 0,
+      image_url: draft.values.image_url ?? "",
+      source_type: draft.values.source_type ?? "Commercial"
     };
   }
   if (module.id === "brews") {
@@ -188,6 +189,15 @@ function mapDraftToModule(module: Module, draft: ScanDraft) {
 }
 
 async function resolveSuggestion(module: Module, hit: BottleSearchHit) {
+  if (hit.table === "brews") {
+    return module.id === "taps" ? brewToTap(hit.product) : {
+      maker: hit.product.maker ?? "",
+      batch_name: hit.product.batch_name ?? hit.product.name ?? "",
+      style: hit.product.style ?? "",
+      calculated_abv: hit.product.calculated_abv ?? hit.product.abv ?? 0,
+      image_url: hit.product.image_url ?? ""
+    };
+  }
   let product = hit.product;
   if (hit.source === "cola_cloud" && hit.ttb_id) {
     const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}`);
@@ -212,6 +222,7 @@ export default function App() {
   const [counts, setCounts] = useState<Record<string,number>>({});
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
+  const [tapSeed, setTapSeed] = useState<Item>();
   const [countsError, setCountsError] = useState("");
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
@@ -287,7 +298,20 @@ export default function App() {
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
         <div className="page">
           {page === "dashboard" && <Dashboard counts={counts} countsError={countsError} admin={admin} go={navigate}/>}
-          {modules.map((module) => page === module.id && <Inventory key={module.id} module={module} admin={admin} scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined} finishScanReview={finishScanReview} openScanner={() => setScanner(true)}/>)}
+          {modules.map((module) => page === module.id && <Inventory
+            key={module.id}
+            module={module}
+            admin={admin}
+            scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined}
+            finishScanReview={finishScanReview}
+            openScanner={() => setScanner(true)}
+            seedCreate={module.id === "taps" ? tapSeed : undefined}
+            onSeedConsumed={() => setTapSeed(undefined)}
+            onPutOnTap={admin && module.id === "brews" ? (brew) => {
+              setTapSeed({ id: 0, ...brewToTap(brew) } as Item);
+              navigate("taps");
+            } : undefined}
+          />)}
           {page === "cocktails" && <Cocktails/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
@@ -320,8 +344,9 @@ function Dashboard({ counts, countsError, admin, go }: { counts: Record<string,n
   </>;
 }
 
-function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: {
+function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, seedCreate, onSeedConsumed, onPutOnTap }: {
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
+  seedCreate?: Item; onSeedConsumed?: () => void; onPutOnTap?: (item: Item) => void;
 }) {
   const [items,setItems] = useState<Item[]>([]);
   const [search,setSearch] = useState("");
@@ -337,6 +362,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
     });
   }, [module.id]);
   useEffect(() => { load(); setViewing(undefined); }, [load]);
+  useEffect(() => {
+    if (!seedCreate) return;
+    setViewing(undefined);
+    setEditing({ ...seedCreate, id: 0 } as Item);
+    onSeedConsumed?.();
+  }, [seedCreate, onSeedConsumed]);
   useEffect(() => {
     if (!scanDraft || scanDraft.guestAdd || openedScanKey.current === scanDraft.key) return;
     openedScanKey.current = scanDraft.key;
@@ -390,6 +421,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
       onEdit={() => { setEditing(viewing); setViewing(undefined); }}
       onDelete={() => remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
+      onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
     />;
   }
 
@@ -448,8 +480,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
   </>;
 }
 
-function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated }:{
-  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void; onUpdated?: (item: Item) => void;
+function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated, onPutOnTap }:{
+  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void; onUpdated?: (item: Item) => void; onPutOnTap?: () => void;
 }) {
   const flavors = parseList(item.flavors);
   const tags = parseList(item.tags);
@@ -517,6 +549,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           {admin && <div className="bottle-detail-actions">
             {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
             {module.id === "taps" && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
+            {onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
             <button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button>
             <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>
           </div>}
@@ -555,11 +588,19 @@ function BottleFinder({ module, onClose, onPick }:{
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<BottleSearchHit[]>([]);
   const [error, setError] = useState("");
-  const [status, setStatus] = useState("Type at least 2 characters to search your vault and COLA Cloud.");
+  const [status, setStatus] = useState(module.id === "taps"
+    ? "Type at least 2 characters to search the brewery lab, packaged beer, and COLA Cloud."
+    : "Type at least 2 characters to search your vault and COLA Cloud.");
 
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) { setResults([]); setStatus("Type at least 2 characters to search your vault and COLA Cloud."); return; }
+    if (q.length < 2) {
+      setResults([]);
+      setStatus(module.id === "taps"
+        ? "Type at least 2 characters to search the brewery lab, packaged beer, and COLA Cloud."
+        : "Type at least 2 characters to search your vault and COLA Cloud.");
+      return;
+    }
     const timer = window.setTimeout(async () => {
       setLoading(true); setError("");
       try {
@@ -594,19 +635,20 @@ function BottleFinder({ module, onClose, onPick }:{
           <div><span className="eyebrow">FIND A BOTTLE</span><h2>Search and add</h2></div>
           <button type="button" className="icon-button" onClick={onClose}><X/></button>
         </header>
-        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Eagle Rare, Lagavulin, Champagne…"/></label>
+        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={module.id === "taps" ? "House IPA, Nugget Nectar…" : "Eagle Rare, Lagavulin, Champagne…"}/></label>
         <p className="scanner-status">{loading ? "Searching…" : status}</p>
         {error && <p className="error">{error}</p>}
         <div className="finder-results">
           {results.map((hit, index) => {
-            const name = String(hit.product.name ?? hit.product.product_name ?? "Untitled");
-            const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? "");
-            const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? "");
+            const name = String(hit.product.name ?? hit.product.product_name ?? hit.product.batch_name ?? "Untitled");
+            const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? hit.product.maker ?? "");
+            const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? hit.product.status ?? "");
+            const origin = hit.table === "brews" ? "BREWERY LAB" : hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD";
             return (
               <button type="button" className="finder-result" key={`${hit.source}-${hit.ttb_id ?? hit.product.id ?? index}`} onClick={() => choose(hit)}>
                 <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle/>}</div>
                 <div>
-                  <span className="eyebrow">{hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD"} · {hit.table.replace("_"," ")}</span>
+                  <span className="eyebrow">{origin} · {hit.table.replace("_"," ")}</span>
                   <strong>{name}</strong>
                   <small>{[brand, category].filter(Boolean).join(" · ")}</small>
                 </div>

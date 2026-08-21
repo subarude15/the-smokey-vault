@@ -41,5 +41,5 @@ export {
   WINE_FAMILIES, SPARKLING_STYLES, KEG_SIZES, KEG_REMAINING_STOPS, DEFAULT_KEG_L,
   defaultSweetnessForWine, inferWineFamilyAndStyle, isSparklingWine,
   migrateWineSweetnessValue, wineKindLabel, wineSweetnessStops,
-  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent
+  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap
 } from "../../src/catalog";

@@ -197,3 +197,22 @@ export function kegSizeLabel(liters: number): string {
   const n = Number(liters);
   return Number.isFinite(n) && n > 0 ? `${n} L` : "";
 }
+
+export function brewToTap(brew: Record<string, unknown>, tappedDate = new Date().toISOString().slice(0, 10)): Record<string, unknown> {
+  return {
+    maker: brew.maker ?? "",
+    brewery_batch: brew.batch_name ?? brew.name ?? "",
+    style: brew.style ?? "",
+    abv: brew.calculated_abv ?? brew.abv ?? 0,
+    image_url: brew.image_url ?? "",
+    tasting_notes: brew.tasting_notes ?? "",
+    flavors: brew.flavors ?? "[]",
+    tags: brew.tags ?? "[]",
+    notes: brew.notes ?? "",
+    base_ingredient: brew.base_ingredient ?? "",
+    source_type: "Homebrew",
+    keg_size_l: DEFAULT_KEG_L,
+    remaining_l: DEFAULT_KEG_L,
+    tapped_date: tappedDate
+  };
+}
