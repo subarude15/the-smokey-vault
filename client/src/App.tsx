@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Copy, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X, ClipboardPaste
+  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
-import { BottleVotes, scoreLabel } from "./BottleVotes";
+import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
   KEG_REMAINING_STOPS, KEG_SIZES, PACK_COUNT_STOPS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
@@ -22,7 +22,8 @@ import {
   SEASONS, collectionGroup, compareCocktails, currentSeason,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
-  formatRestockShare, extractSharedRecipeUrl, type WantedLabel
+  formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
+  type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -304,6 +305,7 @@ export default function App() {
   const nav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },
+    { id:"next",label:"What's next",icon:ThumbsUp },
     { id:"restock",label:"Restock",icon:ShoppingBag,admin:true },{ id:"settings",label:"Settings",icon:Settings,admin:true }
   ];
 
@@ -356,6 +358,7 @@ export default function App() {
           />)}
           {page === "cocktails" && <Cocktails admin={admin} sharedUrl={sharedRecipeUrl} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
+          {page === "next" && <WhatsNextPage admin={admin}/>}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
@@ -555,6 +558,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     <section className="feature-grid">
       <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes, random picks, and drinks on the ticket.</p></div><Shuffle size={56}/></button>
       <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>{admin ? "Describe the mood. Your own AI key powers the pour." : "Describe the mood. We’ll mix from what’s on the shelf."}</p></div><Sparkles size={56}/></button>
+      <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>What’s next?</h2><p>Vote on bottles to bring in, the next keg, and what Nick should brew.</p></div><ThumbsUp size={56}/></button>
     </section>
   </>;
 }
@@ -722,6 +726,184 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
         ))}
       </div>}
     {notice && <div className="toast">{notice}</div>}
+  </>;
+}
+
+const SHELF_KINDS: { id: NextKind; label: string }[] = [
+  { id: "spirits", label: "Bottle" },
+  { id: "wines", label: "Wine" },
+  { id: "packaged_beer", label: "Beer" }
+];
+
+function nextKindLabel(kind: NextKind) {
+  if (kind === "wines") return "WINE";
+  if (kind === "packaged_beer") return "BEER";
+  if (kind === "keg") return "KEG";
+  if (kind === "brew") return "BREW";
+  return "BOTTLE";
+}
+
+function WhatsNextPage({ admin }: { admin: boolean }) {
+  const [boards, setBoards] = useState<NextBoards>({ shelf: [], keg: [], brew: [] });
+  const [error, setError] = useState("");
+  const [shelfKind, setShelfKind] = useState<NextKind>("spirits");
+  const [shelfQuery, setShelfQuery] = useState("");
+  const [shelfLocked, setShelfLocked] = useState("");
+  const [kegQuery, setKegQuery] = useState("");
+  const [kegLocked, setKegLocked] = useState("");
+  const [brewName, setBrewName] = useState("");
+  const voter = voterId();
+
+  function load() {
+    setError("");
+    api<NextBoards>(`/next?voter=${encodeURIComponent(voter)}`)
+      .then(setBoards)
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load What’s next."));
+  }
+  useEffect(() => { load(); }, []);
+
+  async function add(partial: { board: "shelf" | "keg" | "brew"; name: string; maker?: string; kind?: NextKind; image_url?: string }) {
+    setError("");
+    try {
+      const next = await api<NextBoards>("/next", {
+        method: "POST",
+        body: JSON.stringify({ voter, ...partial })
+      });
+      setBoards(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add that");
+    }
+  }
+
+  async function vote(id: number) {
+    setError("");
+    try {
+      setBoards(await api<NextBoards>(`/next/${id}/vote`, { method: "POST", body: JSON.stringify({ voter }) }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save vote");
+    }
+  }
+
+  async function drop(item: NextItem) {
+    if (!confirm(`Remove ${item.name} from What’s next?`)) return;
+    try {
+      await api(`/next/${item.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove that");
+    }
+  }
+
+  function pickHit(board: "shelf" | "keg", hit: BottleSearchHit) {
+    const name = String(hit.product.name ?? hit.product.product_name ?? hit.product.brewery_batch ?? hit.product.batch_name ?? "").trim();
+    const maker = String(hit.product.brand ?? hit.product.brewery ?? hit.product.producer ?? hit.product.maker ?? "").trim();
+    const kind: NextKind = board === "keg"
+      ? "keg"
+      : hit.table === "wines"
+        ? "wines"
+        : hit.table === "packaged_beer"
+          ? "packaged_beer"
+          : "spirits";
+    void add({ board, name, maker, kind, image_url: String(hit.product.image_url ?? "") });
+    if (board === "shelf") { setShelfQuery(""); setShelfLocked(name); }
+    else { setKegQuery(""); setKegLocked(name); }
+  }
+
+  function submitFreeform(event: FormEvent, board: "shelf" | "keg" | "brew") {
+    event.preventDefault();
+    const name = board === "brew" ? brewName : board === "keg" ? kegQuery : shelfQuery;
+    if (board === "shelf") void add({ board, name, kind: shelfKind });
+    else if (board === "keg") void add({ board, name, kind: "keg" });
+    else void add({ board, name, kind: "brew" });
+    if (board === "shelf") { setShelfQuery(""); setShelfLocked(name); }
+    if (board === "keg") { setKegQuery(""); setKegLocked(name); }
+    if (board === "brew") setBrewName("");
+  }
+
+  function boardList(items: NextItem[]) {
+    if (!items.length) return <p className="next-empty">Nothing here yet. Add a pick and tap the thumb to vote.</p>;
+    return <div className="next-list">
+      {items.map((item) => (
+        <div className="next-row" key={item.id}>
+          <button type="button" className={`next-vote${item.mine ? " active" : ""}`} aria-pressed={item.mine} aria-label={`Vote for ${item.name}`} onClick={() => void vote(item.id)}>
+            <ThumbsUp size={18}/>
+            <strong>{item.votes}</strong>
+          </button>
+          <div className="card-icon">{item.image_url ? <img src={item.image_url} alt=""/> : <ThumbsUp size={18}/>}</div>
+          <div className="next-main">
+            <span className="eyebrow">{nextKindLabel(item.kind)}</span>
+            <strong>{item.name}</strong>
+            {item.maker ? <small>{item.maker}</small> : null}
+          </div>
+          {admin && <button type="button" className="icon-button danger" aria-label={`Remove ${item.name}`} onClick={() => void drop(item)}><Trash2 size={17}/></button>}
+        </div>
+      ))}
+    </div>;
+  }
+
+  return <>
+    <PageTitle
+      eyebrow="GUEST PICKS"
+      title="What’s next."
+      subtitle="Vote on bottles you want in the vault, the next keg on a handle, and what Nick should brew. One tap per phone — tap again to take it back."
+    />
+    {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not update What’s next</strong><span>{error}</span></div></div>}
+
+    <section className="next-board">
+      <div className="section-heading"><div><span className="eyebrow">ON THE SHELF</span><h2>Wine, beer &amp; bottles</h2></div></div>
+      <div className="next-add">
+        <div className="chip-row">
+          {SHELF_KINDS.map((kind) => (
+            <button type="button" key={kind.id} className={`chip${shelfKind === kind.id ? " active" : ""}`} onClick={() => setShelfKind(kind.id)}>{kind.label}</button>
+          ))}
+        </div>
+        <form className="wanted-form" onSubmit={(event) => submitFreeform(event, "shelf")}>
+          <div className="suggest-wrap">
+            <input value={shelfQuery} onChange={(e) => { setShelfQuery(e.target.value); setShelfLocked(""); }} maxLength={MAX_NEXT_NAME} placeholder="Search a bottle, wine, or beer…" autoComplete="off"/>
+            <BottleSuggest moduleId={shelfKind} query={shelfQuery} locked={shelfLocked} onPick={(hit) => pickHit("shelf", hit)}/>
+          </div>
+          <button className="primary" type="submit" disabled={!shelfQuery.trim()}><Plus size={16}/> Add to the board</button>
+        </form>
+      </div>
+      {boardList(boards.shelf)}
+    </section>
+
+    <section className="next-board">
+      <div className="section-heading"><div><span className="eyebrow">ON TAP</span><h2>Next keg</h2></div></div>
+      <p className="next-lede">What would you actually drink if Nick tapped a new keg?</p>
+      <div className="next-add">
+        <form className="wanted-form" onSubmit={(event) => submitFreeform(event, "keg")}>
+          <div className="suggest-wrap">
+            <input value={kegQuery} onChange={(e) => { setKegQuery(e.target.value); setKegLocked(""); }} maxLength={MAX_NEXT_NAME} placeholder="Search a beer or type a keg idea…" autoComplete="off"/>
+            <BottleSuggest moduleId="keg" query={kegQuery} locked={kegLocked} onPick={(hit) => pickHit("keg", hit)}/>
+          </div>
+          <button className="primary" type="submit" disabled={!kegQuery.trim()}><Plus size={16}/> Add to the board</button>
+        </form>
+        <div className="chip-row restock-stops">
+          {BEER_STYLES.filter((style) => style !== "Other").map((style) => (
+            <button type="button" key={style} className="chip" onClick={() => void add({ board: "keg", name: style, kind: "keg" })}>{style}</button>
+          ))}
+        </div>
+      </div>
+      {boardList(boards.keg)}
+    </section>
+
+    <section className="next-board">
+      <div className="section-heading"><div><span className="eyebrow">IN THE LAB</span><h2>Next brew</h2></div></div>
+      <p className="next-lede">Help Nick pick the next batch. Tap a style or name something more specific.</p>
+      <div className="next-add">
+        <div className="chip-row restock-stops">
+          {BEER_STYLES.filter((style) => style !== "Other").map((style) => (
+            <button type="button" key={style} className="chip" onClick={() => void add({ board: "brew", name: style, kind: "brew" })}>{style}</button>
+          ))}
+        </div>
+        <form className="wanted-form" onSubmit={(event) => submitFreeform(event, "brew")}>
+          <input value={brewName} onChange={(e) => setBrewName(e.target.value)} maxLength={MAX_NEXT_NAME} placeholder="Coffee stout, hoppy pils, saison with apricot…"/>
+          <button className="primary" type="submit" disabled={!brewName.trim()}><Plus size={16}/> Add brew idea</button>
+        </form>
+      </div>
+      {boardList(boards.brew)}
+    </section>
   </>;
 }
 

@@ -19,6 +19,7 @@ import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
 import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
+import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
 import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
@@ -194,6 +195,48 @@ app.post<{ Params: { table: string; id: string }; Body: { voter?: string; value?
     const code = /not found/i.test(message) ? 404 : 400;
     return reply.code(code).send({ error: message });
   }
+});
+
+app.get<{ Querystring: { voter?: string } }>("/api/next", {
+  schema: { tags: ["Votes"], summary: "Guest boards for the next bottle, keg, and brew" }
+}, async (request) => {
+  try {
+    return listNextBoards(request.query.voter);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load What's next";
+    return { shelf: [], keg: [], brew: [], error: message };
+  }
+});
+
+app.post<{ Body: { voter?: string; board?: string; kind?: string; name?: string; maker?: string; note?: string; image_url?: string } }>("/api/next", {
+  schema: { tags: ["Votes"], summary: "Add a bottle, keg, or brew idea and vote for it" }
+}, async (request, reply) => {
+  try {
+    return addNextRequest(request.body ?? {});
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not add that";
+    return reply.code(400).send({ error: message });
+  }
+});
+
+app.post<{ Params: { id: string }; Body: { voter?: string } }>("/api/next/:id/vote", {
+  schema: { tags: ["Votes"], summary: "Toggle a guest vote on What's next" }
+}, async (request, reply) => {
+  try {
+    return voteNextRequest(Number(request.params.id), request.body?.voter ?? "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not save vote";
+    const code = /not found/i.test(message) ? 404 : 400;
+    return reply.code(code).send({ error: message });
+  }
+});
+
+app.delete<{ Params: { id: string } }>("/api/next/:id", {
+  schema: { tags: ["Votes"], summary: "Remove a What's next card" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  if (!deleteNextRequest(Number(request.params.id))) return reply.code(404).send({ error: "Request not found" });
+  return reply.code(204).send();
 });
 
 app.get("/api/cocktails/match", async () => {

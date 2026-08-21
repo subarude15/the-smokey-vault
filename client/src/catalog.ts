@@ -76,3 +76,5 @@ export {
 } from "../../src/restock";
 export type { RestockItem, RestockThresholds, WantedLabel } from "../../src/restock";
 export { extractSharedRecipeUrl } from "../../src/recipe_share";
+export type { NextBoard, NextBoards, NextItem, NextKind } from "../../src/requests";
+export { MAX_NEXT_MAKER, MAX_NEXT_NAME, MAX_NEXT_NOTE } from "../../src/requests";
