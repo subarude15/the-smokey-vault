@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS packaged_beer (
   id INTEGER PRIMARY KEY AUTOINCREMENT, brewery TEXT DEFAULT '', name TEXT NOT NULL, style TEXT DEFAULT '',
   count INTEGER DEFAULT 1, pack_date TEXT, abv REAL DEFAULT 0, upc TEXT DEFAULT '', image_url TEXT DEFAULT '',
   notes TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
-  base_ingredient TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  base_ingredient TEXT DEFAULT '', vessel TEXT DEFAULT 'Can', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS wines (
   id INTEGER PRIMARY KEY AUTOINCREMENT, producer TEXT DEFAULT '', name TEXT NOT NULL, varietal TEXT DEFAULT '',
@@ -97,6 +97,7 @@ ensureColumn("packaged_beer", "tasting_notes", "ALTER TABLE packaged_beer ADD CO
 ensureColumn("packaged_beer", "flavors", "ALTER TABLE packaged_beer ADD COLUMN flavors TEXT DEFAULT '[]'");
 ensureColumn("packaged_beer", "tags", "ALTER TABLE packaged_beer ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("packaged_beer", "base_ingredient", "ALTER TABLE packaged_beer ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("packaged_beer", "vessel", "ALTER TABLE packaged_beer ADD COLUMN vessel TEXT DEFAULT 'Can'");
 ensureColumn("wines", "upc", "ALTER TABLE wines ADD COLUMN upc TEXT DEFAULT ''");
 ensureColumn("wines", "image_url", "ALTER TABLE wines ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("wines", "tasting_notes", "ALTER TABLE wines ADD COLUMN tasting_notes TEXT DEFAULT ''");

@@ -18,7 +18,9 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .brew-pipeline span{flex:1;height:4px;border-radius:99px;background:var(--surface-2);display:block}
 .brew-pipeline span.done{background:var(--accent)}
 .brew-pipeline span.current{background:var(--accent-2)}
-.inventory-card.archived-brew{opacity:.72}
+.inventory-card.archived-brew,.inventory-card.out-of-stock{opacity:.72}
+.count-stepper{display:flex;align-items:center;gap:12px}
+.count-stepper strong{min-width:2ch;text-align:center;font:600 32px "Playfair Display"}
 .field-hint{color:var(--muted);font-size:12px;line-height:1.45}
 .drink-one:disabled{opacity:.5;cursor:not-allowed}
 .tap-fill{margin-top:4px}

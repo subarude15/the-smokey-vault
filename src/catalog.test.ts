@@ -7,7 +7,8 @@ import {
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch
+  onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch,
+  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -106,6 +107,28 @@ test("brewToTap copies a brewery batch onto a homebrew tap", () => {
   assert.equal(tap.keg_size_l, 19.5);
   assert.equal(tap.remaining_l, 19.5);
   assert.equal(tap.tapped_date, "2026-08-21");
+});
+
+test("packaged stock labels, drink-one, and out-of-stock sort", () => {
+  assert.equal(normalizeBeerVessel("12oz can"), "Can");
+  assert.equal(normalizeBeerVessel("bottle"), "Bottle");
+  assert.equal(packagedStockLabel(6, "Can"), "6 cans");
+  assert.equal(packagedStockLabel(1, "Bottle"), "1 bottle");
+  assert.equal(packagedStockLabel(0, "Can"), "Out of stock");
+  assert.equal(drinkOnePackaged(6), 5);
+  assert.equal(drinkOnePackaged(0), 0);
+  const sorted = [
+    { name: "Zebra", brewery: "A", count: 0 },
+    { name: "Alpha", brewery: "B", count: 4 },
+    { name: "Beta", brewery: "A", count: 2 }
+  ].sort(comparePackagedBeer).map((row) => row.name);
+  assert.deepEqual(sorted, ["Beta", "Alpha", "Zebra"]);
+});
+
+test("preparePackagedWrite clamps count and normalizes vessel", () => {
+  const saved = preparePackagedWrite({ count: -3, vessel: "crowler" });
+  assert.equal(saved.count, 0);
+  assert.equal(saved.vessel, "Crowler");
 });
 
 test("empty taps are None and firstEmptyTapNumber picks a free handle", () => {
