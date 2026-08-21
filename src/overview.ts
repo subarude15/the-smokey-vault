@@ -67,35 +67,55 @@ export type OverviewSnapshot = {
   brews: { active: number; archived: number; list: OverviewBrew[] };
   packaged: { units: number; skus: number; out: number };
   wines: { bottles: number; labels: number };
-  cocktails: { ready: number; almost: number; favorites: OverviewFavorite[] };
+  cocktails: { ready: number; almost: number; favorites: OverviewFavorite[]; offMenu: OverviewFavorite[] };
   tickets: OverviewTicket[];
   low: OverviewLow[];
 };
 
-export function overviewGreeting(date = new Date()): { eyebrow: string; line: string; emphasize: string } {
+export function overviewGreeting(date = new Date(), guest = false): { eyebrow: string; line: string; emphasize: string } {
   const hour = date.getHours();
+  const eyebrow = hour >= 5 && hour < 12
+    ? "GOOD MORNING"
+    : hour >= 12 && hour < 17
+      ? "GOOD AFTERNOON"
+      : hour >= 17 && hour < 21
+        ? "GOOD EVENING"
+        : "AFTER HOURS";
+  if (guest) {
+    return { eyebrow: `${eyebrow} · GUEST NIGHT`, line: "Tonight at", emphasize: "the vault." };
+  }
   if (hour >= 5 && hour < 12) {
-    return { eyebrow: "GOOD MORNING", line: "The cellar is", emphasize: "waking up." };
+    return { eyebrow, line: "The cellar is", emphasize: "waking up." };
   }
   if (hour >= 12 && hour < 17) {
-    return { eyebrow: "GOOD AFTERNOON", line: "What's pouring", emphasize: "this afternoon." };
+    return { eyebrow, line: "What's pouring", emphasize: "this afternoon." };
   }
   if (hour >= 17 && hour < 21) {
-    return { eyebrow: "GOOD EVENING", line: "Your private bar,", emphasize: "beautifully organized." };
+    return { eyebrow, line: "Your private bar,", emphasize: "beautifully organized." };
   }
-  return { eyebrow: "AFTER HOURS", line: "The vault is", emphasize: "still pouring." };
+  return { eyebrow, line: "The vault is", emphasize: "still pouring." };
 }
 
-export function overviewHeroCopy(snapshot: OverviewSnapshot): string {
+export function overviewHeroCopy(snapshot: OverviewSnapshot, guest = false): string {
   const parts: string[] = [];
   if (snapshot.taps.pouring) parts.push(`${snapshot.taps.pouring} handle${snapshot.taps.pouring === 1 ? "" : "s"} pouring`);
-  if (snapshot.cocktails.ready) parts.push(`${snapshot.cocktails.ready} ready to mix`);
+  if (snapshot.cocktails.ready) {
+    parts.push(guest
+      ? `${snapshot.cocktails.ready} off the menu`
+      : `${snapshot.cocktails.ready} ready to mix`);
+  }
   if (snapshot.tickets.length) parts.push(`${snapshot.tickets.length} on the ticket`);
   if (snapshot.spirits.on_shelf) parts.push(`${snapshot.spirits.on_shelf} on the shelf`);
-  if (snapshot.wines.bottles) parts.push(`${snapshot.wines.bottles} in the cellar`);
-  if (snapshot.packaged.units) parts.push(`${snapshot.packaged.units} in the cold room`);
-  if (snapshot.brews.active) parts.push(`${snapshot.brews.active} in the lab`);
-  if (!parts.length) return "Stock the shelf, put a beer on, and the house menu fills in.";
+  if (!guest) {
+    if (snapshot.wines.bottles) parts.push(`${snapshot.wines.bottles} in the cellar`);
+    if (snapshot.packaged.units) parts.push(`${snapshot.packaged.units} in the cold room`);
+    if (snapshot.brews.active) parts.push(`${snapshot.brews.active} in the lab`);
+  }
+  if (!parts.length) {
+    return guest
+      ? "Browse the collection, see what is pouring, and find your next perfect drink."
+      : "Stock the shelf, put a beer on, and the house menu fills in.";
+  }
   return parts.join(" · ");
 }
 
@@ -168,20 +188,22 @@ export function buildOverview(input: {
   const wineBottles = wines.reduce((sum, item) => sum + Math.max(0, Math.floor(num(item.bottle_count))), 0);
   const wineOnRack = wines.filter((item) => wineOnShelf(item)).length;
 
+  const asFavorite = (drink: Record<string, unknown>): OverviewFavorite => ({
+    id: itemId(drink.id),
+    name: text(drink.name) || "Untitled",
+    readiness: text(drink.readiness) || "missing",
+    method: text(drink.method),
+    glassware: text(drink.glassware),
+    image_url: text(drink.image_url)
+  });
   const ready = cocktails.filter((drink) => drink.readiness === "ready");
   const almost = cocktails.filter((drink) => drink.readiness === "almost");
+  const offMenu = [...ready].sort(compareCocktails).slice(0, 8).map(asFavorite);
   const favorites: OverviewFavorite[] = cocktails
     .filter((drink) => num(drink.bartender_fav) > 0)
     .sort(compareCocktails)
     .slice(0, 8)
-    .map((drink) => ({
-      id: itemId(drink.id),
-      name: text(drink.name) || "Untitled",
-      readiness: text(drink.readiness) || "missing",
-      method: text(drink.method),
-      glassware: text(drink.glassware),
-      image_url: text(drink.image_url)
-    }));
+    .map(asFavorite);
 
   const low: OverviewLow[] = [
     ...lowSpirits
@@ -219,7 +241,7 @@ export function buildOverview(input: {
     brews: { active: activeBrews.length, archived: brews.length - activeBrews.length, list: brewList },
     packaged: { units: packagedUnits, skus: packaged.length, out: packagedOut },
     wines: { bottles: wineBottles, labels: wineOnRack },
-    cocktails: { ready: ready.length, almost: almost.length, favorites },
+    cocktails: { ready: ready.length, almost: almost.length, favorites, offMenu },
     tickets: tickets.slice(0, 12).map((ticket) => ({
       id: itemId(ticket.id),
       name: text(ticket.name),
