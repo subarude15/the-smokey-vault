@@ -13,6 +13,7 @@ import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, saveImageBuffer } from "./images.js";
 import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
+import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
@@ -76,7 +77,14 @@ app.post<{ Body: { currentPin?: string; newPin?: string } }>("/api/auth/pin", as
 
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
   if (!publicTables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
-  return db.prepare(`SELECT * FROM ${request.params.table} ORDER BY id DESC`).all();
+  const table = request.params.table;
+  const rows = db.prepare(`SELECT * FROM ${table} ORDER BY id DESC`).all() as Array<Record<string, unknown>>;
+  if (!VOTE_TABLES.has(table)) return rows;
+  const tallies = voteTallies(table);
+  return rows.map((row) => {
+    const tally = tallies[Number(row.id)] ?? summarizeVotes(0, 0);
+    return { ...row, vote_up: tally.up, vote_down: tally.down, vote_net: tally.net, vote_total: tally.total, vote_score: tally.score };
+  });
 });
 
 app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inventory/:table", async (request, reply) => {
@@ -115,6 +123,7 @@ app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id
   if (requireAdmin(request, reply)) return;
   if (!tables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
   deleteReviewsForItem(request.params.table, Number(request.params.id));
+  deleteVotesForItem(request.params.table, Number(request.params.id));
   db.prepare(`DELETE FROM ${request.params.table} WHERE id=?`).run(request.params.id);
   return reply.code(204).send();
 });
@@ -144,6 +153,26 @@ app.delete<{ Params: { id: string } }>("/api/reviews/:id", {
   if (requireAdmin(request, reply)) return;
   if (!deleteReview(Number(request.params.id))) return reply.code(404).send({ error: "Review not found" });
   return reply.code(204).send();
+});
+
+app.get<{ Params: { table: string; id: string }; Querystring: { voter?: string } }>("/api/inventory/:table/:id/votes", {
+  schema: { tags: ["Votes"], summary: "Vote tally for a bottle" }
+}, async (request, reply) => {
+  if (!VOTE_TABLES.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
+  return getVoteTally(request.params.table, Number(request.params.id), request.query.voter);
+});
+
+app.post<{ Params: { table: string; id: string }; Body: { voter?: string; value?: number } }>("/api/inventory/:table/:id/votes", {
+  schema: { tags: ["Votes"], summary: "Cast or clear a guest vote" }
+}, async (request, reply) => {
+  if (!VOTE_TABLES.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
+  try {
+    return castVote(request.params.table, Number(request.params.id), request.body.voter ?? "", Number(request.body.value));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not save vote";
+    const code = /not found/i.test(message) ? 404 : 400;
+    return reply.code(code).send({ error: message });
+  }
 });
 
 app.get("/api/cocktails/match", async () => {

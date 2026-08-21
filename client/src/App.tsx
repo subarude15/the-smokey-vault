@@ -7,6 +7,7 @@ import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
+import { BottleVotes, scoreLabel } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
   parseList, parseTagInput, serializeList
@@ -400,6 +401,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
             {item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
+            {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
           {module.id === "spirits" && <div className="fill"><span style={{width:`${Number(item.fill_level ?? 0)}%`}}/><small>{item.fill_level}% full</small></div>}
           {module.id === "taps" && <div className="fill"><span style={{width:`${Math.min(100,Number(item.remaining_l)/Number(item.keg_size_l)*100)}%`}}/><small>{item.remaining_l} L remaining · ~{Math.floor(Number(item.remaining_l)*2.1)} pints</small></div>}
@@ -438,6 +440,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
+          <BottleVotes table={module.id} itemId={item.id}/>
           {admin && <div className="bottle-detail-actions"><button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button><button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button></div>}
         </div>
       </div>
