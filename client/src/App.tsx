@@ -9,9 +9,11 @@ import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSugg
 import { GuestReviews } from "./GuestReviews";
 import { BottleVotes, scoreLabel } from "./BottleVotes";
 import {
-  BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES,
-  WINE_FAMILIES, defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
-  parseList, parseTagInput, serializeList, wineKindLabel, wineSweetnessStops
+  BASE_INGREDIENTS, BEER_STYLES, DEFAULT_KEG_L, FLAVOR_OPTIONS, KEG_REMAINING_STOPS, KEG_SIZES,
+  SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
+  defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
+  migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
+  remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -41,8 +43,9 @@ const modules: Module[] = [
   ]},
   { id: "taps", label: "Draft Taps", singular: "Tap", icon: Beer, title: "On Tap", subtitle: "Live pours and keg levels at a glance.", primary: "brewery_batch", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
     {key:"tap_number",label:"Tap #",type:"number"},{key:"maker",label:"Brewery / maker"},{key:"brewery_batch",label:"Beer / batch"},
-    {key:"keg_size_l",label:"Keg size (L)",type:"number"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},
-    {key:"abv",label:"ABV %",type:"number"},{key:"ibu",label:"IBU",type:"number"},{key:"tapped_date",label:"Date tapped",type:"date"},{key:"remaining_l",label:"Remaining (L)",type:"number"},
+    {key:"keg_size_l",label:"Keg size",type:"kegSize"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},
+    {key:"abv",label:"ABV %",type:"number"},{key:"ibu",label:"IBU",type:"number"},{key:"tapped_date",label:"Date tapped",type:"date"},
+    {key:"remaining_l",label:"Keg remaining",type:"kegRemaining"},
     {key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
@@ -371,7 +374,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
   });
   const activeFilters = maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
   async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); setViewing(undefined); load(); }
-  const canFind = ["spirits","packaged_beer","wines"].includes(module.id);
+  const canFind = ["spirits","packaged_beer","wines","taps"].includes(module.id);
   const emptyActions = admin ? <>
     {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> Find bottle</button>}
     <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>
@@ -423,6 +426,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
               : null}
             {item.abv ? <span>{item.abv}% ABV</span> : null}
             {item.status ? <span>{item.status}</span> : null}
+            {item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
@@ -430,7 +434,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
           {module.id === "spirits" && <div className="fill"><span style={{width:`${Number(item.fill_level ?? 0)}%`}}/><small>{item.fill_level}% full</small></div>}
-          {module.id === "taps" && <div className="fill"><span style={{width:`${Math.min(100,Number(item.remaining_l)/Number(item.keg_size_l)*100)}%`}}/><small>{item.remaining_l} L remaining · ~{Math.floor(Number(item.remaining_l)*2.1)} pints</small></div>}
+          {module.id === "taps" && (() => {
+            const remaining = Number(item.remaining_l ?? 0);
+            const size = Number(item.keg_size_l || DEFAULT_KEG_L);
+            const pints = pintsRemaining(remaining);
+            const kicked = remaining <= 0;
+            return <div className="fill"><span style={{width:`${kegFillPercent(remaining, size)}%`}}/><small>{kicked ? "Kicked" : `${pints} pint${pints === 1 ? "" : "s"} left`}</small></div>;
+          })()}
         </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button><button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button></div>}
       </button>)}</div>}
     {finderOpen && <BottleFinder module={module} onClose={() => setFinderOpen(false)} onPick={(values) => { setFinderOpen(false); setEditing({id:0,...values} as Item); }}/>}
@@ -443,29 +453,40 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
 }) {
   const flavors = parseList(item.flavors);
   const tags = parseList(item.tags);
-  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", "sweetness", "body", "drink_by_date", module.primary]);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", module.primary]);
   const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
     : "";
   const bottlesLeft = Number(item.bottle_count ?? 0);
-  const [drinkError, setDrinkError] = useState("");
-  const [drinking, setDrinking] = useState(false);
-  async function drinkOne() {
-    if (!admin || module.id !== "wines" || bottlesLeft <= 0 || drinking) return;
-    setDrinking(true);
-    setDrinkError("");
+  const kegSize = Number(item.keg_size_l || DEFAULT_KEG_L);
+  const kegLeft = Number(item.remaining_l ?? 0);
+  const kegPints = pintsRemaining(kegLeft);
+  const [actionError, setActionError] = useState("");
+  const [acting, setActing] = useState(false);
+  async function patchItem(payload: Record<string, unknown>, failed: string) {
+    if (!admin || acting) return;
+    setActing(true);
+    setActionError("");
     try {
-      const next = await api<Item>(`/inventory/wines/${item.id}`, {
+      const next = await api<Item>(`/inventory/${module.id}/${item.id}`, {
         method: "PUT",
-        body: JSON.stringify({ bottle_count: bottlesLeft - 1 })
+        body: JSON.stringify(payload)
       });
       onUpdated?.(next);
     } catch (err) {
-      setDrinkError(err instanceof Error ? err.message : "Could not drink one");
+      setActionError(err instanceof Error ? err.message : failed);
     } finally {
-      setDrinking(false);
+      setActing(false);
     }
+  }
+  async function drinkOne() {
+    if (module.id !== "wines" || bottlesLeft <= 0) return;
+    await patchItem({ bottle_count: bottlesLeft - 1 }, "Could not drink one");
+  }
+  async function pourPintNow() {
+    if (module.id !== "taps" || kegLeft <= 0) return;
+    await patchItem({ remaining_l: pourPint(kegLeft) }, "Could not pour a pint");
   }
   return (
     <section className="bottle-detail">
@@ -485,6 +506,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
               : item.style ? <span>{String(item.style)}</span> : null}
             {item.abv ? <span>{item.abv}% ABV</span> : null}
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
+            {item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
@@ -493,19 +515,26 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           </div>
           <BottleVotes table={module.id} itemId={item.id}/>
           {admin && <div className="bottle-detail-actions">
-            {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || drinking} onClick={drinkOne}>{drinking ? "Drinking…" : "Drink one"}</button>}
+            {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
+            {module.id === "taps" && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
             <button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button>
             <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>
           </div>}
-          {drinkError ? <p className="error">{drinkError}</p> : null}
+          {actionError ? <p className="error">{actionError}</p> : null}
         </div>
       </div>
       <div className="bottle-detail-grid">
         {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
+        {module.id === "taps" && <div className="full">
+          <span>Keg remaining</span>
+          <div className="fill tap-fill"><span style={{width:`${kegFillPercent(kegLeft, kegSize)}%`}}/><small>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${kegSizeLabel(kegSize)}`}</small></div>
+        </div>}
         {module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
           <div key={field.key} className={field.type === "textarea" ? "full" : ""}>
             <span>{field.label}</span>
-            {field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong> : <strong>{String(item[field.key])}</strong>}
+            {field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong>
+              : field.key === "keg_size_l" ? <strong>{kegSizeLabel(Number(item.keg_size_l))}</strong>
+              : <strong>{String(item[field.key])}</strong>}
           </div>
         ))}
       </div>
@@ -597,7 +626,9 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       ? { category: "Whiskey", fill_level: 100 }
       : module.id === "wines"
         ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1 }
-        : {})) as Record<string, unknown>;
+        : module.id === "taps"
+          ? { keg_size_l: DEFAULT_KEG_L, remaining_l: DEFAULT_KEG_L, source_type: "Commercial" }
+          : {})) as Record<string, unknown>;
     return {
       ...defaults,
       flavors: parseList(item?.flavors),
@@ -640,6 +671,16 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   function setWineStyle(style: string) {
     setForm({ ...form, style, sweetness: defaultSweetnessForWine(String(form.type ?? "Sparkling"), style) });
   }
+  function setKegSize(liters: number) {
+    const prev = Number(form.keg_size_l || 0);
+    const remaining = Number(form.remaining_l ?? prev);
+    const wasFull = prev <= 0 || Math.abs(remaining - prev) < 0.05;
+    setForm({
+      ...form,
+      keg_size_l: liters,
+      remaining_l: wasFull ? liters : Math.min(remaining, liters)
+    });
+  }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => {
       if (field.type === "image") {
@@ -680,6 +721,31 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             value={migrateWineSweetnessValue(form.sweetness, String(form.type ?? ""), String(form.style ?? ""))}
             onChange={(sweetness) => setForm({ ...form, sweetness })}
           />
+        </div>;
+      }
+      if (field.type === "kegSize") {
+        const current = Number(form.keg_size_l || DEFAULT_KEG_L);
+        const options = KEG_SIZES.some((size) => Math.abs(size.liters - current) < 0.05)
+          ? KEG_SIZES
+          : [...KEG_SIZES, { label: `${current} L`, liters: current }];
+        return <label key={field.key}><span>{field.label}</span>
+          <select value={String(current)} onChange={(e) => setKegSize(Number(e.target.value))}>
+            {options.map((size) => <option key={size.liters} value={size.liters}>{size.label} · {size.liters} L</option>)}
+          </select>
+        </label>;
+      }
+      if (field.type === "kegRemaining") {
+        const size = Number(form.keg_size_l || DEFAULT_KEG_L);
+        const remaining = Number(form.remaining_l ?? size);
+        const active = nearestKegStop(remaining, size);
+        const pints = pintsRemaining(remaining);
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <div className="chip-row">
+            {KEG_REMAINING_STOPS.map((stop) => (
+              <button type="button" key={stop.percent} className={stop.percent === active ? "chip active" : "chip"} onClick={() => setForm({ ...form, remaining_l: remainingFromPercent(size, stop.percent) })}>{stop.label}</button>
+            ))}
+          </div>
+          <small className="field-hint">{remaining <= 0 ? "Kicked" : `${pints} pint${pints === 1 ? "" : "s"} left`}</small>
         </div>;
       }
       if (module.id === "wines" && field.key === "style" && String(form.type) !== "Sparkling" && !String(form.style ?? "").trim()) {

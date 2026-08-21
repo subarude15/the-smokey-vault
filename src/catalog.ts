@@ -141,3 +141,59 @@ export function inferWineFamilyAndStyle(text: string): { type: string; style: st
   if (/white|chardonnay|sauvignon|riesling|pinot gr|albari[nñ]o|viognier/.test(hay)) return { type: "White", style: "" };
   return { type: "Red", style: "" };
 }
+
+export const US_PINT_L = 0.473176;
+
+export const DEFAULT_KEG_L = 19.5;
+
+export const KEG_SIZES = [
+  { label: "Cornelius (5 gal)", liters: 18.9 },
+  { label: "Sixth barrel", liters: 19.5 },
+  { label: "Quarter barrel", liters: 29.3 },
+  { label: "Half barrel", liters: 58.7 },
+  { label: "20 L", liters: 20 },
+  { label: "30 L", liters: 30 },
+  { label: "50 L", liters: 50 }
+];
+
+export const KEG_REMAINING_STOPS = [
+  { label: "Full", percent: 100 },
+  { label: "¾", percent: 75 },
+  { label: "Half", percent: 50 },
+  { label: "¼", percent: 25 },
+  { label: "Kicked", percent: 0 }
+];
+
+export function roundLiters(value: number): number {
+  return Math.round(Math.max(0, value) * 1000) / 1000;
+}
+
+export function kegFillPercent(remainingL: number, kegSizeL: number): number {
+  if (!(kegSizeL > 0)) return 0;
+  return Math.max(0, Math.min(100, (Number(remainingL) / kegSizeL) * 100));
+}
+
+export function pintsRemaining(remainingL: number): number {
+  return Math.floor(Math.max(0, Number(remainingL) || 0) / US_PINT_L + 1e-9);
+}
+
+export function pourPint(remainingL: number): number {
+  return roundLiters(Math.max(0, Number(remainingL) - US_PINT_L));
+}
+
+export function remainingFromPercent(kegSizeL: number, percent: number): number {
+  return roundLiters((Number(kegSizeL) || 0) * percent / 100);
+}
+
+export function nearestKegStop(remainingL: number, kegSizeL: number): number {
+  const pct = kegFillPercent(remainingL, kegSizeL);
+  return KEG_REMAINING_STOPS.reduce((best, stop) =>
+    Math.abs(stop.percent - pct) < Math.abs(best - pct) ? stop.percent : best, KEG_REMAINING_STOPS[0].percent);
+}
+
+export function kegSizeLabel(liters: number): string {
+  const match = KEG_SIZES.find((size) => Math.abs(size.liters - Number(liters)) < 0.05);
+  if (match) return `${match.label} · ${match.liters} L`;
+  const n = Number(liters);
+  return Number.isFinite(n) && n > 0 ? `${n} L` : "";
+}

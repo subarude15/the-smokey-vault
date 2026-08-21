@@ -3,7 +3,8 @@ import { test } from "node:test";
 import {
   parseList, parseTagInput, serializeList, spiritFamilyFromLabel,
   defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
-  wineKindLabel, wineSweetnessStops
+  wineKindLabel, wineSweetnessStops,
+  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -62,4 +63,23 @@ test("inferWineFamilyAndStyle reads Champagne and Prosecco from text", () => {
   assert.deepEqual(inferWineFamilyAndStyle("La Marca Prosecco"), { type: "Sparkling", style: "Prosecco" });
   assert.deepEqual(inferWineFamilyAndStyle("skin-contact orange wine"), { type: "Orange", style: "" });
   assert.equal(inferWineFamilyAndStyle("Chardonnay").type, "White");
+});
+
+test("pintsRemaining uses US pints and never goes negative", () => {
+  assert.equal(pintsRemaining(19.5), 41);
+  assert.equal(pintsRemaining(0), 0);
+  assert.equal(pintsRemaining(-1), 0);
+});
+
+test("pourPint subtracts one US pint and stops at zero", () => {
+  assert.equal(pourPint(19.5), 19.027);
+  assert.equal(pourPint(0.2), 0);
+  assert.equal(pourPint(0), 0);
+});
+
+test("keg remaining snaps to 25% stops", () => {
+  assert.equal(kegFillPercent(19.5, 19.5), 100);
+  assert.equal(nearestKegStop(9.75, 19.5), 50);
+  assert.equal(remainingFromPercent(19.5, 25), 4.875);
+  assert.equal(kegSizeLabel(19.5), "Sixth barrel · 19.5 L");
 });
