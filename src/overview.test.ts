@@ -10,6 +10,13 @@ test("overviewGreeting follows the clock", () => {
   assert.equal(overviewGreeting(new Date(2026, 7, 21, 2, 0, 0)).eyebrow, "AFTER HOURS");
 });
 
+test("guest greeting is tonight at the vault", () => {
+  const guest = overviewGreeting(new Date(2026, 7, 21, 19, 0, 0), true);
+  assert.equal(guest.eyebrow, "GOOD EVENING · GUEST NIGHT");
+  assert.equal(guest.line, "Tonight at");
+  assert.equal(guest.emphasize, "the vault.");
+});
+
 test("empty vault snapshot is zeros and a stock-the-shelf line", () => {
   const snap = buildOverview({});
   assert.equal(snap.spirits.on_shelf, 0);
@@ -20,7 +27,9 @@ test("empty vault snapshot is zeros and a stock-the-shelf line", () => {
   assert.equal(snap.wines.bottles, 0);
   assert.equal(snap.cocktails.ready, 0);
   assert.equal(snap.tickets.length, 0);
+  assert.equal(snap.cocktails.offMenu.length, 0);
   assert.match(overviewHeroCopy(snap), /Stock the shelf/);
+  assert.match(overviewHeroCopy(snap, true), /Browse the collection/);
 });
 
 test("overview counts pouring taps, shelf bottles, and ready drinks — not empty rows", () => {
@@ -77,6 +86,7 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
   assert.equal(snap.cocktails.ready, 1);
   assert.equal(snap.cocktails.almost, 1);
   assert.equal(snap.cocktails.favorites[0].name, "Negroni");
+  assert.deepEqual(snap.cocktails.offMenu.map((drink) => drink.name), ["Negroni"]);
   assert.equal(snap.tickets[0].guest_name, "Sam");
   assert.ok(snap.low.some((item) => item.name.includes("Last mezcal") && item.detail.includes("25%")));
   assert.ok(snap.low.some((item) => item.name.includes("Last bubbles") && item.detail === "Last bottle"));
@@ -84,4 +94,6 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
   assert.match(overviewHeroCopy(snap), /1 handle pouring/);
   assert.match(overviewHeroCopy(snap), /1 ready to mix/);
   assert.match(overviewHeroCopy(snap), /1 on the ticket/);
+  assert.match(overviewHeroCopy(snap, true), /1 off the menu/);
+  assert.doesNotMatch(overviewHeroCopy(snap, true), /ready to mix|in the lab|cold room|cellar/);
 });
