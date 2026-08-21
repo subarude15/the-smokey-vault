@@ -2,7 +2,7 @@ import { db } from "./db.js";
 
 export const NEXT_BOARDS = ["shelf", "keg", "brew"] as const;
 export type NextBoard = (typeof NEXT_BOARDS)[number];
-export type NextKind = "spirits" | "wines" | "packaged_beer" | "keg" | "brew";
+export type NextKind = "spirits" | "wines" | "keg" | "brew";
 
 export const MAX_NEXT_NAME = 80;
 export const MAX_NEXT_MAKER = 80;
@@ -17,8 +17,11 @@ export type NextItem = {
   maker: string;
   note: string;
   image_url: string;
+  up: number;
+  down: number;
+  net: number;
   votes: number;
-  mine: boolean;
+  mine: 1 | -1 | null;
 };
 
 export type NextBoards = {
@@ -42,11 +45,17 @@ CREATE INDEX IF NOT EXISTS stock_requests_board ON stock_requests(board, name);
 CREATE TABLE IF NOT EXISTS stock_request_votes (
   request_id INTEGER NOT NULL,
   voter_key TEXT NOT NULL,
+  value INTEGER NOT NULL DEFAULT 1 CHECK(value IN (-1, 1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (request_id, voter_key),
   FOREIGN KEY (request_id) REFERENCES stock_requests(id) ON DELETE CASCADE
 );
 `);
+
+const voteColumns = db.prepare("PRAGMA table_info(stock_request_votes)").all() as Array<{ name: string }>;
+if (!voteColumns.some((column) => column.name === "value")) {
+  db.exec("ALTER TABLE stock_request_votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1");
+}
 
 function normalizeVoter(raw: string) {
   const voter = raw.trim();
@@ -62,12 +71,19 @@ function asBoard(value: unknown): NextBoard {
 function asKind(board: NextBoard, value: unknown): NextKind {
   if (board === "keg") return "keg";
   if (board === "brew") return "brew";
-  if (value === "spirits" || value === "wines" || value === "packaged_beer") return value;
+  if (value === "wines") return "wines";
+  if (value === "packaged_beer") throw new Error("Beer kegs and batches are Nick's boards — guests can request liquor and wine");
   return "spirits";
 }
 
 function clip(value: unknown, max: number) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+}
+
+function asMine(value: unknown): 1 | -1 | null {
+  if (Number(value) === 1) return 1;
+  if (Number(value) === -1) return -1;
+  return null;
 }
 
 function rowToItem(row: {
@@ -78,9 +94,12 @@ function rowToItem(row: {
   maker: string;
   note: string;
   image_url: string;
-  votes: number;
-  mine: number;
+  up_count: number | null;
+  down_count: number | null;
+  mine: number | null;
 }): NextItem {
+  const up = Number(row.up_count) || 0;
+  const down = Number(row.down_count) || 0;
   return {
     id: row.id,
     board: asBoard(row.board),
@@ -89,8 +108,11 @@ function rowToItem(row: {
     maker: row.maker,
     note: row.note,
     image_url: row.image_url,
-    votes: Number(row.votes) || 0,
-    mine: Number(row.mine) > 0
+    up,
+    down,
+    net: up - down,
+    votes: up,
+    mine: asMine(row.mine)
   };
 }
 
@@ -103,15 +125,19 @@ function listBoard(board: NextBoard, voter?: string): NextItem[] {
   }
   const rows = db.prepare(`
     SELECT r.id, r.board, r.kind, r.name, r.maker, r.note, r.image_url,
-      COUNT(v.voter_key) AS votes,
-      MAX(CASE WHEN v.voter_key=? THEN 1 ELSE 0 END) AS mine
+      SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END) AS up_count,
+      SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS down_count,
+      MAX(CASE WHEN v.voter_key=? THEN v.value ELSE NULL END) AS mine
     FROM stock_requests r
     LEFT JOIN stock_request_votes v ON v.request_id = r.id
     WHERE r.board=?
     GROUP BY r.id
-    ORDER BY votes DESC, r.id DESC
+    ORDER BY (COALESCE(SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END),0) - COALESCE(SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END),0)) DESC,
+      COALESCE(SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END),0) DESC,
+      r.id DESC
   `).all(voterKey, board) as Array<{
-    id: number; board: string; kind: string; name: string; maker: string; note: string; image_url: string; votes: number; mine: number;
+    id: number; board: string; kind: string; name: string; maker: string; note: string; image_url: string;
+    up_count: number | null; down_count: number | null; mine: number | null;
   }>;
   return rows.map(rowToItem);
 }
@@ -131,11 +157,16 @@ function findExisting(board: NextBoard, name: string, maker: string) {
   `).get(board, name, maker) as { id: number } | undefined;
 }
 
-function setVote(id: number, voter: string, on: boolean) {
-  if (on) {
-    db.prepare("INSERT OR IGNORE INTO stock_request_votes(request_id, voter_key) VALUES(?, ?)").run(id, voter);
-  } else {
+function castValue(id: number, voter: string, value: 1 | -1) {
+  const existing = db.prepare(
+    "SELECT value FROM stock_request_votes WHERE request_id=? AND voter_key=?"
+  ).get(id, voter) as { value: number } | undefined;
+  if (existing?.value === value) {
     db.prepare("DELETE FROM stock_request_votes WHERE request_id=? AND voter_key=?").run(id, voter);
+  } else if (existing) {
+    db.prepare("UPDATE stock_request_votes SET value=? WHERE request_id=? AND voter_key=?").run(value, id, voter);
+  } else {
+    db.prepare("INSERT INTO stock_request_votes(request_id, voter_key, value) VALUES(?, ?, ?)").run(id, voter, value);
   }
 }
 
@@ -148,36 +179,40 @@ export function addNextRequest(input: {
   note?: string;
   image_url?: string;
 }): NextBoards {
-  const voter = normalizeVoter(input.voter ?? "");
   const board = asBoard(input.board);
   const name = clip(input.name, MAX_NEXT_NAME);
   const maker = clip(input.maker, MAX_NEXT_MAKER);
   const note = clip(input.note, MAX_NEXT_NOTE);
   const image = clip(input.image_url, 500);
   if (!name) throw new Error("Add a name");
+  const kind = asKind(board, input.kind);
   const existing = findExisting(board, name, maker);
+  const voter = board === "shelf" ? normalizeVoter(input.voter ?? "") : (input.voter?.trim() ? normalizeVoter(input.voter) : "");
   if (existing) {
-    setVote(existing.id, voter, true);
-    return listNextBoards(voter);
+    if (board === "shelf") castValue(existing.id, voter, 1);
+    return listNextBoards(voter || input.voter);
   }
   const count = Number((db.prepare("SELECT COUNT(*) AS n FROM stock_requests WHERE board=?").get(board) as { n: number }).n);
   if (count >= MAX_NEXT_PER_BOARD) throw new Error("This board is full — vote on what's already here");
-  const kind = asKind(board, input.kind);
   const result = db.prepare(
     "INSERT INTO stock_requests(board,kind,name,maker,note,image_url) VALUES(?,?,?,?,?,?)"
   ).run(board, kind, name, maker, note, image);
-  setVote(Number(result.lastInsertRowid), voter, true);
-  return listNextBoards(voter);
+  if (board === "shelf") castValue(Number(result.lastInsertRowid), voter, 1);
+  return listNextBoards(voter || input.voter);
 }
 
-export function voteNextRequest(id: number, voterRaw: string): NextBoards {
+export function voteNextRequest(id: number, voterRaw: string, value?: number): NextBoards {
   const voter = normalizeVoter(voterRaw);
   const n = Math.floor(Number(id));
   if (!Number.isInteger(n) || n < 1) throw new Error("Request not found");
-  const row = db.prepare("SELECT id FROM stock_requests WHERE id=?").get(n) as { id: number } | undefined;
+  const row = db.prepare("SELECT id, board FROM stock_requests WHERE id=?").get(n) as { id: number; board: string } | undefined;
   if (!row) throw new Error("Request not found");
-  const mine = db.prepare("SELECT voter_key FROM stock_request_votes WHERE request_id=? AND voter_key=?").get(n, voter);
-  setVote(n, voter, !mine);
+  if (row.board === "shelf") {
+    castValue(n, voter, 1);
+    return listNextBoards(voter);
+  }
+  if (value !== 1 && value !== -1) throw new Error("Vote must be up or down");
+  castValue(n, voter, value);
   return listNextBoards(voter);
 }
 

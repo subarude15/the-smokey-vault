@@ -209,8 +209,10 @@ app.get<{ Querystring: { voter?: string } }>("/api/next", {
 });
 
 app.post<{ Body: { voter?: string; board?: string; kind?: string; name?: string; maker?: string; note?: string; image_url?: string } }>("/api/next", {
-  schema: { tags: ["Votes"], summary: "Add a bottle, keg, or brew idea and vote for it" }
+  schema: { tags: ["Votes"], summary: "Add a What's next card" }
 }, async (request, reply) => {
+  const board = request.body?.board;
+  if ((board === "keg" || board === "brew") && requireAdmin(request, reply)) return;
   try {
     return addNextRequest(request.body ?? {});
   } catch (error) {
@@ -219,11 +221,11 @@ app.post<{ Body: { voter?: string; board?: string; kind?: string; name?: string;
   }
 });
 
-app.post<{ Params: { id: string }; Body: { voter?: string } }>("/api/next/:id/vote", {
-  schema: { tags: ["Votes"], summary: "Toggle a guest vote on What's next" }
+app.post<{ Params: { id: string }; Body: { voter?: string; value?: number } }>("/api/next/:id/vote", {
+  schema: { tags: ["Votes"], summary: "Cast or clear a vote on What's next" }
 }, async (request, reply) => {
   try {
-    return voteNextRequest(Number(request.params.id), request.body?.voter ?? "");
+    return voteNextRequest(Number(request.params.id), request.body?.voter ?? "", request.body?.value);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not save vote";
     const code = /not found/i.test(message) ? 404 : 400;
