@@ -9,7 +9,7 @@ import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
-import { prepareBrewWrite, preparePackagedWrite } from "./catalog.js";
+import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, saveImageBuffer } from "./images.js";
@@ -96,7 +96,9 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
     ? prepareBrewWrite({ ...request.body })
     : table === "packaged_beer"
       ? preparePackagedWrite({ ...request.body })
-      : { ...request.body };
+      : table === "spirits"
+        ? prepareSpiritWrite({ ...request.body })
+        : { ...request.body };
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
@@ -119,7 +121,9 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
     ? prepareBrewWrite({ ...request.body }, existing)
     : table === "packaged_beer"
       ? preparePackagedWrite({ ...request.body })
-      : { ...request.body };
+      : table === "spirits"
+        ? prepareSpiritWrite({ ...request.body })
+        : { ...request.body };
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;

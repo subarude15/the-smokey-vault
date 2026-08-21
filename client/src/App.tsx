@@ -17,7 +17,8 @@ import {
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
-  packagedCount, packagedStockLabel
+  packagedCount, packagedStockLabel, FILL_STOPS, compareSpirits, fillStopLabel, isSpiritEmpty,
+  nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -39,9 +40,9 @@ const modules: Module[] = [
   { id: "spirits", label: "Spirits & Mixers", singular: "Bottle", icon: Bottle, title: "The Bottle Library", subtitle: "Spirits, liqueurs, bitters, and every essential mixer.", primary: "name", secondary: "brand", makerKey: "brand", kindKey: "category", fields: [
     { key:"name",label:"Name" },{ key:"brand",label:"Brand / maker" },{ key:"category",label:"Family",options:SPIRIT_FAMILIES },
     { key:"sub_category",label:"Type" },{ key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS },
-    { key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level",type:"percent",options:["100","75","50","25","0"] },
+    { key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill",type:"fillLevel" },
     { key:"purchase_date",label:"Purchase date",type:"date" },{ key:"opened_date",label:"Date opened",type:"date" },{ key:"shelf_location",label:"Shelf location" },{ key:"upc",label:"UPC" },
-    { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Photo",type:"image" },
+    { key:"stock_count",label:"Bottles",type:"spiritStock" },{ key:"image_url",label:"Photo",type:"image" },
     { key:"notes",label:"Cellar notes",type:"textarea" },{ key:"tasting_notes",label:"Tasting notes",type:"tasting" },
     { key:"flavors",label:"Flavors",type:"flavors" },{ key:"tags",label:"Tags",type:"tags" }
   ]},
@@ -464,7 +465,9 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       ? [...filtered].sort(compareBrews)
       : module.id === "packaged_beer"
         ? [...filtered].sort(comparePackagedBeer)
-        : filtered;
+        : module.id === "spirits"
+          ? [...filtered].sort(compareSpirits)
+          : filtered;
   const canFind = ["spirits","packaged_beer","wines","taps","brews"].includes(module.id);
   const emptyActions = admin ? <>
     {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {findBeerLabel(module.id)}</button>}
@@ -509,7 +512,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
         const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
         const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
-        const outOfStock = module.id === "packaged_beer" && packagedCount(item.count) <= 0;
+        const outOfStock = (module.id === "packaged_beer" && packagedCount(item.count) <= 0)
+          || (module.id === "spirits" && isSpiritEmpty(item));
         return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}`} key={item.id} onClick={() => setViewing(item)}>
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
@@ -532,12 +536,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
             {module.id === "brews" && parseList(item.flavors).slice(0,3).map((value) => <span key={`flavor-${value}`}>{value}</span>)}
             {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
+            {module.id === "spirits" ? <span>{spiritStockLabel(item.stock_count)}</span> : null}
             {module.id === "packaged_beer" ? <span>{packagedStockLabel(item.count, item.vessel)}</span> : item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
-          {module.id === "spirits" && <div className="fill"><span style={{width:`${Number(item.fill_level ?? 0)}%`}}/><small>{item.fill_level}% full</small></div>}
+          {module.id === "spirits" && <div className="fill"><span style={{width:`${nearestFillStop(item.fill_level)}%`}}/><small>{fillStopLabel(item.fill_level)}</small></div>}
           {module.id === "taps" && !isTapEmpty(item) && (() => {
             const remaining = Number(item.remaining_l ?? 0);
             const size = Number(item.keg_size_l || DEFAULT_KEG_L);
@@ -568,7 +573,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const flavors = parseList(item.flavors);
   const hops = parseList(item.hops);
   const tags = parseList(item.tags);
-  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "hops", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", "count", module.primary]);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "hops", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", "count", "fill_level", "stock_count", module.primary]);
   const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
@@ -576,6 +581,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const bottlesLeft = Number(item.bottle_count ?? 0);
   const packagedLeft = packagedCount(item.count);
   const packagedLabel = module.id === "packaged_beer" ? packagedStockLabel(item.count, item.vessel) : "";
+  const spiritFill = module.id === "spirits" ? nearestFillStop(item.fill_level) : 0;
+  const nextSpirit = module.id === "spirits" ? openNextSpirit(item) : null;
   const kegSize = Number(item.keg_size_l || DEFAULT_KEG_L);
   const kegLeft = Number(item.remaining_l ?? 0);
   const kegPints = pintsRemaining(kegLeft);
@@ -609,6 +616,14 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
     if (module.id === "packaged_beer" && packagedLeft > 0) {
       await patchItem({ count: drinkOnePackaged(item.count) }, "Could not drink one");
     }
+  }
+  async function pourDrink() {
+    if (module.id !== "spirits" || spiritFill <= 0) return;
+    await patchItem({ fill_level: pourSpirit(item.fill_level) }, "Could not pour a drink");
+  }
+  async function openNextBottle() {
+    if (!nextSpirit) return;
+    await patchItem(nextSpirit, "Could not open the next bottle");
   }
   async function pourPintNow() {
     if (module.id !== "taps" || kegLeft <= 0) return;
@@ -645,7 +660,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
             {onTap ? <span>{onTap}</span> : null}
             {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
-            {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
+            {module.id === "spirits" ? <span>{spiritStockLabel(item.stock_count)}</span> : item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
             {item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
             {packagedLabel ? <span>{packagedLabel}</span> : item.count != null && module.id !== "packaged_beer" ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
@@ -654,6 +669,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           {!(module.id === "taps" && isTapEmpty(item)) && <BottleVotes table={module.id} itemId={item.id}/>}
           {admin && <div className="bottle-detail-actions">
             {(module.id === "wines" || module.id === "packaged_beer") && <button type="button" className="secondary drink-one" disabled={(module.id === "wines" ? bottlesLeft : packagedLeft) <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
+            {module.id === "spirits" && <button type="button" className="secondary drink-one" disabled={spiritFill <= 0 || acting} onClick={pourDrink}>{acting ? "Pouring…" : "Pour a drink"}</button>}
+            {module.id === "spirits" && nextSpirit && <button type="button" className="secondary drink-one" disabled={acting} onClick={openNextBottle}>{acting ? "Opening…" : "Open next"}</button>}
             {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
             {module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
             {module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
@@ -679,6 +696,14 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           <span>Keg remaining</span>
           <div className="fill tap-fill"><span style={{width:`${kegFillPercent(kegLeft, kegSize)}%`}}/><small>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${kegSizeLabel(kegSize)}`}</small></div>
         </div>}
+        {module.id === "spirits" && <div className="full">
+          <span>Fill</span>
+          <FillLevelScale
+            value={item.fill_level}
+            onChange={admin ? (fill) => { void patchItem({ fill_level: fill }, "Could not update fill"); } : undefined}
+          />
+          <small className="field-hint">{fillStopLabel(item.fill_level)} · {spiritStockLabel(item.stock_count)}</small>
+        </div>}
         {module.id === "packaged_beer" && <div className="full">
           <span>In the cold room</span>
           <strong>{packagedLabel}</strong>
@@ -686,8 +711,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
         {!(module.id === "taps" && isTapEmpty(item)) && module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
           <div key={field.key} className={field.type === "textarea" ? "full" : ""}>
             <span>{field.label}</span>
-            {field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong>
-              : field.key === "keg_size_l" ? <strong>{kegSizeLabel(Number(item.keg_size_l))}</strong>
+            {field.key === "keg_size_l" ? <strong>{kegSizeLabel(Number(item.keg_size_l))}</strong>
               : field.type === "gravity" ? <strong>{formatGravity(item[field.key]) || String(item[field.key])}</strong>
               : <strong>{String(item[field.key])}</strong>}
           </div>
@@ -788,7 +812,7 @@ function BottleFinder({ module, onClose, onPick }:{
 function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
   const [form,setForm] = useState<Record<string,unknown>>(() => {
     const defaults = (item ?? (module.id === "spirits"
-      ? { category: "Whiskey", fill_level: 100 }
+      ? { category: "Whiskey", fill_level: 100, stock_count: 1 }
       : module.id === "wines"
         ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1 }
         : module.id === "taps"
@@ -809,6 +833,10 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       ...(module.id === "packaged_beer" ? {
         vessel: normalizeBeerVessel(defaults.vessel),
         count: packagedCount(defaults.count ?? 1)
+      } : {}),
+      ...(module.id === "spirits" ? {
+        fill_level: nearestFillStop(defaults.fill_level ?? 100),
+        stock_count: defaults.stock_count == null || String(defaults.stock_count).trim() === "" ? 1 : spiritStock(defaults.stock_count)
       } : {})
     };
   });
@@ -840,6 +868,10 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     if (module.id === "packaged_beer") {
       payload.count = packagedCount(payload.count);
       payload.vessel = normalizeBeerVessel(payload.vessel);
+    }
+    if (module.id === "spirits") {
+      payload.fill_level = nearestFillStop(payload.fill_level);
+      payload.stock_count = spiritStock(payload.stock_count ?? 1);
     }
     try {
       await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(payload)});
@@ -1013,6 +1045,22 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             ))}
           </div>
           <small className="field-hint">{packagedStockLabel(n, form.vessel)}</small>
+        </div>;
+      }
+      if (field.type === "fillLevel") {
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <FillLevelScale value={form.fill_level} onChange={(fill) => setForm({ ...form, fill_level: fill })}/>
+        </div>;
+      }
+      if (field.type === "spiritStock") {
+        const n = spiritStock(form.stock_count);
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <div className="count-stepper">
+            <button type="button" className="icon-button" aria-label="Remove one bottle" onClick={() => setForm({ ...form, stock_count: Math.max(0, n - 1) })}>−</button>
+            <strong>{n}</strong>
+            <button type="button" className="icon-button" aria-label="Add one bottle" onClick={() => setForm({ ...form, stock_count: n + 1 })}>+</button>
+          </div>
+          <small className="field-hint">{spiritStockLabel(n)}</small>
         </div>;
       }
       if (module.id === "wines" && field.key === "style" && String(form.type) !== "Sparkling" && !String(form.style ?? "").trim()) {
@@ -1212,6 +1260,28 @@ function uniqueWineKinds(items: Item[]) {
     if (style) values.add(style);
   }
   return [...values].sort((a, b) => a.localeCompare(b));
+}
+function FillLevelScale({ value, onChange }:{
+  value: unknown; onChange?: (percent: number) => void;
+}) {
+  const current = nearestFillStop(value);
+  const index = Math.max(0, FILL_STOPS.findIndex((stop) => stop.percent === current));
+  const pct = FILL_STOPS.length > 1 ? (index / (FILL_STOPS.length - 1)) * 100 : 0;
+  const readOnly = !onChange;
+  return (
+    <div className={`wine-scale fill-scale${readOnly ? " read-only" : ""}`}>
+      <div className="wine-scale-track" aria-hidden="true">
+        <span className="wine-scale-marker" style={{ left: `${pct}%` }}/>
+      </div>
+      <div className="wine-scale-stops" role={readOnly ? "list" : "radiogroup"} aria-label="Fill">
+        {FILL_STOPS.map((stop) => readOnly ? (
+          <span role="listitem" key={stop.percent} className={stop.percent === current ? "wine-scale-stop active" : "wine-scale-stop"}>{stop.label}</span>
+        ) : (
+          <button type="button" key={stop.percent} className={stop.percent === current ? "wine-scale-stop active" : "wine-scale-stop"} aria-pressed={stop.percent === current} onClick={() => onChange(stop.percent)}>{stop.label}</button>
+        ))}
+      </div>
+    </div>
+  );
 }
 function WineSweetnessScale({ type, style, value, onChange }:{
   type: string; style: string; value: string; onChange?: (value: string) => void;

@@ -178,6 +178,14 @@ export const KEG_REMAINING_STOPS = [
   { label: "Kicked", percent: 0 }
 ];
 
+export const FILL_STOPS = [
+  { label: "Full", percent: 100 },
+  { label: "¾", percent: 75 },
+  { label: "Half", percent: 50 },
+  { label: "¼", percent: 25 },
+  { label: "Empty", percent: 0 }
+];
+
 export function roundLiters(value: number): number {
   return Math.round(Math.max(0, value) * 1000) / 1000;
 }
@@ -210,6 +218,61 @@ export function kegSizeLabel(liters: number): string {
   if (match) return `${match.label} · ${match.liters} L`;
   const n = Number(liters);
   return Number.isFinite(n) && n > 0 ? `${n} L` : "";
+}
+
+export function nearestFillStop(fill: unknown): number {
+  const pct = Math.max(0, Math.min(100, Number(fill) || 0));
+  return FILL_STOPS.reduce((best, stop) =>
+    Math.abs(stop.percent - pct) < Math.abs(best - pct) ? stop.percent : best, FILL_STOPS[0].percent);
+}
+
+export function fillStopLabel(fill: unknown): string {
+  const pct = nearestFillStop(fill);
+  return FILL_STOPS.find((stop) => stop.percent === pct)?.label ?? `${pct}%`;
+}
+
+export function pourSpirit(fill: unknown): number {
+  return Math.max(0, nearestFillStop(fill) - 25);
+}
+
+export function spiritStock(count: unknown): number {
+  const n = Math.floor(Number(count));
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+export function spiritStockLabel(count: unknown): string {
+  const n = count == null || String(count).trim() === "" ? 1 : spiritStock(count);
+  if (n <= 0) return "No bottles";
+  return n === 1 ? "1 bottle" : `${n} bottles`;
+}
+
+export function isSpiritEmpty(item: Record<string, unknown> | null | undefined): boolean {
+  if (!item) return true;
+  const stock = item.stock_count == null || String(item.stock_count).trim() === "" ? 1 : spiritStock(item.stock_count);
+  return nearestFillStop(item.fill_level) <= 0 && stock <= 1;
+}
+
+export function openNextSpirit(item: Record<string, unknown>): { fill_level: number; stock_count: number } | null {
+  const stock = item.stock_count == null || String(item.stock_count).trim() === "" ? 1 : spiritStock(item.stock_count);
+  if (nearestFillStop(item.fill_level) > 0 || stock <= 1) return null;
+  return { fill_level: 100, stock_count: stock - 1 };
+}
+
+export function compareSpirits(a: Record<string, unknown>, b: Record<string, unknown>): number {
+  const empty = (isSpiritEmpty(a) ? 1 : 0) - (isSpiritEmpty(b) ? 1 : 0);
+  if (empty !== 0) return empty;
+  const family = String(a.category ?? "").localeCompare(String(b.category ?? ""), undefined, { sensitivity: "base" });
+  if (family !== 0) return family;
+  const brand = String(a.brand ?? "").localeCompare(String(b.brand ?? ""), undefined, { sensitivity: "base" });
+  if (brand !== 0) return brand;
+  return String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { sensitivity: "base" });
+}
+
+export function prepareSpiritWrite(body: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...body };
+  if (next.fill_level !== undefined) next.fill_level = nearestFillStop(next.fill_level);
+  if (next.stock_count !== undefined) next.stock_count = spiritStock(next.stock_count);
+  return next;
 }
 
 export function brewToTap(brew: Record<string, unknown>, tappedDate = new Date().toISOString().slice(0, 10)): Record<string, unknown> {

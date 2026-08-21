@@ -8,7 +8,9 @@ import {
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch,
-  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite
+  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite,
+  compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
+  prepareSpiritWrite, spiritStock, spiritStockLabel
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -129,6 +131,47 @@ test("preparePackagedWrite clamps count and normalizes vessel", () => {
   const saved = preparePackagedWrite({ count: -3, vessel: "crowler" });
   assert.equal(saved.count, 0);
   assert.equal(saved.vessel, "Crowler");
+});
+
+test("spirit fill snaps to 25% stops and pours down a quarter", () => {
+  assert.equal(nearestFillStop(100), 100);
+  assert.equal(nearestFillStop(70), 75);
+  assert.equal(nearestFillStop(60), 50);
+  assert.equal(nearestFillStop(12), 0);
+  assert.equal(fillStopLabel(75), "¾");
+  assert.equal(fillStopLabel(0), "Empty");
+  assert.equal(pourSpirit(100), 75);
+  assert.equal(pourSpirit(25), 0);
+  assert.equal(pourSpirit(0), 0);
+});
+
+test("spirit stock, open next, empty bottles, and out-of-stock sort", () => {
+  assert.equal(spiritStock(2.9), 2);
+  assert.equal(spiritStock(-1), 0);
+  assert.equal(spiritStockLabel(1), "1 bottle");
+  assert.equal(spiritStockLabel(3), "3 bottles");
+  assert.equal(spiritStockLabel(0), "No bottles");
+  assert.equal(spiritStockLabel(undefined), "1 bottle");
+  assert.equal(isSpiritEmpty({ fill_level: 0, stock_count: 1 }), true);
+  assert.equal(isSpiritEmpty({ fill_level: 0, stock_count: 0 }), true);
+  assert.equal(isSpiritEmpty({ fill_level: 0, stock_count: 2 }), false);
+  assert.equal(isSpiritEmpty({ fill_level: 50, stock_count: 1 }), false);
+  assert.equal(isSpiritEmpty({ fill_level: 0 }), true);
+  assert.deepEqual(openNextSpirit({ fill_level: 0, stock_count: 3 }), { fill_level: 100, stock_count: 2 });
+  assert.equal(openNextSpirit({ fill_level: 0, stock_count: 1 }), null);
+  assert.equal(openNextSpirit({ fill_level: 25, stock_count: 4 }), null);
+  const sorted = [
+    { name: "Empty Rye", brand: "A", category: "Whiskey", fill_level: 0, stock_count: 1 },
+    { name: "Gin", brand: "B", category: "Gin", fill_level: 50, stock_count: 1 },
+    { name: "Bourbon", brand: "A", category: "Whiskey", fill_level: 100, stock_count: 1 }
+  ].sort(compareSpirits).map((row) => row.name);
+  assert.deepEqual(sorted, ["Gin", "Bourbon", "Empty Rye"]);
+});
+
+test("prepareSpiritWrite snaps fill and clamps bottle count", () => {
+  const saved = prepareSpiritWrite({ fill_level: 68, stock_count: -2 });
+  assert.equal(saved.fill_level, 75);
+  assert.equal(saved.stock_count, 0);
 });
 
 test("empty taps are None and firstEmptyTapNumber picks a free handle", () => {
