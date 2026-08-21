@@ -12,6 +12,7 @@ import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } f
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, saveImageBuffer } from "./images.js";
+import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
@@ -113,7 +114,35 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
 app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   if (!tables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
+  deleteReviewsForItem(request.params.table, Number(request.params.id));
   db.prepare(`DELETE FROM ${request.params.table} WHERE id=?`).run(request.params.id);
+  return reply.code(204).send();
+});
+
+app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/reviews", async (request, reply) => {
+  if (!REVIEW_TABLES.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
+  return listReviews(request.params.table, Number(request.params.id));
+});
+
+app.post<{ Params: { table: string; id: string }; Body: { author?: string; body?: string } }>("/api/inventory/:table/:id/reviews", {
+  schema: { tags: ["Reviews"], summary: "Post a guest review" }
+}, async (request, reply) => {
+  if (!REVIEW_TABLES.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
+  try {
+    const review = createReview(request.params.table, Number(request.params.id), request.body.author ?? "", request.body.body ?? "");
+    return reply.code(201).send(review);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not save review";
+    const code = /not found/i.test(message) ? 404 : 400;
+    return reply.code(code).send({ error: message });
+  }
+});
+
+app.delete<{ Params: { id: string } }>("/api/reviews/:id", {
+  schema: { tags: ["Reviews"], summary: "Delete a guest review" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  if (!deleteReview(Number(request.params.id))) return reply.code(404).send({ error: "Review not found" });
   return reply.code(204).send();
 });
 
