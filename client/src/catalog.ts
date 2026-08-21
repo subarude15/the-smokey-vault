@@ -61,3 +61,8 @@ export {
   onTapLabel, parseGravity, tapsForBatch,
   comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedCount, packagedStockLabel
 } from "../../src/catalog";
+
+export {
+  SEASONS, collectionGroup, compareCocktails, currentSeason
+} from "../../src/cocktails";
+export type { IngredientLine } from "../../src/cocktails";

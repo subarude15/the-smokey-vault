@@ -17,7 +17,7 @@ import {
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
-  packagedCount, packagedStockLabel
+  packagedCount, packagedStockLabel, SEASONS, collectionGroup, compareCocktails, currentSeason
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -343,7 +343,7 @@ export default function App() {
               navigate("taps");
             } : undefined}
           />)}
-          {page === "cocktails" && <Cocktails/>}
+          {page === "cocktails" && <Cocktails admin={admin}/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
@@ -1092,30 +1092,184 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     {error && <p className="error">{error}</p>}<footer className="modal-footer"><button type="button" className="secondary" onClick={close}>Cancel</button><button className="primary">Save to vault</button></footer></form></div>;
 }
 
-type CocktailDrink = Item & { ingredients:string[]; missing:string[]; readiness:string; season:string; garnish:string; method:string; glassware:string; collection:string };
+type IngredientLine = { text: string; state: "have" | "pantry" | "substitute" | "missing"; using?: string };
+type CocktailDrink = Item & {
+  ingredients: string[];
+  lines?: IngredientLine[];
+  missing: string[];
+  readiness: string;
+  season: string;
+  garnish: string;
+  method: string;
+  glassware: string;
+  collection: string;
+  notes?: string;
+};
 
-function Cocktails() {
-  const [drinks,setDrinks] = useState<CocktailDrink[]>([]);
-  const [filter,setFilter] = useState("ready");
-  const [season,setSeason] = useState("All");
-  const [selected,setSelected] = useState<CocktailDrink>();
-  const [loadError,setLoadError] = useState("");
-  useEffect(()=>{api<typeof drinks>("/cocktails/match").then(setDrinks).catch((err)=>setLoadError(err instanceof Error?err.message:"Could not load cocktail matches."));},[]);
-  const inSeason = drinks.filter((drink)=>season==="All"||drink.season===season);
-  const shown = inSeason.filter((drink)=>filter==="all"||drink.readiness===filter);
-  const ready = inSeason.filter((drink)=>drink.readiness==="ready");
-  function surprise(){if(!ready.length)return;setSelected(ready[Math.floor(Math.random()*ready.length)]);}
-  return <><PageTitle eyebrow="THE RECIPE INDEX" title="What can I make?" subtitle="Live matches against your shelves, including pantry staples and smart spirit substitutions."/>
+function readinessLabel(readiness: string) {
+  return readiness === "ready" ? "READY TO POUR" : readiness === "almost" ? "ONE ITEM AWAY" : "BUILD THE SHELF";
+}
+
+function cocktailLines(drink: CocktailDrink): IngredientLine[] {
+  if (drink.lines?.length) return drink.lines;
+  return (drink.ingredients ?? []).map((text) => ({
+    text,
+    state: drink.missing?.includes(text) ? "missing" : "have"
+  }));
+}
+
+function Cocktails({ admin }: { admin: boolean }) {
+  const [drinks, setDrinks] = useState<CocktailDrink[]>([]);
+  const [filter, setFilter] = useState("ready");
+  const [season, setSeason] = useState("All");
+  const [collection, setCollection] = useState("All");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<CocktailDrink>();
+  const [loadError, setLoadError] = useState("");
+  const nowSeason = currentSeason();
+  function load() {
+    api<CocktailDrink[]>("/cocktails/match")
+      .then((rows) => setDrinks([...rows].sort(compareCocktails)))
+      .catch((err) => setLoadError(err instanceof Error ? err.message : "Could not load cocktail matches."));
+  }
+  useEffect(() => { load(); }, []);
+  const queried = drinks.filter((drink) => {
+    if (season !== "All" && drink.season !== season) return false;
+    if (collection !== "All" && collectionGroup(drink.collection) !== collection) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [drink.name, drink.method, drink.glassware, drink.collection, ...(drink.ingredients ?? [])]
+      .join(" ").toLowerCase().includes(q);
+  });
+  const shown = queried.filter((drink) => filter === "all" || drink.readiness === filter);
+  const ready = queried.filter((drink) => drink.readiness === "ready");
+  const almost = queried.filter((drink) => drink.readiness === "almost");
+  function surprise() {
+    if (!ready.length) return;
+    setSelected(ready[Math.floor(Math.random() * ready.length)]);
+  }
+  return <>
+    <PageTitle
+      eyebrow="THE RECIPE INDEX"
+      title="What can I make?"
+      subtitle={`${ready.length} ready to pour · ${almost.length} one bottle away. Citrus, sugar, soda, and mint are pantry. Bourbon can stand in for rye.`}
+    />
     {loadError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load recipes</strong><span>{loadError}</span></div></div>}
-    <div className="cocktail-toolbar"><div className="segmented cocktail-filters">{[["ready","Ready now"],["almost","Missing one"],["all","All recipes"]].map(([id,label])=><button key={id} className={filter===id?"active":""} onClick={()=>setFilter(id)}>{label}</button>)}</div><button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button></div>
-    <section className="season-section"><span className="eyebrow">SEASONAL COCKTAILS</span><div className="season-filters">{["All","Spring","Summer","Fall","Winter","Holiday"].map((value)=><button key={value} className={season===value?"active":""} onClick={()=>setSeason(value)}>{value==="All"?"All seasons":value}</button>)}</div></section>
-    {!shown.length?<Empty icon={Wine} title="No matching cocktails" text={season==="All"?"Stock a few more ingredients and check back.":`No ${season.toLowerCase()} recipes match this readiness filter.`}/>:<div className="recipe-grid">{shown.map((drink)=><button className="recipe-card" key={drink.id} onClick={()=>setSelected(drink)}><span className={`status ${drink.readiness}`}>{drink.readiness==="ready"?"READY TO POUR":drink.readiness==="almost"?"ONE ITEM AWAY":"BUILD THE SHELF"}</span>{drink.season!=="All"&&<span className="season-tag">{drink.season}</span>}<h3>{drink.name}</h3><p>{drink.method} · {drink.glassware}</p><ul>{drink.ingredients.map((i)=><li key={i}>{i}</li>)}</ul>{drink.missing.length>0&&<small>Missing: {drink.missing.join(", ")}</small>}</button>)}</div>}
-    {selected&&<RecipeModal drink={selected} close={()=>setSelected(undefined)}/>}
+    <div className="cocktail-toolbar">
+      <div className="segmented cocktail-filters">
+        {[["ready", "Ready now"], ["almost", "Missing one"], ["all", "All recipes"]].map(([id, label]) => (
+          <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
+        ))}
+      </div>
+      <button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button>
+    </div>
+    <label className="search cocktail-search"><Search/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Negroni, mezcal, coupe…"/></label>
+    <section className="season-section">
+      <span className="eyebrow">SEASON</span>
+      <div className="season-filters">
+        {SEASONS.map((value) => (
+          <button key={value} className={season === value ? "active" : ""} onClick={() => setSeason(value)}>
+            {value === "All" ? "All seasons" : value === nowSeason ? `${value} · now` : value}
+          </button>
+        ))}
+      </div>
+    </section>
+    <section className="season-section">
+      <span className="eyebrow">COLLECTION</span>
+      <div className="season-filters">
+        {[["All", "All books"], ["Classics", "Classics"], ["Seasonal", "Seasonal"], ["Custom", "Custom"]].map(([id, label]) => (
+          <button key={id} className={collection === id ? "active" : ""} onClick={() => setCollection(id)}>{label}</button>
+        ))}
+      </div>
+    </section>
+    {!shown.length ? <Empty icon={Wine} title="No matching cocktails" text={search.trim() ? "Nothing matches that search." : season === "All" ? "Stock a few more bottles and check back." : `No ${season.toLowerCase()} recipes match this filter.`}/> :
+      <div className="recipe-grid">{shown.map((drink) => {
+        const lines = cocktailLines(drink);
+        const preview = lines.slice(0, 3);
+        return (
+          <button className="recipe-card" key={drink.id} onClick={() => setSelected(drink)}>
+            <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness)}</span>
+            {drink.season !== "All" && <span className="season-tag">{drink.season}</span>}
+            <h3>{drink.name}</h3>
+            <p>{drink.method} · {drink.glassware}</p>
+            <ul className="ingredient-preview">{preview.map((line) => <li key={line.text} className={line.state}>{line.text}</li>)}</ul>
+            {lines.length > 3 ? <small>+{lines.length - 3} more</small> : null}
+            {drink.missing.length > 0 && <small>Missing: {drink.missing.join(", ")}</small>}
+          </button>
+        );
+      })}</div>}
+    {selected && <RecipeModal
+      drink={selected}
+      admin={admin}
+      close={() => setSelected(undefined)}
+      onDeleted={() => { setSelected(undefined); load(); }}
+    />}
   </>;
 }
 
-function RecipeModal({drink,close}:{drink:CocktailDrink;close:()=>void}){
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${drink.name} recipe`}><section className="modal recipe-modal"><header className="modal-header"><div><span className="eyebrow">{drink.collection}{drink.season!=="All"?` · ${drink.season}`:""}</span><h2>{drink.name}</h2><p>{drink.method} · {drink.glassware}</p></div><button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button></header><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{drink.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{drink.method}</strong></div><div><span>GLASS</span><strong>{drink.glassware}</strong></div><div><span>GARNISH</span><strong>{drink.garnish||"None"}</strong></div></div></div>{drink.missing.length>0&&<p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}<footer className="modal-footer"><button className="primary" onClick={close}>Cheers</button></footer></section></div>
+function RecipeModal({ drink, admin, close, onDeleted }:{
+  drink: CocktailDrink; admin: boolean; close: () => void; onDeleted: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [removing, setRemoving] = useState(false);
+  const lines = cocktailLines(drink);
+  const custom = drink.collection === "Custom Cocktails";
+  async function remove() {
+    if (!custom || !admin || !confirm("Remove this custom recipe?")) return;
+    setRemoving(true);
+    setError("");
+    try {
+      await api(`/cocktails/${drink.id}`, { method: "DELETE" });
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove recipe");
+      setRemoving(false);
+    }
+  }
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${drink.name} recipe`}>
+      <section className="modal recipe-modal">
+        <header className="modal-header">
+          <div>
+            <span className="eyebrow">{drink.collection}{drink.season !== "All" ? ` · ${drink.season}` : ""}</span>
+            <h2>{drink.name}</h2>
+            <p>{drink.method} · {drink.glassware}</p>
+          </div>
+          <button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button>
+        </header>
+        <div className="recipe-modal-body">
+          <div>
+            <span className="eyebrow">INGREDIENTS</span>
+            <ul className="ingredient-list">
+              {lines.map((line) => (
+                <li key={line.text} className={line.state}>
+                  <span className="mark" aria-hidden="true">{line.state === "missing" ? "○" : line.state === "substitute" ? "◐" : "●"}</span>
+                  <span>
+                    {line.text}
+                    {line.state === "substitute" && line.using ? <small> using {line.using}</small> : null}
+                    {line.state === "have" && line.using ? <small> · {line.using}</small> : null}
+                    {line.state === "pantry" ? <small> · pantry</small> : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="recipe-details">
+            <div><span>METHOD</span><strong>{drink.method}</strong></div>
+            <div><span>GLASS</span><strong>{drink.glassware}</strong></div>
+            <div><span>GARNISH</span><strong>{drink.garnish || "None"}</strong></div>
+          </div>
+        </div>
+        {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
+        {drink.missing.length > 0 && <p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}
+        {error ? <p className="error">{error}</p> : null}
+        <footer className="modal-footer">
+          {admin && custom && <button type="button" className="secondary danger" disabled={removing} onClick={remove}><Trash2 size={16}/> Remove</button>}
+          <button className="primary" onClick={close}>Cheers</button>
+        </footer>
+      </section>
+    </div>
+  );
 }
 
 type GeneratedRecipe = { name:string; ingredients:string[]; method:string; glassware:string; garnish:string; season:string; notes:string };
@@ -1124,8 +1278,8 @@ function Mixologist({admin,goSettings}:{admin:boolean;goSettings:()=>void}) {
   const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
   async function ask(request=prompt){setLoading(true);setRecipe(undefined);setError("");setSaved(false);try{const data=await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request})});setRecipe(data.recipe);}catch(e){setError(e instanceof Error?e.message:"The AI service could not generate a recipe.");}finally{setLoading(false);}}
   async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
-  return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Tell us a flavor, feeling, occasion, or ingredient. Your inventory shapes every recommendation."/>
-    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from my current inventory. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from my vault</button></div>
+  return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples."/>
+    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from my vault</button></div>
     {loading&&<div className="ai-loading"><LoaderCircle className="spinner"/><div><strong>The mixologist is measuring…</strong><span>Balancing your inventory, flavors, and request.</span></div></div>}
     {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div>{admin&&/Settings|API key|provider/i.test(error)&&<button className="secondary" onClick={goSettings}>Open Settings</button>}</div>}
     {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}</div>
