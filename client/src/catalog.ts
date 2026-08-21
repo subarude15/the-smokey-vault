@@ -75,3 +75,4 @@ export {
   RESTOCK_PACKAGED_STOPS, RESTOCK_SPIRIT_STOPS, RESTOCK_WINE_STOPS
 } from "../../src/restock";
 export type { RestockItem, RestockThresholds, WantedLabel } from "../../src/restock";
+export { extractSharedRecipeUrl } from "../../src/recipe_share";
