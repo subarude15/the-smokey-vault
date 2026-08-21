@@ -360,8 +360,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load the house snapshot."));
   }
   useEffect(() => { load(); }, []);
-  const orbitValue = snap?.cocktails.ready || snap?.taps.pouring || snap?.spirits.on_shelf || 0;
-  const orbitLabel = snap?.cocktails.ready ? "READY TO MIX" : snap?.taps.pouring ? "ON TAP" : "ON THE SHELF";
+  const orbitValue = snap?.spirits.on_shelf ?? 0;
+  const orbitLabel = "BOTTLES";
   const stats = snap ? [
     { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: snap.spirits.low ? `${snap.spirits.low} running low` : "Spirits & mixers" },
     { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: `${snap.taps.empty} open handle${snap.taps.empty === 1 ? "" : "s"}` },
@@ -381,12 +381,15 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
-      <div>
+      <div className="hero-copy">
         <span className="eyebrow">{greeting.eyebrow}</span>
         <h1>{greeting.line}<br/><em>{greeting.emphasize}</em></h1>
-        <p>{snap ? overviewHeroCopy(snap) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
       </div>
-      <div className="hero-orbit"><Wine/><span>{orbitValue}<small>{orbitLabel}</small></span></div>
+      <div className="hero-orbit" aria-label={`${orbitValue} bottles on the shelf`}>
+        <Wine/>
+        <span>{orbitValue}<small>{orbitLabel}</small></span>
+      </div>
+      <p className="hero-lede">{snap ? overviewHeroCopy(snap) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
     </div>
     <section>
       <div className="section-heading">
