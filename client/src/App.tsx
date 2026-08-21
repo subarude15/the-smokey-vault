@@ -2169,8 +2169,26 @@ function Mixologist({admin,goSettings}:{admin:boolean;goSettings:()=>void}) {
   </>;
 }
 
+const AI_PROVIDERS = [
+  { id: "ollama", label: "Ollama" },
+  { id: "openai", label: "OpenAI" },
+  { id: "anthropic", label: "Anthropic" },
+  { id: "openrouter", label: "OpenRouter" }
+];
+
+function lastBackupLabel(iso?: string) {
+  const stamp = Date.parse(iso ?? "");
+  if (!stamp) return "No portable copy downloaded yet.";
+  const days = Math.floor((Date.now() - stamp) / 86_400_000);
+  if (days <= 0) return "You took a portable copy today.";
+  if (days === 1) return "Last portable copy was yesterday.";
+  return `Last portable copy was ${days} days ago.`;
+}
+
 function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void}) {
-  const [settings,setSettings] = useState<Record<string,string>>({}); const [message,setMessage]=useState(""); const [themeText,setThemeText]=useState("");
+  const [settings,setSettings] = useState<Record<string,string>>({});
+  const [message,setMessage]=useState("");
+  const [themeText,setThemeText]=useState("");
   const [quota,setQuota] = useState<{
     configured?: boolean; message?: string; source?: string; tier?: string;
     detail_views_remaining?: string | null; detail_views_limit?: string | null;
@@ -2181,55 +2199,198 @@ function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void})
     api<Record<string,string>>("/settings").then(setSettings).catch((err)=>setMessage(err instanceof Error?err.message:"Could not load settings"));
     api<NonNullable<typeof quota>>("/cola/quota").then((data)=>{setQuota(data);setQuotaError("");}).catch((err)=>setQuotaError(err instanceof Error?err.message:"Unable to read COLA Cloud quota"));
   },[]);
-  async function save(){try{await api("/settings",{method:"PUT",body:JSON.stringify(settings)});setMessage("Settings saved");}catch(err){setMessage(err instanceof Error?err.message:"Could not save settings");}}
+  async function persist(next: Record<string, string>, ok: string) {
+    setSettings(next);
+    try {
+      await api("/settings", { method: "PUT", body: JSON.stringify(next) });
+      setMessage(ok);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not save settings");
+    }
+  }
+  async function save() { await persist(settings, "Mixologist settings saved"); }
   async function saveRestock(partial: Partial<RestockThresholds>) {
     const current = parseRestockThresholds(settings);
-    const next = {
+    await persist({
       ...settings,
       restockPackagedBelow: String(partial.packagedBelow ?? current.packagedBelow),
       restockSpiritFill: String(partial.spiritFill ?? current.spiritFill),
       restockWineBelow: String(partial.wineBelow ?? current.wineBelow)
-    };
-    setSettings(next);
+    }, "Restock rules saved");
+  }
+  async function pickTheme(next: string) {
+    setTheme(next);
+    if (!settings.themeTokens) return;
+    await persist({ ...settings, themeTokens: "" }, "Back to a built-in theme");
+  }
+  async function applyThemeJson(text:string){
     try {
-      await api("/settings", { method: "PUT", body: JSON.stringify(next) });
-      setMessage("Restock rules saved");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not save restock rules");
+      const raw=JSON.parse(text);
+      const flat=raw.schemes?.dark??raw.dark??raw;
+      const tokens:Record<string,string>={"--accent":flat.primary,"--bg":flat.background,"--surface":flat.surface,"--text":flat.onSurface,"--line":flat.outlineVariant};
+      Object.keys(tokens).forEach((k)=>!tokens[k]&&delete tokens[k]);
+      applyTheme("custom",tokens);
+      await persist({ ...settings, themeTokens: JSON.stringify(tokens) }, "Custom theme saved");
+    } catch {
+      setMessage("That content is not valid Material theme JSON.");
     }
   }
-  function applyThemeJson(text:string){try{const raw=JSON.parse(text);const flat=raw.schemes?.dark??raw.dark??raw;const tokens:Record<string,string>={"--accent":flat.primary,"--bg":flat.background,"--surface":flat.surface,"--text":flat.onSurface,"--line":flat.outlineVariant};Object.keys(tokens).forEach((k)=>!tokens[k]&&delete tokens[k]);applyTheme("custom",tokens);setSettings((current)=>({...current,themeTokens:JSON.stringify(tokens)}));setMessage("Material tokens applied — save to persist.");}catch{setMessage("That content is not valid Material theme JSON.");}}
-  function importTheme(file:File){const reader=new FileReader();reader.onload=()=>applyThemeJson(String(reader.result));reader.readAsText(file);}
-  const download=(format:"db"|"json")=>{downloadExport(format).catch(()=>setMessage("Export failed"));};
+  function importTheme(file:File){const reader=new FileReader();reader.onload=()=>void applyThemeJson(String(reader.result));reader.readAsText(file);}
+  const download=(format:"db"|"json")=>{
+    downloadExport(format)
+      .then(() => {
+        setSettings((current) => ({ ...current, lastBackupDownload: new Date().toISOString() }));
+        setMessage("Portable copy downloaded");
+      })
+      .catch(()=>setMessage("Export failed"));
+  };
   const restockRules = parseRestockThresholds(settings);
-  return <><PageTitle eyebrow="VAULT ADMINISTRATION" title="Settings & maintenance" subtitle="Security, appearance, AI providers, and durable backups."/>
-    <div className="settings-grid"><section className="settings-card"><h3>Appearance</h3><p>Choose a contrast profile for every display.</p><div className="theme-grid">{["light","dark","oled"].map((t)=><button key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}><span className={`theme-swatch ${t}`}/>{t==="oled"?"OLED Black":t[0].toUpperCase()+t.slice(1)}</button>)}</div><label className="secondary file-button"><Upload/> Import Material theme<input type="file" accept=".json,application/json" onChange={(e)=>e.target.files?.[0]&&importTheme(e.target.files[0])}/></label><textarea value={themeText} onChange={(e)=>setThemeText(e.target.value)} placeholder="Or paste theme.json / tokens.json here"/><button className="secondary" disabled={!themeText} onClick={()=>applyThemeJson(themeText)}>Apply pasted tokens</button></section>
-      <section className="settings-card"><h3>Restock list</h3><p>Live snapshot of what is low right now — not a pour history. Tap a cutoff; it saves immediately. Bottles with a spare stay off the list so you can Open next instead of buying.</p>
+  return <>
+    <PageTitle
+      eyebrow="THE KEEPER"
+      title="The house keys."
+      subtitle="PIN, restock cutoffs, Mixologist, and a copy of the vault you can take with you."
+    />
+    <div className="settings-grid">
+      <section className="settings-card">
+        <span className="eyebrow">UNLOCK</span>
+        <h3>Master PIN</h3>
+        <p>4–12 digits. Changing it does not lock you out of this session.</p>
+        <PinChange onMessage={setMessage}/>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">DISPLAY</span>
+        <h3>Appearance</h3>
+        <p>Tap a profile for this screen. Guest night uses the same toggle in the top bar.</p>
+        <div className="theme-grid">{(["light","dark","oled"] as const).map((t)=>(
+          <button type="button" key={t} className={theme===t?"active":""} onClick={()=>void pickTheme(t)}>
+            <span className={`theme-swatch ${t}`}/>{t==="oled"?"OLED Black":t[0].toUpperCase()+t.slice(1)}
+          </button>
+        ))}</div>
+        <details className="settings-advanced">
+          <summary>Paste a custom theme</summary>
+          <label className="secondary file-button"><Upload/> Import Material theme<input type="file" accept=".json,application/json" onChange={(e)=>e.target.files?.[0]&&importTheme(e.target.files[0])}/></label>
+          <textarea value={themeText} onChange={(e)=>setThemeText(e.target.value)} placeholder="Paste theme.json / tokens.json"/>
+          <button type="button" className="secondary" disabled={!themeText} onClick={()=>void applyThemeJson(themeText)}>Apply and save</button>
+        </details>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">STORE RUN</span>
+        <h3>Restock list</h3>
+        <p>Live snapshot of what is low right now — not a pour history. Tap a cutoff; it saves immediately. Bottles with a spare stay off the list so you can Open next instead of buying.</p>
         <label><span>Cans &amp; bottles — flag when below</span><div className="chip-row restock-stops">{RESTOCK_PACKAGED_STOPS.map((count) => <button type="button" key={count} className={`chip${restockRules.packagedBelow === count ? " active" : ""}`} onClick={() => void saveRestock({ packagedBelow: count })}>{count}</button>)}</div></label>
         <label><span>Spirits — flag at or below</span><div className="chip-row restock-stops">{FILL_STOPS.filter((stop) => stop.percent <= 75).map((stop) => <button type="button" key={stop.percent} className={`chip${restockRules.spiritFill === stop.percent ? " active" : ""}`} onClick={() => void saveRestock({ spiritFill: stop.percent })}>{stop.label}</button>)}</div></label>
         <label><span>Wine — flag when below</span><div className="chip-row restock-stops">{RESTOCK_WINE_STOPS.map((count) => <button type="button" key={count} className={`chip${restockRules.wineBelow === count ? " active" : ""}`} onClick={() => void saveRestock({ wineBelow: count })}>{count}</button>)}</div></label>
       </section>
-      <section className="settings-card"><h3>COLA Cloud lookup</h3><p>Barcode and name search use your vault first, then COLA Cloud when a key is configured on the server.</p>
+      <section className="settings-card">
+        <div className="ai-settings-heading">
+          <div>
+            <span className="eyebrow">CUSTOM CREATIONS</span>
+            <h3>Mixologist</h3>
+          </div>
+          {settings.aiConfiguredViaEnvironment==="true"&&<span className="environment-badge">On the server</span>}
+        </div>
+        <p>{settings.aiConfiguredViaEnvironment==="true"
+          ? `Using ${settings.aiEnvironmentProvider} · ${settings.aiEnvironmentModel}. The server key wins over anything typed below.`
+          : "Keys stay in your own vault database. Tap a provider, then save."}</p>
+        <label>
+          <span>Provider</span>
+          <div className="chip-row restock-stops">
+            {AI_PROVIDERS.map((provider) => (
+              <button type="button" key={provider.id} className={`chip${(settings.aiProvider??"ollama") === provider.id ? " active" : ""}`} onClick={() => setSettings({ ...settings, aiProvider: provider.id })}>{provider.label}</button>
+            ))}
+          </div>
+        </label>
+        <label><span>Model</span><input value={settings.aiModel??""} onChange={(e)=>setSettings({...settings,aiModel:e.target.value})} placeholder="gpt-4o-mini, llama3.1…"/></label>
+        <label><span>API key</span><input type="password" autoComplete="off" value={settings.aiApiKey??""} onChange={(e)=>setSettings({...settings,aiApiKey:e.target.value})}/></label>
+        <label><span>Base URL (optional)</span><input value={settings.aiBaseUrl??""} onChange={(e)=>setSettings({...settings,aiBaseUrl:e.target.value})} placeholder="Leave blank unless you run your own endpoint"/></label>
+        <button type="button" className="primary" onClick={() => void save()}>Save Mixologist</button>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">SCAN</span>
+        <h3>COLA Cloud lookup</h3>
+        <p>Scan and name search check the vault first, then COLA Cloud when a key is on the server.</p>
         {quotaError && <div className="ai-error"><CircleAlert/><div><strong>Quota unavailable</strong><span>{quotaError}</span></div></div>}
-        {quota && quota.configured === false && <p>{quota.message ?? "Set COLA_API_KEY to enable COLA Cloud lookups."}</p>}
+        {quota && quota.configured === false && <p>{quota.message ?? "Add COLA_API_KEY on the server to look up bottles outside the vault."}</p>}
         {quota && quota.configured !== false && !quotaError && <div className="stack">
           {quota?.tier && <span className="environment-badge">{quota.tier} tier</span>}
-          <div className="quota-stat"><span>Detail views</span><strong>{quota?.detail_views_remaining ?? "—"}{quota?.detail_views_limit ? ` / ${quota.detail_views_limit}` : ""}</strong></div>
-          <div className="quota-stat"><span>List records</span><strong>{quota?.list_records_remaining ?? "—"}{quota?.list_records_limit ? ` / ${quota.list_records_limit}` : ""}</strong></div>
+          <div className="quota-row">
+            <div className="quota-stat"><span>Detail views</span><strong>{quota?.detail_views_remaining ?? "—"}{quota?.detail_views_limit ? ` / ${quota.detail_views_limit}` : ""}</strong></div>
+            <div className="quota-stat"><span>List records</span><strong>{quota?.list_records_remaining ?? "—"}{quota?.list_records_limit ? ` / ${quota.list_records_limit}` : ""}</strong></div>
+          </div>
           {quota?.quota_reset && <small>Resets {quota.quota_reset}</small>}
-          {quota?.detail_views_remaining === "0" && <p className="error">Detail quota is exhausted. Lookups will use cache and Open Food Facts until it resets.</p>}
+          {quota?.detail_views_remaining === "0" && <p className="error">Detail quota is used up. Lookups will use cache and Open Food Facts until it resets.</p>}
         </div>}
       </section>
-      <section className="settings-card"><div className="ai-settings-heading"><h3>AI provider</h3>{settings.aiConfiguredViaEnvironment==="true"&&<span className="environment-badge">Configured via Server Environment</span>}</div><p>{settings.aiConfiguredViaEnvironment==="true"?`Using ${settings.aiEnvironmentProvider} · ${settings.aiEnvironmentModel}. Server environment values take precedence over fields below.`:"Keys saved here stay in your own SQLite database."}</p><label><span>Provider</span><select value={settings.aiProvider??"ollama"} onChange={(e)=>setSettings({...settings,aiProvider:e.target.value})}>{["ollama","openai","anthropic","openrouter"].map((x)=><option key={x}>{x}</option>)}</select></label><label><span>Model</span><input value={settings.aiModel??""} onChange={(e)=>setSettings({...settings,aiModel:e.target.value})}/></label><label><span>API key</span><input type="password" value={settings.aiApiKey??""} onChange={(e)=>setSettings({...settings,aiApiKey:e.target.value})}/></label><label><span>Base URL (optional)</span><input value={settings.aiBaseUrl??""} onChange={(e)=>setSettings({...settings,aiBaseUrl:e.target.value})}/></label><button className="primary" onClick={save}>Save AI settings</button></section>
-      <section className="settings-card"><h3>Data maintenance</h3><p>Daily snapshots are retained in <code>/data/backups</code>. Download a portable copy anytime.</p><div className="stack"><button className="secondary" onClick={()=>download("db")}><Database/> Download SQLite</button><button className="secondary" onClick={()=>download("json")}><Download/> Download JSON</button><button className="secondary" onClick={()=>api("/backups/snapshot",{method:"POST"}).then(()=>setMessage("Snapshot created"))}><Database/> Snapshot now</button></div></section>
-      <section className="settings-card"><h3>Spreadsheet import</h3><p>CSV headers should match the field names shown in the API docs.</p><CsvImport/></section>
-      <section className="settings-card"><h3>Master PIN</h3><p>Use 4–12 digits. Changing it does not end your current session.</p><PinChange onMessage={setMessage}/></section>
-    </div>{message&&<div className="toast">{message}</div>}</>;
+      <section className="settings-card">
+        <span className="eyebrow">PORTABLE COPY</span>
+        <h3>Backup</h3>
+        <p>Daily snapshots stay on this machine. Download a copy when you want one in the drawer. {lastBackupLabel(settings.lastBackupDownload)}</p>
+        <div className="stack">
+          <button type="button" className="secondary" onClick={()=>download("db")}><Database/> Download the vault</button>
+          <button type="button" className="secondary" onClick={()=>download("json")}><Download/> Download JSON</button>
+          <button type="button" className="secondary" onClick={()=>api("/backups/snapshot",{method:"POST"}).then(()=>setMessage("Snapshot saved on this machine"))}><Database/> Snapshot now</button>
+        </div>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">BULK ADD</span>
+        <h3>Spreadsheet import</h3>
+        <p>Tap the section, pick a CSV, then import. Column names should match the add-bottle fields.</p>
+        <CsvImport/>
+      </section>
+    </div>
+    {message&&<div className="toast">{message}</div>}
+  </>;
 }
 
-function CsvImport(){const [table,setTable]=useState("spirits");const [file,setFile]=useState<File>();const [status,setStatus]=useState("");const [error,setError]=useState("");async function run(){if(!file)return;setError("");try{const csv=await file.text();const result=await api<{imported:number}>(`/import/${table}`,{method:"POST",body:JSON.stringify({csv})});setStatus(`${result.imported} rows imported`);}catch(err){setError(err instanceof Error?err.message:"Import failed");}}return <div className="stack"><select value={table} onChange={(e)=>setTable(e.target.value)}>{modules.map((m)=><option key={m.id} value={m.id}>{m.label}</option>)}</select><label className="secondary file-button"><Upload/> Choose CSV<input type="file" accept=".csv,text/csv" onChange={(e)=>setFile(e.target.files?.[0])}/></label><button className="primary" disabled={!file} onClick={run}>Import spreadsheet</button>{status&&<small>{status}</small>}{error&&<p className="error">{error}</p>}</div>}
+function CsvImport(){
+  const [table,setTable]=useState("spirits");
+  const [file,setFile]=useState<File>();
+  const [status,setStatus]=useState("");
+  const [error,setError]=useState("");
+  async function run(){
+    if(!file)return;
+    setError("");
+    try{
+      const csv=await file.text();
+      const result=await api<{imported:number}>(`/import/${table}`,{method:"POST",body:JSON.stringify({csv})});
+      setStatus(`${result.imported} rows into ${modules.find((module) => module.id === table)?.label ?? table}`);
+    }catch(err){
+      setError(err instanceof Error?err.message:"Import failed");
+    }
+  }
+  return <div className="stack">
+    <div className="chip-row restock-stops">
+      {modules.map((module)=>(
+        <button type="button" key={module.id} className={`chip${table===module.id?" active":""}`} onClick={()=>setTable(module.id)}>{module.label}</button>
+      ))}
+    </div>
+    <label className="secondary file-button"><Upload/> {file ? file.name : "Choose CSV"}<input type="file" accept=".csv,text/csv" onChange={(e)=>setFile(e.target.files?.[0])}/></label>
+    <button type="button" className="primary" disabled={!file} onClick={() => void run()}>Import spreadsheet</button>
+    {status&&<small>{status}</small>}
+    {error&&<p className="error">{error}</p>}
+  </div>;
+}
 
-function PinChange({onMessage}:{onMessage:(value:string)=>void}){const [currentPin,setCurrentPin]=useState("");const [newPin,setNewPin]=useState("");async function change(){try{await api("/auth/pin",{method:"POST",body:JSON.stringify({currentPin,newPin})});setCurrentPin("");setNewPin("");onMessage("Master PIN updated");}catch(error){onMessage(error instanceof Error?error.message:"Could not update PIN");}}return <div className="stack"><input type="password" inputMode="numeric" placeholder="Current PIN" value={currentPin} onChange={(e)=>setCurrentPin(e.target.value)}/><input type="password" inputMode="numeric" placeholder="New PIN" value={newPin} onChange={(e)=>setNewPin(e.target.value)}/><button className="primary" disabled={!currentPin||!/^\d{4,12}$/.test(newPin)} onClick={change}>Update master PIN</button></div>}
+function PinChange({onMessage}:{onMessage:(value:string)=>void}){
+  const [currentPin,setCurrentPin]=useState("");
+  const [newPin,setNewPin]=useState("");
+  async function change(){
+    try{
+      await api("/auth/pin",{method:"POST",body:JSON.stringify({currentPin,newPin})});
+      setCurrentPin("");
+      setNewPin("");
+      onMessage("Master PIN updated");
+    }catch(error){
+      onMessage(error instanceof Error?error.message:"Could not update PIN");
+    }
+  }
+  return <div className="stack settings-pin">
+    <label><span>Current PIN</span><input type="password" inputMode="numeric" autoComplete="off" value={currentPin} onChange={(e)=>setCurrentPin(e.target.value.replace(/\D/g,"").slice(0,12))}/></label>
+    <label><span>New PIN</span><input type="password" inputMode="numeric" autoComplete="off" value={newPin} onChange={(e)=>setNewPin(e.target.value.replace(/\D/g,"").slice(0,12))}/></label>
+    <button type="button" className="primary" disabled={!currentPin||!/^\d{4,12}$/.test(newPin)} onClick={() => void change()}>Update master PIN</button>
+  </div>;
+}
 
 function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
   const [pin,setPinValue]=useState("");const [error,setError]=useState("");

@@ -113,3 +113,14 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .next-vote-pair .vote-score{min-width:56px;text-align:center}
 .next-empty{color:var(--muted);margin:0}
 @media(max-width:360px){.hero{grid-template-columns:1fr;grid-template-areas:"copy" "orbit" "lede";justify-items:start}.hero-orbit{width:132px;height:132px;margin:10px 0 0}.hero-orbit span{font-size:28px}}
+.settings-card .eyebrow{margin:0}
+.settings-advanced{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:10px}
+.settings-advanced summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:600}
+.settings-advanced[open] summary{margin-bottom:4px;color:var(--text)}
+.settings-pin input{min-height:48px;letter-spacing:.18em;font-size:20px}
+.theme-grid button{min-height:72px}
+.quota-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.quota-stat{border:1px solid var(--line);background:var(--surface-2);border-radius:12px;padding:12px 14px}
+.quota-stat span{display:block;font-size:10px;letter-spacing:.12em;color:var(--muted);font-weight:700}
+.quota-stat strong{display:block;font:600 22px "Playfair Display";margin-top:6px}
+@media(max-width:700px){.quota-row{grid-template-columns:1fr}.theme-grid{grid-template-columns:1fr}}
