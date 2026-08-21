@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Wine, X, ClipboardPaste
+  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, ScanBarcode, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
@@ -109,7 +109,6 @@ type ScanDraft = {
   values: Record<string, unknown>;
   key: number;
   mode: "view" | "edit" | "create";
-  guestAdd?: boolean;
 };
 
 function itemId(values: Record<string, unknown> | undefined) {
@@ -253,7 +252,14 @@ export default function App() {
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
-  const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
+  const lock = useCallback(() => {
+    clearToken();
+    setAdmin(false);
+    setScanner(false);
+    setScanDraft(undefined);
+    setUnlock(false);
+    setPage((current) => ["scan", "restock", "settings"].includes(current) ? "dashboard" : current);
+  }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
   useEffect(() => {
@@ -287,9 +293,10 @@ export default function App() {
   function handleScan(result: ScanResult) {
     const table = result.table;
     const vaultId = result.source === "vault" && table ? itemId(result.product) : 0;
+    if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
     const draft: ScanDraft = vaultId && table
-      ? { moduleId: table, key: Date.now(), values: result.product, mode: admin ? "edit" : "view" }
-      : { ...scannedInventoryDraft(result), guestAdd: !admin };
+      ? { moduleId: table, key: Date.now(), values: result.product, mode: "edit" }
+      : scannedInventoryDraft(result);
     setScanDraft(draft);
     navigate(draft.moduleId);
     if (draft.mode === "view") setScanner(false);
@@ -302,12 +309,19 @@ export default function App() {
     scanReviewResolver.current?.(outcome);
     scanReviewResolver.current = undefined;
   }
-  const nav = [
+  const collectionNav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },
-    { id:"next",label:"What's next",icon:ThumbsUp },
-    { id:"restock",label:"Restock",icon:ShoppingBag,admin:true },{ id:"settings",label:"Settings",icon:Settings,admin:true }
+    { id:"next",label:"What's next",icon:ThumbsUp }
   ];
+  const keeperNav = [
+    { id:"scan",label:"Scan bottles",icon:ScanBarcode },
+    { id:"restock",label:"Restock",icon:ShoppingBag },
+    { id:"settings",label:"Settings",icon:Settings }
+  ];
+  function navButton(item: { id: string; label: string; icon: typeof Bottle }) {
+    return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><item.icon size={19}/>{item.label}<ChevronRight size={15}/></button>;
+  }
 
   return (
     <div className="app-shell">
@@ -316,7 +330,8 @@ export default function App() {
         <div className="brand"><div className="brand-mark"><Wine/></div><div><strong>The Smokey Vault</strong><span>PRIVATE CELLAR</span></div></div>
         <nav>
           <span className="nav-label">COLLECTION</span>
-          {nav.filter((n) => !n.admin || admin).map((item) => <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><item.icon size={19}/>{item.label}<ChevronRight size={15}/></button>)}
+          {collectionNav.map(navButton)}
+          {admin && keeperNav.map(navButton)}
         </nav>
         <div className="sidebar-footer">
           <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Admin unlocked" : "Guest menu"}</strong><small>{admin ? "Tap to lock" : "Read-only access"}</small></span></button>
@@ -327,8 +342,6 @@ export default function App() {
           <button className="icon-button menu-button" onClick={() => setMobileNav(true)}><Menu/></button>
           <div className="top-actions">
             <button className="icon-button" onClick={() => setTheme(theme === "light" ? "dark" : theme === "dark" ? "oled" : "light")} aria-label="Change theme">{theme === "light" ? <Sun/> : <Moon/>}</button>
-            <button className="scan-button" onClick={() => setScanner(true)}><Search size={18}/> Scan bottle</button>
-            <button className="icon-button lock-button" onClick={() => admin ? lock() : setUnlock(true)} aria-label={admin ? "Lock admin mode" : "Unlock admin mode"}>{admin ? <LockOpen/> : <Lock/>}</button>
           </div>
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
@@ -359,14 +372,14 @@ export default function App() {
           {page === "cocktails" && <Cocktails admin={admin} sharedUrl={sharedRecipeUrl} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
+          {page === "scan" && admin && <ScanPage onStart={() => setScanner(true)}/>}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
-      {scanner && !scanDraft && !unlock && <Scanner onClose={() => setScanner(false)} onProduct={handleScan}/>}
-      {scanDraft?.guestAdd && !unlock && <GuestAddPrompt draft={scanDraft} onUnlock={() => setUnlock(true)} onClose={() => { finishScanReview("cancelled"); setScanner(false); }}/>}
-      {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft?.guestAdd) return; if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); if (scanDraft?.guestAdd) setScanDraft({ ...scanDraft, guestAdd: false, mode: "create" }); }}/>}
+      {admin && scanner && !scanDraft && !unlock && <Scanner onClose={() => setScanner(false)} onProduct={handleScan}/>}
+      {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
     </div>
   );
 }
@@ -914,6 +927,18 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
   </>;
 }
 
+function ScanPage({ onStart }: { onStart: () => void }) {
+  return <>
+    <PageTitle
+      eyebrow="VAULT TOOLS"
+      title="Scan a bottle."
+      subtitle="Point the camera at a UPC or snap a label. Hits the vault first, then COLA. This stays off the guest menu."
+    />
+    <div className="toolbar-actions">
+      <button type="button" className="primary" onClick={onStart}><ScanBarcode size={18}/> Start scan</button>
+    </div>
+  </>;
+}
 
 function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, seedCreate, onSeedConsumed, onPutOnTap }: {
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
@@ -956,7 +981,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     onSeedConsumed?.();
   }, [seedCreate, items, onSeedConsumed, module.id]);
   useEffect(() => {
-    if (!scanDraft || scanDraft.guestAdd || openedScanKey.current === scanDraft.key) return;
+    if (!scanDraft || openedScanKey.current === scanDraft.key) return;
     openedScanKey.current = scanDraft.key;
     if (scanDraft.mode === "view") {
       setEditing(undefined);
@@ -1102,7 +1127,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
         setEditing({id:0,...values} as Item);
       }
     }}/>}
-    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft) && !scanDraft?.guestAdd} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); setViewing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
+    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft)} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); setViewing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
   </>;
 }
 
@@ -2205,28 +2230,6 @@ function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void})
 function CsvImport(){const [table,setTable]=useState("spirits");const [file,setFile]=useState<File>();const [status,setStatus]=useState("");const [error,setError]=useState("");async function run(){if(!file)return;setError("");try{const csv=await file.text();const result=await api<{imported:number}>(`/import/${table}`,{method:"POST",body:JSON.stringify({csv})});setStatus(`${result.imported} rows imported`);}catch(err){setError(err instanceof Error?err.message:"Import failed");}}return <div className="stack"><select value={table} onChange={(e)=>setTable(e.target.value)}>{modules.map((m)=><option key={m.id} value={m.id}>{m.label}</option>)}</select><label className="secondary file-button"><Upload/> Choose CSV<input type="file" accept=".csv,text/csv" onChange={(e)=>setFile(e.target.files?.[0])}/></label><button className="primary" disabled={!file} onClick={run}>Import spreadsheet</button>{status&&<small>{status}</small>}{error&&<p className="error">{error}</p>}</div>}
 
 function PinChange({onMessage}:{onMessage:(value:string)=>void}){const [currentPin,setCurrentPin]=useState("");const [newPin,setNewPin]=useState("");async function change(){try{await api("/auth/pin",{method:"POST",body:JSON.stringify({currentPin,newPin})});setCurrentPin("");setNewPin("");onMessage("Master PIN updated");}catch(error){onMessage(error instanceof Error?error.message:"Could not update PIN");}}return <div className="stack"><input type="password" inputMode="numeric" placeholder="Current PIN" value={currentPin} onChange={(e)=>setCurrentPin(e.target.value)}/><input type="password" inputMode="numeric" placeholder="New PIN" value={newPin} onChange={(e)=>setNewPin(e.target.value)}/><button className="primary" disabled={!currentPin||!/^\d{4,12}$/.test(newPin)} onClick={change}>Update master PIN</button></div>}
-
-function GuestAddPrompt({ draft, onUnlock, onClose }: { draft: ScanDraft; onUnlock: () => void; onClose: () => void }) {
-  const name = String(draft.values.name ?? draft.values.product_name ?? "").trim();
-  const brand = String(draft.values.brand ?? draft.values.brewery ?? draft.values.producer ?? "").trim();
-  const upc = String(draft.values.upc ?? "").trim();
-  const titled = Boolean(name && name.toLowerCase() !== "unknown");
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <section className="modal unlock-modal">
-        <button type="button" className="icon-button close" onClick={onClose} aria-label="Dismiss"><X/></button>
-        <div className="lock-seal"><Search/></div>
-        <span className="eyebrow">NOT IN THE VAULT</span>
-        <h2>{titled ? name : "No match in your collection"}</h2>
-        <p>{titled
-          ? `${brand ? `${brand}. ` : ""}Guests can browse bottles already on the shelf. Unlock admin mode to add this one.`
-          : `${upc ? `UPC ${upc} is not on the shelf. ` : ""}Unlock admin mode to add it.`}</p>
-        <button className="primary wide" onClick={onUnlock}><LockOpen/> Unlock to add</button>
-        <button type="button" className="secondary wide" onClick={onClose}>Keep browsing</button>
-      </section>
-    </div>
-  );
-}
 
 function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
   const [pin,setPinValue]=useState("");const [error,setError]=useState("");
