@@ -20,7 +20,8 @@ import {
   packagedCount, packagedStockLabel, FILL_STOPS, compareSpirits, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason,
-  overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem
+  overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem, type RestockThresholds,
+  parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -289,7 +290,7 @@ export default function App() {
   const nav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },
-    { id:"restock",label:"Restock",icon:ShoppingBag },{ id:"settings",label:"Settings",icon:Settings,admin:true }
+    { id:"restock",label:"Restock",icon:ShoppingBag,admin:true },{ id:"settings",label:"Settings",icon:Settings,admin:true }
   ];
 
   return (
@@ -341,7 +342,7 @@ export default function App() {
           />)}
           {page === "cocktails" && <Cocktails admin={admin}/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
-          {page === "restock" && <RestockPage go={navigate}/>}
+          {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
       </main>
@@ -363,11 +364,15 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     api<OverviewSnapshot>("/overview")
       .then(setSnap)
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load the house snapshot."));
+    if (!admin) {
+      setRestock(undefined);
+      return;
+    }
     api<{ items: RestockItem[]; open: number; total: number }>("/restock")
       .then(setRestock)
       .catch(() => setRestock(undefined));
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [admin]);
   const orbitValue = snap?.spirits.on_shelf ?? 0;
   const orbitLabel = "BOTTLES";
   const stats = snap ? [
@@ -518,7 +523,17 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   </>;
 }
 
-type RestockList = { items: RestockItem[]; open: number; total: number };
+type RestockList = { items: RestockItem[]; open: number; total: number; thresholds?: RestockThresholds };
+
+function restockRuleHint(thresholds?: RestockThresholds): string {
+  const rules = parseRestockThresholds({
+    restockPackagedBelow: thresholds ? String(thresholds.packagedBelow) : undefined,
+    restockSpiritFill: thresholds ? String(thresholds.spiritFill) : undefined,
+    restockWineBelow: thresholds ? String(thresholds.wineBelow) : undefined
+  });
+  const fill = FILL_STOPS.find((stop) => stop.percent === rules.spiritFill)?.label ?? "¼";
+  return `Cans below ${rules.packagedBelow} · spirits at or below ${fill} · wine below ${rules.wineBelow}`;
+}
 
 function RestockPage({ go }:{ go: (page: string) => void }) {
   const [data, setData] = useState<RestockList>();
@@ -547,7 +562,7 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
     <PageTitle
       eyebrow="STORE RUN"
       title="What to pick up."
-      subtitle={data ? `${data.open} still needed · ${data.total} on the list. Tap a row when you grab it — no PIN required.` : "Empty bottles, last wines, cold-room leftovers, and mixers that unlock a favorite."}
+      subtitle={data ? `${data.open} still needed · ${data.total} on the list. ${restockRuleHint(data.thresholds)}.` : "Empty bottles, low cans, last wines, and mixers that unlock a favorite."}
     />
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load restock</strong><span>{error}</span></div></div>}
     <div className="cocktail-toolbar">
@@ -556,8 +571,9 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
           <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
         ))}
       </div>
+      <button type="button" className="secondary" onClick={() => go("settings")}>Change rules</button>
     </div>
-    {!shown.length ? <Empty icon={ShoppingBag} title={filter === "got" ? "Nothing grabbed yet" : "Shelf looks stocked"} text={filter === "got" ? "Tap a bottle when you pick it up." : "When something runs low or a favorite is missing a bottle, it lands here."}/> :
+    {!shown.length ? <Empty icon={ShoppingBag} title={filter === "got" ? "Nothing grabbed yet" : "Shelf looks stocked"} text={filter === "got" ? "Tap a bottle when you pick it up." : "When something hits the cutoff you set, it lands here. Restocked bottles drop off on their own."}/> :
       <div className="restock-list">
         {shown.map((item) => (
           <button type="button" className={`restock-row${item.got ? " got" : ""}`} key={item.key} onClick={() => void toggle(item)}>
@@ -1777,11 +1793,33 @@ function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void})
     api<NonNullable<typeof quota>>("/cola/quota").then((data)=>{setQuota(data);setQuotaError("");}).catch((err)=>setQuotaError(err instanceof Error?err.message:"Unable to read COLA Cloud quota"));
   },[]);
   async function save(){try{await api("/settings",{method:"PUT",body:JSON.stringify(settings)});setMessage("Settings saved");}catch(err){setMessage(err instanceof Error?err.message:"Could not save settings");}}
+  async function saveRestock(partial: Partial<RestockThresholds>) {
+    const current = parseRestockThresholds(settings);
+    const next = {
+      ...settings,
+      restockPackagedBelow: String(partial.packagedBelow ?? current.packagedBelow),
+      restockSpiritFill: String(partial.spiritFill ?? current.spiritFill),
+      restockWineBelow: String(partial.wineBelow ?? current.wineBelow)
+    };
+    setSettings(next);
+    try {
+      await api("/settings", { method: "PUT", body: JSON.stringify(next) });
+      setMessage("Restock rules saved");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not save restock rules");
+    }
+  }
   function applyThemeJson(text:string){try{const raw=JSON.parse(text);const flat=raw.schemes?.dark??raw.dark??raw;const tokens:Record<string,string>={"--accent":flat.primary,"--bg":flat.background,"--surface":flat.surface,"--text":flat.onSurface,"--line":flat.outlineVariant};Object.keys(tokens).forEach((k)=>!tokens[k]&&delete tokens[k]);applyTheme("custom",tokens);setSettings((current)=>({...current,themeTokens:JSON.stringify(tokens)}));setMessage("Material tokens applied — save to persist.");}catch{setMessage("That content is not valid Material theme JSON.");}}
   function importTheme(file:File){const reader=new FileReader();reader.onload=()=>applyThemeJson(String(reader.result));reader.readAsText(file);}
   const download=(format:"db"|"json")=>{downloadExport(format).catch(()=>setMessage("Export failed"));};
+  const restockRules = parseRestockThresholds(settings);
   return <><PageTitle eyebrow="VAULT ADMINISTRATION" title="Settings & maintenance" subtitle="Security, appearance, AI providers, and durable backups."/>
     <div className="settings-grid"><section className="settings-card"><h3>Appearance</h3><p>Choose a contrast profile for every display.</p><div className="theme-grid">{["light","dark","oled"].map((t)=><button key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}><span className={`theme-swatch ${t}`}/>{t==="oled"?"OLED Black":t[0].toUpperCase()+t.slice(1)}</button>)}</div><label className="secondary file-button"><Upload/> Import Material theme<input type="file" accept=".json,application/json" onChange={(e)=>e.target.files?.[0]&&importTheme(e.target.files[0])}/></label><textarea value={themeText} onChange={(e)=>setThemeText(e.target.value)} placeholder="Or paste theme.json / tokens.json here"/><button className="secondary" disabled={!themeText} onClick={()=>applyThemeJson(themeText)}>Apply pasted tokens</button></section>
+      <section className="settings-card"><h3>Restock list</h3><p>Live snapshot of what is low right now — not a pour history. Tap a cutoff; it saves immediately. Bottles with a spare stay off the list so you can Open next instead of buying.</p>
+        <label><span>Cans &amp; bottles — flag when below</span><div className="chip-row restock-stops">{RESTOCK_PACKAGED_STOPS.map((count) => <button type="button" key={count} className={`chip${restockRules.packagedBelow === count ? " active" : ""}`} onClick={() => void saveRestock({ packagedBelow: count })}>{count}</button>)}</div></label>
+        <label><span>Spirits — flag at or below</span><div className="chip-row restock-stops">{FILL_STOPS.filter((stop) => stop.percent <= 75).map((stop) => <button type="button" key={stop.percent} className={`chip${restockRules.spiritFill === stop.percent ? " active" : ""}`} onClick={() => void saveRestock({ spiritFill: stop.percent })}>{stop.label}</button>)}</div></label>
+        <label><span>Wine — flag when below</span><div className="chip-row restock-stops">{RESTOCK_WINE_STOPS.map((count) => <button type="button" key={count} className={`chip${restockRules.wineBelow === count ? " active" : ""}`} onClick={() => void saveRestock({ wineBelow: count })}>{count}</button>)}</div></label>
+      </section>
       <section className="settings-card"><h3>COLA Cloud lookup</h3><p>Barcode and name search use your vault first, then COLA Cloud when a key is configured on the server.</p>
         {quotaError && <div className="ai-error"><CircleAlert/><div><strong>Quota unavailable</strong><span>{quotaError}</span></div></div>}
         {quota && quota.configured === false && <p>{quota.message ?? "Set COLA_API_KEY to enable COLA Cloud lookups."}</p>}

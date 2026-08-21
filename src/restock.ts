@@ -1,15 +1,46 @@
 import { db } from "./db.js";
 import {
+  FILL_STOPS,
   fillStopLabel,
   isSpiritEmpty,
   nearestFillStop,
+  openNextSpirit,
   packagedCount,
   packagedStockLabel,
   spiritStockLabel
 } from "./catalog.js";
-import { spiritOnShelf, stripMeasure, wineOnShelf } from "./cocktails.js";
+import { spiritOnShelf, stripMeasure } from "./cocktails.js";
 
 export type RestockKind = "spirits" | "wines" | "packaged_beer" | "ingredient";
+
+export type RestockThresholds = {
+  packagedBelow: number;
+  spiritFill: number;
+  wineBelow: number;
+};
+
+export const DEFAULT_RESTOCK_THRESHOLDS: RestockThresholds = {
+  packagedBelow: 3,
+  spiritFill: 25,
+  wineBelow: 2
+};
+
+export const RESTOCK_PACKAGED_STOPS = [1, 2, 3, 4, 6, 12];
+export const RESTOCK_WINE_STOPS = [2, 3, 4, 6];
+export const RESTOCK_SPIRIT_STOPS = FILL_STOPS.filter((stop) => stop.percent <= 75).map((stop) => stop.percent);
+
+function pickStop(value: unknown, stops: number[], fallback: number): number {
+  const n = Math.floor(Number(value));
+  return stops.includes(n) ? n : fallback;
+}
+
+export function parseRestockThresholds(settings?: Record<string, string | undefined> | null): RestockThresholds {
+  return {
+    packagedBelow: pickStop(settings?.restockPackagedBelow, RESTOCK_PACKAGED_STOPS, DEFAULT_RESTOCK_THRESHOLDS.packagedBelow),
+    spiritFill: pickStop(settings?.restockSpiritFill, RESTOCK_SPIRIT_STOPS, DEFAULT_RESTOCK_THRESHOLDS.spiritFill),
+    wineBelow: pickStop(settings?.restockWineBelow, RESTOCK_WINE_STOPS, DEFAULT_RESTOCK_THRESHOLDS.wineBelow)
+  };
+}
 
 export type RestockItem = {
   key: string;
@@ -81,15 +112,18 @@ export function buildRestockList(input: {
   packaged?: Array<Record<string, unknown>>;
   cocktails?: Array<Record<string, unknown>>;
   got?: Iterable<string>;
+  thresholds?: RestockThresholds;
 }): RestockItem[] {
   const got = new Set(input.got ?? []);
+  const thresholds = input.thresholds ?? DEFAULT_RESTOCK_THRESHOLDS;
   const items: RestockItem[] = [];
 
   for (const item of input.spirits ?? []) {
-    const empty = isSpiritEmpty(item);
-    const low = spiritOnShelf(item) && nearestFillStop(item.fill_level) <= 25;
-    if (!empty && !low) continue;
+    if (openNextSpirit(item)) continue;
     const fill = nearestFillStop(item.fill_level);
+    const empty = isSpiritEmpty(item);
+    const low = spiritOnShelf(item) && fill <= thresholds.spiritFill;
+    if (!empty && !low) continue;
     items.push({
       key: `spirits:${itemId(item.id)}`,
       kind: "spirits",
@@ -106,14 +140,14 @@ export function buildRestockList(input: {
 
   for (const item of input.wines ?? []) {
     const count = Math.max(0, Math.floor(num(item.bottle_count)));
-    if (count !== 1) continue;
+    if (count <= 0 || count >= thresholds.wineBelow) continue;
     items.push({
       key: `wines:${itemId(item.id)}`,
       kind: "wines",
       module: "wines",
       id: itemId(item.id),
       name: bottleName(item, "producer"),
-      reason: "Last bottle",
+      reason: count === 1 ? "Last bottle" : `${count} left`,
       image_url: text(item.image_url),
       got: false
     });
@@ -121,7 +155,7 @@ export function buildRestockList(input: {
 
   for (const item of input.packaged ?? []) {
     const count = packagedCount(item.count);
-    if (count > 1) continue;
+    if (count >= thresholds.packagedBelow) continue;
     items.push({
       key: `packaged_beer:${itemId(item.id)}`,
       kind: "packaged_beer",

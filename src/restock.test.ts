@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildRestockList, restockSummary } from "./restock.js";
+import { buildRestockList, parseRestockThresholds, restockSummary } from "./restock.js";
 
-test("restock lists empty and quarter-full spirits, last wines, and cold-room leftovers", () => {
+test("restock lists empty and quarter-full spirits, last wines, and cans below 3", () => {
   const items = buildRestockList({
     spirits: [
       { id: 1, name: "Eagle Rare", brand: "Buffalo Trace", fill_level: 75, stock_count: 1 },
       { id: 2, name: "Empty Rye", brand: "WT", fill_level: 0, stock_count: 1 },
-      { id: 3, name: "Low mezcal", fill_level: 25, stock_count: 1 }
+      { id: 3, name: "Low mezcal", fill_level: 25, stock_count: 1 },
+      { id: 4, name: "Spare gin", fill_level: 0, stock_count: 3 }
     ],
     wines: [
       { id: 10, name: "Village Rouge", producer: "Foo", bottle_count: 3 },
@@ -17,19 +18,56 @@ test("restock lists empty and quarter-full spirits, last wines, and cold-room le
     packaged: [
       { id: 20, name: "Hazy IPA", brewery: "Other Half", count: 6, vessel: "Can" },
       { id: 21, name: "Gone lager", brewery: "Vault", count: 0, vessel: "Can" },
-      { id: 22, name: "Last pils", brewery: "Vault", count: 1, vessel: "Can" }
+      { id: 22, name: "Last pils", brewery: "Vault", count: 1, vessel: "Can" },
+      { id: 23, name: "Two left stout", brewery: "Vault", count: 2, vessel: "Can" }
     ]
   });
   const names = items.map((item) => item.name);
   assert.ok(names.some((name) => name.includes("Empty Rye")));
   assert.ok(names.some((name) => name.includes("Low mezcal")));
   assert.ok(!names.some((name) => name.includes("Eagle Rare")));
+  assert.ok(!names.some((name) => name.includes("Spare gin")));
   assert.ok(names.some((name) => name.includes("Last bubbles")));
   assert.ok(!names.some((name) => name.includes("Drunk dry")));
+  assert.ok(!names.some((name) => name.includes("Village Rouge")));
   assert.ok(names.some((name) => name.includes("Gone lager")));
   assert.ok(names.some((name) => name.includes("Last pils")));
+  assert.ok(names.some((name) => name.includes("Two left stout")));
   assert.ok(!names.some((name) => name.includes("Hazy IPA")));
   assert.equal(restockSummary(items).open, items.length);
+});
+
+test("restock cutoffs follow saved thresholds", () => {
+  const items = buildRestockList({
+    thresholds: { packagedBelow: 6, spiritFill: 0, wineBelow: 4 },
+    spirits: [
+      { id: 2, name: "Empty Rye", fill_level: 0, stock_count: 1 },
+      { id: 3, name: "Low mezcal", fill_level: 25, stock_count: 1 }
+    ],
+    wines: [
+      { id: 10, name: "Village Rouge", producer: "Foo", bottle_count: 3 },
+      { id: 11, name: "Last bubbles", producer: "Bar", bottle_count: 1 }
+    ],
+    packaged: [
+      { id: 20, name: "Hazy IPA", brewery: "Other Half", count: 6, vessel: "Can" },
+      { id: 24, name: "Four pack", brewery: "Vault", count: 4, vessel: "Can" }
+    ]
+  });
+  const names = items.map((item) => item.name);
+  assert.ok(names.some((name) => name.includes("Empty Rye")));
+  assert.ok(!names.some((name) => name.includes("Low mezcal")));
+  assert.ok(names.some((name) => name.includes("Village Rouge")));
+  assert.ok(names.some((name) => name.includes("Last bubbles")));
+  assert.ok(names.some((name) => name.includes("Four pack")));
+  assert.ok(!names.some((name) => name.includes("Hazy IPA")));
+});
+
+test("restock threshold parser keeps empty-only fill and ignores junk", () => {
+  assert.deepEqual(parseRestockThresholds(undefined), { packagedBelow: 3, spiritFill: 25, wineBelow: 2 });
+  assert.equal(parseRestockThresholds({ restockSpiritFill: "0" }).spiritFill, 0);
+  assert.equal(parseRestockThresholds({ restockPackagedBelow: "12" }).packagedBelow, 12);
+  assert.equal(parseRestockThresholds({ restockPackagedBelow: "5" }).packagedBelow, 3);
+  assert.equal(parseRestockThresholds({ restockSpiritFill: "100" }).spiritFill, 25);
 });
 
 test("restock asks for missing bottles on favorites and the one-away cocktail", () => {

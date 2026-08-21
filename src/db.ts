@@ -178,6 +178,9 @@ export function setSetting(key: string, value: string) {
 if (!getSetting("pinHash")) setPin(process.env.DEFAULT_PIN ?? "1234");
 if (!getSetting("theme")) setSetting("theme", "dark");
 if (!getSetting("lastBackupDownload")) setSetting("lastBackupDownload", new Date().toISOString());
+if (!getSetting("restockPackagedBelow")) setSetting("restockPackagedBelow", "3");
+if (!getSetting("restockSpiritFill")) setSetting("restockSpiritFill", "25");
+if (!getSetting("restockWineBelow")) setSetting("restockWineBelow", "2");
 
 const insertCocktail = db.prepare("INSERT OR IGNORE INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season) VALUES(?,?,?,?,?,?,?,?)");
 const updatePlaceholder = db.prepare("UPDATE cocktails SET collection=?,ingredients=?,glassware=?,garnish=?,method=?,notes=?,season=? WHERE id=?");

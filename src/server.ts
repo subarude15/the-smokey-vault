@@ -13,7 +13,7 @@ import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./ca
 import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
 import { createTicket, deleteTicket, listTickets, setTicketStatus } from "./cocktail_tickets.js";
 import { buildOverview } from "./overview.js";
-import { buildRestockList, listRestockGot, restockSummary, setRestockGot } from "./restock.js";
+import { buildRestockList, listRestockGot, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
@@ -227,6 +227,14 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
   });
 });
 
+function restockThresholds() {
+  return parseRestockThresholds({
+    restockPackagedBelow: getSetting("restockPackagedBelow"),
+    restockSpiritFill: getSetting("restockSpiritFill"),
+    restockWineBelow: getSetting("restockWineBelow")
+  });
+}
+
 function restockPayload() {
   const spirits = db.prepare("SELECT * FROM spirits").all() as Array<Record<string, unknown>>;
   const packaged = db.prepare("SELECT * FROM packaged_beer").all() as Array<Record<string, unknown>>;
@@ -234,19 +242,25 @@ function restockPayload() {
   const shelf = buildShelf(spirits, wines);
   const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
     .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
+  const thresholds = restockThresholds();
   const items = buildRestockList({
     spirits,
     wines,
     packaged,
     cocktails,
-    got: listRestockGot()
+    got: listRestockGot(),
+    thresholds
   });
-  return { items, ...restockSummary(items) };
+  return { items, thresholds, ...restockSummary(items) };
 }
 
-app.get("/api/restock", { schema: { tags: ["System"], summary: "Bottles and mixers to pick up" } }, async () => restockPayload());
+app.get("/api/restock", { schema: { tags: ["System"], summary: "Bottles and mixers to pick up" } }, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return restockPayload();
+});
 
 app.post<{ Body: { key?: string; got?: boolean } }>("/api/restock/check", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
   try {
     setRestockGot(request.body.key ?? "", request.body.got !== false);
     return restockPayload();
@@ -618,8 +632,17 @@ app.get("/api/settings", async (request, reply) => {
 
 app.put<{ Body: Record<string, string> }>("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
-  const allowed = new Set(["theme","themeTokens","aiProvider","aiApiKey","aiBaseUrl","aiModel"]);
-  for (const [key, value] of Object.entries(request.body)) if (allowed.has(key)) setSetting(key, String(value));
+  const allowed = new Set(["theme","themeTokens","aiProvider","aiApiKey","aiBaseUrl","aiModel","restockPackagedBelow","restockSpiritFill","restockWineBelow"]);
+  for (const [key, value] of Object.entries(request.body)) {
+    if (!allowed.has(key)) continue;
+    if (key.startsWith("restock")) {
+      const parsed = parseRestockThresholds({ [key]: String(value) });
+      const stored = key === "restockPackagedBelow" ? parsed.packagedBelow : key === "restockSpiritFill" ? parsed.spiritFill : parsed.wineBelow;
+      setSetting(key, String(stored));
+      continue;
+    }
+    setSetting(key, String(value));
+  }
   return { ok: true };
 });
 
