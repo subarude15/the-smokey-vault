@@ -254,3 +254,108 @@ export function firstEmptyTapNumber(taps: Array<Record<string, unknown>>): numbe
   }
   return 1;
 }
+
+export const BREW_STATUSES = [
+  "Planned",
+  "Fermenting",
+  "Conditioning",
+  "Ready to Keg",
+  "Archived"
+] as const;
+
+export type BrewStatus = typeof BREW_STATUSES[number];
+
+export const ACTIVE_BREW_STATUSES: BrewStatus[] = BREW_STATUSES.filter((status) => status !== "Archived");
+
+export const GRAVITY_FIELDS = ["target_og", "target_fg", "measured_og", "measured_fg"] as const;
+
+export function normalizeBrewStatus(value: unknown): BrewStatus {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return BREW_STATUSES.find((status) => status.toLowerCase() === raw) ?? "Planned";
+}
+
+export function nextBrewStatus(value: unknown): BrewStatus | null {
+  const current = normalizeBrewStatus(value);
+  if (current === "Archived") return null;
+  const index = ACTIVE_BREW_STATUSES.indexOf(current);
+  if (index < 0 || index >= ACTIVE_BREW_STATUSES.length - 1) return null;
+  return ACTIVE_BREW_STATUSES[index + 1];
+}
+
+export function parseGravity(value: unknown): number | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 900 && n < 2000) return Math.round(n) / 1000;
+  if (n >= 10 && n < 200) return Math.round((1 + n / 1000) * 1000) / 1000;
+  if (n >= 0.9 && n < 2) return Math.round(n * 1000) / 1000;
+  return null;
+}
+
+export function formatGravity(value: unknown): string {
+  const gravity = parseGravity(value);
+  return gravity == null ? "" : gravity.toFixed(3);
+}
+
+export function calculateAbv(og: unknown, fg: unknown): number | null {
+  const original = parseGravity(og);
+  const final = parseGravity(fg);
+  if (original == null || final == null) return null;
+  if (original <= final) return 0;
+  return Math.round((original - final) * 131.25 * 10) / 10;
+}
+
+export function brewAbv(item: Record<string, unknown>): number | null {
+  const og = parseGravity(item.measured_og) ?? parseGravity(item.target_og);
+  const fg = parseGravity(item.measured_fg) ?? parseGravity(item.target_fg);
+  return calculateAbv(og, fg);
+}
+
+export function formatAbv(value: unknown): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return String(Math.round(n * 10) / 10);
+}
+
+export function prepareBrewWrite(body: Record<string, unknown>, existing?: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...body };
+  for (const field of GRAVITY_FIELDS) {
+    if (next[field] === undefined) continue;
+    next[field] = parseGravity(next[field]);
+  }
+  if (next.status !== undefined) next.status = normalizeBrewStatus(next.status);
+  const abv = brewAbv({ ...existing, ...next });
+  if (abv != null) next.calculated_abv = abv;
+  return next;
+}
+
+export function compareBrews(a: Record<string, unknown>, b: Record<string, unknown>): number {
+  const aArchived = normalizeBrewStatus(a.status) === "Archived" ? 1 : 0;
+  const bArchived = normalizeBrewStatus(b.status) === "Archived" ? 1 : 0;
+  if (aArchived !== bArchived) return aArchived - bArchived;
+  const rank = BREW_STATUSES.indexOf(normalizeBrewStatus(a.status)) - BREW_STATUSES.indexOf(normalizeBrewStatus(b.status));
+  if (rank !== 0) return rank;
+  const dateA = String(a.brew_date ?? "").trim() || "9999-99-99";
+  const dateB = String(b.brew_date ?? "").trim() || "9999-99-99";
+  const dates = dateA.localeCompare(dateB);
+  if (dates !== 0) return dates;
+  return String(a.batch_name ?? "").localeCompare(String(b.batch_name ?? ""), undefined, { sensitivity: "base" });
+}
+
+export function tapsForBatch(taps: Array<Record<string, unknown>>, batchName: unknown): number[] {
+  const name = String(batchName ?? "").trim().toLowerCase();
+  if (!name) return [];
+  return taps
+    .filter((tap) => !isTapEmpty(tap) && String(tap.brewery_batch ?? "").trim().toLowerCase() === name)
+    .map((tap) => Number(tap.tap_number))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => a - b);
+}
+
+export function onTapLabel(tapNumbers: number[]): string {
+  if (!tapNumbers.length) return "";
+  if (tapNumbers.length === 1) return `On tap ${tapNumbers[0]}`;
+  return `On taps ${tapNumbers.join(", ")}`;
+}

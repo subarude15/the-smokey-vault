@@ -13,6 +13,13 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .wine-scale-stop{flex:1 1 calc(33.33% - 6px);min-width:72px;min-height:44px;border:1px solid var(--line);background:var(--surface-2);border-radius:10px;color:var(--muted);font-size:11px;line-height:1.25;padding:6px 8px;cursor:pointer;text-align:center}
 .wine-scale-stop.active{border-color:var(--accent);color:var(--text);background:color-mix(in srgb,var(--accent) 16%,var(--surface))}
 .wine-scale.read-only .wine-scale-stop{cursor:default}
+.brew-scale .wine-scale-track{background:linear-gradient(90deg,#5c564c 0%,#c77647 58%,#e1b46e 82%,#6b6356 100%)}
+.brew-pipeline{display:flex;gap:4px;margin-top:12px}
+.brew-pipeline span{flex:1;height:4px;border-radius:99px;background:var(--surface-2);display:block}
+.brew-pipeline span.done{background:var(--accent)}
+.brew-pipeline span.current{background:var(--accent-2)}
+.inventory-card.archived-brew{opacity:.72}
+.field-hint{color:var(--muted);font-size:12px;line-height:1.45}
 .drink-one:disabled{opacity:.5;cursor:not-allowed}
 .tap-fill{margin-top:4px}
 .inventory-card.empty-tap{opacity:.78}

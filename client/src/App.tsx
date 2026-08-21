@@ -11,10 +11,12 @@ import { BottleVotes, scoreLabel } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, DEFAULT_KEG_L, FLAVOR_OPTIONS, KEG_REMAINING_STOPS, KEG_SIZES,
   SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
-  defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
+  BREW_STATUSES, defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
   remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap,
-  TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle
+  TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
+  brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
+  onTapLabel, parseGravity, tapsForBatch
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -52,9 +54,11 @@ const modules: Module[] = [
   ]},
   { id: "brews", label: "Brewery", singular: "Batch", icon: FlaskConical, title: "Brewery Lab", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
     {key:"batch_name",label:"Batch name"},{key:"maker",label:"Brewery / maker"},
-    {key:"brew_date",label:"Brew date",type:"date"},{key:"target_og",label:"Target OG",type:"number"},{key:"target_fg",label:"Target FG",type:"number"},
-    {key:"measured_og",label:"Measured OG",type:"number"},{key:"measured_fg",label:"Measured FG",type:"number"},{key:"calculated_abv",label:"Calculated ABV %",type:"number"},
-    {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},{key:"status",label:"Status",options:["Planned","Fermenting","Conditioning","Ready to Keg","Archived"]},
+    {key:"brew_date",label:"Brew date",type:"date"},{key:"status",label:"Status",type:"brewStatus"},
+    {key:"target_og",label:"Target OG",type:"gravity"},{key:"target_fg",label:"Target FG",type:"gravity"},
+    {key:"measured_og",label:"Measured OG",type:"gravity"},{key:"measured_fg",label:"Measured FG",type:"gravity"},
+    {key:"calculated_abv",label:"Calculated ABV %",type:"brewAbv"},
+    {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},
     {key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Brew notes",type:"textarea"}
   ]},
@@ -179,14 +183,24 @@ function mapDraftToModule(module: Module, draft: ScanDraft) {
   }
   if (module.id === "brews") {
     return {
-      maker: draft.values.brewery ?? draft.values.brand ?? "",
-      batch_name: draft.values.name ?? "",
+      maker: draft.values.brewery ?? draft.values.brand ?? draft.values.maker ?? "",
+      batch_name: draft.values.name ?? draft.values.batch_name ?? "",
       style: draft.values.style ?? "",
-      calculated_abv: draft.values.abv ?? 0,
-      image_url: draft.values.image_url ?? ""
+      calculated_abv: draft.values.abv ?? draft.values.calculated_abv ?? 0,
+      image_url: draft.values.image_url ?? "",
+      tasting_notes: draft.values.tasting_notes ?? "",
+      status: "Planned"
     };
   }
   return draft.values;
+}
+
+function brewAbvDisplay(item: Record<string, unknown>): string {
+  return formatAbv(brewAbv(item) ?? item.calculated_abv ?? item.abv);
+}
+
+function findBeerLabel(moduleId: string) {
+  return moduleId === "taps" || moduleId === "brews" ? "Find beer" : "Find bottle";
 }
 
 async function resolveSuggestion(module: Module, hit: BottleSearchHit) {
@@ -363,6 +377,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   const [viewing,setViewing] = useState<Item>();
   const [finderOpen,setFinderOpen] = useState(false);
   const [loadError,setLoadError] = useState("");
+  const [taps,setTaps] = useState<Item[]>([]);
   const openedScanKey = useRef<number | undefined>(undefined);
   const load = useCallback(() => {
     setLoadError("");
@@ -371,6 +386,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     });
   }, [module.id]);
   useEffect(() => { load(); setViewing(undefined); }, [load]);
+  useEffect(() => {
+    if (module.id !== "brews") {
+      setTaps([]);
+      return;
+    }
+    api<Item[]>("/inventory/taps").then(setTaps).catch(() => setTaps([]));
+  }, [module.id, items]);
   useEffect(() => {
     if (!seedCreate) return;
     if (module.id === "taps" && items.length === 0) return;
@@ -430,10 +452,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   }
   const listed = module.id === "taps"
     ? [...filtered].sort((a, b) => Number(a.tap_number) - Number(b.tap_number))
-    : filtered;
-  const canFind = ["spirits","packaged_beer","wines","taps"].includes(module.id);
+    : module.id === "brews"
+      ? [...filtered].sort(compareBrews)
+      : filtered;
+  const canFind = ["spirits","packaged_beer","wines","taps","brews"].includes(module.id);
   const emptyActions = admin ? <>
-    {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> Find bottle</button>}
+    {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {findBeerLabel(module.id)}</button>}
     <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>
     <button className="secondary" onClick={openScanner}><Search size={17}/> Scan bottle</button>
   </> : undefined;
@@ -448,6 +472,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       onDelete={() => module.id === "taps" ? clearTap(viewing) : remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
       onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
+      tapNumbers={module.id === "brews" ? tapsForBatch(taps, viewing.batch_name) : []}
     />;
   }
 
@@ -456,7 +481,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     <div className="toolbar">
       <label className="search"><Search/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder={`Filter ${module.label.toLowerCase()}…`}/></label>
       {admin && <div className="toolbar-actions">
-        {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {module.id === "taps" ? "Find beer" : "Find bottle"}</button>}
+        {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {findBeerLabel(module.id)}</button>}
         {module.id !== "taps" && <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>}
       </div>}
     </div>
@@ -470,7 +495,11 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     {loadError ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
     !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."} actions={emptyActions}/> :
     !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
-      <div className="inventory-grid">{listed.map((item) => <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}`} key={item.id} onClick={() => setViewing(item)}>
+      <div className="inventory-grid">{listed.map((item) => {
+        const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
+        const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
+        const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
+        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}`} key={item.id} onClick={() => setViewing(item)}>
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
@@ -484,9 +513,11 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
             {module.id === "wines" && item.sweetness != null && String(item.sweetness).trim() !== ""
               ? <span>{migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))}</span>
               : null}
-            {item.abv && !(module.id === "taps" && isTapEmpty(item)) ? <span>{item.abv}% ABV</span> : null}
-            {item.status ? <span>{item.status}</span> : null}
-            {module.id !== "taps" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {module.id === "brews" && brewAbvText ? <span>{brewAbvText}% ABV</span>
+              : item.abv && !(module.id === "taps" && isTapEmpty(item)) ? <span>{item.abv}% ABV</span> : null}
+            {item.status ? <span>{normalizeBrewStatus(item.status)}</span> : null}
+            {brewTaps.length ? <span>{onTapLabel(brewTaps)}</span> : null}
+            {module.id !== "taps" && module.id !== "brews" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
@@ -501,8 +532,10 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
             const kicked = remaining <= 0;
             return <div className="fill"><span style={{width:`${kegFillPercent(remaining, size)}%`}}/><small>{kicked ? "Kicked" : `${pints} pint${pints === 1 ? "" : "s"} left`}</small></div>;
           })()}
+          {module.id === "brews" && <BrewPipeline status={String(item.status ?? "")}/>}
         </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button>{module.id !== "taps" && <button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button>}</div>}
-      </button>)}</div>}
+      </button>;
+      })}</div>}
     {finderOpen && <BottleFinder module={module} onClose={() => setFinderOpen(false)} onPick={(values) => {
       setFinderOpen(false);
       if (module.id === "taps") {
@@ -516,12 +549,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   </>;
 }
 
-function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated, onPutOnTap }:{
-  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void; onUpdated?: (item: Item) => void; onPutOnTap?: () => void;
+function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated, onPutOnTap, tapNumbers }:{
+  module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void; onUpdated?: (item: Item) => void; onPutOnTap?: () => void; tapNumbers?: number[];
 }) {
   const flavors = parseList(item.flavors);
   const tags = parseList(item.tags);
-  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", module.primary]);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", module.primary]);
   const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
@@ -530,6 +563,10 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const kegSize = Number(item.keg_size_l || DEFAULT_KEG_L);
   const kegLeft = Number(item.remaining_l ?? 0);
   const kegPints = pintsRemaining(kegLeft);
+  const brewStatus = module.id === "brews" ? normalizeBrewStatus(item.status) : "";
+  const brewNext = module.id === "brews" ? nextBrewStatus(item.status) : null;
+  const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
+  const onTap = onTapLabel(tapNumbers ?? []);
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
   async function patchItem(payload: Record<string, unknown>, failed: string) {
@@ -556,6 +593,14 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
     if (module.id !== "taps" || kegLeft <= 0) return;
     await patchItem({ remaining_l: pourPint(kegLeft) }, "Could not pour a pint");
   }
+  async function advanceBrew() {
+    if (module.id !== "brews" || !brewNext) return;
+    await patchItem({ status: brewNext }, "Could not advance this batch");
+  }
+  async function archiveBrew() {
+    if (module.id !== "brews") return;
+    await patchItem({ status: brewStatus === "Archived" ? "Ready to Keg" : "Archived" }, "Could not update archive status");
+  }
   return (
     <section className="bottle-detail">
       <button className="secondary back-button" onClick={onBack}><ArrowLeft size={17}/> Back to {module.label}</button>
@@ -574,9 +619,11 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
               ? (wineKind ? <span>{wineKind}</span> : null)
               : module.id === "taps" && isTapEmpty(item) ? null
               : item.style ? <span>{String(item.style)}</span> : null}
-            {item.abv && !(module.id === "taps" && isTapEmpty(item)) ? <span>{item.abv}% ABV</span> : null}
+            {item.abv && !(module.id === "taps" && isTapEmpty(item)) && module.id !== "brews" ? <span>{item.abv}% ABV</span> : null}
+            {brewAbvText ? <span>{brewAbvText}% ABV</span> : null}
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
-            {module.id !== "taps" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {onTap ? <span>{onTap}</span> : null}
+            {module.id !== "taps" && module.id !== "brews" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
@@ -587,6 +634,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           {admin && <div className="bottle-detail-actions">
             {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
             {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
+            {module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
+            {module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
             {onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
             <button className="primary" onClick={onEdit}><Settings size={16}/> {module.id === "taps" && isTapEmpty(item) ? "Put a beer on" : "Edit"}</button>
             {module.id === "taps" && !isTapEmpty(item) && <button className="secondary danger" onClick={onDelete}>Clear tap</button>}
@@ -597,6 +646,14 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       </div>
       <div className="bottle-detail-grid">
         {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
+        {module.id === "brews" && <div className="full"><span>Status</span>
+          <BrewStatusScale
+            value={brewStatus}
+            abv={brewAbvText}
+            onTap={onTap}
+            onChange={admin ? (status) => { void patchItem({ status }, "Could not update status"); } : undefined}
+          />
+        </div>}
         {module.id === "taps" && !isTapEmpty(item) && <div className="full">
           <span>Keg remaining</span>
           <div className="fill tap-fill"><span style={{width:`${kegFillPercent(kegLeft, kegSize)}%`}}/><small>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${kegSizeLabel(kegSize)}`}</small></div>
@@ -606,6 +663,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
             <span>{field.label}</span>
             {field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong>
               : field.key === "keg_size_l" ? <strong>{kegSizeLabel(Number(item.keg_size_l))}</strong>
+              : field.type === "gravity" ? <strong>{formatGravity(item[field.key]) || String(item[field.key])}</strong>
               : <strong>{String(item[field.key])}</strong>}
           </div>
         ))}
@@ -627,7 +685,7 @@ function BottleFinder({ module, onClose, onPick }:{
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<BottleSearchHit[]>([]);
   const [error, setError] = useState("");
-  const [status, setStatus] = useState(module.id === "taps"
+  const [status, setStatus] = useState(module.id === "taps" || module.id === "brews"
     ? "Type at least 2 characters to search the brewery lab, packaged beer, and COLA Cloud."
     : "Type at least 2 characters to search your vault and COLA Cloud.");
 
@@ -635,7 +693,7 @@ function BottleFinder({ module, onClose, onPick }:{
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
-      setStatus(module.id === "taps"
+      setStatus(module.id === "taps" || module.id === "brews"
         ? "Type at least 2 characters to search the brewery lab, packaged beer, and COLA Cloud."
         : "Type at least 2 characters to search your vault and COLA Cloud.");
       return;
@@ -671,10 +729,10 @@ function BottleFinder({ module, onClose, onPick }:{
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <section className="modal finder-modal">
         <header className="modal-header">
-          <div><span className="eyebrow">FIND A BOTTLE</span><h2>Search and add</h2></div>
+          <div><span className="eyebrow">{module.id === "taps" || module.id === "brews" ? "FIND A BEER" : "FIND A BOTTLE"}</span><h2>Search and add</h2></div>
           <button type="button" className="icon-button" onClick={onClose}><X/></button>
         </header>
-        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={module.id === "taps" ? "House IPA, Nugget Nectar…" : "Eagle Rare, Lagavulin, Champagne…"}/></label>
+        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={module.id === "taps" || module.id === "brews" ? "House IPA, Nugget Nectar…" : "Eagle Rare, Lagavulin, Champagne…"}/></label>
         <p className="scanner-status">{loading ? "Searching…" : status}</p>
         {error && <p className="error">{error}</p>}
         <div className="finder-results">
@@ -709,7 +767,9 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
         ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1 }
         : module.id === "taps"
           ? { tap_number: 1, keg_size_l: DEFAULT_KEG_L, remaining_l: 0, source_type: "Commercial", brewery_batch: "" }
-          : {})) as Record<string, unknown>;
+          : module.id === "brews"
+            ? { status: "Planned" }
+            : {})) as Record<string, unknown>;
     return {
       ...defaults,
       flavors: parseList(item?.flavors),
@@ -728,7 +788,15 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   const tags = parseList(form.tags);
   async function submit(e:React.FormEvent) {
     e.preventDefault();
-    const payload = { ...form, flavors: serializeList(flavors), tags: serializeList(parseTagInput([...tags, tagDraft].join(" "))) };
+    const payload: Record<string, unknown> = { ...form, flavors: serializeList(flavors), tags: serializeList(parseTagInput([...tags, tagDraft].join(" "))) };
+    if (module.id === "brews") {
+      payload.status = normalizeBrewStatus(payload.status);
+      for (const key of ["target_og", "target_fg", "measured_og", "measured_fg"] as const) {
+        payload[key] = parseGravity(payload[key]);
+      }
+      const abv = brewAbv(payload);
+      if (abv != null) payload.calculated_abv = abv;
+    }
     try {
       await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(payload)});
       saved();
@@ -760,6 +828,15 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       ...form,
       keg_size_l: liters,
       remaining_l: wasFull ? liters : Math.min(remaining, liters)
+    });
+  }
+  function setGravityField(key: string, raw: string, commit = false) {
+    setForm((current) => {
+      const parsed = parseGravity(raw);
+      const stored = commit ? (raw.trim() === "" ? "" : parsed ?? raw) : raw;
+      const next = { ...current, [key]: stored };
+      const abv = brewAbv({ ...next, [key]: parsed ?? stored });
+      return abv != null ? { ...next, calculated_abv: abv } : next;
     });
   }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
@@ -803,6 +880,32 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             onChange={(sweetness) => setForm({ ...form, sweetness })}
           />
         </div>;
+      }
+      if (field.type === "brewStatus") {
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <BrewStatusScale value={normalizeBrewStatus(form.status)} onChange={(status) => setForm({ ...form, status })}/>
+        </div>;
+      }
+      if (field.type === "gravity") {
+        return <label key={field.key}><span>{field.label}</span>
+          <input
+            inputMode="decimal"
+            placeholder="1.054"
+            value={form[field.key] == null ? "" : String(form[field.key])}
+            onChange={(e) => setGravityField(field.key, e.target.value)}
+            onBlur={(e) => setGravityField(field.key, e.target.value, true)}
+          />
+        </label>;
+      }
+      if (field.type === "brewAbv") {
+        const computed = brewAbv(form);
+        const display = computed != null ? formatAbv(computed) || "0" : String(form.calculated_abv ?? "");
+        return <label key={field.key}><span>{field.label}</span>
+          {computed != null
+            ? <input readOnly value={display} aria-label="Calculated ABV"/>
+            : <input type="number" step="0.1" value={display} onChange={(e) => setForm({ ...form, calculated_abv: e.target.value === "" ? "" : Number(e.target.value) })}/>}
+          <small className="field-hint">{computed != null ? "From measured gravity, or target if you have not measured yet. (OG − FG) × 131.25" : "Enter gravity to calculate, or type ABV yourself."}</small>
+        </label>;
       }
       if (field.type === "tapNumber") {
         return <label key={field.key}><span>{field.label}</span>
@@ -885,7 +988,8 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
                     keg_size_l: currentForm.keg_size_l ?? values.keg_size_l,
                     remaining_l: values.remaining_l ?? currentForm.keg_size_l ?? DEFAULT_KEG_L,
                     flavors: module.id === "taps" ? parseList(values.flavors ?? currentForm.flavors) : currentForm.flavors,
-                    tags: module.id === "taps" ? parseList(values.tags ?? currentForm.tags) : currentForm.tags
+                    tags: module.id === "taps" ? parseList(values.tags ?? currentForm.tags) : currentForm.tags,
+                    status: module.id === "brews" && existing ? currentForm.status : (values.status ?? currentForm.status)
                   }));
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Could not load bottle details");
@@ -893,7 +997,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
               }}
             />
           </div>
-          {!existing ? <small className="field-hint">Matches from your vault and COLA fill the rest of the form.</small> : null}
+          {!existing ? <small className="field-hint">{module.id === "brews" ? "Matches from packaged beer and COLA fill the rest of the form." : "Matches from your vault and COLA fill the rest of the form."}</small> : null}
           {module.id === "taps" ? <small className="field-hint">None leaves this handle empty. Find a house brew or packaged beer to put it on.</small> : null}
         </div>;
       }
@@ -1052,6 +1156,41 @@ function WineSweetnessScale({ type, style, value, onChange }:{
           <button type="button" key={stop} className={stop === value ? "wine-scale-stop active" : "wine-scale-stop"} aria-pressed={stop === value} onClick={() => onChange(stop)}>{stop}</button>
         ))}
       </div>
+    </div>
+  );
+}
+function BrewStatusScale({ value, onChange, abv, onTap }:{
+  value: string; onChange?: (value: string) => void; abv?: string; onTap?: string;
+}) {
+  const current = normalizeBrewStatus(value);
+  const index = Math.max(0, BREW_STATUSES.indexOf(current));
+  const pct = BREW_STATUSES.length > 1 ? (index / (BREW_STATUSES.length - 1)) * 100 : 0;
+  const readOnly = !onChange;
+  const hint = [abv ? `${abv}% ABV` : "", onTap].filter(Boolean).join(" · ");
+  return (
+    <div className={`wine-scale brew-scale${readOnly ? " read-only" : ""}`}>
+      <div className="wine-scale-track" aria-hidden="true">
+        <span className="wine-scale-marker" style={{ left: `${pct}%` }}/>
+      </div>
+      <div className="wine-scale-stops" role={readOnly ? "list" : "radiogroup"} aria-label="Brew status">
+        {BREW_STATUSES.map((stop) => readOnly ? (
+          <span role="listitem" key={stop} className={stop === current ? "wine-scale-stop active" : "wine-scale-stop"}>{stop}</span>
+        ) : (
+          <button type="button" key={stop} className={stop === current ? "wine-scale-stop active" : "wine-scale-stop"} aria-pressed={stop === current} onClick={() => onChange(stop)}>{stop}</button>
+        ))}
+      </div>
+      {hint ? <small className="field-hint">{hint}</small> : null}
+    </div>
+  );
+}
+function BrewPipeline({ status }:{ status: string }) {
+  const current = normalizeBrewStatus(status);
+  const index = BREW_STATUSES.indexOf(current);
+  return (
+    <div className="brew-pipeline" aria-hidden="true">
+      {BREW_STATUSES.map((stop, stopIndex) => (
+        <span key={stop} className={stopIndex < index ? "done" : stopIndex === index ? "current" : ""}/>
+      ))}
     </div>
   );
 }

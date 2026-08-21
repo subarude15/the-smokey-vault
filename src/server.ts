@@ -9,6 +9,7 @@ import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
+import { prepareBrewWrite } from "./catalog.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, saveImageBuffer } from "./images.js";
@@ -91,7 +92,7 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const body = { ...request.body };
+  const body = table === "brews" ? prepareBrewWrite({ ...request.body }) : { ...request.body };
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
@@ -107,7 +108,10 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const body = { ...request.body };
+  const existing = table === "brews"
+    ? db.prepare("SELECT * FROM brews WHERE id=?").get(request.params.id) as Record<string, unknown> | undefined
+    : undefined;
+  const body = table === "brews" ? prepareBrewWrite({ ...request.body }, existing) : { ...request.body };
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
