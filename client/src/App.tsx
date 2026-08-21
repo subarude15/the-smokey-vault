@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Copy, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X
+  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
@@ -22,7 +22,7 @@ import {
   SEASONS, collectionGroup, compareCocktails, currentSeason,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
-  formatRestockShare, type WantedLabel
+  formatRestockShare, extractSharedRecipeUrl, type WantedLabel
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -250,10 +250,23 @@ export default function App() {
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
   const [tapSeed, setTapSeed] = useState<Item>();
+  const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const found = extractSharedRecipeUrl({
+      url: params.get("url"),
+      text: params.get("text"),
+      title: params.get("title")
+    });
+    if (!found) return;
+    setSharedRecipeUrl(found);
+    setPage("cocktails");
+    window.history.replaceState({}, "", window.location.pathname || "/");
+  }, []);
   useEffect(() => {
     if (!admin) return;
     api<Record<string,string>>("/settings").then((values) => {
@@ -341,7 +354,7 @@ export default function App() {
               navigate("taps");
             } : undefined}
           />)}
-          {page === "cocktails" && <Cocktails admin={admin}/>}
+          {page === "cocktails" && <Cocktails admin={admin} sharedUrl={sharedRecipeUrl} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
@@ -1506,7 +1519,7 @@ function cocktailLines(drink: CocktailDrink): IngredientLine[] {
   }));
 }
 
-function Cocktails({ admin }: { admin: boolean }) {
+function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sharedUrl?: string; onSharedConsumed?: () => void }) {
   const [drinks, setDrinks] = useState<CocktailDrink[]>([]);
   const [tickets, setTickets] = useState<CocktailTicket[]>([]);
   const [filter, setFilter] = useState("ready");
@@ -1514,7 +1527,7 @@ function Cocktails({ admin }: { admin: boolean }) {
   const [collection, setCollection] = useState("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<CocktailDrink>();
-  const [importer, setImporter] = useState(false);
+  const [importer, setImporter] = useState(Boolean(sharedUrl));
   const [loadError, setLoadError] = useState("");
   const nowSeason = currentSeason();
   function load() {
@@ -1526,6 +1539,13 @@ function Cocktails({ admin }: { admin: boolean }) {
       .catch(() => setTickets([]));
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (sharedUrl) setImporter(true);
+  }, [sharedUrl]);
+  function closeImporter() {
+    setImporter(false);
+    onSharedConsumed?.();
+  }
   const queried = drinks.filter((drink) => {
     if (season !== "All" && drink.season !== season) return false;
     if (collection !== "All" && collectionGroup(drink.collection) !== collection) return false;
@@ -1546,7 +1566,7 @@ function Cocktails({ admin }: { admin: boolean }) {
     <PageTitle
       eyebrow="THE RECIPE INDEX"
       title="What can I make?"
-      subtitle={`${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link, star Nick’s favorites, or put a drink on the ticket for someone.`}
+      subtitle={`${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link on any phone, share it into the vault on Android, star Nick’s favorites, or put a drink on the ticket.`}
     />
     {loadError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load recipes</strong><span>{loadError}</span></div></div>}
     <div className="cocktail-toolbar">
@@ -1644,7 +1664,7 @@ function Cocktails({ admin }: { admin: boolean }) {
       onChanged={() => { load(); }}
       onDeleted={() => { setSelected(undefined); load(); }}
     />}
-    {importer && <RecipeImportModal admin={admin} close={() => setImporter(false)} saved={() => { setImporter(false); load(); }}/>}
+    {importer && <RecipeImportModal admin={admin} initialUrl={sharedUrl} close={closeImporter} saved={() => { closeImporter(); load(); }}/>}
   </>;
 }
 
@@ -1761,10 +1781,10 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
   );
 }
 
-function RecipeImportModal({ admin, close, saved }:{
-  admin: boolean; close: () => void; saved: () => void;
+function RecipeImportModal({ admin, close, saved, initialUrl }:{
+  admin: boolean; close: () => void; saved: () => void; initialUrl?: string;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialUrl ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [recipe, setRecipe] = useState<ImportedRecipe>();
@@ -1773,7 +1793,10 @@ function RecipeImportModal({ admin, close, saved }:{
   const [ticketNote, setTicketNote] = useState("");
   const [favorite, setFavorite] = useState(false);
   const [status, setStatus] = useState("");
-  async function parse() {
+  const autoRead = useRef(Boolean(initialUrl));
+  async function parse(raw = url) {
+    const link = raw.trim();
+    if (!link) return;
     setLoading(true);
     setError("");
     setRecipe(undefined);
@@ -1781,7 +1804,7 @@ function RecipeImportModal({ admin, close, saved }:{
     try {
       const data = await api<{ recipe: ImportedRecipe; source: string }>("/cocktails/import", {
         method: "POST",
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url: link })
       });
       setRecipe(data.recipe);
       setSource(data.source);
@@ -1790,6 +1813,33 @@ function RecipeImportModal({ admin, close, saved }:{
     } finally {
       setLoading(false);
     }
+  }
+  useEffect(() => {
+    if (!autoRead.current || !initialUrl) return;
+    autoRead.current = false;
+    void parse(initialUrl);
+  }, [initialUrl]);
+  async function useCopiedLink() {
+    setError("");
+    try {
+      const text = await navigator.clipboard.readText();
+      const found = extractSharedRecipeUrl({ text, url: text });
+      if (!found) {
+        setError("No recipe link on the clipboard. Paste one in the box.");
+        return;
+      }
+      setUrl(found);
+      await parse(found);
+    } catch {
+      setError("Paste the link in the box — this browser will not read the clipboard.");
+    }
+  }
+  function takePastedLink(event: ClipboardEvent<HTMLInputElement>) {
+    const text = event.clipboardData.getData("text");
+    const found = extractSharedRecipeUrl({ text, url: text });
+    if (!found) return;
+    event.preventDefault();
+    setUrl(found);
   }
   async function saveBook() {
     if (!recipe || !admin) return;
@@ -1831,12 +1881,15 @@ function RecipeImportModal({ admin, close, saved }:{
           <div>
             <span className="eyebrow">ADD FROM A LINK</span>
             <h2>Import a recipe</h2>
-            <p>Paste a URL from Punch, Liquor.com, a blog, or anywhere that publishes a recipe. The vault reads the page and grabs a photo when it can.</p>
+            <p>Paste a URL from Punch, Liquor.com, a blog, or anywhere that publishes a recipe. On Android you can also Share to The Smokey Vault. The vault reads the page and grabs a photo when it can.</p>
           </div>
           <button type="button" className="icon-button" onClick={close}><X/></button>
         </header>
-        <label className="search finder-search"><Link/><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/paper-plane" autoFocus/></label>
-        <button className="primary wide" disabled={loading || !url.trim()} onClick={parse}>{loading ? "Reading the page…" : "Read recipe"}</button>
+        <label className="search finder-search"><Link/><input value={url} onChange={(e) => setUrl(e.target.value)} onPaste={takePastedLink} placeholder="https://…/paper-plane" autoFocus/></label>
+        <div className="import-actions">
+          <button type="button" className="secondary" disabled={loading} onClick={() => void useCopiedLink()}><ClipboardPaste size={16}/> Use copied link</button>
+          <button type="button" className="primary" disabled={loading || !url.trim()} onClick={() => void parse()}>{loading ? "Reading the page…" : "Read recipe"}</button>
+        </div>
         {recipe && <div className="import-preview">
           {recipe.image_url ? <img src={recipe.image_url} alt=""/> : null}
           <div>

@@ -18,6 +18,16 @@ export default defineConfig({
         background_color: "#0b0a08",
         display: "standalone",
         start_url: "/",
+        share_target: {
+          action: "/",
+          method: "GET",
+          enctype: "application/x-www-form-urlencoded",
+          params: {
+            title: "title",
+            text: "text",
+            url: "url"
+          }
+        },
         icons: [
           { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }
         ]
