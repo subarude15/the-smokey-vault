@@ -28,7 +28,7 @@ const modules: Module[] = [
   { id: "spirits", label: "Spirits & Mixers", singular: "Bottle", icon: Bottle, title: "The Bottle Library", subtitle: "Spirits, liqueurs, bitters, and every essential mixer.", primary: "name", secondary: "brand", makerKey: "brand", kindKey: "category", fields: [
     { key:"name",label:"Name" },{ key:"brand",label:"Brand / maker" },{ key:"category",label:"Family",options:SPIRIT_FAMILIES },
     { key:"sub_category",label:"Type" },{ key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS },
-    { key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level %",type:"range" },
+    { key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level",type:"percent",options:["100","75","50","25","0"] },
     { key:"purchase_date",label:"Purchase date",type:"date" },{ key:"opened_date",label:"Date opened",type:"date" },{ key:"shelf_location",label:"Shelf location" },{ key:"upc",label:"UPC" },
     { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Image URL",type:"url" },
     { key:"notes",label:"Cellar notes",type:"textarea" },{ key:"tasting_notes",label:"Tasting notes",type:"tasting" },
@@ -507,7 +507,7 @@ function BottleFinder({ module, onClose, onPick }:{
 
 function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
   const [form,setForm] = useState<Record<string,unknown>>(() => ({
-    ...(item ?? (module.id === "spirits" ? { category: "Whiskey" } : {})),
+    ...(item ?? (module.id === "spirits" ? { category: "Whiskey", fill_level: 100 } : {})),
     flavors: parseList(item?.flavors),
     tags: parseList(item?.tags)
   }));
@@ -565,8 +565,9 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       const options = typeOptions(field);
       const optionList = options.length ? Array.from(new Set([...options, ...(current && !options.includes(current) ? [current] : [])])) : undefined;
       const optionalSelect = field.key === "sub_category" || field.key === "base_ingredient" || field.key === "style";
+      const percentSelect = field.type === "percent";
       return <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
-      {optionList ? <select value={current} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}>{optionalSelect && <option value="">Select…</option>}{optionList.map((v)=><option key={v}>{v}</option>)}</select> :
+      {optionList ? <select value={current} onChange={(e)=>setForm({...form,[field.key]:percentSelect?Number(e.target.value):e.target.value})}>{optionalSelect && <option value="">Select…</option>}{optionList.map((v)=><option key={v} value={v}>{percentSelect ? (v === "100" ? "Full (100%)" : v === "0" ? "Empty (0%)" : `${v}%`) : v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :
       field.type?.startsWith("range") ? <div className="range-wrap"><input type="range" min={field.type==="range5"?1:0} max={field.type==="range5"?5:100} value={Number(form[field.key]??(field.type==="range5"?3:100))} onChange={(e)=>setForm({...form,[field.key]:Number(e.target.value)})}/><b>{String(form[field.key]??(field.type==="range5"?3:100))}</b></div> :
       <input type={field.type??"text"} step={field.type==="number"?"any":undefined} value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:field.type==="number"?Number(e.target.value):e.target.value})}/>}</label>;
