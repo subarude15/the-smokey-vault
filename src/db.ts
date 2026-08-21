@@ -122,6 +122,9 @@ ensureColumn("brews", "tags", "ALTER TABLE brews ADD COLUMN tags TEXT DEFAULT '[
 ensureColumn("brews", "base_ingredient", "ALTER TABLE brews ADD COLUMN base_ingredient TEXT DEFAULT ''");
 ensureColumn("brews", "hops", "ALTER TABLE brews ADD COLUMN hops TEXT DEFAULT '[]'");
 ensureColumn("cocktails", "season", "ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
+ensureColumn("cocktails", "image_url", "ALTER TABLE cocktails ADD COLUMN image_url TEXT DEFAULT ''");
+ensureColumn("cocktails", "source_url", "ALTER TABLE cocktails ADD COLUMN source_url TEXT DEFAULT ''");
+ensureColumn("cocktails", "bartender_fav", "ALTER TABLE cocktails ADD COLUMN bartender_fav INTEGER DEFAULT 0");
 ensureColumn("cola_cache", "volume_ml", "ALTER TABLE cola_cache ADD COLUMN volume_ml REAL");
 ensureColumn("cola_cache", "product_type", "ALTER TABLE cola_cache ADD COLUMN product_type TEXT");
 
