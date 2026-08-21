@@ -3,7 +3,9 @@ import { test } from "node:test";
 import {
   parseList, parseTagInput, serializeList, spiritFamilyFromLabel,
   defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
-  wineKindLabel, wineSweetnessStops
+  wineKindLabel, wineSweetnessStops,
+  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
+  emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -62,4 +64,57 @@ test("inferWineFamilyAndStyle reads Champagne and Prosecco from text", () => {
   assert.deepEqual(inferWineFamilyAndStyle("La Marca Prosecco"), { type: "Sparkling", style: "Prosecco" });
   assert.deepEqual(inferWineFamilyAndStyle("skin-contact orange wine"), { type: "Orange", style: "" });
   assert.equal(inferWineFamilyAndStyle("Chardonnay").type, "White");
+});
+
+test("pintsRemaining uses US pints and never goes negative", () => {
+  assert.equal(pintsRemaining(19.5), 41);
+  assert.equal(pintsRemaining(0), 0);
+  assert.equal(pintsRemaining(-1), 0);
+});
+
+test("pourPint subtracts one US pint and stops at zero", () => {
+  assert.equal(pourPint(19.5), 19.027);
+  assert.equal(pourPint(0.2), 0);
+  assert.equal(pourPint(0), 0);
+});
+
+test("keg remaining snaps to 25% stops", () => {
+  assert.equal(kegFillPercent(19.5, 19.5), 100);
+  assert.equal(nearestKegStop(9.75, 19.5), 50);
+  assert.equal(remainingFromPercent(19.5, 25), 4.875);
+  assert.equal(kegSizeLabel(19.5), "Sixth barrel · 19.5 L");
+});
+
+test("brewToTap copies a brewery batch onto a homebrew tap", () => {
+  const tap = brewToTap({
+    batch_name: "Vault IPA",
+    maker: "Nick",
+    style: "IPA",
+    calculated_abv: 6.4,
+    tasting_notes: "Citrus and pine",
+    flavors: '["Citrus"]',
+    tags: '["house"]',
+    notes: "Kegged 8/21",
+    image_url: "/api/media/images/ipa.png"
+  }, "2026-08-21");
+  assert.equal(tap.source_type, "Homebrew");
+  assert.equal(tap.brewery_batch, "Vault IPA");
+  assert.equal(tap.maker, "Nick");
+  assert.equal(tap.abv, 6.4);
+  assert.equal(tap.keg_size_l, 19.5);
+  assert.equal(tap.remaining_l, 19.5);
+  assert.equal(tap.tapped_date, "2026-08-21");
+});
+
+test("empty taps are None and firstEmptyTapNumber picks a free handle", () => {
+  assert.equal(isTapEmpty({ brewery_batch: "" }), true);
+  assert.equal(isTapEmpty({ brewery_batch: "None" }), true);
+  assert.equal(isTapEmpty({ brewery_batch: "Vault IPA" }), false);
+  assert.equal(tapTitle({ brewery_batch: "" }), "None");
+  assert.equal(firstEmptyTapNumber([
+    { tap_number: 1, brewery_batch: "IPA" },
+    { tap_number: 2, brewery_batch: "" }
+  ]), 2);
+  assert.equal(emptyTapBeerFields().brewery_batch, "");
+  assert.equal(emptyTapBeerFields().remaining_l, 0);
 });
