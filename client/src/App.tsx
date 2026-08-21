@@ -9,14 +9,15 @@ import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSugg
 import { GuestReviews } from "./GuestReviews";
 import { BottleVotes, scoreLabel } from "./BottleVotes";
 import {
-  BASE_INGREDIENTS, BEER_STYLES, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS, KEG_REMAINING_STOPS, KEG_SIZES,
-  SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
+  BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
+  KEG_REMAINING_STOPS, KEG_SIZES, PACK_COUNT_STOPS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
   BREW_STATUSES, defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
   remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap,
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseGravity, tapsForBatch
+  onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
+  packagedCount, packagedStockLabel, packagedToTap
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -69,7 +70,9 @@ const modules: Module[] = [
   ]},
   { id: "packaged_beer", label: "Packaged Beer", singular: "Beer", icon: Beer, title: "Packaged Beer", subtitle: "The cold-room count for cans and bottles.", primary: "name", secondary: "brewery", makerKey: "brewery", kindKey: "style", fields: [
     {key:"brewery",label:"Brewery / maker"},{key:"name",label:"Name"},
-    {key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
+    {key:"vessel",label:"Can or bottle",options:[...BEER_VESSELS]},
+    {key:"count",label:"In the cold room",type:"packagedCount"},
+    {key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
   { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and what's on the shelf.", primary: "name", secondary: "producer", makerKey: "producer", kindKey: "type", fields: [
@@ -131,7 +134,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
       moduleId: "packaged_beer",
       key: Date.now(),
       mode: "create",
-      values: { name, brewery: brand, style: categories.split(",")[0] ?? "", abv, count: 1, upc, image_url: image }
+      values: { name, brewery: brand, style: categories.split(",")[0] ?? "", abv, count: 1, vessel: /bottle/i.test(`${categories} ${productType} ${name}`) ? "Bottle" : "Can", upc, image_url: image }
     };
   }
   if (moduleId === "wines") {
@@ -205,7 +208,7 @@ function brewAbvDisplay(item: Record<string, unknown>): string {
 }
 
 function findBeerLabel(moduleId: string) {
-  return moduleId === "taps" || moduleId === "brews" ? "Find beer" : "Find bottle";
+  return moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer" ? "Find beer" : "Find bottle";
 }
 
 async function resolveSuggestion(module: Module, hit: BottleSearchHit) {
@@ -327,12 +330,13 @@ export default function App() {
             openScanner={() => setScanner(true)}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
-            onPutOnTap={admin && module.id === "brews" ? async (brew) => {
+            onPutOnTap={admin && (module.id === "brews" || module.id === "packaged_beer") ? async (item) => {
               const taps = await api<Item[]>("/inventory/taps");
               const slot = [...taps].sort((a, b) => Number(a.tap_number) - Number(b.tap_number)).find(isTapEmpty) ?? taps[0];
+              const payload = module.id === "brews" ? brewToTap(item) : packagedToTap(item);
               setTapSeed({
                 ...(slot ?? { tap_number: firstEmptyTapNumber(taps) }),
-                ...brewToTap(brew),
+                ...payload,
                 id: slot?.id ?? 0,
                 tap_number: slot?.tap_number ?? firstEmptyTapNumber(taps),
                 keg_size_l: slot?.keg_size_l ?? DEFAULT_KEG_L
@@ -392,7 +396,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   }, [module.id]);
   useEffect(() => { load(); setViewing(undefined); }, [load]);
   useEffect(() => {
-    if (module.id !== "brews") {
+    if (module.id !== "brews" && module.id !== "packaged_beer") {
       setTaps([]);
       return;
     }
@@ -459,7 +463,9 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     ? [...filtered].sort((a, b) => Number(a.tap_number) - Number(b.tap_number))
     : module.id === "brews"
       ? [...filtered].sort(compareBrews)
-      : filtered;
+      : module.id === "packaged_beer"
+        ? [...filtered].sort(comparePackagedBeer)
+        : filtered;
   const canFind = ["spirits","packaged_beer","wines","taps","brews"].includes(module.id);
   const emptyActions = admin ? <>
     {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {findBeerLabel(module.id)}</button>}
@@ -477,7 +483,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       onDelete={() => module.id === "taps" ? clearTap(viewing) : remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
       onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
-      tapNumbers={module.id === "brews" ? tapsForBatch(taps, viewing.batch_name) : []}
+      tapNumbers={module.id === "brews" || module.id === "packaged_beer" ? tapsForBatch(taps, module.id === "brews" ? viewing.batch_name : viewing.name) : []}
     />;
   }
 
@@ -501,10 +507,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."} actions={emptyActions}/> :
     !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
       <div className="inventory-grid">{listed.map((item) => {
-        const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
+        const brewTaps = module.id === "brews" || module.id === "packaged_beer"
+          ? tapsForBatch(taps, module.id === "brews" ? item.batch_name : item.name)
+          : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
         const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
-        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}`} key={item.id} onClick={() => setViewing(item)}>
+        const outOfStock = module.id === "packaged_beer" && packagedCount(item.count) <= 0;
+        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}`} key={item.id} onClick={() => setViewing(item)}>
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
@@ -524,9 +533,9 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
             {brewTaps.length ? <span>{onTapLabel(brewTaps)}</span> : null}
             {module.id === "brews" && parseList(item.hops).slice(0,3).map((value) => <span key={`hop-${value}`}>{value}</span>)}
             {module.id === "brews" && parseList(item.flavors).slice(0,3).map((value) => <span key={`flavor-${value}`}>{value}</span>)}
-            {module.id !== "taps" && module.id !== "brews" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
-            {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
-            {item.count != null ? <span>{item.count} packaged</span> : null}
+            {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
+            {module.id === "packaged_beer" ? <span>{packagedStockLabel(item.count, item.vessel)}</span> : item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
@@ -562,12 +571,14 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const flavors = parseList(item.flavors);
   const hops = parseList(item.hops);
   const tags = parseList(item.tags);
-  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "hops", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", module.primary]);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "hops", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", "count", module.primary]);
   const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
     : "";
   const bottlesLeft = Number(item.bottle_count ?? 0);
+  const packagedLeft = packagedCount(item.count);
+  const packagedLabel = module.id === "packaged_beer" ? packagedStockLabel(item.count, item.vessel) : "";
   const kegSize = Number(item.keg_size_l || DEFAULT_KEG_L);
   const kegLeft = Number(item.remaining_l ?? 0);
   const kegPints = pintsRemaining(kegLeft);
@@ -594,8 +605,13 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
     }
   }
   async function drinkOne() {
-    if (module.id !== "wines" || bottlesLeft <= 0) return;
-    await patchItem({ bottle_count: bottlesLeft - 1 }, "Could not drink one");
+    if (module.id === "wines" && bottlesLeft > 0) {
+      await patchItem({ bottle_count: bottlesLeft - 1 }, "Could not drink one");
+      return;
+    }
+    if (module.id === "packaged_beer" && packagedLeft > 0) {
+      await patchItem({ count: drinkOnePackaged(item.count) }, "Could not drink one");
+    }
   }
   async function pourPintNow() {
     if (module.id !== "taps" || kegLeft <= 0) return;
@@ -631,16 +647,16 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
             {brewAbvText ? <span>{brewAbvText}% ABV</span> : null}
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
             {onTap ? <span>{onTap}</span> : null}
-            {module.id !== "taps" && module.id !== "brews" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
-            {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
-            {item.count != null ? <span>{item.count} packaged</span> : null}
+            {item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
+            {packagedLabel ? <span>{packagedLabel}</span> : item.count != null && module.id !== "packaged_beer" ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
           {!(module.id === "taps" && isTapEmpty(item)) && <BottleVotes table={module.id} itemId={item.id}/>}
           {admin && <div className="bottle-detail-actions">
-            {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
+            {(module.id === "wines" || module.id === "packaged_beer") && <button type="button" className="secondary drink-one" disabled={(module.id === "wines" ? bottlesLeft : packagedLeft) <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
             {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
             {module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
             {module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
@@ -665,6 +681,10 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
         {module.id === "taps" && !isTapEmpty(item) && <div className="full">
           <span>Keg remaining</span>
           <div className="fill tap-fill"><span style={{width:`${kegFillPercent(kegLeft, kegSize)}%`}}/><small>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${kegSizeLabel(kegSize)}`}</small></div>
+        </div>}
+        {module.id === "packaged_beer" && <div className="full">
+          <span>In the cold room</span>
+          <strong>{packagedLabel}</strong>
         </div>}
         {!(module.id === "taps" && isTapEmpty(item)) && module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
           <div key={field.key} className={field.type === "textarea" ? "full" : ""}>
@@ -694,16 +714,16 @@ function BottleFinder({ module, onClose, onPick }:{
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<BottleSearchHit[]>([]);
   const [error, setError] = useState("");
-  const [status, setStatus] = useState(module.id === "taps" || module.id === "brews"
-    ? "Type at least 2 characters to search the brewery lab, packaged beer, and COLA Cloud."
+  const [status, setStatus] = useState(module.id === "taps" || module.id === "brews" || module.id === "packaged_beer"
+    ? "Type at least 2 characters to search packaged beer, the brewery lab, and COLA Cloud."
     : "Type at least 2 characters to search your vault and COLA Cloud.");
 
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
-      setStatus(module.id === "taps" || module.id === "brews"
-        ? "Type at least 2 characters to search the brewery lab, packaged beer, and COLA Cloud."
+      setStatus(module.id === "taps" || module.id === "brews" || module.id === "packaged_beer"
+        ? "Type at least 2 characters to search packaged beer, the brewery lab, and COLA Cloud."
         : "Type at least 2 characters to search your vault and COLA Cloud.");
       return;
     }
@@ -738,10 +758,10 @@ function BottleFinder({ module, onClose, onPick }:{
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <section className="modal finder-modal">
         <header className="modal-header">
-          <div><span className="eyebrow">{module.id === "taps" || module.id === "brews" ? "FIND A BEER" : "FIND A BOTTLE"}</span><h2>Search and add</h2></div>
+          <div><span className="eyebrow">{module.id === "taps" || module.id === "brews" || module.id === "packaged_beer" ? "FIND A BEER" : "FIND A BOTTLE"}</span><h2>Search and add</h2></div>
           <button type="button" className="icon-button" onClick={onClose}><X/></button>
         </header>
-        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={module.id === "taps" || module.id === "brews" ? "House IPA, Nugget Nectar…" : "Eagle Rare, Lagavulin, Champagne…"}/></label>
+        <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={module.id === "taps" || module.id === "brews" || module.id === "packaged_beer" ? "House IPA, Nugget Nectar…" : "Eagle Rare, Lagavulin, Champagne…"}/></label>
         <p className="scanner-status">{loading ? "Searching…" : status}</p>
         {error && <p className="error">{error}</p>}
         <div className="finder-results">
@@ -778,7 +798,9 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
           ? { tap_number: 1, keg_size_l: DEFAULT_KEG_L, remaining_l: 0, source_type: "Commercial", brewery_batch: "" }
           : module.id === "brews"
             ? { status: "Planned" }
-            : {})) as Record<string, unknown>;
+            : module.id === "packaged_beer"
+              ? { count: 1, vessel: "Can" }
+              : {})) as Record<string, unknown>;
     return {
       ...defaults,
       flavors: parseList(item?.flavors),
@@ -786,6 +808,10 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       tags: parseList(item?.tags),
       ...(module.id === "wines" ? {
         sweetness: migrateWineSweetnessValue(defaults.sweetness, String(defaults.type ?? ""), String(defaults.style ?? ""))
+      } : {}),
+      ...(module.id === "packaged_beer" ? {
+        vessel: normalizeBeerVessel(defaults.vessel),
+        count: packagedCount(defaults.count ?? 1)
       } : {})
     };
   });
@@ -813,6 +839,10 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       }
       const abv = brewAbv(payload);
       if (abv != null) payload.calculated_abv = abv;
+    }
+    if (module.id === "packaged_beer") {
+      payload.count = packagedCount(payload.count);
+      payload.vessel = normalizeBeerVessel(payload.vessel);
     }
     try {
       await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(payload)});
@@ -970,6 +1000,22 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             ))}
           </div>
           <small className="field-hint">{remaining <= 0 ? "Kicked" : `${pints} pint${pints === 1 ? "" : "s"} left`}</small>
+        </div>;
+      }
+      if (field.type === "packagedCount") {
+        const n = packagedCount(form.count);
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <div className="count-stepper">
+            <button type="button" className="icon-button" aria-label="Remove one" onClick={() => setForm({ ...form, count: Math.max(0, n - 1) })}>−</button>
+            <strong>{n}</strong>
+            <button type="button" className="icon-button" aria-label="Add one" onClick={() => setForm({ ...form, count: n + 1 })}>+</button>
+          </div>
+          <div className="chip-row">
+            {PACK_COUNT_STOPS.map((stop) => (
+              <button type="button" key={stop.count} className={stop.count === n ? "chip active" : "chip"} onClick={() => setForm({ ...form, count: stop.count })}>{stop.label}</button>
+            ))}
+          </div>
+          <small className="field-hint">{packagedStockLabel(n, form.vessel)}</small>
         </div>;
       }
       if (module.id === "wines" && field.key === "style" && String(form.type) !== "Sparkling" && !String(form.style ?? "").trim()) {

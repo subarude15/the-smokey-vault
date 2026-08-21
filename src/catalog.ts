@@ -231,6 +231,78 @@ export function brewToTap(brew: Record<string, unknown>, tappedDate = new Date()
   };
 }
 
+export const BEER_VESSELS = ["Can", "Bottle", "Crowler", "Growler"] as const;
+
+export const PACK_COUNT_STOPS = [
+  { label: "Out", count: 0 },
+  { label: "Single", count: 1 },
+  { label: "4-pack", count: 4 },
+  { label: "Sixer", count: 6 },
+  { label: "12-pack", count: 12 },
+  { label: "Case", count: 24 }
+];
+
+export function normalizeBeerVessel(value: unknown): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (/crowler/.test(raw)) return "Crowler";
+  if (/growler/.test(raw)) return "Growler";
+  if (/bottle|btl/.test(raw)) return "Bottle";
+  if (/can|tin/.test(raw)) return "Can";
+  return BEER_VESSELS.find((vessel) => vessel.toLowerCase() === raw) ?? "Can";
+}
+
+export function packagedCount(value: unknown): number {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+export function drinkOnePackaged(count: unknown): number {
+  return Math.max(0, packagedCount(count) - 1);
+}
+
+export function packagedStockLabel(count: unknown, vessel?: unknown): string {
+  const n = packagedCount(count);
+  const kind = normalizeBeerVessel(vessel).toLowerCase();
+  if (n <= 0) return "Out of stock";
+  if (n === 1) return `1 ${kind}`;
+  if (kind === "can") return `${n} cans`;
+  return `${n} ${kind}s`;
+}
+
+export function comparePackagedBeer(a: Record<string, unknown>, b: Record<string, unknown>): number {
+  const empty = (packagedCount(a.count) <= 0 ? 1 : 0) - (packagedCount(b.count) <= 0 ? 1 : 0);
+  if (empty !== 0) return empty;
+  const brewery = String(a.brewery ?? "").localeCompare(String(b.brewery ?? ""), undefined, { sensitivity: "base" });
+  if (brewery !== 0) return brewery;
+  return String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { sensitivity: "base" });
+}
+
+export function packagedToTap(beer: Record<string, unknown>, tappedDate = new Date().toISOString().slice(0, 10)): Record<string, unknown> {
+  return {
+    maker: beer.brewery ?? beer.maker ?? "",
+    brewery_batch: beer.name ?? beer.brewery_batch ?? "",
+    style: beer.style ?? "",
+    abv: beer.abv ?? beer.calculated_abv ?? 0,
+    image_url: beer.image_url ?? "",
+    tasting_notes: beer.tasting_notes ?? "",
+    flavors: beer.flavors ?? "[]",
+    tags: beer.tags ?? "[]",
+    notes: beer.notes ?? "",
+    base_ingredient: beer.base_ingredient ?? "",
+    source_type: "Commercial",
+    keg_size_l: DEFAULT_KEG_L,
+    remaining_l: DEFAULT_KEG_L,
+    tapped_date: tappedDate
+  };
+}
+
+export function preparePackagedWrite(body: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...body };
+  if (next.count !== undefined) next.count = packagedCount(next.count);
+  if (next.vessel !== undefined) next.vessel = normalizeBeerVessel(next.vessel);
+  return next;
+}
+
 export function isTapEmpty(item: Record<string, unknown> | null | undefined): boolean {
   const name = String(item?.brewery_batch ?? "").trim();
   return !name || /^none$/i.test(name);

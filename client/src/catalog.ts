@@ -51,12 +51,13 @@ export const BREW_FLAVOR_OPTIONS = [
 
 export {
   parseList, parseTagInput, serializeList,
-  WINE_FAMILIES, SPARKLING_STYLES, KEG_SIZES, KEG_REMAINING_STOPS, DEFAULT_KEG_L, TAP_COUNT,
+  WINE_FAMILIES, SPARKLING_STYLES, BEER_VESSELS, PACK_COUNT_STOPS, KEG_SIZES, KEG_REMAINING_STOPS, DEFAULT_KEG_L, TAP_COUNT,
   BREW_STATUSES, ACTIVE_BREW_STATUSES,
   defaultSweetnessForWine, inferWineFamilyAndStyle, isSparklingWine,
   migrateWineSweetnessValue, wineKindLabel, wineSweetnessStops,
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseGravity, tapsForBatch
+  onTapLabel, parseGravity, tapsForBatch,
+  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedCount, packagedStockLabel, packagedToTap
 } from "../../src/catalog";
