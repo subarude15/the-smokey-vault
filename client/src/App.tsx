@@ -17,7 +17,8 @@ import {
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
-  packagedCount, packagedStockLabel, SEASONS, collectionGroup, compareCocktails, currentSeason
+  packagedCount, packagedStockLabel,   SEASONS, collectionGroup, compareCocktails, currentSeason,
+  overviewGreeting, overviewHeroCopy, type OverviewSnapshot
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -242,21 +243,13 @@ export default function App() {
   const [scanner, setScanner] = useState(false);
   const [unlock, setUnlock] = useState(false);
   const [theme, setTheme] = useState(localStorage.getItem("smokey-theme") ?? "dark");
-  const [counts, setCounts] = useState<Record<string,number>>({});
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
   const [tapSeed, setTapSeed] = useState<Item>();
-  const [countsError, setCountsError] = useState("");
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const lock = useCallback(() => { clearToken(); setAdmin(false); }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
-  useEffect(() => {
-    setCountsError("");
-    Promise.all(modules.map(async (m) => [m.id, (await api<Item[]>(`/inventory/${m.id}`)).length] as const))
-      .then((pairs) => setCounts(Object.fromEntries(pairs)))
-      .catch((err) => setCountsError(err instanceof Error ? err.message : "Could not load collection counts."));
-  }, [page]);
   useEffect(() => {
     if (!admin) return;
     api<Record<string,string>>("/settings").then((values) => {
@@ -320,7 +313,7 @@ export default function App() {
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
         <div className="page">
-          {page === "dashboard" && <Dashboard counts={counts} countsError={countsError} admin={admin} go={navigate}/>}
+          {page === "dashboard" && <Dashboard admin={admin} go={navigate}/>}
           {modules.map((module) => page === module.id && <Inventory
             key={module.id}
             module={module}
@@ -356,20 +349,141 @@ export default function App() {
   );
 }
 
-function Dashboard({ counts, countsError, admin, go }: { counts: Record<string,number>; countsError: string; admin:boolean; go:(page:string)=>void }) {
+function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }) {
+  const [snap, setSnap] = useState<OverviewSnapshot>();
+  const [error, setError] = useState("");
+  const greeting = overviewGreeting();
+  function load() {
+    setError("");
+    api<OverviewSnapshot>("/overview")
+      .then(setSnap)
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the house snapshot."));
+  }
+  useEffect(() => { load(); }, []);
+  const orbitValue = snap?.cocktails.ready || snap?.taps.pouring || snap?.spirits.on_shelf || 0;
+  const orbitLabel = snap?.cocktails.ready ? "READY TO MIX" : snap?.taps.pouring ? "ON TAP" : "ON THE SHELF";
+  const stats = snap ? [
+    { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: snap.spirits.low ? `${snap.spirits.low} running low` : "Spirits & mixers" },
+    { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: `${snap.taps.empty} open handle${snap.taps.empty === 1 ? "" : "s"}` },
+    { id: "brews", icon: FlaskConical, value: snap.brews.active, label: "IN THE LAB", hint: snap.brews.archived ? `${snap.brews.archived} archived` : "Active batches" },
+    { id: "packaged_beer", icon: Beer, value: snap.packaged.units, label: "COLD ROOM", hint: snap.packaged.out ? `${snap.packaged.out} out of stock` : "Cans & bottles" },
+    { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: `${snap.wines.labels} on the rack` },
+    { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "READY TO POUR", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Matched to the shelf" }
+  ] : [];
+  async function pourTicket(id: number) {
+    await api(`/cocktails/tickets/${id}/pour`, { method: "POST" });
+    load();
+  }
+  async function removeTicket(id: number) {
+    await api(`/cocktails/tickets/${id}`, { method: "DELETE" });
+    load();
+  }
   return <>
-    {countsError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load collection counts</strong><span>{countsError}</span></div></div>}
+    {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
-      <div><span className="eyebrow">GOOD EVENING</span><h1>Your private bar,<br/><em>beautifully organized.</em></h1><p>Browse the collection, see what is pouring, and find your next perfect drink.</p></div>
-      <div className="hero-orbit"><Wine/><span>{counts.spirits ?? 0}<small>BOTTLES</small></span></div>
+      <div>
+        <span className="eyebrow">{greeting.eyebrow}</span>
+        <h1>{greeting.line}<br/><em>{greeting.emphasize}</em></h1>
+        <p>{snap ? overviewHeroCopy(snap) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
+      </div>
+      <div className="hero-orbit"><Wine/><span>{orbitValue}<small>{orbitLabel}</small></span></div>
     </div>
-    <section><div className="section-heading"><div><span className="eyebrow">AT A GLANCE</span><h2>Inside the vault</h2></div>{!admin && <span className="guest-badge"><Lock size={13}/> DIGITAL BAR MENU</span>}</div>
+    <section>
+      <div className="section-heading">
+        <div><span className="eyebrow">AT A GLANCE</span><h2>Inside the vault</h2></div>
+        {!admin && <span className="guest-badge"><Lock size={13}/> DIGITAL BAR MENU</span>}
+      </div>
       <div className="stat-grid">
-        {modules.slice(0,5).map((m) => <button className="stat-card" key={m.id} onClick={() => go(m.id)}><m.icon/><span>{counts[m.id] ?? 0}</span><small>{m.label.toUpperCase()}</small><ChevronRight/></button>)}
+        {stats.map((stat) => (
+          <button className="stat-card" key={stat.id} onClick={() => go(stat.id)}>
+            <stat.icon/>
+            <span>{stat.value}</span>
+            <small>{stat.label}</small>
+            <b className="stat-hint">{stat.hint}</b>
+            <ChevronRight/>
+          </button>
+        ))}
       </div>
     </section>
+    {snap && snap.tickets.length > 0 && <section className="ticket-board">
+      <div className="section-heading"><div><span className="eyebrow">ON THE TICKET</span><h2>Make for someone</h2></div><span className="guest-badge">{snap.tickets.length}</span></div>
+      <div className="ticket-row">
+        {snap.tickets.map((ticket) => (
+          <article className="ticket-card" key={ticket.id}>
+            {ticket.image_url ? <img src={ticket.image_url} alt=""/> : null}
+            <div>
+              <span className="eyebrow">FOR {ticket.guest_name.toUpperCase()}</span>
+              <h3>{ticket.name}</h3>
+              {ticket.notes ? <p>{ticket.notes}</p> : null}
+            </div>
+            <div className="ticket-actions">
+              <button type="button" className="secondary" onClick={() => go("cocktails")}>Open recipes</button>
+              {admin && <button type="button" className="primary" onClick={() => void pourTicket(ticket.id)}>Poured</button>}
+              {admin && <button type="button" className="icon-button danger" aria-label="Remove ticket" onClick={() => void removeTicket(ticket.id)}><Trash2 size={16}/></button>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>}
+    {snap && <section className="overview-board">
+      <div className="section-heading"><div><span className="eyebrow">ON TAP</span><h2>What's pouring</h2></div><button type="button" className="secondary" onClick={() => go("taps")}>All handles</button></div>
+      <div className="overview-taps">
+        {(snap.taps.list.length ? snap.taps.list : Array.from({ length: 7 }, (_, i) => ({
+          tap_number: i + 1, title: "None", maker: "", style: "", abv: "", remaining_pct: 0, pints: 0, image_url: "", source_type: "", empty: true
+        }))).map((tap) => (
+          <button type="button" className={`overview-tap${tap.empty ? " empty" : ""}`} key={tap.tap_number} onClick={() => go("taps")}>
+            <span className="eyebrow">TAP {tap.tap_number}</span>
+            <strong>{tap.title}</strong>
+            <small>{tap.empty ? "Nothing pouring" : [tap.style, tap.abv ? `${tap.abv}%` : "", tap.pints ? `${tap.pints} pints` : ""].filter(Boolean).join(" · ")}</small>
+            {!tap.empty && <span className="overview-tap-fill"><span style={{ width: `${tap.remaining_pct}%` }}/></span>}
+          </button>
+        ))}
+      </div>
+    </section>}
+    {snap && snap.cocktails.favorites.length > 0 && <section className="favorite-board">
+      <div className="section-heading"><div><span className="eyebrow">BEHIND THE STICK</span><h2>Bartender favorites</h2></div><button type="button" className="secondary" onClick={() => go("cocktails")}>Recipe book</button></div>
+      <div className="favorite-row">
+        {snap.cocktails.favorites.map((drink) => (
+          <button type="button" className="favorite-card" key={drink.id} onClick={() => go("cocktails")}>
+            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt=""/> : <Star/>}</div>
+            <div>
+              <span className="eyebrow">{drink.readiness === "ready" ? "READY TO POUR" : drink.readiness === "almost" ? "ONE ITEM AWAY" : "BUILD THE SHELF"}</span>
+              <strong>{drink.name}</strong>
+              <small>{[drink.method, drink.glassware].filter(Boolean).join(" · ")}</small>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>}
+    {snap && snap.brews.list.length > 0 && <section className="overview-board">
+      <div className="section-heading"><div><span className="eyebrow">BREWERY LAB</span><h2>In the pipeline</h2></div><button type="button" className="secondary" onClick={() => go("brews")}>Open lab</button></div>
+      <div className="overview-brew-row">
+        {snap.brews.list.map((brew) => (
+          <button type="button" className="overview-brew" key={brew.id || brew.batch_name} onClick={() => go("brews")}>
+            <span className="eyebrow">{brew.status.toUpperCase()}</span>
+            <strong>{brew.batch_name}</strong>
+            <small>{[brew.style, brew.abv ? `${brew.abv}% ABV` : "", brew.on_tap].filter(Boolean).join(" · ")}</small>
+          </button>
+        ))}
+      </div>
+    </section>}
+    {snap && snap.low.length > 0 && <section className="overview-board">
+      <div className="section-heading"><div><span className="eyebrow">CELLAR WATCH</span><h2>Running low</h2></div></div>
+      <div className="overview-low-row">
+        {snap.low.map((item) => (
+          <button type="button" className="overview-low" key={`${item.module}-${item.id}`} onClick={() => go(item.module)}>
+            <div className="card-icon">{item.image_url ? <img src={item.image_url} alt=""/> : <Bottle/>}</div>
+            <div>
+              <span className="eyebrow">{item.module === "wines" ? "WINE" : item.module === "packaged_beer" ? "COLD ROOM" : "SPIRITS"}</span>
+              <strong>{item.name}</strong>
+              <small>{item.detail}</small>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>}
     <section className="feature-grid">
-      <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes, random picks, and seasonal collections.</p></div><Shuffle size={56}/></button>
+      <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes, random picks, and drinks on the ticket.</p></div><Shuffle size={56}/></button>
       <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. Your own AI key powers the pour.</p></div><Sparkles size={56}/></button>
     </section>
   </>;

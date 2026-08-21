@@ -12,6 +12,7 @@ import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } f
 import { prepareBrewWrite, preparePackagedWrite } from "./catalog.js";
 import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
 import { createTicket, deleteTicket, listTickets, setTicketStatus } from "./cocktail_tickets.js";
+import { buildOverview } from "./overview.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
@@ -198,6 +199,26 @@ app.get("/api/cocktails/match", async () => {
   return cocktails.map((cocktail) => {
     const matched = matchCocktail(cocktail, shelf);
     return { ...cocktail, ...matched };
+  });
+});
+
+app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot for the Overview page" } }, async () => {
+  const spirits = db.prepare("SELECT * FROM spirits").all() as Array<Record<string, unknown>>;
+  const taps = db.prepare("SELECT * FROM taps ORDER BY tap_number ASC").all() as Array<Record<string, unknown>>;
+  const brews = db.prepare("SELECT * FROM brews").all() as Array<Record<string, unknown>>;
+  const packaged = db.prepare("SELECT * FROM packaged_beer").all() as Array<Record<string, unknown>>;
+  const wines = db.prepare("SELECT * FROM wines").all() as Array<Record<string, unknown>>;
+  const shelf = buildShelf(spirits, wines);
+  const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
+    .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
+  return buildOverview({
+    spirits,
+    taps,
+    brews,
+    packaged,
+    wines,
+    cocktails,
+    tickets: listTickets("queued")
   });
 });
 
