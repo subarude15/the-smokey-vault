@@ -35,6 +35,20 @@ export type BottleSearchHit = {
   product: Record<string, unknown>;
 };
 
+export type SearchTable = BottleSearchHit["table"];
+
+export function searchTableForModule(moduleId?: string): SearchTable | undefined {
+  if (moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer") return "packaged_beer";
+  if (moduleId === "wines" || moduleId === "spirits") return moduleId;
+  return undefined;
+}
+
+export function colaProductTypeForTable(table: SearchTable) {
+  if (table === "packaged_beer") return "malt beverage";
+  if (table === "wines") return "wine";
+  return "distilled spirits";
+}
+
 type CacheRow = {
   upc: string;
   name: string;
@@ -381,18 +395,23 @@ function scoreHit(row: Record<string, unknown>, tokens: string[]) {
   return score;
 }
 
-export function searchVault(query: string): BottleSearchHit[] {
+export function searchVault(query: string, table?: SearchTable): BottleSearchHit[] {
   const tokens = queryTokens(query);
   if (!tokens.length) return [];
-  const limits: Record<BottleSearchHit["table"], number> = { spirits: 12, packaged_beer: 8, wines: 8 };
+  const tables: SearchTable[] = table ? [table] : ["spirits", "packaged_beer", "wines"];
+  const limits: Record<SearchTable, number> = {
+    spirits: table ? 16 : 12,
+    packaged_beer: table ? 16 : 8,
+    wines: table ? 16 : 8
+  };
   const hits: Array<BottleSearchHit & { score: number }> = [];
-  for (const table of ["spirits", "packaged_beer", "wines"] as const) {
-    const rows = db.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+  for (const next of tables) {
+    const rows = db.prepare(`SELECT * FROM ${next}`).all() as Record<string, unknown>[];
     hits.push(
       ...rows.filter((row) => matchesQuery(row, query))
-        .map((product) => ({ source: "vault" as const, table, product, score: scoreHit(product, tokens) }))
+        .map((product) => ({ source: "vault" as const, table: next, product, score: scoreHit(product, tokens) }))
         .sort((a, b) => b.score - a.score)
-        .slice(0, limits[table])
+        .slice(0, limits[next])
     );
   }
   return hits.sort((a, b) => b.score - a.score).map((hit) => ({
@@ -402,17 +421,18 @@ export function searchVault(query: string): BottleSearchHit[] {
   }));
 }
 
-export async function searchBottles(query: string): Promise<{ results: BottleSearchHit[]; quota?: ReturnType<typeof getLastQuota> }> {
+export async function searchBottles(query: string, options?: { table?: string }): Promise<{ results: BottleSearchHit[]; quota?: ReturnType<typeof getLastQuota> }> {
   const q = query.trim();
   if (q.length < 2) return { results: [] };
+  const table = searchTableForModule(options?.table);
 
-  const results = searchVault(q);
+  const results = searchVault(q, table);
   const seen = new Set(results.map(hitKey));
 
   if (isColaConfigured()) {
     try {
       const colaQuery = queryTokens(q).join(" ") || q;
-      const summaries = await searchColasByQuery(colaQuery, 10);
+      const summaries = await searchColasByQuery(colaQuery, 10, table ? { productType: colaProductTypeForTable(table) } : undefined);
       for (const summary of summaries) {
         const product = productToInventoryFields(mapColaToSchema(summary.ttb_id || "", summary));
         const hit: BottleSearchHit = {
@@ -421,6 +441,7 @@ export async function searchBottles(query: string): Promise<{ results: BottleSea
           ttb_id: summary.ttb_id ?? null,
           product
         };
+        if (table && hit.table !== table) continue;
         const key = hitKey(hit);
         if (seen.has(key)) continue;
         seen.add(key);

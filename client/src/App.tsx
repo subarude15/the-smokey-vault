@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
-import { BottleSuggest, type BottleSearchHit } from "./BottleSuggest";
+import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import {
   BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
   parseList, parseTagInput, serializeList
@@ -472,9 +472,10 @@ function BottleFinder({ module, onClose, onPick }:{
     const timer = window.setTimeout(async () => {
       setLoading(true); setError("");
       try {
-        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}`);
-        setResults(data.results.filter((hit) => !module.id || hit.table === module.id || hit.source === "cola_cloud"));
-        setStatus(data.results.length ? `${data.results.length} matches` : "No matches yet — try a brand or bottle name.");
+        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(module.id)}`);
+        const next = data.results.filter((hit) => hitFitsModule(module.id, hit));
+        setResults(next);
+        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
       } finally {

@@ -9,9 +9,15 @@ export type BottleSearchHit = {
   product: Record<string, unknown>;
 };
 
-function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
+export function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
   if (moduleId === "taps" || moduleId === "brews") return hit.table === "packaged_beer";
   return hit.table === moduleId;
+}
+
+function searchBottlesUrl(query: string, moduleId: string) {
+  const params = new URLSearchParams({ q: query });
+  if (moduleId) params.set("table", moduleId);
+  return `/search/bottles?${params}`;
 }
 
 function hitLabel(hit: BottleSearchHit) {
@@ -43,7 +49,7 @@ export function BottleSuggest({
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}`);
+        const data = await api<{ results: BottleSearchHit[] }>(searchBottlesUrl(q, moduleId));
         const next = data.results.filter((hit) => hitFitsModule(moduleId, hit)).slice(0, 8);
         setResults(next);
         setActive(0);

@@ -260,14 +260,20 @@ export async function searchByBarcode(upc: string): Promise<ColaSummary | null> 
   return null;
 }
 
-export async function searchColasByQuery(query: string, perPage = 8): Promise<ColaSummary[]> {
+export async function searchColasByQuery(
+  query: string,
+  perPage = 8,
+  options?: { productType?: string }
+): Promise<ColaSummary[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  const data = await colaFetch("/colas", {
+  const params: Record<string, string> = {
     q,
     per_page: String(Math.min(perPage, 20)),
     approval_date_from: "2005-01-01"
-  }) as { data?: ColaSummary[] };
+  };
+  if (options?.productType) params.product_type = options.productType;
+  const data = await colaFetch("/colas", params) as { data?: ColaSummary[] };
   return data.data ?? [];
 }
 

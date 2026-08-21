@@ -161,13 +161,13 @@ app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: st
   handleBarcodeLookup
 );
 
-app.get<{ Querystring: { q?: string } }>("/api/search/bottles", {
+app.get<{ Querystring: { q?: string; table?: string } }>("/api/search/bottles", {
   schema: { tags: ["Lookup"], summary: "Search vault + COLA Cloud by bottle name" }
 }, async (request, reply) => {
   const q = request.query.q?.trim() ?? "";
   if (q.length < 2) return { results: [] };
   try {
-    return await searchBottles(q);
+    return await searchBottles(q, { table: request.query.table });
   } catch (error) {
     app.log.error({ error }, "Bottle search failed");
     return reply.code(502).send({ error: "Bottle search failed" });
