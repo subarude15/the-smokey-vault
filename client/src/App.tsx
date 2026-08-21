@@ -613,7 +613,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       {flavors.length > 0 && <div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div>}
       {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
-      <GuestReviews table={module.id} itemId={item.id} admin={admin}/>
+      {!(module.id === "taps" && isTapEmpty(item)) && <GuestReviews table={module.id} itemId={item.id} admin={admin}/>}
     </section>
   );
 }
