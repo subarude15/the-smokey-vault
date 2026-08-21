@@ -4,6 +4,7 @@ import {
   barcodeVariants,
   mapColaToSchema,
   mapToSpiritCategory,
+  mapToSpiritType,
   normalizeAbv,
   normalizeUpc,
   parseVolumeMl,
@@ -31,8 +32,10 @@ test("normalizeAbv and parseVolumeMl read OCR strings", () => {
 });
 
 test("mapToSpiritCategory keeps vault select options", () => {
-  assert.equal(mapToSpiritCategory("Kentucky Straight Bourbon Whiskey"), "Bourbon");
-  assert.equal(mapToSpiritCategory("Islay Single Malt Scotch"), "Scotch");
+  assert.equal(mapToSpiritCategory("Kentucky Straight Bourbon Whiskey"), "Whiskey");
+  assert.equal(mapToSpiritType("Kentucky Straight Bourbon Whiskey"), "Bourbon");
+  assert.equal(mapToSpiritCategory("Islay Single Malt Scotch"), "Whiskey");
+  assert.equal(mapToSpiritType("Islay Single Malt Scotch"), "Scotch");
   assert.equal(mapToSpiritCategory("London Dry Gin"), "Gin");
 });
 
@@ -55,5 +58,6 @@ test("mapColaToSchema plus inventory fields keep upc and image", () => {
   const fields = productToInventoryFields(product);
   assert.equal(fields.upc, "008066095702");
   assert.equal(fields.image_url, "https://example.com/label.jpg");
-  assert.equal(fields.category, "Bourbon");
+  assert.equal(fields.category, "Whiskey");
+  assert.equal(fields.sub_category, "Bourbon");
 });

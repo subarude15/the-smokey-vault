@@ -1,3 +1,5 @@
+import { spiritFamilyFromLabel } from "./catalog.js";
+
 export const COLA_API_BASE = "https://app.colacloud.us/api/v1";
 export const CACHE_TTL_SECONDS = 86400 * 30;
 export const COLA_BURST_LIMIT = Number(process.env.COLA_BURST_LIMIT ?? 10);
@@ -194,13 +196,13 @@ export function mapColaToSchema(upc: string, summary: ColaSummary, detail?: Cola
 
 /** Inventory-facing fields used by the existing scan review form. */
 export function productToInventoryFields(product: ProductSchema) {
-  const spiritCategory = mapToSpiritCategory(product.category);
+  const mapped = spiritFamilyFromLabel(product.category);
   return {
     upc: product.upc,
     name: product.name,
     brand: product.brand,
-    category: spiritCategory,
-    sub_category: product.category && product.category !== spiritCategory ? product.category : "",
+    category: mapped.family,
+    sub_category: mapped.type,
     abv: product.abv ?? 0,
     image_url: product.image_url ?? "",
     notes: product.notes ?? "",
@@ -277,22 +279,11 @@ export async function getColaDetail(ttbId: string): Promise<ColaDetail | null> {
 }
 
 export function mapToSpiritCategory(raw?: string | null) {
-  const value = (raw ?? "").toLowerCase();
-  if (/bourbon/.test(value)) return "Bourbon";
-  if (/rye/.test(value)) return "Rye";
-  if (/scotch|single malt|islay|speyside/.test(value)) return "Scotch";
-  if (/irish/.test(value)) return "Irish";
-  if (/gin/.test(value)) return "Gin";
-  if (/tequila/.test(value)) return "Tequila";
-  if (/mezcal/.test(value)) return "Mezcal";
-  if (/rum/.test(value)) return "Rum";
-  if (/amaro/.test(value)) return "Amaro";
-  if (/liqueur|cordial/.test(value)) return "Liqueur";
-  if (/bitter/.test(value)) return "Bitters";
-  if (/vodka/.test(value)) return "Vodka";
-  if (/cognac|brandy|armagnac/.test(value)) return "Cognac";
-  if (/whisky|whiskey/.test(value)) return "Bourbon";
-  return raw?.trim() || "Mixer";
+  return spiritFamilyFromLabel(raw ?? "").family;
+}
+
+export function mapToSpiritType(raw?: string | null) {
+  return spiritFamilyFromLabel(raw ?? "").type;
 }
 
 export async function fetchColaQuota(): Promise<ColaQuota & { tier?: string; configured: boolean; source: string }> {

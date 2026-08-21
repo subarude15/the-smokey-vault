@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { spiritFamilyFromLabel } from "./catalog.js";
 
 export const dbPath = process.env.DB_PATH ?? (process.env.NODE_ENV === "production" ? "/data/smokeyvault.db" : "./data/smokeyvault.db");
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -19,31 +20,36 @@ CREATE TABLE IF NOT EXISTS spirits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, brand TEXT DEFAULT '', category TEXT NOT NULL,
   sub_category TEXT DEFAULT '', abv REAL DEFAULT 0, volume_ml REAL DEFAULT 750, fill_level REAL DEFAULT 100,
   purchase_date TEXT, opened_date TEXT, shelf_location TEXT DEFAULT '', upc TEXT DEFAULT '', notes TEXT DEFAULT '',
-  image_url TEXT DEFAULT '', stock_count INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  image_url TEXT DEFAULT '', stock_count INTEGER DEFAULT 1, tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]',
+  tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS taps (
   id INTEGER PRIMARY KEY AUTOINCREMENT, tap_number INTEGER NOT NULL UNIQUE, keg_size_l REAL DEFAULT 19,
   source_type TEXT DEFAULT 'Commercial', brewery_batch TEXT NOT NULL, style TEXT DEFAULT '', abv REAL DEFAULT 0,
-  ibu REAL DEFAULT 0, tapped_date TEXT, remaining_l REAL DEFAULT 19, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  ibu REAL DEFAULT 0, tapped_date TEXT, remaining_l REAL DEFAULT 19, maker TEXT DEFAULT '', notes TEXT DEFAULT '',
+  tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS brews (
   id INTEGER PRIMARY KEY AUTOINCREMENT, batch_name TEXT NOT NULL, style TEXT DEFAULT '', brew_date TEXT,
   target_og REAL, target_fg REAL, measured_og REAL, measured_fg REAL, calculated_abv REAL DEFAULT 0,
-  schedule TEXT DEFAULT '', status TEXT DEFAULT 'Planned', notes TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  schedule TEXT DEFAULT '', status TEXT DEFAULT 'Planned', notes TEXT DEFAULT '', maker TEXT DEFAULT '',
+  tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS packaged_beer (
   id INTEGER PRIMARY KEY AUTOINCREMENT, brewery TEXT DEFAULT '', name TEXT NOT NULL, style TEXT DEFAULT '',
   count INTEGER DEFAULT 1, pack_date TEXT, abv REAL DEFAULT 0, upc TEXT DEFAULT '', image_url TEXT DEFAULT '',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  notes TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
+  base_ingredient TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS wines (
   id INTEGER PRIMARY KEY AUTOINCREMENT, producer TEXT DEFAULT '', name TEXT NOT NULL, varietal TEXT DEFAULT '',
   vintage INTEGER, type TEXT DEFAULT 'Red', region TEXT DEFAULT '', sweetness INTEGER DEFAULT 3, body INTEGER DEFAULT 3,
   bottle_count INTEGER DEFAULT 1, drink_by_date TEXT, pairings TEXT DEFAULT '', notes TEXT DEFAULT '',
-  upc TEXT DEFAULT '', image_url TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  upc TEXT DEFAULT '', image_url TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]',
+  tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS cocktails (
@@ -71,34 +77,52 @@ CREATE TABLE IF NOT EXISTS cola_cache (
 );
 `;
 db.exec(schema);
-const spiritColumns = db.prepare("PRAGMA table_info(spirits)").all() as Array<{ name: string }>;
-if (!spiritColumns.some((column) => column.name === "stock_count")) {
-  db.exec("ALTER TABLE spirits ADD COLUMN stock_count INTEGER DEFAULT 1");
+
+function ensureColumn(table: string, column: string, ddl: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((entry) => entry.name === column)) db.exec(ddl);
 }
-const packagedBeerColumns = db.prepare("PRAGMA table_info(packaged_beer)").all() as Array<{ name: string }>;
-if (!packagedBeerColumns.some((column) => column.name === "upc")) {
-  db.exec("ALTER TABLE packaged_beer ADD COLUMN upc TEXT DEFAULT ''");
-}
-if (!packagedBeerColumns.some((column) => column.name === "image_url")) {
-  db.exec("ALTER TABLE packaged_beer ADD COLUMN image_url TEXT DEFAULT ''");
-}
-const wineColumns = db.prepare("PRAGMA table_info(wines)").all() as Array<{ name: string }>;
-if (!wineColumns.some((column) => column.name === "upc")) {
-  db.exec("ALTER TABLE wines ADD COLUMN upc TEXT DEFAULT ''");
-}
-if (!wineColumns.some((column) => column.name === "image_url")) {
-  db.exec("ALTER TABLE wines ADD COLUMN image_url TEXT DEFAULT ''");
-}
-const cocktailColumns = db.prepare("PRAGMA table_info(cocktails)").all() as Array<{ name: string }>;
-if (!cocktailColumns.some((column) => column.name === "season")) {
-  db.exec("ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
-}
-const colaCacheColumns = db.prepare("PRAGMA table_info(cola_cache)").all() as Array<{ name: string }>;
-for (const [column, ddl] of [
-  ["volume_ml", "ALTER TABLE cola_cache ADD COLUMN volume_ml REAL"],
-  ["product_type", "ALTER TABLE cola_cache ADD COLUMN product_type TEXT"]
-] as const) {
-  if (!colaCacheColumns.some((entry) => entry.name === column)) db.exec(ddl);
+
+ensureColumn("spirits", "stock_count", "ALTER TABLE spirits ADD COLUMN stock_count INTEGER DEFAULT 1");
+ensureColumn("spirits", "tasting_notes", "ALTER TABLE spirits ADD COLUMN tasting_notes TEXT DEFAULT ''");
+ensureColumn("spirits", "flavors", "ALTER TABLE spirits ADD COLUMN flavors TEXT DEFAULT '[]'");
+ensureColumn("spirits", "tags", "ALTER TABLE spirits ADD COLUMN tags TEXT DEFAULT '[]'");
+ensureColumn("spirits", "base_ingredient", "ALTER TABLE spirits ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("packaged_beer", "upc", "ALTER TABLE packaged_beer ADD COLUMN upc TEXT DEFAULT ''");
+ensureColumn("packaged_beer", "image_url", "ALTER TABLE packaged_beer ADD COLUMN image_url TEXT DEFAULT ''");
+ensureColumn("packaged_beer", "notes", "ALTER TABLE packaged_beer ADD COLUMN notes TEXT DEFAULT ''");
+ensureColumn("packaged_beer", "tasting_notes", "ALTER TABLE packaged_beer ADD COLUMN tasting_notes TEXT DEFAULT ''");
+ensureColumn("packaged_beer", "flavors", "ALTER TABLE packaged_beer ADD COLUMN flavors TEXT DEFAULT '[]'");
+ensureColumn("packaged_beer", "tags", "ALTER TABLE packaged_beer ADD COLUMN tags TEXT DEFAULT '[]'");
+ensureColumn("packaged_beer", "base_ingredient", "ALTER TABLE packaged_beer ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("wines", "upc", "ALTER TABLE wines ADD COLUMN upc TEXT DEFAULT ''");
+ensureColumn("wines", "image_url", "ALTER TABLE wines ADD COLUMN image_url TEXT DEFAULT ''");
+ensureColumn("wines", "tasting_notes", "ALTER TABLE wines ADD COLUMN tasting_notes TEXT DEFAULT ''");
+ensureColumn("wines", "flavors", "ALTER TABLE wines ADD COLUMN flavors TEXT DEFAULT '[]'");
+ensureColumn("wines", "tags", "ALTER TABLE wines ADD COLUMN tags TEXT DEFAULT '[]'");
+ensureColumn("wines", "base_ingredient", "ALTER TABLE wines ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("taps", "maker", "ALTER TABLE taps ADD COLUMN maker TEXT DEFAULT ''");
+ensureColumn("taps", "notes", "ALTER TABLE taps ADD COLUMN notes TEXT DEFAULT ''");
+ensureColumn("taps", "tasting_notes", "ALTER TABLE taps ADD COLUMN tasting_notes TEXT DEFAULT ''");
+ensureColumn("taps", "flavors", "ALTER TABLE taps ADD COLUMN flavors TEXT DEFAULT '[]'");
+ensureColumn("taps", "tags", "ALTER TABLE taps ADD COLUMN tags TEXT DEFAULT '[]'");
+ensureColumn("taps", "base_ingredient", "ALTER TABLE taps ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("brews", "maker", "ALTER TABLE brews ADD COLUMN maker TEXT DEFAULT ''");
+ensureColumn("brews", "tasting_notes", "ALTER TABLE brews ADD COLUMN tasting_notes TEXT DEFAULT ''");
+ensureColumn("brews", "flavors", "ALTER TABLE brews ADD COLUMN flavors TEXT DEFAULT '[]'");
+ensureColumn("brews", "tags", "ALTER TABLE brews ADD COLUMN tags TEXT DEFAULT '[]'");
+ensureColumn("brews", "base_ingredient", "ALTER TABLE brews ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("cocktails", "season", "ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
+ensureColumn("cola_cache", "volume_ml", "ALTER TABLE cola_cache ADD COLUMN volume_ml REAL");
+ensureColumn("cola_cache", "product_type", "ALTER TABLE cola_cache ADD COLUMN product_type TEXT");
+
+const migrateWhiskey = db.prepare("UPDATE spirits SET category=?, sub_category=? WHERE id=?");
+const whiskeyRows = db.prepare("SELECT id, category, sub_category FROM spirits").all() as Array<{ id: number; category: string; sub_category: string }>;
+for (const row of whiskeyRows) {
+  const mapped = spiritFamilyFromLabel(row.category ?? "", row.sub_category ?? "");
+  if (mapped.family === "Whiskey" && row.category !== "Whiskey") {
+    migrateWhiskey.run(mapped.family, mapped.type || row.sub_category || "", row.id);
+  }
 }
 
 function hashPin(pin: string, salt = randomBytes(16).toString("hex")) {

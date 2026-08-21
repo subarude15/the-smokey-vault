@@ -4,34 +4,60 @@ import {
   LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
+import {
+  BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
+  parseList, parseTagInput, serializeList
+} from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
 type Field = { key: string; label: string; type?: string; options?: string[] };
-type Module = { id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string; fields: Field[]; primary: string; secondary: string };
+type Module = {
+  id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string;
+  fields: Field[]; primary: string; secondary: string; makerKey: string; kindKey: string;
+};
+
+const beerFields: Field[] = [
+  { key:"style",label:"Style",options:BEER_STYLES },
+  { key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS },
+  { key:"tasting_notes",label:"Tasting notes",type:"tasting" },
+  { key:"flavors",label:"Flavors",type:"flavors" },
+  { key:"tags",label:"Tags",type:"tags" }
+];
 
 const modules: Module[] = [
-  { id: "spirits", label: "Spirits & Mixers", singular: "Bottle", icon: Bottle, title: "The Bottle Library", subtitle: "Spirits, liqueurs, bitters, and every essential mixer.", primary: "name", secondary: "brand", fields: [
-    { key:"name",label:"Name" },{ key:"brand",label:"Brand" },{ key:"category",label:"Category",options:["Bourbon","Rye","Scotch","Irish","Gin","Tequila","Mezcal","Rum","Amaro","Liqueur","Bitters","Mixer","Vodka","Cognac"] },
-    { key:"sub_category",label:"Sub-category" },{ key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level %",type:"range" },
+  { id: "spirits", label: "Spirits & Mixers", singular: "Bottle", icon: Bottle, title: "The Bottle Library", subtitle: "Spirits, liqueurs, bitters, and every essential mixer.", primary: "name", secondary: "brand", makerKey: "brand", kindKey: "category", fields: [
+    { key:"name",label:"Name" },{ key:"brand",label:"Brand / maker" },{ key:"category",label:"Family",options:SPIRIT_FAMILIES },
+    { key:"sub_category",label:"Type" },{ key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS },
+    { key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level",type:"percent",options:["100","75","50","25","0"] },
     { key:"purchase_date",label:"Purchase date",type:"date" },{ key:"opened_date",label:"Date opened",type:"date" },{ key:"shelf_location",label:"Shelf location" },{ key:"upc",label:"UPC" },
-    { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Image URL",type:"url" },{ key:"notes",label:"Notes",type:"textarea" }
+    { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Image URL",type:"url" },
+    { key:"notes",label:"Cellar notes",type:"textarea" },{ key:"tasting_notes",label:"Tasting notes",type:"tasting" },
+    { key:"flavors",label:"Flavors",type:"flavors" },{ key:"tags",label:"Tags",type:"tags" }
   ]},
-  { id: "taps", label: "Draft Taps", singular: "Tap", icon: Beer, title: "On Tap", subtitle: "Live pours and keg levels at a glance.", primary: "brewery_batch", secondary: "style", fields: [
-    {key:"tap_number",label:"Tap #",type:"number"},{key:"keg_size_l",label:"Keg size (L)",type:"number"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},{key:"brewery_batch",label:"Brewery / Batch"},
-    {key:"style",label:"Style"},{key:"abv",label:"ABV %",type:"number"},{key:"ibu",label:"IBU",type:"number"},{key:"tapped_date",label:"Date tapped",type:"date"},{key:"remaining_l",label:"Remaining (L)",type:"number"}
+  { id: "taps", label: "Draft Taps", singular: "Tap", icon: Beer, title: "On Tap", subtitle: "Live pours and keg levels at a glance.", primary: "brewery_batch", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
+    {key:"tap_number",label:"Tap #",type:"number"},{key:"maker",label:"Brewery / maker"},{key:"brewery_batch",label:"Beer / batch"},
+    {key:"keg_size_l",label:"Keg size (L)",type:"number"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},
+    {key:"abv",label:"ABV %",type:"number"},{key:"ibu",label:"IBU",type:"number"},{key:"tapped_date",label:"Date tapped",type:"date"},{key:"remaining_l",label:"Remaining (L)",type:"number"},
+    ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
-  { id: "brews", label: "Brewery", singular: "Batch", icon: FlaskConical, title: "Brewery Lab", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", fields: [
-    {key:"batch_name",label:"Batch name"},{key:"style",label:"Style"},{key:"brew_date",label:"Brew date",type:"date"},{key:"target_og",label:"Target OG",type:"number"},{key:"target_fg",label:"Target FG",type:"number"},
+  { id: "brews", label: "Brewery", singular: "Batch", icon: FlaskConical, title: "Brewery Lab", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
+    {key:"batch_name",label:"Batch name"},{key:"maker",label:"Brewery / maker"},
+    {key:"brew_date",label:"Brew date",type:"date"},{key:"target_og",label:"Target OG",type:"number"},{key:"target_fg",label:"Target FG",type:"number"},
     {key:"measured_og",label:"Measured OG",type:"number"},{key:"measured_fg",label:"Measured FG",type:"number"},{key:"calculated_abv",label:"Calculated ABV %",type:"number"},
-    {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},{key:"status",label:"Status",options:["Planned","Fermenting","Conditioning","Ready to Keg","Archived"]},{key:"notes",label:"Brew notes",type:"textarea"}
+    {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},{key:"status",label:"Status",options:["Planned","Fermenting","Conditioning","Ready to Keg","Archived"]},
+    ...beerFields, {key:"notes",label:"Brew notes",type:"textarea"}
   ]},
-  { id: "packaged_beer", label: "Packaged Beer", singular: "Beer", icon: Beer, title: "Packaged Beer", subtitle: "The cold-room count for cans and bottles.", primary: "name", secondary: "brewery", fields: [
-    {key:"brewery",label:"Brewery"},{key:"name",label:"Name"},{key:"style",label:"Style"},{key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Image URL",type:"url"}
+  { id: "packaged_beer", label: "Packaged Beer", singular: "Beer", icon: Beer, title: "Packaged Beer", subtitle: "The cold-room count for cans and bottles.", primary: "name", secondary: "brewery", makerKey: "brewery", kindKey: "style", fields: [
+    {key:"brewery",label:"Brewery / maker"},{key:"name",label:"Name"},
+    {key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Image URL",type:"url"},
+    ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
-  { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and ideal drinking windows.", primary: "name", secondary: "producer", fields: [
-    {key:"producer",label:"Producer / Winery"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},{key:"type",label:"Type",options:["Red","White","Rosé","Sparkling","Dessert","Fortified"]},
-    {key:"region",label:"Region"},{key:"sweetness",label:"Sweetness (1–5)",type:"range5"},{key:"body",label:"Body (1–5)",type:"range5"},{key:"bottle_count",label:"Bottle count",type:"number"},
-    {key:"drink_by_date",label:"Drink-by date",type:"date"},{key:"pairings",label:"Pairings"},{key:"notes",label:"Notes",type:"textarea"},{key:"upc",label:"UPC"},{key:"image_url",label:"Image URL",type:"url"}
+  { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and ideal drinking windows.", primary: "name", secondary: "producer", makerKey: "producer", kindKey: "type", fields: [
+    {key:"producer",label:"Producer / maker"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},{key:"type",label:"Type",options:["Red","White","Rosé","Sparkling","Dessert","Fortified"]},
+    {key:"base_ingredient",label:"Base / fruit",options:BASE_INGREDIENTS},{key:"region",label:"Region"},{key:"sweetness",label:"Sweetness (1–5)",type:"range5"},{key:"body",label:"Body (1–5)",type:"range5"},{key:"bottle_count",label:"Bottle count",type:"number"},
+    {key:"drink_by_date",label:"Drink-by date",type:"date"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Image URL",type:"url"},
+    {key:"notes",label:"Cellar notes",type:"textarea"},{key:"tasting_notes",label:"Tasting notes",type:"tasting"},
+    {key:"flavors",label:"Flavors",type:"flavors"},{key:"tags",label:"Tags",type:"tags"}
   ]}
 ];
 
@@ -270,7 +296,24 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
     setViewing(undefined);
     setEditing({ ...scanDraft.values, id: scanDraft.mode === "edit" ? itemId(scanDraft.values) : 0 } as Item);
   }, [admin, scanDraft, finishScanReview]);
-  const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(search.toLowerCase()));
+  const [maker,setMaker] = useState("All");
+  const [kind,setKind] = useState("All");
+  const [tag,setTag] = useState("All");
+  const [flavor,setFlavor] = useState("All");
+  const makers = ["All", ...uniqueValues(items, module.makerKey)];
+  const kinds = ["All", ...uniqueValues(items, module.kindKey)];
+  const tags = ["All", ...uniqueItemLists(items, "tags")];
+  const flavors = ["All", ...uniqueItemLists(items, "flavors")];
+  const filtered = items.filter((item) => {
+    const haystack = JSON.stringify(item).toLowerCase();
+    if (search && !haystack.includes(search.toLowerCase())) return false;
+    if (maker !== "All" && String(item[module.makerKey] ?? "") !== maker) return false;
+    if (kind !== "All" && String(item[module.kindKey] ?? "") !== kind) return false;
+    if (tag !== "All" && !parseList(item.tags).some((value) => value.toLowerCase() === tag.toLowerCase())) return false;
+    if (flavor !== "All" && !parseList(item.flavors).some((value) => value.toLowerCase() === flavor.toLowerCase())) return false;
+    return true;
+  });
+  const activeFilters = maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
   async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); setViewing(undefined); load(); }
   const canFind = ["spirits","packaged_beer","wines"].includes(module.id);
   const emptyActions = admin ? <>
@@ -299,13 +342,30 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
         <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>
       </div>}
     </div>
+    {items.length > 0 && <div className="filter-row">
+      <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value}>{value === "All" ? "All makers" : value}</option>)}</select>
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value}>{value === "All" ? (module.id === "spirits" ? "All families" : module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
+      <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
+      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      {activeFilters && <button type="button" className="secondary" onClick={() => { setSearch(""); setMaker("All"); setKind("All"); setTag("All"); setFlavor("All"); }}>Clear</button>}
+    </div>}
     {loadError ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
     !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."} actions={emptyActions}/> :
-    !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches “${search}”.`}/> :
+    !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
       <div className="inventory-grid">{filtered.map((item) => <button type="button" className="inventory-card inventory-card-button" key={item.id} onClick={() => setViewing(item)}>
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
         <div className="card-content"><span className="eyebrow">{String(item[module.secondary] ?? item.style ?? "")}</span><h3>{String(item[module.primary] ?? "Untitled")}</h3>
-          <div className="meta">{item.abv ? <span>{item.abv}% ABV</span> : null}{item.status ? <span>{item.status}</span> : null}{item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}{item.count != null ? <span>{item.count} packaged</span> : null}{item.upc ? <span>UPC {String(item.upc)}</span> : null}</div>
+          <div className="meta">
+            {item.category ? <span>{String(item.category)}</span> : null}
+            {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
+            {item.style ? <span>{String(item.style)}</span> : null}
+            {item.abv ? <span>{item.abv}% ABV</span> : null}
+            {item.status ? <span>{item.status}</span> : null}
+            {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
+            {item.count != null ? <span>{item.count} packaged</span> : null}
+            {item.upc ? <span>UPC {String(item.upc)}</span> : null}
+            {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
+          </div>
           {module.id === "spirits" && <div className="fill"><span style={{width:`${Number(item.fill_level ?? 0)}%`}}/><small>{item.fill_level}% full</small></div>}
           {module.id === "taps" && <div className="fill"><span style={{width:`${Math.min(100,Number(item.remaining_l)/Number(item.keg_size_l)*100)}%`}}/><small>{item.remaining_l} L remaining · ~{Math.floor(Number(item.remaining_l)*2.1)} pints</small></div>}
         </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button><button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button></div>}
@@ -318,6 +378,9 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: 
 function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
   module: Module; item: Item; admin: boolean; onBack: () => void; onEdit: () => void; onDelete: () => void;
 }) {
+  const flavors = parseList(item.flavors);
+  const tags = parseList(item.tags);
+  const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "image_url", module.primary]);
   return (
     <section className="bottle-detail">
       <button className="secondary back-button" onClick={onBack}><ArrowLeft size={17}/> Back to {module.label}</button>
@@ -326,30 +389,34 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
           {item.image_url ? <img src={String(item.image_url)} alt={String(item[module.primary] ?? "")}/> : <module.icon size={64}/>}
         </div>
         <div>
-          <span className="eyebrow">{String(item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
+          <span className="eyebrow">{String(item[module.makerKey] ?? item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
           <h1>{String(item[module.primary] ?? "Untitled")}</h1>
           <div className="meta">
+            {item.category ? <span>{String(item.category)}</span> : null}
+            {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
+            {item.style ? <span>{String(item.style)}</span> : null}
             {item.abv ? <span>{item.abv}% ABV</span> : null}
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
             {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
+            {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
           {admin && <div className="bottle-detail-actions"><button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button><button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button></div>}
         </div>
       </div>
       <div className="bottle-detail-grid">
-        {module.fields.filter((field) => field.key !== module.primary && field.key !== "notes" && item[field.key] != null && String(item[field.key]).trim() !== "").map((field) => (
-          <div key={field.key} className={field.type === "textarea" || field.key === "notes" || field.key === "image_url" ? "full" : ""}>
+        {module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
+          <div key={field.key} className={field.type === "textarea" ? "full" : ""}>
             <span>{field.label}</span>
-            {field.key === "image_url" ? <a href={String(item.image_url)} target="_blank" rel="noreferrer">{String(item.image_url)}</a> :
-              field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong> :
-              <strong>{String(item[field.key])}</strong>}
+            {field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong> : <strong>{String(item[field.key])}</strong>}
           </div>
         ))}
       </div>
-      {item.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{String(item.notes)}</p></article> : null}
+      {flavors.length > 0 && <div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div>}
+      {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
+      {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
     </section>
   );
 }
@@ -439,17 +506,68 @@ function BottleFinder({ module, onClose, onPick }:{
 }
 
 function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
-  const [form,setForm] = useState<Record<string,unknown>>(item ?? {});
+  const [form,setForm] = useState<Record<string,unknown>>(() => ({
+    ...(item ?? (module.id === "spirits" ? { category: "Whiskey", fill_level: 100 } : {})),
+    flavors: parseList(item?.flavors),
+    tags: parseList(item?.tags)
+  }));
+  const [tagDraft,setTagDraft] = useState("");
+  const [flavorDraft,setFlavorDraft] = useState("");
   const [error,setError] = useState("");
   const existing = Boolean(item?.id);
-  async function submit(e:React.FormEvent) { e.preventDefault(); try { await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(form)}); saved(); } catch(err){setError(err instanceof Error?err.message:"Could not save");} }
+  const flavors = parseList(form.flavors);
+  const tags = parseList(form.tags);
+  async function submit(e:React.FormEvent) {
+    e.preventDefault();
+    const payload = { ...form, flavors: serializeList(flavors), tags: serializeList(parseTagInput([...tags, tagDraft].join(" "))) };
+    try {
+      await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(payload)});
+      saved();
+    } catch(err) {
+      setError(err instanceof Error?err.message:"Could not save");
+    }
+  }
+  function typeOptions(field: Field) {
+    if (field.key === "sub_category" && module.id === "spirits") {
+      return SPIRIT_TYPES[String(form.category || "Whiskey")] ?? [];
+    }
+    return field.options ?? [];
+  }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     {form.image_url ? <div className="form-image-preview"><img src={String(form.image_url)} alt=""/></div> : null}
     <div className="form-grid">{module.fields.map((field) => {
+      if (field.type === "flavors") {
+        const options = Array.from(new Set([...FLAVOR_OPTIONS, ...flavors]));
+        return <label className="full" key={field.key}><span>{field.label}</span>
+          <div className="chip-row">{options.map((value) => {
+            const on = flavors.some((entry) => entry.toLowerCase() === value.toLowerCase());
+            return <button type="button" key={value} className={on ? "chip active" : "chip"} onClick={() => setForm({ ...form, flavors: on ? flavors.filter((entry) => entry.toLowerCase() !== value.toLowerCase()) : [...flavors, value] })}>{value}</button>;
+          })}</div>
+          <div className="tag-input-row">
+            <input value={flavorDraft} onChange={(e)=>setFlavorDraft(e.target.value)} placeholder="Add a custom flavor"/>
+            <button type="button" className="secondary" disabled={!flavorDraft.trim()} onClick={() => { setForm({ ...form, flavors: [...flavors, ...parseList(flavorDraft)] }); setFlavorDraft(""); }}>Add</button>
+          </div>
+        </label>;
+      }
+      if (field.type === "tags") {
+        return <label className="full" key={field.key}><span>{field.label}</span>
+          <div className="chip-row">{tags.map((value) => <button type="button" className="chip active" key={value} onClick={() => setForm({ ...form, tags: tags.filter((entry) => entry !== value) })}>#{value} ×</button>)}</div>
+          <div className="tag-input-row">
+            <input value={tagDraft} onChange={(e)=>setTagDraft(e.target.value)} placeholder="#irish #summer #rare" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setForm({ ...form, tags: parseTagInput([...tags, tagDraft].join(" ")) }); setTagDraft(""); } }}/>
+            <button type="button" className="secondary" disabled={!tagDraft.trim()} onClick={() => { setForm({ ...form, tags: parseTagInput([...tags, tagDraft].join(" ")) }); setTagDraft(""); }}>Add tags</button>
+          </div>
+        </label>;
+      }
+      if (field.type === "tasting") {
+        return <label className="full" key={field.key}><span>{field.label}</span><textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})} placeholder="Peat, orange oil, a long dry finish…"/></label>;
+      }
       const current = String(form[field.key] ?? "");
-      const options = field.options ? Array.from(new Set([...(field.options), ...(current && !field.options.includes(current) ? [current] : [])])) : undefined;
+      const options = typeOptions(field);
+      const optionList = options.length ? Array.from(new Set([...options, ...(current && !options.includes(current) ? [current] : [])])) : undefined;
+      const optionalSelect = field.key === "sub_category" || field.key === "base_ingredient" || field.key === "style";
+      const percentSelect = field.type === "percent";
       return <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
-      {options ? <select value={current || options[0]} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}>{options.map((v)=><option key={v}>{v}</option>)}</select> :
+      {optionList ? <select value={current} onChange={(e)=>setForm({...form,[field.key]:percentSelect?Number(e.target.value):e.target.value})}>{optionalSelect && <option value="">Select…</option>}{optionList.map((v)=><option key={v} value={v}>{percentSelect ? (v === "100" ? "Full (100%)" : v === "0" ? "Empty (0%)" : `${v}%`) : v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :
       field.type?.startsWith("range") ? <div className="range-wrap"><input type="range" min={field.type==="range5"?1:0} max={field.type==="range5"?5:100} value={Number(form[field.key]??(field.type==="range5"?3:100))} onChange={(e)=>setForm({...form,[field.key]:Number(e.target.value)})}/><b>{String(form[field.key]??(field.type==="range5"?3:100))}</b></div> :
       <input type={field.type??"text"} step={field.type==="number"?"any":undefined} value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:field.type==="number"?Number(e.target.value):e.target.value})}/>}</label>;
@@ -565,5 +683,11 @@ function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
   return <div className="modal-backdrop"><form className="modal unlock-modal" onSubmit={submit}><button type="button" className="icon-button close" onClick={onClose}><X/></button><div className="lock-seal"><Lock/></div><span className="eyebrow">ADMIN ACCESS</span><h2>Unlock the vault</h2><p>Enter your master PIN to manage the collection.</p><input autoFocus inputMode="numeric" pattern="\d*" maxLength={12} type="password" value={pin} onChange={(e)=>setPinValue(e.target.value)} placeholder="••••"/>{error&&<p className="error">{error}</p>}<button className="primary wide">Unlock</button><small>First launch default: 1234</small></form></div>;
 }
 
+function uniqueValues(items: Item[], key: string) {
+  return [...new Set(items.map((item) => String(item[key] ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+function uniqueItemLists(items: Item[], key: string) {
+  return [...new Set(items.flatMap((item) => parseList(item[key])))].sort((a, b) => a.localeCompare(b));
+}
 function PageTitle({eyebrow,title,subtitle}:{eyebrow:string;title:string;subtitle:string}){return <div className="page-title"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{subtitle}</p></div>}
 function Empty({icon:Icon,title,text,actions}:{icon:typeof Bottle;title:string;text:string;actions?:ReactNode}){return <div className="empty"><Icon/><h3>{title}</h3><p>{text}</p>{actions ? <div className="empty-actions">{actions}</div> : null}</div>}

@@ -18,11 +18,11 @@ const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
 const tables = new Set(["spirits", "taps", "brews", "packaged_beer", "wines"]);
 const publicTables = new Set([...tables, "cocktails"]);
 const tableFields: Record<string, string[]> = {
-  spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count"],
-  taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l"],
-  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes"],
-  packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url"],
-  wines: ["producer","name","varietal","vintage","type","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url"]
+  spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count","tasting_notes","flavors","tags","base_ingredient"],
+  taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l","maker","notes","tasting_notes","flavors","tags","base_ingredient"],
+  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","tasting_notes","flavors","tags","base_ingredient"],
+  packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url","notes","tasting_notes","flavors","tags","base_ingredient"],
+  wines: ["producer","name","varietal","vintage","type","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url","tasting_notes","flavors","tags","base_ingredient"]
 };
 
 await app.register(cors, { origin: true });
