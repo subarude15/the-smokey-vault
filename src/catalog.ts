@@ -142,6 +142,8 @@ export function inferWineFamilyAndStyle(text: string): { type: string; style: st
   return { type: "Red", style: "" };
 }
 
+export const TAP_COUNT = 7;
+
 export const US_PINT_L = 0.473176;
 
 export const DEFAULT_KEG_L = 19.5;
@@ -215,4 +217,40 @@ export function brewToTap(brew: Record<string, unknown>, tappedDate = new Date()
     remaining_l: DEFAULT_KEG_L,
     tapped_date: tappedDate
   };
+}
+
+export function isTapEmpty(item: Record<string, unknown> | null | undefined): boolean {
+  const name = String(item?.brewery_batch ?? "").trim();
+  return !name || /^none$/i.test(name);
+}
+
+export function tapTitle(item: Record<string, unknown>): string {
+  return isTapEmpty(item) ? "None" : String(item.brewery_batch ?? "Untitled");
+}
+
+export function emptyTapBeerFields(): Record<string, unknown> {
+  return {
+    brewery_batch: "",
+    maker: "",
+    style: "",
+    abv: 0,
+    ibu: 0,
+    tapped_date: "",
+    remaining_l: 0,
+    notes: "",
+    tasting_notes: "",
+    flavors: "[]",
+    tags: "[]",
+    image_url: "",
+    base_ingredient: "",
+    source_type: "Commercial"
+  };
+}
+
+export function firstEmptyTapNumber(taps: Array<Record<string, unknown>>): number {
+  const taken = new Set(taps.filter((tap) => !isTapEmpty(tap)).map((tap) => Number(tap.tap_number)));
+  for (let n = 1; n <= TAP_COUNT; n++) {
+    if (!taken.has(n)) return n;
+  }
+  return 1;
 }

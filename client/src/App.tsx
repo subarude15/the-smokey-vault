@@ -13,7 +13,8 @@ import {
   SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
   defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
-  remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap
+  remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap,
+  TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -41,8 +42,8 @@ const modules: Module[] = [
     { key:"notes",label:"Cellar notes",type:"textarea" },{ key:"tasting_notes",label:"Tasting notes",type:"tasting" },
     { key:"flavors",label:"Flavors",type:"flavors" },{ key:"tags",label:"Tags",type:"tags" }
   ]},
-  { id: "taps", label: "Draft Taps", singular: "Tap", icon: Beer, title: "On Tap", subtitle: "Live pours and keg levels at a glance.", primary: "brewery_batch", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
-    {key:"tap_number",label:"Tap #",type:"number"},{key:"maker",label:"Brewery / maker"},{key:"brewery_batch",label:"Beer / batch"},
+  { id: "taps", label: "Draft Taps", singular: "Tap", icon: Beer, title: "On Tap", subtitle: "Seven handles. Empty taps show None until something is pouring.", primary: "brewery_batch", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
+    {key:"tap_number",label:"Tap #",type:"tapNumber"},{key:"maker",label:"Brewery / maker"},{key:"brewery_batch",label:"Beer / batch"},
     {key:"keg_size_l",label:"Keg size",type:"kegSize"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},
     {key:"abv",label:"ABV %",type:"number"},{key:"ibu",label:"IBU",type:"number"},{key:"tapped_date",label:"Date tapped",type:"date"},
     {key:"remaining_l",label:"Keg remaining",type:"kegRemaining"},
@@ -307,8 +308,16 @@ export default function App() {
             openScanner={() => setScanner(true)}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
-            onPutOnTap={admin && module.id === "brews" ? (brew) => {
-              setTapSeed({ id: 0, ...brewToTap(brew) } as Item);
+            onPutOnTap={admin && module.id === "brews" ? async (brew) => {
+              const taps = await api<Item[]>("/inventory/taps");
+              const slot = [...taps].sort((a, b) => Number(a.tap_number) - Number(b.tap_number)).find(isTapEmpty) ?? taps[0];
+              setTapSeed({
+                ...(slot ?? { tap_number: firstEmptyTapNumber(taps) }),
+                ...brewToTap(brew),
+                id: slot?.id ?? 0,
+                tap_number: slot?.tap_number ?? firstEmptyTapNumber(taps),
+                keg_size_l: slot?.keg_size_l ?? DEFAULT_KEG_L
+              } as Item);
               navigate("taps");
             } : undefined}
           />)}
@@ -364,10 +373,18 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   useEffect(() => { load(); setViewing(undefined); }, [load]);
   useEffect(() => {
     if (!seedCreate) return;
-    setViewing(undefined);
-    setEditing({ ...seedCreate, id: 0 } as Item);
+    if (module.id === "taps" && items.length === 0) return;
+    if (module.id === "taps") {
+      const num = Number(seedCreate.tap_number);
+      const slot = items.find((row) => Number(row.tap_number) === num) ?? items.find(isTapEmpty) ?? items[0];
+      setViewing(undefined);
+      setEditing({ ...slot, ...seedCreate, id: slot?.id ?? seedCreate.id } as Item);
+    } else {
+      setViewing(undefined);
+      setEditing({ ...seedCreate, id: 0 } as Item);
+    }
     onSeedConsumed?.();
-  }, [seedCreate, onSeedConsumed]);
+  }, [seedCreate, items, onSeedConsumed, module.id]);
   useEffect(() => {
     if (!scanDraft || scanDraft.guestAdd || openedScanKey.current === scanDraft.key) return;
     openedScanKey.current = scanDraft.key;
@@ -405,6 +422,15 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   });
   const activeFilters = maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
   async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); setViewing(undefined); load(); }
+  async function clearTap(item: Item) {
+    if (!confirm("Clear this tap back to None?")) return;
+    await api(`/inventory/taps/${item.id}`, { method: "PUT", body: JSON.stringify(emptyTapBeerFields()) });
+    setViewing(undefined);
+    load();
+  }
+  const listed = module.id === "taps"
+    ? [...filtered].sort((a, b) => Number(a.tap_number) - Number(b.tap_number))
+    : filtered;
   const canFind = ["spirits","packaged_beer","wines","taps"].includes(module.id);
   const emptyActions = admin ? <>
     {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> Find bottle</button>}
@@ -419,7 +445,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       admin={admin}
       onBack={() => setViewing(undefined)}
       onEdit={() => { setEditing(viewing); setViewing(undefined); }}
-      onDelete={() => remove(viewing.id)}
+      onDelete={() => module.id === "taps" ? clearTap(viewing) : remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
       onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
     />;
@@ -430,8 +456,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     <div className="toolbar">
       <label className="search"><Search/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder={`Filter ${module.label.toLowerCase()}…`}/></label>
       {admin && <div className="toolbar-actions">
-        {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> Find bottle</button>}
-        <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>
+        {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {module.id === "taps" ? "Find beer" : "Find bottle"}</button>}
+        {module.id !== "taps" && <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>}
       </div>}
     </div>
     {items.length > 0 && <div className="filter-row">
@@ -444,21 +470,23 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     {loadError ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
     !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."} actions={emptyActions}/> :
     !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
-      <div className="inventory-grid">{filtered.map((item) => <button type="button" className="inventory-card inventory-card-button" key={item.id} onClick={() => setViewing(item)}>
+      <div className="inventory-grid">{listed.map((item) => <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}`} key={item.id} onClick={() => setViewing(item)}>
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
-        <div className="card-content"><span className="eyebrow">{String(item[module.secondary] ?? item.style ?? "")}</span><h3>{String(item[module.primary] ?? "Untitled")}</h3>
+        <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
+            {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
             {item.category ? <span>{String(item.category)}</span> : null}
             {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
             {module.id === "wines"
               ? (wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) ? <span>{wineKindLabel(String(item.type ?? ""), String(item.style ?? ""))}</span> : null)
-              : item.style ? <span>{String(item.style)}</span> : null}
+              : module.id !== "taps" && item.style ? <span>{String(item.style)}</span> : null}
+            {module.id === "taps" && !isTapEmpty(item) && item.style ? <span>{String(item.style)}</span> : null}
             {module.id === "wines" && item.sweetness != null && String(item.sweetness).trim() !== ""
               ? <span>{migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))}</span>
               : null}
-            {item.abv ? <span>{item.abv}% ABV</span> : null}
+            {item.abv && !(module.id === "taps" && isTapEmpty(item)) ? <span>{item.abv}% ABV</span> : null}
             {item.status ? <span>{item.status}</span> : null}
-            {item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {module.id !== "taps" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
@@ -466,16 +494,24 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
           {module.id === "spirits" && <div className="fill"><span style={{width:`${Number(item.fill_level ?? 0)}%`}}/><small>{item.fill_level}% full</small></div>}
-          {module.id === "taps" && (() => {
+          {module.id === "taps" && !isTapEmpty(item) && (() => {
             const remaining = Number(item.remaining_l ?? 0);
             const size = Number(item.keg_size_l || DEFAULT_KEG_L);
             const pints = pintsRemaining(remaining);
             const kicked = remaining <= 0;
             return <div className="fill"><span style={{width:`${kegFillPercent(remaining, size)}%`}}/><small>{kicked ? "Kicked" : `${pints} pint${pints === 1 ? "" : "s"} left`}</small></div>;
           })()}
-        </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button><button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button></div>}
+        </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button>{module.id !== "taps" && <button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button>}</div>}
       </button>)}</div>}
-    {finderOpen && <BottleFinder module={module} onClose={() => setFinderOpen(false)} onPick={(values) => { setFinderOpen(false); setEditing({id:0,...values} as Item); }}/>}
+    {finderOpen && <BottleFinder module={module} onClose={() => setFinderOpen(false)} onPick={(values) => {
+      setFinderOpen(false);
+      if (module.id === "taps") {
+        const slot = listed.find(isTapEmpty) ?? items[0];
+        setEditing({ ...slot, ...values, id: slot?.id ?? 0, tap_number: slot?.tap_number ?? firstEmptyTapNumber(items), keg_size_l: slot?.keg_size_l ?? values.keg_size_l } as Item);
+      } else {
+        setEditing({id:0,...values} as Item);
+      }
+    }}/>}
     {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft) && !scanDraft?.guestAdd} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); setViewing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
   </>;
 }
@@ -528,41 +564,44 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           {item.image_url ? <img src={String(item.image_url)} alt={String(item[module.primary] ?? "")}/> : <module.icon size={64}/>}
         </div>
         <div>
-          <span className="eyebrow">{String(item[module.makerKey] ?? item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
-          <h1>{String(item[module.primary] ?? "Untitled")}</h1>
+          <span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.makerKey] ?? item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
+          <h1>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h1>
           <div className="meta">
+            {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
             {item.category ? <span>{String(item.category)}</span> : null}
             {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
             {module.id === "wines"
               ? (wineKind ? <span>{wineKind}</span> : null)
+              : module.id === "taps" && isTapEmpty(item) ? null
               : item.style ? <span>{String(item.style)}</span> : null}
-            {item.abv ? <span>{item.abv}% ABV</span> : null}
+            {item.abv && !(module.id === "taps" && isTapEmpty(item)) ? <span>{item.abv}% ABV</span> : null}
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
-            {item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {module.id !== "taps" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
             {item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
             {item.bottle_count != null ? <span>{item.bottle_count} bottles</span> : null}
             {item.count != null ? <span>{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
-          <BottleVotes table={module.id} itemId={item.id}/>
+          {!(module.id === "taps" && isTapEmpty(item)) && <BottleVotes table={module.id} itemId={item.id}/>}
           {admin && <div className="bottle-detail-actions">
             {module.id === "wines" && <button type="button" className="secondary drink-one" disabled={bottlesLeft <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
-            {module.id === "taps" && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
+            {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
             {onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
-            <button className="primary" onClick={onEdit}><Settings size={16}/> Edit</button>
-            <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>
+            <button className="primary" onClick={onEdit}><Settings size={16}/> {module.id === "taps" && isTapEmpty(item) ? "Put a beer on" : "Edit"}</button>
+            {module.id === "taps" && !isTapEmpty(item) && <button className="secondary danger" onClick={onDelete}>Clear tap</button>}
+            {module.id !== "taps" && <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>}
           </div>}
           {actionError ? <p className="error">{actionError}</p> : null}
         </div>
       </div>
       <div className="bottle-detail-grid">
         {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
-        {module.id === "taps" && <div className="full">
+        {module.id === "taps" && !isTapEmpty(item) && <div className="full">
           <span>Keg remaining</span>
           <div className="fill tap-fill"><span style={{width:`${kegFillPercent(kegLeft, kegSize)}%`}}/><small>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${kegSizeLabel(kegSize)}`}</small></div>
         </div>}
-        {module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
+        {!(module.id === "taps" && isTapEmpty(item)) && module.fields.filter((field) => !skip.has(field.key) && item[field.key] != null && String(item[field.key]).trim() !== "" && String(item[field.key]) !== "[]").map((field) => (
           <div key={field.key} className={field.type === "textarea" ? "full" : ""}>
             <span>{field.label}</span>
             {field.key === "fill_level" ? <strong>{String(item.fill_level)}% full</strong>
@@ -669,7 +708,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       : module.id === "wines"
         ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1 }
         : module.id === "taps"
-          ? { keg_size_l: DEFAULT_KEG_L, remaining_l: DEFAULT_KEG_L, source_type: "Commercial" }
+          ? { tap_number: 1, keg_size_l: DEFAULT_KEG_L, remaining_l: 0, source_type: "Commercial", brewery_batch: "" }
           : {})) as Record<string, unknown>;
     return {
       ...defaults,
@@ -723,7 +762,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       remaining_l: wasFull ? liters : Math.min(remaining, liters)
     });
   }
-  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => {
       if (field.type === "image") {
         return <div className="full field-block" key={field.key}><span>{field.label}</span>
@@ -765,6 +804,13 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
           />
         </div>;
       }
+      if (field.type === "tapNumber") {
+        return <label key={field.key}><span>{field.label}</span>
+          <select value={String(form.tap_number ?? 1)} disabled={existing} onChange={(e) => setForm({ ...form, tap_number: Number(e.target.value) })}>
+            {Array.from({ length: TAP_COUNT }, (_, index) => index + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>;
+      }
       if (field.type === "kegSize") {
         const current = Number(form.keg_size_l || DEFAULT_KEG_L);
         const options = KEG_SIZES.some((size) => Math.abs(size.liters - current) < 0.05)
@@ -801,13 +847,26 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       const nameSuggest = field.key === module.primary && !optionList && field.type !== "textarea" && field.type !== "number" && field.type !== "percent";
       if (nameSuggest) {
         return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          {module.id === "taps" && <div className="chip-row">
+            <button type="button" className={isTapEmpty(form) ? "chip active" : "chip"} onClick={() => {
+              setSuggestLock("");
+              setForm((currentForm) => ({
+                ...currentForm,
+                ...emptyTapBeerFields(),
+                tap_number: currentForm.tap_number,
+                keg_size_l: currentForm.keg_size_l,
+                flavors: [],
+                tags: []
+              }));
+            }}>None</button>
+          </div>}
           <div className="suggest-wrap">
             <input
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
               value={current}
-              placeholder={existing ? undefined : "Start typing a name…"}
+              placeholder={module.id === "taps" ? "None — or start typing a beer…" : existing ? undefined : "Start typing a name…"}
               onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
               onKeyDown={(e) => { if (e.key === "Escape") setSuggestLock(current); }}
             />
@@ -822,8 +881,11 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
                   setForm((currentForm) => ({
                     ...currentForm,
                     ...values,
-                    flavors: currentForm.flavors,
-                    tags: currentForm.tags
+                    tap_number: currentForm.tap_number,
+                    keg_size_l: currentForm.keg_size_l ?? values.keg_size_l,
+                    remaining_l: values.remaining_l ?? currentForm.keg_size_l ?? DEFAULT_KEG_L,
+                    flavors: module.id === "taps" ? parseList(values.flavors ?? currentForm.flavors) : currentForm.flavors,
+                    tags: module.id === "taps" ? parseList(values.tags ?? currentForm.tags) : currentForm.tags
                   }));
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Could not load bottle details");
@@ -832,6 +894,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             />
           </div>
           {!existing ? <small className="field-hint">Matches from your vault and COLA fill the rest of the form.</small> : null}
+          {module.id === "taps" ? <small className="field-hint">None leaves this handle empty. Find a house brew or packaged beer to put it on.</small> : null}
         </div>;
       }
       return <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>

@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { migrateWineSweetnessValue, spiritFamilyFromLabel } from "./catalog.js";
+import { DEFAULT_KEG_L, TAP_COUNT, migrateWineSweetnessValue, spiritFamilyFromLabel } from "./catalog.js";
 
 export const dbPath = process.env.DB_PATH ?? (process.env.NODE_ENV === "production" ? "/data/smokeyvault.db" : "./data/smokeyvault.db");
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -138,6 +138,11 @@ for (const row of wineRows) {
   const next = migrateWineSweetnessValue(row.sweetness, row.type, row.style);
   if (String(row.sweetness ?? "") !== next) migrateWineSweetness.run(next, row.id);
 }
+
+const insertEmptyTap = db.prepare(
+  "INSERT OR IGNORE INTO taps(tap_number, brewery_batch, keg_size_l, remaining_l, source_type) VALUES(?, '', ?, 0, 'Commercial')"
+);
+for (let n = 1; n <= TAP_COUNT; n++) insertEmptyTap.run(n, DEFAULT_KEG_L);
 
 function hashPin(pin: string, salt = randomBytes(16).toString("hex")) {
   return `${salt}:${scryptSync(pin, salt, 64).toString("hex")}`;

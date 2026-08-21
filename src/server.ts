@@ -78,7 +78,7 @@ app.post<{ Body: { currentPin?: string; newPin?: string } }>("/api/auth/pin", as
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
   if (!publicTables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
   const table = request.params.table;
-  const rows = db.prepare(`SELECT * FROM ${table} ORDER BY id DESC`).all() as Array<Record<string, unknown>>;
+  const rows = db.prepare(`SELECT * FROM ${table} ORDER BY ${table === "taps" ? "tap_number ASC" : "id DESC"}`).all() as Array<Record<string, unknown>>;
   if (!VOTE_TABLES.has(table)) return rows;
   const tallies = voteTallies(table);
   return rows.map((row) => {

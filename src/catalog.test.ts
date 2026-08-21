@@ -4,7 +4,8 @@ import {
   parseList, parseTagInput, serializeList, spiritFamilyFromLabel,
   defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
   wineKindLabel, wineSweetnessStops,
-  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap
+  kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
+  emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -103,4 +104,17 @@ test("brewToTap copies a brewery batch onto a homebrew tap", () => {
   assert.equal(tap.keg_size_l, 19.5);
   assert.equal(tap.remaining_l, 19.5);
   assert.equal(tap.tapped_date, "2026-08-21");
+});
+
+test("empty taps are None and firstEmptyTapNumber picks a free handle", () => {
+  assert.equal(isTapEmpty({ brewery_batch: "" }), true);
+  assert.equal(isTapEmpty({ brewery_batch: "None" }), true);
+  assert.equal(isTapEmpty({ brewery_batch: "Vault IPA" }), false);
+  assert.equal(tapTitle({ brewery_batch: "" }), "None");
+  assert.equal(firstEmptyTapNumber([
+    { tap_number: 1, brewery_batch: "IPA" },
+    { tap_number: 2, brewery_batch: "" }
+  ]), 2);
+  assert.equal(emptyTapBeerFields().brewery_batch, "");
+  assert.equal(emptyTapBeerFields().remaining_l, 0);
 });
