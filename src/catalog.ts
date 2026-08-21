@@ -63,3 +63,81 @@ export function spiritFamilyFromLabel(category: string, subCategory = ""): { fam
   if (/brandy|armagnac|pisco/.test(haystack)) return { family: "Brandy", type: typeRaw };
   return { family: familyRaw, type: typeRaw };
 }
+
+export const WINE_FAMILIES = [
+  "Red", "White", "Rosé", "Orange", "Sparkling", "Dessert", "Fortified"
+];
+
+export const SPARKLING_STYLES = [
+  "Champagne", "Prosecco", "Cava", "Crémant", "Pét-nat", "Other"
+];
+
+export const STILL_WINE_SWEETNESS = [
+  "Bone dry", "Dry", "Off-dry", "Medium", "Sweet"
+];
+
+export const SPARKLING_SWEETNESS = [
+  "Brut Nature", "Extra Brut", "Brut", "Extra Dry", "Sec", "Demi-sec", "Doux"
+];
+
+export function isSparklingWine(type?: string | null, style?: string | null): boolean {
+  if (String(type ?? "").trim().toLowerCase() === "sparkling") return true;
+  const sparkle = String(style ?? "").trim().toLowerCase();
+  return SPARKLING_STYLES.some((value) => value.toLowerCase() === sparkle);
+}
+
+export function wineKindLabel(type?: string | null, style?: string | null): string {
+  const sparkle = String(style ?? "").trim();
+  if (sparkle) return sparkle;
+  return String(type ?? "").trim();
+}
+
+export function wineSweetnessStops(type?: string | null, style?: string | null): string[] {
+  return isSparklingWine(type, style) ? [...SPARKLING_SWEETNESS] : [...STILL_WINE_SWEETNESS];
+}
+
+export function defaultSweetnessForWine(type?: string | null, style?: string | null): string {
+  const family = String(type ?? "").trim();
+  if (/dessert|fortified/i.test(family)) return "Sweet";
+  if (isSparklingWine(family, style)) {
+    if (/prosecco/i.test(String(style ?? ""))) return "Extra Dry";
+    return "Brut";
+  }
+  return "Dry";
+}
+
+export function migrateWineSweetnessValue(value: unknown, type?: string | null, style?: string | null): string {
+  if (value == null || String(value).trim() === "") return defaultSweetnessForWine(type, style);
+  const raw = String(value).trim();
+  const known = [...STILL_WINE_SWEETNESS, ...SPARKLING_SWEETNESS]
+    .find((stop) => stop.toLowerCase() === raw.toLowerCase());
+  if (known) return known;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 1 && n <= 5) {
+    if (isSparklingWine(type, style)) {
+      if (n <= 2) return "Brut";
+      if (n === 3) return "Extra Dry";
+      return n >= 5 ? "Doux" : "Demi-sec";
+    }
+    if (n <= 2) return "Dry";
+    if (n === 3) return "Off-dry";
+    return "Sweet";
+  }
+  return raw;
+}
+
+export function inferWineFamilyAndStyle(text: string): { type: string; style: string } {
+  const hay = text.toLowerCase();
+  if (/champagne/.test(hay)) return { type: "Sparkling", style: "Champagne" };
+  if (/prosecco/.test(hay)) return { type: "Sparkling", style: "Prosecco" };
+  if (/\bcava\b/.test(hay)) return { type: "Sparkling", style: "Cava" };
+  if (/cr[eé]mant/.test(hay)) return { type: "Sparkling", style: "Crémant" };
+  if (/p[eé]t[- ]?nat|pétillant naturel/.test(hay)) return { type: "Sparkling", style: "Pét-nat" };
+  if (/sparkling/.test(hay)) return { type: "Sparkling", style: "" };
+  if (/ros[eé]|blush/.test(hay)) return { type: "Rosé", style: "" };
+  if (/orange wine|skin[- ]contact/.test(hay)) return { type: "Orange", style: "" };
+  if (/dessert|late harvest|sauternes|ice ?wine/.test(hay)) return { type: "Dessert", style: "" };
+  if (/\bport\b|sherry|madeira|marsala|fortified/.test(hay)) return { type: "Fortified", style: "" };
+  if (/white|chardonnay|sauvignon|riesling|pinot gr|albari[nñ]o|viognier/.test(hay)) return { type: "White", style: "" };
+  return { type: "Red", style: "" };
+}

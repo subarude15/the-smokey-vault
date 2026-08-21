@@ -36,4 +36,9 @@ export const FLAVOR_OPTIONS = [
   "Roast", "Tart", "Funk", "Pine", "Earth", "Mineral", "Leather", "Brine"
 ];
 
-export { parseList, parseTagInput, serializeList } from "../../src/catalog";
+export {
+  parseList, parseTagInput, serializeList,
+  WINE_FAMILIES, SPARKLING_STYLES,
+  defaultSweetnessForWine, inferWineFamilyAndStyle, isSparklingWine,
+  migrateWineSweetnessValue, wineKindLabel, wineSweetnessStops
+} from "../../src/catalog";
