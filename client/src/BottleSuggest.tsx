@@ -10,7 +10,8 @@ export type BottleSearchHit = {
 };
 
 export function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
-  if (moduleId === "taps") return hit.table === "packaged_beer" || hit.table === "brews";
+  if (moduleId === "shelf") return hit.table === "spirits" || hit.table === "packaged_beer" || hit.table === "wines";
+  if (moduleId === "keg" || moduleId === "taps") return hit.table === "packaged_beer" || hit.table === "brews";
   if (moduleId === "brews") return hit.table === "packaged_beer";
   return hit.table === moduleId;
 }
