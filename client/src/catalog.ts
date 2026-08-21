@@ -70,3 +70,4 @@ export {
 export type { IngredientLine } from "../../src/cocktails";
 export { overviewGreeting, overviewHeroCopy } from "../../src/overview";
 export type { OverviewSnapshot } from "../../src/overview";
+export type { RestockItem } from "../../src/restock";

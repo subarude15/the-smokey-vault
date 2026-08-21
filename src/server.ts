@@ -13,6 +13,7 @@ import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./ca
 import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
 import { createTicket, deleteTicket, listTickets, setTicketStatus } from "./cocktail_tickets.js";
 import { buildOverview } from "./overview.js";
+import { buildRestockList, listRestockGot, restockSummary, setRestockGot } from "./restock.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
@@ -224,6 +225,35 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
     cocktails,
     tickets: listTickets("queued")
   });
+});
+
+function restockPayload() {
+  const spirits = db.prepare("SELECT * FROM spirits").all() as Array<Record<string, unknown>>;
+  const packaged = db.prepare("SELECT * FROM packaged_beer").all() as Array<Record<string, unknown>>;
+  const wines = db.prepare("SELECT * FROM wines").all() as Array<Record<string, unknown>>;
+  const shelf = buildShelf(spirits, wines);
+  const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
+    .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
+  const items = buildRestockList({
+    spirits,
+    wines,
+    packaged,
+    cocktails,
+    got: listRestockGot()
+  });
+  return { items, ...restockSummary(items) };
+}
+
+app.get("/api/restock", { schema: { tags: ["System"], summary: "Bottles and mixers to pick up" } }, async () => restockPayload());
+
+app.post<{ Body: { key?: string; got?: boolean } }>("/api/restock/check", async (request, reply) => {
+  try {
+    setRestockGot(request.body.key ?? "", request.body.got !== false);
+    return restockPayload();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not update the restock list";
+    return reply.code(400).send({ error: message });
+  }
 });
 
 async function handleBarcodeLookup(

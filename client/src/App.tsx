@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X
+  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, ShoppingBag, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
@@ -20,7 +20,7 @@ import {
   packagedCount, packagedStockLabel, FILL_STOPS, compareSpirits, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason,
-  overviewGreeting, overviewHeroCopy, type OverviewSnapshot
+  overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -288,7 +288,8 @@ export default function App() {
   }
   const nav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
-    { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },{ id:"settings",label:"Settings",icon:Settings,admin:true }
+    { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },
+    { id:"restock",label:"Restock",icon:ShoppingBag },{ id:"settings",label:"Settings",icon:Settings,admin:true }
   ];
 
   return (
@@ -340,6 +341,7 @@ export default function App() {
           />)}
           {page === "cocktails" && <Cocktails admin={admin}/>}
           {page === "mixologist" && <Mixologist admin={admin} goSettings={()=>navigate("settings")}/>}
+          {page === "restock" && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
       </main>
@@ -353,6 +355,7 @@ export default function App() {
 
 function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }) {
   const [snap, setSnap] = useState<OverviewSnapshot>();
+  const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
   const [error, setError] = useState("");
   const greeting = overviewGreeting();
   function load() {
@@ -360,6 +363,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     api<OverviewSnapshot>("/overview")
       .then(setSnap)
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load the house snapshot."));
+    api<{ items: RestockItem[]; open: number; total: number }>("/restock")
+      .then(setRestock)
+      .catch(() => setRestock(undefined));
   }
   useEffect(() => { load(); }, []);
   const orbitValue = snap?.spirits.on_shelf ?? 0;
@@ -472,7 +478,25 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         ))}
       </div>
     </section>}
-    {snap && snap.low.length > 0 && <section className="overview-board">
+    {restock && restock.open > 0 && <section className="overview-board">
+      <div className="section-heading">
+        <div><span className="eyebrow">NEED TO RESTOCK</span><h2>{restock.open} to pick up</h2></div>
+        <button type="button" className="secondary" onClick={() => go("restock")}>Open list</button>
+      </div>
+      <div className="overview-low-row">
+        {restock.items.filter((item) => !item.got).slice(0, 8).map((item) => (
+          <button type="button" className="overview-low" key={item.key} onClick={() => go("restock")}>
+            <div className="card-icon">{item.image_url ? <img src={item.image_url} alt=""/> : <ShoppingBag/>}</div>
+            <div>
+              <span className="eyebrow">{item.kind === "ingredient" ? "MIXER" : item.kind === "wines" ? "WINE" : item.kind === "packaged_beer" ? "COLD ROOM" : "SPIRITS"}</span>
+              <strong>{item.name}</strong>
+              <small>{item.reason}</small>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>}
+    {snap && snap.low.length > 0 && !(restock && restock.open > 0) && <section className="overview-board">
       <div className="section-heading"><div><span className="eyebrow">CELLAR WATCH</span><h2>Running low</h2></div></div>
       <div className="overview-low-row">
         {snap.low.map((item) => (
@@ -491,6 +515,63 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes, random picks, and drinks on the ticket.</p></div><Shuffle size={56}/></button>
       <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. Your own AI key powers the pour.</p></div><Sparkles size={56}/></button>
     </section>
+  </>;
+}
+
+type RestockList = { items: RestockItem[]; open: number; total: number };
+
+function RestockPage({ go }:{ go: (page: string) => void }) {
+  const [data, setData] = useState<RestockList>();
+  const [filter, setFilter] = useState<"open" | "got" | "all">("open");
+  const [error, setError] = useState("");
+  function load() {
+    setError("");
+    api<RestockList>("/restock")
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the restock list."));
+  }
+  useEffect(() => { load(); }, []);
+  async function toggle(item: RestockItem) {
+    try {
+      const next = await api<RestockList>("/restock/check", {
+        method: "POST",
+        body: JSON.stringify({ key: item.key, got: !item.got })
+      });
+      setData(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update that item");
+    }
+  }
+  const shown = (data?.items ?? []).filter((item) => filter === "all" || (filter === "got" ? item.got : !item.got));
+  return <>
+    <PageTitle
+      eyebrow="STORE RUN"
+      title="What to pick up."
+      subtitle={data ? `${data.open} still needed · ${data.total} on the list. Tap a row when you grab it — no PIN required.` : "Empty bottles, last wines, cold-room leftovers, and mixers that unlock a favorite."}
+    />
+    {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load restock</strong><span>{error}</span></div></div>}
+    <div className="cocktail-toolbar">
+      <div className="segmented cocktail-filters">
+        {([["open", "Still need"], ["got", "Grabbed"], ["all", "All"]] as const).map(([id, label]) => (
+          <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
+        ))}
+      </div>
+    </div>
+    {!shown.length ? <Empty icon={ShoppingBag} title={filter === "got" ? "Nothing grabbed yet" : "Shelf looks stocked"} text={filter === "got" ? "Tap a bottle when you pick it up." : "When something runs low or a favorite is missing a bottle, it lands here."}/> :
+      <div className="restock-list">
+        {shown.map((item) => (
+          <button type="button" className={`restock-row${item.got ? " got" : ""}`} key={item.key} onClick={() => void toggle(item)}>
+            <span className="restock-check" aria-hidden="true">{item.got ? "✓" : ""}</span>
+            <div className="card-icon">{item.image_url ? <img src={item.image_url} alt=""/> : <ShoppingBag/>}</div>
+            <div>
+              <span className="eyebrow">{item.kind === "ingredient" ? "MIXER / BOTTLE" : item.kind === "wines" ? "WINE" : item.kind === "packaged_beer" ? "COLD ROOM" : "SPIRITS"}</span>
+              <strong>{item.name}</strong>
+              <small>{item.reason}</small>
+            </div>
+            {item.module ? <span className="restock-open" onClick={(e) => { e.stopPropagation(); go(item.module!); }}>Open</span> : null}
+          </button>
+        ))}
+      </div>}
   </>;
 }
 
