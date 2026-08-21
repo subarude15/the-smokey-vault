@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildRestockList, createWanted, deleteWanted, parseRestockThresholds, restockSummary } from "./restock.js";
+import { buildRestockList, createWanted, deleteWanted, formatRestockShare, parseRestockThresholds, restockSummary } from "./restock.js";
 
 test("restock lists empty and quarter-full spirits, last wines, and cans below 3", () => {
   const items = buildRestockList({
@@ -123,4 +123,19 @@ test("checked restock keys stay on the list until the shelf recovers", () => {
   assert.equal(items[0].got, true);
   assert.equal(restockSummary(items).open, 0);
   assert.equal(restockSummary(items).total, 1);
+});
+
+test("restock share text lists open items as a checklist and skips grabbed", () => {
+  const items = buildRestockList({
+    wanted: [{ id: 1, name: "Green Chartreuse", note: "750", label: "bottle" }],
+    spirits: [{ id: 2, name: "Empty Rye", fill_level: 0, stock_count: 1 }],
+    packaged: [{ id: 21, name: "Gone lager", brewery: "Vault", count: 0, vessel: "Can" }],
+    got: ["spirits:2"]
+  });
+  const text = formatRestockShare(items);
+  assert.match(text, /^The Smokey Vault — pick up/);
+  assert.match(text, /Wanted\n☐ Green Chartreuse — 750/);
+  assert.match(text, /Cold room\n☐ Gone lager · Vault — Out of stock/);
+  assert.doesNotMatch(text, /Empty Rye/);
+  assert.equal(formatRestockShare(items.filter((item) => item.got)), "");
 });

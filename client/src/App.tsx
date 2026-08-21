@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, ShoppingBag, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X
+  ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Copy, Database, Download, FlaskConical, Grape, LayoutDashboard,
+  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
@@ -22,7 +22,7 @@ import {
   SEASONS, collectionGroup, compareCocktails, currentSeason,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
-  type WantedLabel
+  formatRestockShare, type WantedLabel
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -552,6 +552,8 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
   const [wantNote, setWantNote] = useState("");
   const [wantLabel, setWantLabel] = useState<WantedLabel>("bottle");
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
   function load() {
     setError("");
     api<RestockList>("/restock")
@@ -598,6 +600,27 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
       setError(err instanceof Error ? err.message : "Could not drop that");
     }
   }
+  async function shareList() {
+    const text = formatRestockShare(data?.items ?? []);
+    if (!text) {
+      setNotice("Nothing left to pick up.");
+      return;
+    }
+    try {
+      if (canShare) {
+        await navigator.share({ title: "Smokey Vault restock", text });
+        return;
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("List copied. Paste it into Keep or anywhere else.");
+    } catch {
+      setNotice("Could not copy the list.");
+    }
+  }
   const shown = (data?.items ?? []).filter((item) => filter === "all" || (filter === "got" ? item.got : !item.got));
   const wanted = shown.filter((item) => item.kind === "wanted");
   const low = shown.filter((item) => item.kind !== "wanted");
@@ -629,7 +652,10 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
           <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
         ))}
       </div>
-      <button type="button" className="secondary" onClick={() => go("settings")}>Change rules</button>
+      <div className="toolbar-actions">
+        <button type="button" className="secondary" onClick={() => void shareList()} disabled={!(data?.open)}>{canShare ? <Share2 size={16}/> : <Copy size={16}/>} {canShare ? "Share list" : "Copy list"}</button>
+        <button type="button" className="secondary" onClick={() => go("settings")}>Change rules</button>
+      </div>
     </div>
     {!shown.length ? <Empty icon={ShoppingBag} title={filter === "got" ? "Nothing grabbed yet" : "Shelf looks stocked"} text={filter === "got" ? "Tap a bottle when you pick it up." : "When something hits the cutoff you set, or you add a wanted bottle, it lands here."}/> :
       <div className="restock-list">
@@ -660,6 +686,7 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
           </button>
         ))}
       </div>}
+    {notice && <div className="toast">{notice}</div>}
   </>;
 }
 

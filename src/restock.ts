@@ -271,3 +271,26 @@ export function buildRestockList(input: {
 export function restockSummary(items: RestockItem[]): { total: number; open: number } {
   return { total: items.length, open: items.filter((item) => !item.got).length };
 }
+
+const SHARE_GROUPS: Array<{ kind: RestockKind; heading: string }> = [
+  { kind: "wanted", heading: "Wanted" },
+  { kind: "spirits", heading: "Spirits" },
+  { kind: "wines", heading: "Wine" },
+  { kind: "packaged_beer", heading: "Cold room" },
+  { kind: "ingredient", heading: "Mixers" }
+];
+
+export function formatRestockShare(items: RestockItem[]): string {
+  const open = items.filter((item) => !item.got);
+  if (!open.length) return "";
+  const lines = ["The Smokey Vault — pick up"];
+  for (const group of SHARE_GROUPS) {
+    const rows = open.filter((item) => item.kind === group.kind);
+    if (!rows.length) continue;
+    lines.push("", group.heading);
+    for (const item of rows) {
+      lines.push(`☐ ${item.name}${item.reason ? ` — ${item.reason}` : ""}`);
+    }
+  }
+  return lines.join("\n");
+}
