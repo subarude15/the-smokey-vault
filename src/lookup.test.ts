@@ -37,6 +37,8 @@ test("searchVault can stay inside packaged beer and ignore liquor", () => {
 test("searchTableForModule maps taps to beer and COLA malt beverage", () => {
   assert.equal(searchTableForModule("taps"), "packaged_beer");
   assert.deepEqual(searchTablesForModule("taps"), ["brews", "packaged_beer"]);
+  assert.equal(searchTableForModule("brews"), "packaged_beer");
+  assert.deepEqual(searchTablesForModule("brews"), ["packaged_beer"]);
   assert.equal(searchTableForModule("packaged_beer"), "packaged_beer");
   assert.equal(searchTableForModule("spirits"), "spirits");
   assert.equal(colaProductTypeForTable("packaged_beer"), "malt beverage");

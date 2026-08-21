@@ -5,7 +5,9 @@ import {
   defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
   wineKindLabel, wineSweetnessStops,
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
-  emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle
+  emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
+  brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
+  onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -117,4 +119,79 @@ test("empty taps are None and firstEmptyTapNumber picks a free handle", () => {
   ]), 2);
   assert.equal(emptyTapBeerFields().brewery_batch, "");
   assert.equal(emptyTapBeerFields().remaining_l, 0);
+});
+
+test("parseGravity accepts SG, points, and 1050-style values", () => {
+  assert.equal(parseGravity("1.050"), 1.05);
+  assert.equal(parseGravity(1.054), 1.054);
+  assert.equal(parseGravity(1050), 1.05);
+  assert.equal(parseGravity(50), 1.05);
+  assert.equal(parseGravity(""), null);
+  assert.equal(formatGravity(1.05), "1.050");
+});
+
+test("brewAbv prefers measured gravity and uses (OG − FG) × 131.25", () => {
+  assert.equal(brewAbv({ target_og: 1.054, target_fg: 1.012 }), 5.5);
+  assert.equal(brewAbv({
+    target_og: 1.054,
+    target_fg: 1.012,
+    measured_og: 1.060,
+    measured_fg: 1.010
+  }), 6.6);
+  assert.equal(brewAbv({ measured_og: 1.054, target_fg: 1.012 }), 5.5);
+  assert.equal(brewAbv({ target_og: 1.050 }), null);
+});
+
+test("nextBrewStatus walks the pipeline and never auto-archives", () => {
+  assert.equal(normalizeBrewStatus(""), "Planned");
+  assert.equal(nextBrewStatus("Planned"), "Fermenting");
+  assert.equal(nextBrewStatus("Fermenting"), "Conditioning");
+  assert.equal(nextBrewStatus("Conditioning"), "Ready to Keg");
+  assert.equal(nextBrewStatus("Ready to Keg"), null);
+  assert.equal(nextBrewStatus("Archived"), null);
+});
+
+test("compareBrews keeps active batches ahead of archived, then along the pipeline", () => {
+  const rows = [
+    { batch_name: "Old Stout", status: "Archived", brew_date: "2026-01-01" },
+    { batch_name: "House IPA", status: "Ready to Keg", brew_date: "2026-08-01" },
+    { batch_name: "Pils", status: "Fermenting", brew_date: "2026-08-10" },
+    { batch_name: "Earlier Pils", status: "Fermenting", brew_date: "2026-07-01" }
+  ];
+  const sorted = [...rows].sort(compareBrews).map((row) => row.batch_name);
+  assert.deepEqual(sorted, ["Earlier Pils", "Pils", "House IPA", "Old Stout"]);
+});
+
+test("tapsForBatch matches brewery batch names onto handles", () => {
+  const taps = [
+    { tap_number: 3, brewery_batch: "Vault IPA" },
+    { tap_number: 1, brewery_batch: "None" },
+    { tap_number: 7, brewery_batch: "vault ipa" }
+  ];
+  assert.deepEqual(tapsForBatch(taps, "Vault IPA"), [3, 7]);
+  assert.equal(onTapLabel([3]), "On tap 3");
+  assert.equal(onTapLabel([3, 7]), "On taps 3, 7");
+});
+
+test("prepareBrewWrite normalizes gravity and stores calculated ABV", () => {
+  const saved = prepareBrewWrite({
+    status: "fermenting",
+    target_og: 1054,
+    target_fg: 12,
+    measured_og: "",
+    measured_fg: "",
+    hops: "Citra, Mosaic, Idaho 7",
+    flavors: "Grapefruit, pine"
+  });
+  assert.equal(saved.status, "Fermenting");
+  assert.equal(saved.target_og, 1.054);
+  assert.equal(saved.target_fg, 1.012);
+  assert.equal(saved.calculated_abv, 5.5);
+  assert.equal(saved.hops, '["Citra","Mosaic","Idaho 7"]');
+  assert.equal(saved.flavors, '["Grapefruit","pine"]');
+});
+
+test("parseCommaList keeps multi-word hop names", () => {
+  assert.deepEqual(parseCommaList("Citra, Mosaic, Idaho 7"), ["Citra", "Mosaic", "Idaho 7"]);
+  assert.deepEqual(parseCommaList('["Nelson Sauvin"]'), ["Nelson Sauvin"]);
 });
