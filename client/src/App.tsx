@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
+import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import {
   BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
   parseList, parseTagInput, serializeList
@@ -144,6 +145,43 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   };
 }
 
+function mapDraftToModule(module: Module, draft: ScanDraft) {
+  if (module.id === "taps") {
+    return {
+      maker: draft.values.brewery ?? draft.values.brand ?? "",
+      brewery_batch: draft.values.name ?? "",
+      style: draft.values.style ?? "",
+      abv: draft.values.abv ?? 0,
+      image_url: draft.values.image_url ?? ""
+    };
+  }
+  if (module.id === "brews") {
+    return {
+      maker: draft.values.brewery ?? draft.values.brand ?? "",
+      batch_name: draft.values.name ?? "",
+      style: draft.values.style ?? "",
+      calculated_abv: draft.values.abv ?? 0,
+      image_url: draft.values.image_url ?? ""
+    };
+  }
+  return draft.values;
+}
+
+async function resolveSuggestion(module: Module, hit: BottleSearchHit) {
+  let product = hit.product;
+  if (hit.source === "cola_cloud" && hit.ttb_id) {
+    const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}`);
+    if (enriched.product) product = enriched.product;
+  }
+  const draft = scannedInventoryDraft({
+    source: hit.source === "vault" ? "vault" : "cola_cloud",
+    table: hit.table,
+    upc: String(product.upc ?? ""),
+    product
+  });
+  return mapDraftToModule(module, draft);
+}
+
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [admin, setAdmin] = useState(tokenExists());
@@ -261,13 +299,6 @@ function Dashboard({ counts, countsError, admin, go }: { counts: Record<string,n
     </section>
   </>;
 }
-
-type BottleSearchHit = {
-  source: "vault" | "cola_cloud";
-  table: "spirits" | "packaged_beer" | "wines";
-  ttb_id?: string | null;
-  product: Record<string, unknown>;
-};
 
 function Inventory({ module, admin, scanDraft, finishScanReview, openScanner }: {
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
@@ -441,9 +472,10 @@ function BottleFinder({ module, onClose, onPick }:{
     const timer = window.setTimeout(async () => {
       setLoading(true); setError("");
       try {
-        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}`);
-        setResults(data.results.filter((hit) => !module.id || hit.table === module.id || hit.source === "cola_cloud"));
-        setStatus(data.results.length ? `${data.results.length} matches` : "No matches yet — try a brand or bottle name.");
+        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(module.id)}`);
+        const next = data.results.filter((hit) => hitFitsModule(module.id, hit));
+        setResults(next);
+        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
       } finally {
@@ -456,18 +488,7 @@ function BottleFinder({ module, onClose, onPick }:{
   async function choose(hit: BottleSearchHit) {
     try {
       setLoading(true);
-      let product = hit.product;
-      if (hit.source === "cola_cloud" && hit.ttb_id) {
-        const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}`);
-        if (enriched.product) product = enriched.product;
-      }
-      const draft = scannedInventoryDraft({
-        source: hit.source === "vault" ? "vault" : "cola_cloud",
-        table: hit.table,
-        upc: String(product.upc ?? ""),
-        product
-      });
-      onPick(draft.values);
+      onPick(await resolveSuggestion(module, hit));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load bottle details");
     } finally {
@@ -517,6 +538,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   const [tagDraft,setTagDraft] = useState("");
   const [flavorDraft,setFlavorDraft] = useState("");
   const [error,setError] = useState("");
+  const [suggestLock,setSuggestLock] = useState(() => String(item?.[module.primary] ?? ""));
   const existing = Boolean(item?.id);
   const flavors = parseList(form.flavors);
   const tags = parseList(form.tags);
@@ -573,6 +595,42 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       const optionList = options.length ? Array.from(new Set([...options, ...(current && !options.includes(current) ? [current] : [])])) : undefined;
       const optionalSelect = field.key === "sub_category" || field.key === "base_ingredient" || field.key === "style";
       const percentSelect = field.type === "percent";
+      const nameSuggest = field.key === module.primary && !optionList && field.type !== "textarea" && field.type !== "number" && field.type !== "percent";
+      if (nameSuggest) {
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <div className="suggest-wrap">
+            <input
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              value={current}
+              placeholder={existing ? undefined : "Start typing a name…"}
+              onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Escape") setSuggestLock(current); }}
+            />
+            <BottleSuggest
+              moduleId={module.id}
+              query={current}
+              locked={suggestLock}
+              onPick={async (hit) => {
+                try {
+                  const values = await resolveSuggestion(module, hit);
+                  setSuggestLock(String(values[module.primary] ?? current));
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    ...values,
+                    flavors: currentForm.flavors,
+                    tags: currentForm.tags
+                  }));
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Could not load bottle details");
+                }
+              }}
+            />
+          </div>
+          {!existing ? <small className="field-hint">Matches from your vault and COLA fill the rest of the form.</small> : null}
+        </div>;
+      }
       return <label className={field.type==="textarea"?"full":""} key={field.key}><span>{field.label}</span>
       {optionList ? <select value={current} onChange={(e)=>setForm({...form,[field.key]:percentSelect?Number(e.target.value):e.target.value})}>{optionalSelect && <option value="">Select…</option>}{optionList.map((v)=><option key={v} value={v}>{percentSelect ? (v === "100" ? "Full (100%)" : v === "0" ? "Empty (0%)" : `${v}%`) : v}</option>)}</select> :
       field.type==="textarea" ? <textarea value={String(form[field.key]??"")} onChange={(e)=>setForm({...form,[field.key]:e.target.value})}/> :

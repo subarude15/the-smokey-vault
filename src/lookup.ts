@@ -35,6 +35,20 @@ export type BottleSearchHit = {
   product: Record<string, unknown>;
 };
 
+export type SearchTable = BottleSearchHit["table"];
+
+export function searchTableForModule(moduleId?: string): SearchTable | undefined {
+  if (moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer") return "packaged_beer";
+  if (moduleId === "wines" || moduleId === "spirits") return moduleId;
+  return undefined;
+}
+
+export function colaProductTypeForTable(table: SearchTable) {
+  if (table === "packaged_beer") return "malt beverage";
+  if (table === "wines") return "wine";
+  return "distilled spirits";
+}
+
 type CacheRow = {
   upc: string;
   name: string;
@@ -341,48 +355,97 @@ function findInVault(upc: string, rawUpc: string): { table: NonNullable<LookupRe
   return null;
 }
 
-function searchVault(query: string): BottleSearchHit[] {
-  const like = `%${query}%`;
-  const spirits = db.prepare(`
-    SELECT * FROM spirits
-    WHERE name LIKE ? OR brand LIKE ? OR category LIKE ? OR upc LIKE ?
-    ORDER BY name LIMIT 8
-  `).all(like, like, like, like) as Record<string, unknown>[];
-  const beers = db.prepare(`
-    SELECT * FROM packaged_beer
-    WHERE name LIKE ? OR brewery LIKE ? OR style LIKE ? OR upc LIKE ?
-    ORDER BY name LIMIT 5
-  `).all(like, like, like, like) as Record<string, unknown>[];
-  const wines = db.prepare(`
-    SELECT * FROM wines
-    WHERE name LIKE ? OR producer LIKE ? OR varietal LIKE ? OR region LIKE ? OR upc LIKE ?
-    ORDER BY name LIMIT 5
-  `).all(like, like, like, like, like) as Record<string, unknown>[];
+const SEARCH_FIELDS = [
+  "name", "brand", "brewery", "producer", "maker", "category", "sub_category",
+  "style", "varietal", "region", "upc", "brewery_batch", "batch_name"
+] as const;
 
-  return [
-    ...spirits.map((product) => ({ source: "vault" as const, table: "spirits" as const, product })),
-    ...beers.map((product) => ({ source: "vault" as const, table: "packaged_beer" as const, product })),
-    ...wines.map((product) => ({ source: "vault" as const, table: "wines" as const, product }))
-  ];
+export function foldSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/ø/g, "o")
+    .replace(/æ/g, "ae")
+    .replace(/œ/g, "oe")
+    .toLowerCase();
 }
 
-export async function searchBottles(query: string): Promise<{ results: BottleSearchHit[]; quota?: ReturnType<typeof getLastQuota> }> {
+export function queryTokens(query: string) {
+  return foldSearch(query).split(/[^a-z0-9]+/).filter((token) => token.length > 0);
+}
+
+export function haystackFor(row: Record<string, unknown>) {
+  return foldSearch(SEARCH_FIELDS.map((key) => String(row[key] ?? "")).filter(Boolean).join(" "));
+}
+
+export function matchesQuery(row: Record<string, unknown>, query: string) {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return false;
+  const hay = haystackFor(row);
+  return tokens.every((token) => hay.includes(token));
+}
+
+function scoreHit(row: Record<string, unknown>, tokens: string[]) {
+  const name = foldSearch(String(row.name ?? row.brewery_batch ?? row.batch_name ?? ""));
+  const brand = foldSearch(String(row.brand ?? row.brewery ?? row.producer ?? row.maker ?? ""));
+  let score = 0;
+  if (tokens.every((token) => name.includes(token))) score += 8;
+  if (tokens[0] && name.split(/[^a-z0-9]+/).some((part) => part.startsWith(tokens[0]))) score += 4;
+  if (tokens[0] && brand.split(/[^a-z0-9]+/).some((part) => part.startsWith(tokens[0]))) score += 3;
+  return score;
+}
+
+export function searchVault(query: string, table?: SearchTable): BottleSearchHit[] {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return [];
+  const tables: SearchTable[] = table ? [table] : ["spirits", "packaged_beer", "wines"];
+  const limits: Record<SearchTable, number> = {
+    spirits: table ? 16 : 12,
+    packaged_beer: table ? 16 : 8,
+    wines: table ? 16 : 8
+  };
+  const hits: Array<BottleSearchHit & { score: number }> = [];
+  for (const next of tables) {
+    const rows = db.prepare(`SELECT * FROM ${next}`).all() as Record<string, unknown>[];
+    hits.push(
+      ...rows.filter((row) => matchesQuery(row, query))
+        .map((product) => ({ source: "vault" as const, table: next, product, score: scoreHit(product, tokens) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limits[next])
+    );
+  }
+  return hits.sort((a, b) => b.score - a.score).map((hit) => ({
+    source: hit.source,
+    table: hit.table,
+    product: hit.product
+  }));
+}
+
+export async function searchBottles(query: string, options?: { table?: string }): Promise<{ results: BottleSearchHit[]; quota?: ReturnType<typeof getLastQuota> }> {
   const q = query.trim();
   if (q.length < 2) return { results: [] };
+  const table = searchTableForModule(options?.table);
 
-  const results = searchVault(q);
+  const results = searchVault(q, table);
+  const seen = new Set(results.map(hitKey));
 
   if (isColaConfigured()) {
     try {
-      const summaries = await searchColasByQuery(q, 10);
+      const colaQuery = queryTokens(q).join(" ") || q;
+      const summaries = await searchColasByQuery(colaQuery, 10, table ? { productType: colaProductTypeForTable(table) } : undefined);
       for (const summary of summaries) {
         const product = productToInventoryFields(mapColaToSchema(summary.ttb_id || "", summary));
-        results.push({
+        const hit: BottleSearchHit = {
           source: "cola_cloud",
           table: inferTable({ ...product, product_type: summary.product_type }),
           ttb_id: summary.ttb_id ?? null,
           product
-        });
+        };
+        if (table && hit.table !== table) continue;
+        const key = hitKey(hit);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push(hit);
       }
     } catch {
       // Local vault results are still useful when COLA is down.
@@ -390,6 +453,10 @@ export async function searchBottles(query: string): Promise<{ results: BottleSea
   }
 
   return { results: results.slice(0, 20), quota: getLastQuota() };
+}
+
+function hitKey(hit: BottleSearchHit) {
+  return foldSearch(`${hit.product.name ?? ""}|${hit.product.brand ?? hit.product.brewery ?? hit.product.producer ?? ""}`);
 }
 
 export { fetchColaQuota };
