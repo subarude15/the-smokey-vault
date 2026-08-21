@@ -11,9 +11,11 @@ import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
 import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
+import { createTicket, deleteTicket, listTickets, setTicketStatus } from "./cocktail_tickets.js";
+import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
-import { imagesDir, saveImageBuffer } from "./images.js";
+import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
 import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
 import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
 
@@ -382,6 +384,9 @@ type GeneratedRecipe = {
   garnish: string;
   season: string;
   notes: string;
+  image_url?: string;
+  source_url?: string;
+  bartender_fav?: boolean | number;
 };
 
 function parseGeneratedRecipe(result: string): GeneratedRecipe {
@@ -405,7 +410,9 @@ function parseGeneratedRecipe(result: string): GeneratedRecipe {
     glassware: value.glassware || "Rocks",
     garnish: value.garnish || "None",
     season: ["Spring","Summer","Fall","Winter","Holiday"].includes(value.season ?? "") ? value.season! : "All",
-    notes: value.notes || ""
+    notes: value.notes || "",
+    image_url: typeof value.image_url === "string" ? value.image_url : "",
+    source_url: typeof value.source_url === "string" ? value.source_url : ""
   };
 }
 
@@ -424,18 +431,68 @@ app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, re
   }
 });
 
+app.post<{ Body: { url?: string } }>("/api/cocktails/import", async (request, reply) => {
+  const url = String(request.body?.url ?? "").trim();
+  if (!url) return reply.code(400).send({ error: "Paste a recipe link." });
+  try {
+    const { html, finalUrl } = await fetchPublicHtml(url);
+    try {
+      return { recipe: parseRecipeHtml(html, finalUrl), source: "page" };
+    } catch (parseError) {
+      const { provider, key } = resolveAiConfig();
+      if (provider === "ollama" || key) {
+        try {
+          const extracted = await callLlm(`Extract a cocktail recipe from this page. Return ONLY JSON with keys name, ingredients (array of strings), method, glassware, garnish, season (All|Spring|Summer|Fall|Winter|Holiday), notes. Page text: ${recipeTextForAi(html)}`);
+          const parsed = parseGeneratedRecipe(extracted);
+          const image = metaContent(html, "og:image") || metaContent(html, "twitter:image");
+          let imageUrl = "";
+          if (image) {
+            try { imageUrl = new URL(image, finalUrl).href; } catch { imageUrl = image; }
+          }
+          return {
+            recipe: { ...parsed, image_url: imageUrl, source_url: finalUrl },
+            source: "ai"
+          };
+        } catch {
+          // Fall through to the original parse error.
+        }
+      }
+      throw parseError;
+    }
+  } catch (error) {
+    const status = error instanceof RecipeImportError ? error.statusCode : 502;
+    const message = error instanceof RecipeImportError ? error.message : "Could not read that recipe link.";
+    return reply.code(status).send({ error: message });
+  }
+});
+
 app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const recipe = request.body;
   if (!recipe.name || !Array.isArray(recipe.ingredients) || !recipe.ingredients.length || !recipe.method) {
     return reply.code(400).send({ error: "A name, ingredients, and method are required." });
   }
-  db.prepare(`INSERT INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season)
-    VALUES(?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?)
+  const imageUrl = await localizeImage(recipe.image_url) ?? recipe.image_url ?? "";
+  const fav = recipe.bartender_fav ? 1 : 0;
+  db.prepare(`INSERT INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season,image_url,source_url,bartender_fav)
+    VALUES(?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET collection='Custom Cocktails',ingredients=excluded.ingredients,
-    glassware=excluded.glassware,garnish=excluded.garnish,method=excluded.method,notes=excluded.notes,season=excluded.season`)
-    .run(recipe.name.trim(), JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "", recipe.method, recipe.notes || "", recipe.season || "All");
+    glassware=excluded.glassware,garnish=excluded.garnish,method=excluded.method,notes=excluded.notes,season=excluded.season,
+    image_url=excluded.image_url,source_url=excluded.source_url,bartender_fav=excluded.bartender_fav`)
+    .run(
+      recipe.name.trim(), JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "",
+      recipe.method, recipe.notes || "", recipe.season || "All", imageUrl, recipe.source_url || "", fav
+    );
   return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(recipe.name.trim()));
+});
+
+app.put<{ Params: { id: string }; Body: { bartender_fav?: boolean | number } }>("/api/cocktails/:id", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const row = db.prepare("SELECT id FROM cocktails WHERE id=?").get(request.params.id);
+  if (!row) return reply.code(404).send({ error: "Recipe not found" });
+  if (request.body.bartender_fav === undefined) return reply.code(400).send({ error: "Nothing to update" });
+  db.prepare("UPDATE cocktails SET bartender_fav=? WHERE id=?").run(request.body.bartender_fav ? 1 : 0, request.params.id);
+  return db.prepare("SELECT * FROM cocktails WHERE id=?").get(request.params.id);
 });
 
 app.delete<{ Params: { id: string } }>("/api/cocktails/:id", async (request, reply) => {
@@ -444,6 +501,38 @@ app.delete<{ Params: { id: string } }>("/api/cocktails/:id", async (request, rep
   if (!row) return reply.code(404).send({ error: "Recipe not found" });
   if (row.collection !== "Custom Cocktails") return reply.code(403).send({ error: "Only custom recipes can be removed" });
   db.prepare("DELETE FROM cocktails WHERE id=?").run(row.id);
+  return reply.code(204).send();
+});
+
+app.get("/api/cocktails/tickets", async () => listTickets("queued"));
+
+app.post<{ Body: { cocktail_id?: number; name?: string; guest_name?: string; notes?: string; source_url?: string; image_url?: string } }>("/api/cocktails/tickets", async (request, reply) => {
+  try {
+    const ticket = createTicket({
+      cocktail_id: request.body.cocktail_id,
+      name: request.body.name ?? "",
+      guest_name: request.body.guest_name ?? "",
+      notes: request.body.notes,
+      source_url: request.body.source_url,
+      image_url: request.body.image_url
+    });
+    return reply.code(201).send(ticket);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not add that drink to the ticket";
+    return reply.code(/not found/i.test(message) ? 404 : 400).send({ error: message });
+  }
+});
+
+app.post<{ Params: { id: string } }>("/api/cocktails/tickets/:id/pour", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const ticket = setTicketStatus(Number(request.params.id), "poured");
+  if (!ticket) return reply.code(404).send({ error: "Ticket not found" });
+  return ticket;
+});
+
+app.delete<{ Params: { id: string } }>("/api/cocktails/tickets/:id", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  if (!deleteTicket(Number(request.params.id))) return reply.code(404).send({ error: "Ticket not found" });
   return reply.code(204).send();
 });
 

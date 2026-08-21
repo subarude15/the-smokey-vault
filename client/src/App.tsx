@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, ChevronRight, CircleAlert, Database, Download, FlaskConical, Grape, LayoutDashboard,
-  LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
+  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Star, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
@@ -1153,7 +1153,33 @@ type CocktailDrink = Item & {
   glassware: string;
   collection: string;
   notes?: string;
+  image_url?: string;
+  source_url?: string;
+  bartender_fav?: number;
 };
+type CocktailTicket = {
+  id: number;
+  cocktail_id: number | null;
+  name: string;
+  guest_name: string;
+  notes: string;
+  source_url: string;
+  image_url: string;
+  status: string;
+};
+type ImportedRecipe = {
+  name: string;
+  ingredients: string[];
+  method: string;
+  glassware: string;
+  garnish: string;
+  season: string;
+  notes: string;
+  image_url: string;
+  source_url: string;
+};
+
+const GUEST_NAME_KEY = "smokey-reviewer";
 
 function readinessLabel(readiness: string) {
   return readiness === "ready" ? "READY TO POUR" : readiness === "almost" ? "ONE ITEM AWAY" : "BUILD THE SHELF";
@@ -1169,17 +1195,22 @@ function cocktailLines(drink: CocktailDrink): IngredientLine[] {
 
 function Cocktails({ admin }: { admin: boolean }) {
   const [drinks, setDrinks] = useState<CocktailDrink[]>([]);
+  const [tickets, setTickets] = useState<CocktailTicket[]>([]);
   const [filter, setFilter] = useState("ready");
   const [season, setSeason] = useState("All");
   const [collection, setCollection] = useState("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<CocktailDrink>();
+  const [importer, setImporter] = useState(false);
   const [loadError, setLoadError] = useState("");
   const nowSeason = currentSeason();
   function load() {
     api<CocktailDrink[]>("/cocktails/match")
       .then((rows) => setDrinks([...rows].sort(compareCocktails)))
       .catch((err) => setLoadError(err instanceof Error ? err.message : "Could not load cocktail matches."));
+    api<CocktailTicket[]>("/cocktails/tickets")
+      .then(setTickets)
+      .catch(() => setTickets([]));
   }
   useEffect(() => { load(); }, []);
   const queried = drinks.filter((drink) => {
@@ -1193,6 +1224,7 @@ function Cocktails({ admin }: { admin: boolean }) {
   const shown = queried.filter((drink) => filter === "all" || drink.readiness === filter);
   const ready = queried.filter((drink) => drink.readiness === "ready");
   const almost = queried.filter((drink) => drink.readiness === "almost");
+  const favorites = drinks.filter((drink) => Number(drink.bartender_fav) > 0);
   function surprise() {
     if (!ready.length) return;
     setSelected(ready[Math.floor(Math.random() * ready.length)]);
@@ -1201,7 +1233,7 @@ function Cocktails({ admin }: { admin: boolean }) {
     <PageTitle
       eyebrow="THE RECIPE INDEX"
       title="What can I make?"
-      subtitle={`${ready.length} ready to pour · ${almost.length} one bottle away. Citrus, sugar, soda, and mint are pantry. Bourbon can stand in for rye.`}
+      subtitle={`${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link, star Nick’s favorites, or put a drink on the ticket for someone.`}
     />
     {loadError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load recipes</strong><span>{loadError}</span></div></div>}
     <div className="cocktail-toolbar">
@@ -1210,9 +1242,52 @@ function Cocktails({ admin }: { admin: boolean }) {
           <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
         ))}
       </div>
-      <button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button>
+      <div className="toolbar-actions">
+        <button className="secondary" onClick={() => setImporter(true)}><Link size={17}/> Add from a link</button>
+        <button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button>
+      </div>
     </div>
     <label className="search cocktail-search"><Search/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Negroni, mezcal, coupe…"/></label>
+    {tickets.length > 0 && <section className="ticket-board">
+      <div className="section-heading"><div><span className="eyebrow">ON THE TICKET</span><h2>Make for someone</h2></div><span className="guest-badge">{tickets.length}</span></div>
+      <div className="ticket-row">
+        {tickets.map((ticket) => (
+          <article className="ticket-card" key={ticket.id}>
+            {ticket.image_url ? <img src={ticket.image_url} alt=""/> : null}
+            <div>
+              <span className="eyebrow">FOR {ticket.guest_name.toUpperCase()}</span>
+              <h3>{ticket.name}</h3>
+              {ticket.notes ? <p>{ticket.notes}</p> : null}
+            </div>
+            <div className="ticket-actions">
+              {admin && <button type="button" className="primary" onClick={async () => {
+                await api(`/cocktails/tickets/${ticket.id}/pour`, { method: "POST" });
+                load();
+              }}>Poured</button>}
+              {admin && <button type="button" className="icon-button danger" aria-label="Remove ticket" onClick={async () => {
+                await api(`/cocktails/tickets/${ticket.id}`, { method: "DELETE" });
+                load();
+              }}><Trash2 size={16}/></button>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>}
+    {favorites.length > 0 && <section className="favorite-board">
+      <div className="section-heading"><div><span className="eyebrow">BEHIND THE STICK</span><h2>Bartender favorites</h2></div></div>
+      <div className="favorite-row">
+        {favorites.map((drink) => (
+          <button type="button" className="favorite-card" key={drink.id} onClick={() => setSelected(drink)}>
+            <div className="card-icon">{drink.image_url ? <img src={String(drink.image_url)} alt=""/> : <Star/>}</div>
+            <div>
+              <span className="eyebrow">{readinessLabel(drink.readiness)}</span>
+              <strong>{drink.name}</strong>
+              <small>{drink.method} · {drink.glassware}</small>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>}
     <section className="season-section">
       <span className="eyebrow">SEASON</span>
       <div className="season-filters">
@@ -1237,7 +1312,9 @@ function Cocktails({ admin }: { admin: boolean }) {
         const preview = lines.slice(0, 3);
         return (
           <button className="recipe-card" key={drink.id} onClick={() => setSelected(drink)}>
+            {drink.image_url ? <img className="recipe-thumb" src={String(drink.image_url)} alt=""/> : null}
             <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness)}</span>
+            {Number(drink.bartender_fav) > 0 && <span className="fav-tag">Favorite</span>}
             {drink.season !== "All" && <span className="season-tag">{drink.season}</span>}
             <h3>{drink.name}</h3>
             <p>{drink.method} · {drink.glassware}</p>
@@ -1251,16 +1328,22 @@ function Cocktails({ admin }: { admin: boolean }) {
       drink={selected}
       admin={admin}
       close={() => setSelected(undefined)}
+      onChanged={() => { load(); }}
       onDeleted={() => { setSelected(undefined); load(); }}
     />}
+    {importer && <RecipeImportModal admin={admin} close={() => setImporter(false)} saved={() => { setImporter(false); load(); }}/>}
   </>;
 }
 
-function RecipeModal({ drink, admin, close, onDeleted }:{
-  drink: CocktailDrink; admin: boolean; close: () => void; onDeleted: () => void;
+function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
+  drink: CocktailDrink; admin: boolean; close: () => void; onChanged: () => void; onDeleted: () => void;
 }) {
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
+  const [guestName, setGuestName] = useState(() => localStorage.getItem(GUEST_NAME_KEY) ?? "");
+  const [ticketNote, setTicketNote] = useState("");
+  const [ticketed, setTicketed] = useState(false);
+  const [fav, setFav] = useState(Number(drink.bartender_fav) > 0);
   const lines = cocktailLines(drink);
   const custom = drink.collection === "Custom Cocktails";
   async function remove() {
@@ -1275,17 +1358,53 @@ function RecipeModal({ drink, admin, close, onDeleted }:{
       setRemoving(false);
     }
   }
+  async function toggleFav() {
+    if (!admin) return;
+    try {
+      const next = await api<CocktailDrink>(`/cocktails/${drink.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ bartender_fav: !fav })
+      });
+      setFav(Number(next.bartender_fav) > 0);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update favorite");
+    }
+  }
+  async function addToTicket() {
+    setError("");
+    try {
+      await api("/cocktails/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          cocktail_id: drink.id,
+          name: drink.name,
+          guest_name: guestName,
+          notes: ticketNote,
+          image_url: drink.image_url,
+          source_url: drink.source_url
+        })
+      });
+      localStorage.setItem(GUEST_NAME_KEY, guestName.trim());
+      setTicketed(true);
+      setTicketNote("");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add to the ticket");
+    }
+  }
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${drink.name} recipe`}>
       <section className="modal recipe-modal">
         <header className="modal-header">
           <div>
-            <span className="eyebrow">{drink.collection}{drink.season !== "All" ? ` · ${drink.season}` : ""}</span>
+            <span className="eyebrow">{drink.collection}{drink.season !== "All" ? ` · ${drink.season}` : ""}{fav ? " · FAVORITE" : ""}</span>
             <h2>{drink.name}</h2>
             <p>{drink.method} · {drink.glassware}</p>
           </div>
           <button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button>
         </header>
+        {drink.image_url ? <img className="recipe-hero" src={String(drink.image_url)} alt=""/> : null}
         <div className="recipe-modal-body">
           <div>
             <span className="eyebrow">INGREDIENTS</span>
@@ -1307,14 +1426,126 @@ function RecipeModal({ drink, admin, close, onDeleted }:{
             <div><span>METHOD</span><strong>{drink.method}</strong></div>
             <div><span>GLASS</span><strong>{drink.glassware}</strong></div>
             <div><span>GARNISH</span><strong>{drink.garnish || "None"}</strong></div>
+            {drink.source_url ? <div><span>SOURCE</span><a href={String(drink.source_url)} target="_blank" rel="noreferrer">{String(drink.source_url).replace(/^https?:\/\//, "")}</a></div> : null}
           </div>
         </div>
         {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
         {drink.missing.length > 0 && <p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}
+        <form className="ticket-form" onSubmit={(e) => { e.preventDefault(); void addToTicket(); }}>
+          <span className="eyebrow">MAKE FOR SOMEONE</span>
+          <label><span>Who is it for?</span><input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={40} placeholder="Sam, Dad, the table in the back…"/></label>
+          <label className="full"><span>Note (optional)</span><input value={ticketNote} onChange={(e) => setTicketNote(e.target.value)} maxLength={240} placeholder="Up, extra lime, no egg white…"/></label>
+          <button className="secondary" disabled={!guestName.trim() || ticketed}>{ticketed ? "On the ticket" : "Put it on the ticket"}</button>
+        </form>
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
+          {admin && <button type="button" className={fav ? "primary" : "secondary"} onClick={toggleFav}><Star size={16}/> {fav ? "Bartender favorite" : "Mark favorite"}</button>}
           {admin && custom && <button type="button" className="secondary danger" disabled={removing} onClick={remove}><Trash2 size={16}/> Remove</button>}
           <button className="primary" onClick={close}>Cheers</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function RecipeImportModal({ admin, close, saved }:{
+  admin: boolean; close: () => void; saved: () => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [recipe, setRecipe] = useState<ImportedRecipe>();
+  const [source, setSource] = useState("");
+  const [guestName, setGuestName] = useState(() => localStorage.getItem(GUEST_NAME_KEY) ?? "");
+  const [ticketNote, setTicketNote] = useState("");
+  const [favorite, setFavorite] = useState(false);
+  const [status, setStatus] = useState("");
+  async function parse() {
+    setLoading(true);
+    setError("");
+    setRecipe(undefined);
+    setStatus("");
+    try {
+      const data = await api<{ recipe: ImportedRecipe; source: string }>("/cocktails/import", {
+        method: "POST",
+        body: JSON.stringify({ url })
+      });
+      setRecipe(data.recipe);
+      setSource(data.source);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that link");
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function saveBook() {
+    if (!recipe || !admin) return;
+    setError("");
+    try {
+      await api("/cocktails/custom", {
+        method: "POST",
+        body: JSON.stringify({ ...recipe, bartender_fav: favorite })
+      });
+      saved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save recipe");
+    }
+  }
+  async function saveTicket() {
+    if (!recipe) return;
+    setError("");
+    try {
+      await api("/cocktails/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          name: recipe.name,
+          guest_name: guestName,
+          notes: ticketNote,
+          source_url: recipe.source_url,
+          image_url: recipe.image_url
+        })
+      });
+      localStorage.setItem(GUEST_NAME_KEY, guestName.trim());
+      setStatus(`On the ticket for ${guestName.trim()}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add to the ticket");
+    }
+  }
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <section className="modal recipe-modal">
+        <header className="modal-header">
+          <div>
+            <span className="eyebrow">ADD FROM A LINK</span>
+            <h2>Import a recipe</h2>
+            <p>Paste a URL from Punch, Liquor.com, a blog, or anywhere that publishes a recipe. The vault reads the page and grabs a photo when it can.</p>
+          </div>
+          <button type="button" className="icon-button" onClick={close}><X/></button>
+        </header>
+        <label className="search finder-search"><Link/><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/paper-plane" autoFocus/></label>
+        <button className="primary wide" disabled={loading || !url.trim()} onClick={parse}>{loading ? "Reading the page…" : "Read recipe"}</button>
+        {recipe && <div className="import-preview">
+          {recipe.image_url ? <img src={recipe.image_url} alt=""/> : null}
+          <div>
+            <span className="eyebrow">{source === "ai" ? "READ WITH AI" : "FROM THE PAGE"}</span>
+            <h3>{recipe.name}</h3>
+            <p>{recipe.method}</p>
+            <ul>{recipe.ingredients.map((line) => <li key={line}>{line}</li>)}</ul>
+          </div>
+        </div>}
+        {recipe && <form className="ticket-form" onSubmit={(e) => { e.preventDefault(); void saveTicket(); }}>
+          <span className="eyebrow">MAKE FOR SOMEONE</span>
+          <label><span>Who is it for?</span><input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={40} placeholder="Nick, Sam…"/></label>
+          <label className="full"><span>Note (optional)</span><input value={ticketNote} onChange={(e) => setTicketNote(e.target.value)} maxLength={240}/></label>
+          <button className="secondary" disabled={!guestName.trim()}>Put it on the ticket</button>
+        </form>}
+        {recipe && admin && <label className="fav-check"><input type="checkbox" checked={favorite} onChange={(e) => setFavorite(e.target.checked)}/> Save as a bartender favorite</label>}
+        {status ? <small>{status}</small> : null}
+        {error ? <p className="error">{error}</p> : null}
+        <footer className="modal-footer">
+          <button type="button" className="secondary" onClick={close}>Close</button>
+          {recipe && admin && <button type="button" className="primary" onClick={saveBook}><Save size={16}/> Save to Custom Cocktails</button>}
+          {recipe && !admin && <small>Unlock admin to save this to the recipe book.</small>}
         </footer>
       </section>
     </div>
