@@ -71,6 +71,7 @@ export type { IngredientLine } from "../../src/cocktails";
 export { overviewGreeting, overviewHeroCopy } from "../../src/overview";
 export type { OverviewSnapshot } from "../../src/overview";
 export {
-  DEFAULT_RESTOCK_THRESHOLDS, parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_SPIRIT_STOPS, RESTOCK_WINE_STOPS
+  DEFAULT_RESTOCK_THRESHOLDS, MAX_WANTED_NAME, MAX_WANTED_NOTE, parseRestockThresholds,
+  RESTOCK_PACKAGED_STOPS, RESTOCK_SPIRIT_STOPS, RESTOCK_WINE_STOPS
 } from "../../src/restock";
-export type { RestockItem, RestockThresholds } from "../../src/restock";
+export type { RestockItem, RestockThresholds, WantedLabel } from "../../src/restock";

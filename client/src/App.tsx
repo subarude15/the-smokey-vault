@@ -21,7 +21,8 @@ import {
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem, type RestockThresholds,
-  parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS
+  parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
+  type WantedLabel
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -493,7 +494,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
           <button type="button" className="overview-low" key={item.key} onClick={() => go("restock")}>
             <div className="card-icon">{item.image_url ? <img src={item.image_url} alt=""/> : <ShoppingBag/>}</div>
             <div>
-              <span className="eyebrow">{item.kind === "ingredient" ? "MIXER" : item.kind === "wines" ? "WINE" : item.kind === "packaged_beer" ? "COLD ROOM" : "SPIRITS"}</span>
+              <span className="eyebrow">{item.kind === "wanted" ? "WANTED" : item.kind === "ingredient" ? "MIXER" : item.kind === "wines" ? "WINE" : item.kind === "packaged_beer" ? "COLD ROOM" : "SPIRITS"}</span>
               <strong>{item.name}</strong>
               <small>{item.reason}</small>
             </div>
@@ -535,10 +536,22 @@ function restockRuleHint(thresholds?: RestockThresholds): string {
   return `Cans below ${rules.packagedBelow} · spirits at or below ${fill} · wine below ${rules.wineBelow}`;
 }
 
+function restockKindLabel(kind: RestockItem["kind"]): string {
+  if (kind === "wanted") return "WANTED";
+  if (kind === "ingredient") return "MIXER / BOTTLE";
+  if (kind === "wines") return "WINE";
+  if (kind === "packaged_beer") return "COLD ROOM";
+  return "SPIRITS";
+}
+
 function RestockPage({ go }:{ go: (page: string) => void }) {
   const [data, setData] = useState<RestockList>();
   const [filter, setFilter] = useState<"open" | "got" | "all">("open");
   const [error, setError] = useState("");
+  const [wantName, setWantName] = useState("");
+  const [wantNote, setWantNote] = useState("");
+  const [wantLabel, setWantLabel] = useState<WantedLabel>("bottle");
+  const [saving, setSaving] = useState(false);
   function load() {
     setError("");
     api<RestockList>("/restock")
@@ -557,14 +570,59 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
       setError(err instanceof Error ? err.message : "Could not update that item");
     }
   }
+  async function addWanted(e: React.FormEvent) {
+    e.preventDefault();
+    if (!wantName.trim() || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const next = await api<RestockList>("/restock/wanted", {
+        method: "POST",
+        body: JSON.stringify({ name: wantName, note: wantNote, label: wantLabel })
+      });
+      setData(next);
+      setWantName("");
+      setWantNote("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add that");
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function dropWanted(item: RestockItem) {
+    if (!item.id) return;
+    try {
+      const next = await api<RestockList>(`/restock/wanted/${item.id}`, { method: "DELETE" });
+      setData(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not drop that");
+    }
+  }
   const shown = (data?.items ?? []).filter((item) => filter === "all" || (filter === "got" ? item.got : !item.got));
+  const wanted = shown.filter((item) => item.kind === "wanted");
+  const low = shown.filter((item) => item.kind !== "wanted");
   return <>
     <PageTitle
       eyebrow="STORE RUN"
       title="What to pick up."
-      subtitle={data ? `${data.open} still needed · ${data.total} on the list. ${restockRuleHint(data.thresholds)}.` : "Empty bottles, low cans, last wines, and mixers that unlock a favorite."}
+      subtitle={data ? `${data.open} still needed · ${data.total} on the list. ${restockRuleHint(data.thresholds)}.` : "Empty bottles, low cans, last wines, mixers that unlock a favorite, and bottles you want for the vault."}
     />
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load restock</strong><span>{error}</span></div></div>}
+    <section className="wanted-card">
+      <span className="eyebrow">WANTED FOR THE VAULT</span>
+      <h2>Not on the shelf yet</h2>
+      <p>Add a bottle or mixer when it crosses your mind. It stays here until you drop it — even if it is not in inventory.</p>
+      <form className="wanted-form" onSubmit={(e) => void addWanted(e)}>
+        <div className="chip-row restock-stops">
+          {([["bottle", "Bottle"], ["mixer", "Mixer"]] as const).map(([id, label]) => (
+            <button type="button" key={id} className={`chip${wantLabel === id ? " active" : ""}`} onClick={() => setWantLabel(id)}>{label}</button>
+          ))}
+        </div>
+        <input value={wantName} onChange={(e) => setWantName(e.target.value)} maxLength={MAX_WANTED_NAME} placeholder="Green Chartreuse, orgeat, a rye you keep meaning to buy…" autoComplete="off"/>
+        <input value={wantNote} onChange={(e) => setWantNote(e.target.value)} maxLength={MAX_WANTED_NOTE} placeholder="Note (optional) — store, size, why"/>
+        <button className="primary" disabled={!wantName.trim() || saving}><Plus size={16}/> Add to list</button>
+      </form>
+    </section>
     <div className="cocktail-toolbar">
       <div className="segmented cocktail-filters">
         {([["open", "Still need"], ["got", "Grabbed"], ["all", "All"]] as const).map(([id, label]) => (
@@ -573,14 +631,28 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
       </div>
       <button type="button" className="secondary" onClick={() => go("settings")}>Change rules</button>
     </div>
-    {!shown.length ? <Empty icon={ShoppingBag} title={filter === "got" ? "Nothing grabbed yet" : "Shelf looks stocked"} text={filter === "got" ? "Tap a bottle when you pick it up." : "When something hits the cutoff you set, it lands here. Restocked bottles drop off on their own."}/> :
+    {!shown.length ? <Empty icon={ShoppingBag} title={filter === "got" ? "Nothing grabbed yet" : "Shelf looks stocked"} text={filter === "got" ? "Tap a bottle when you pick it up." : "When something hits the cutoff you set, or you add a wanted bottle, it lands here."}/> :
       <div className="restock-list">
-        {shown.map((item) => (
+        {wanted.map((item) => (
+          <div className={`restock-row${item.got ? " got" : ""}`} key={item.key}>
+            <button type="button" className="restock-main" onClick={() => void toggle(item)}>
+              <span className="restock-check" aria-hidden="true">{item.got ? "✓" : ""}</span>
+              <div className="card-icon"><ShoppingBag/></div>
+              <div>
+                <span className="eyebrow">{restockKindLabel(item.kind)}</span>
+                <strong>{item.name}</strong>
+                <small>{item.reason}</small>
+              </div>
+            </button>
+            <button type="button" className="icon-button danger restock-drop" aria-label="Drop from wanted list" onClick={() => void dropWanted(item)}><Trash2 size={17}/></button>
+          </div>
+        ))}
+        {low.map((item) => (
           <button type="button" className={`restock-row${item.got ? " got" : ""}`} key={item.key} onClick={() => void toggle(item)}>
             <span className="restock-check" aria-hidden="true">{item.got ? "✓" : ""}</span>
             <div className="card-icon">{item.image_url ? <img src={item.image_url} alt=""/> : <ShoppingBag/>}</div>
             <div>
-              <span className="eyebrow">{item.kind === "ingredient" ? "MIXER / BOTTLE" : item.kind === "wines" ? "WINE" : item.kind === "packaged_beer" ? "COLD ROOM" : "SPIRITS"}</span>
+              <span className="eyebrow">{restockKindLabel(item.kind)}</span>
               <strong>{item.name}</strong>
               <small>{item.reason}</small>
             </div>

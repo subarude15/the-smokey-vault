@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildRestockList, parseRestockThresholds, restockSummary } from "./restock.js";
+import { buildRestockList, createWanted, deleteWanted, parseRestockThresholds, restockSummary } from "./restock.js";
 
 test("restock lists empty and quarter-full spirits, last wines, and cans below 3", () => {
   const items = buildRestockList({
@@ -84,6 +84,35 @@ test("restock asks for missing bottles on favorites and the one-away cocktail", 
   assert.ok(byKey["need:green chartreuse"]);
   assert.match(byKey["need:green chartreuse"].reason, /Last Word/);
   assert.ok(!items.some((item) => /aperol/i.test(item.name)));
+});
+
+test("wanted bottles stay on restock until deleted", () => {
+  const items = buildRestockList({
+    wanted: [
+      { id: 1, name: "Green Chartreuse", note: "The 750 at Total Wine", label: "bottle" },
+      { id: 2, name: "Orgeat", note: "", label: "mixer" }
+    ],
+    got: ["wanted:1"]
+  });
+  assert.equal(items.length, 2);
+  assert.equal(items[0].kind, "wanted");
+  assert.equal(items.find((item) => item.name === "Green Chartreuse")?.got, true);
+  assert.match(items.find((item) => item.name === "Orgeat")?.reason ?? "", /mixer/i);
+  assert.equal(restockSummary(items).open, 1);
+});
+
+test("wanted list rejects blanks and duplicate names", () => {
+  const a = createWanted({ name: "  St. Germain  ", label: "bottle", note: "for last word riffs" });
+  try {
+    assert.equal(a.name, "St. Germain");
+    assert.equal(a.label, "bottle");
+    assert.throws(() => createWanted({ name: "st. germain" }), /already/i);
+    assert.throws(() => createWanted({ name: "   " }), /name/i);
+    assert.equal(deleteWanted(a.id), true);
+    assert.equal(deleteWanted(a.id), false);
+  } finally {
+    deleteWanted(a.id);
+  }
 });
 
 test("checked restock keys stay on the list until the shelf recovers", () => {

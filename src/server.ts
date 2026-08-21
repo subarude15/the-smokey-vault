@@ -13,7 +13,7 @@ import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./ca
 import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
 import { createTicket, deleteTicket, listTickets, setTicketStatus } from "./cocktail_tickets.js";
 import { buildOverview } from "./overview.js";
-import { buildRestockList, listRestockGot, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
+import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
@@ -248,6 +248,7 @@ function restockPayload() {
     wines,
     packaged,
     cocktails,
+    wanted: listWanted(),
     got: listRestockGot(),
     thresholds
   });
@@ -268,6 +269,23 @@ app.post<{ Body: { key?: string; got?: boolean } }>("/api/restock/check", async 
     const message = error instanceof Error ? error.message : "Could not update the restock list";
     return reply.code(400).send({ error: message });
   }
+});
+
+app.post<{ Body: { name?: string; note?: string; label?: string } }>("/api/restock/wanted", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    createWanted(request.body ?? {});
+    return restockPayload();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not add that to the wanted list";
+    return reply.code(400).send({ error: message });
+  }
+});
+
+app.delete<{ Params: { id: string } }>("/api/restock/wanted/:id", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  if (!deleteWanted(Number(request.params.id))) return reply.code(404).send({ error: "Wanted item not found" });
+  return restockPayload();
 });
 
 async function handleBarcodeLookup(

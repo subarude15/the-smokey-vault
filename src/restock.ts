@@ -11,7 +11,19 @@ import {
 } from "./catalog.js";
 import { spiritOnShelf, stripMeasure } from "./cocktails.js";
 
-export type RestockKind = "spirits" | "wines" | "packaged_beer" | "ingredient";
+export type RestockKind = "spirits" | "wines" | "packaged_beer" | "ingredient" | "wanted";
+export type WantedLabel = "bottle" | "mixer";
+
+export const MAX_WANTED_NAME = 80;
+export const MAX_WANTED_NOTE = 160;
+
+export type WantedRow = {
+  id: number;
+  name: string;
+  note: string;
+  label: WantedLabel;
+  created_at: string;
+};
 
 export type RestockThresholds = {
   packagedBelow: number;
@@ -59,7 +71,44 @@ CREATE TABLE IF NOT EXISTS restock_got (
   got INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS restock_wanted (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL DEFAULT 'bottle',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `);
+
+function wantedLabel(value: unknown): WantedLabel {
+  return String(value ?? "").trim().toLowerCase() === "mixer" ? "mixer" : "bottle";
+}
+
+export function listWanted(): WantedRow[] {
+  return db.prepare(
+    "SELECT id, name, note, label, created_at FROM restock_wanted ORDER BY id DESC"
+  ).all() as WantedRow[];
+}
+
+export function createWanted(input: { name?: string; note?: string; label?: string }): WantedRow {
+  const name = text(input.name).replace(/\s+/g, " ");
+  const note = text(input.note).replace(/\s+/g, " ");
+  const label = wantedLabel(input.label);
+  if (!name) throw new Error("Add a bottle or mixer name");
+  if (name.length > MAX_WANTED_NAME) throw new Error(`Name must be ${MAX_WANTED_NAME} characters or fewer`);
+  if (note.length > MAX_WANTED_NOTE) throw new Error(`Note must be ${MAX_WANTED_NOTE} characters or fewer`);
+  const existing = db.prepare("SELECT id FROM restock_wanted WHERE lower(name)=lower(?)").get(name) as { id: number } | undefined;
+  if (existing) throw new Error("That's already on the wanted list");
+  const result = db.prepare("INSERT INTO restock_wanted(name,note,label) VALUES(?,?,?)").run(name, note, label);
+  return db.prepare("SELECT id, name, note, label, created_at FROM restock_wanted WHERE id=?").get(result.lastInsertRowid) as WantedRow;
+}
+
+export function deleteWanted(id: number): boolean {
+  const n = Math.floor(Number(id));
+  if (!Number.isFinite(n) || n <= 0) return false;
+  db.prepare("DELETE FROM restock_got WHERE key=?").run(`wanted:${n}`);
+  return db.prepare("DELETE FROM restock_wanted WHERE id=?").run(n).changes > 0;
+}
 
 export function listRestockGot(): Set<string> {
   const rows = db.prepare("SELECT key FROM restock_got WHERE got=1").all() as Array<{ key: string }>;
@@ -111,12 +160,27 @@ export function buildRestockList(input: {
   wines?: Array<Record<string, unknown>>;
   packaged?: Array<Record<string, unknown>>;
   cocktails?: Array<Record<string, unknown>>;
+  wanted?: Array<Pick<WantedRow, "id" | "name" | "note" | "label">>;
   got?: Iterable<string>;
   thresholds?: RestockThresholds;
 }): RestockItem[] {
   const got = new Set(input.got ?? []);
   const thresholds = input.thresholds ?? DEFAULT_RESTOCK_THRESHOLDS;
   const items: RestockItem[] = [];
+
+  for (const item of input.wanted ?? []) {
+    const note = text(item.note);
+    const label = wantedLabel(item.label);
+    items.push({
+      key: `wanted:${itemId(item.id)}`,
+      kind: "wanted",
+      id: itemId(item.id),
+      name: text(item.name) || "Untitled",
+      reason: note || (label === "mixer" ? "Wanted mixer" : "Wanted for the vault"),
+      image_url: "",
+      got: false
+    });
+  }
 
   for (const item of input.spirits ?? []) {
     if (openNextSpirit(item)) continue;
@@ -199,7 +263,7 @@ export function buildRestockList(input: {
     });
   }
 
-  const rank = (item: RestockItem) => item.kind === "ingredient" ? 1 : 0;
+  const rank = (item: RestockItem) => item.kind === "wanted" ? 0 : item.kind === "ingredient" ? 2 : 1;
   items.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   return items.map((item) => ({ ...item, got: got.has(item.key) }));
 }

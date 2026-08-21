@@ -26,6 +26,13 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .restock-row .card-icon{width:52px;height:68px}
 .restock-row strong{display:block;font:600 20px "Playfair Display";margin:2px 0}
 .restock-row small{color:var(--muted)}
+.restock-main{display:flex;align-items:center;gap:14px;flex:1;min-width:0;border:0;background:none;padding:0;color:inherit;text-align:left;cursor:pointer}
+.restock-drop{margin-left:4px;flex:none}
+.wanted-card{max-width:720px;border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:22px;margin-bottom:24px}
+.wanted-card h2{font:600 28px "Playfair Display";margin:8px 0 6px}
+.wanted-card>p{color:var(--muted);margin:0 0 16px;line-height:1.6}
+.wanted-form{display:flex;flex-direction:column;gap:10px}
+.wanted-form .primary{align-self:flex-start}
 .restock-check{width:28px;height:28px;border:2px solid var(--accent);border-radius:8px;display:grid;place-items:center;flex:none;font-size:16px;font-weight:700;color:var(--accent-2)}
 .restock-row.got .restock-check{background:var(--accent);border-color:var(--accent);color:#fff}
 .restock-open{margin-left:auto;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;padding:8px 12px;font-size:13px;flex:none}
