@@ -63,3 +63,8 @@ export {
   compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
   spiritStock, spiritStockLabel
 } from "../../src/catalog";
+
+export {
+  SEASONS, collectionGroup, compareCocktails, currentSeason
+} from "../../src/cocktails";
+export type { IngredientLine } from "../../src/cocktails";

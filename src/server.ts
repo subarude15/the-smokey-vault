@@ -10,6 +10,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
+import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, saveImageBuffer } from "./images.js";
@@ -192,17 +193,13 @@ app.post<{ Params: { table: string; id: string }; Body: { voter?: string; value?
 });
 
 app.get("/api/cocktails/match", async () => {
-  const stock = (db.prepare("SELECT name,brand,category,sub_category FROM spirits WHERE fill_level > 1").all() as Record<string,string>[])
-    .flatMap((s) => Object.values(s).filter(Boolean).map((v) => v.toLowerCase()));
+  const spirits = db.prepare("SELECT name,brand,category,sub_category,fill_level,stock_count FROM spirits").all() as Array<Record<string, unknown>>;
+  const wines = db.prepare("SELECT name,producer,type,style,varietal,bottle_count FROM wines").all() as Array<Record<string, unknown>>;
+  const shelf = buildShelf(spirits, wines);
   const cocktails = db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>;
-  const common = ["sugar","syrup","lemon","lime","soda","water","salt","egg","mint"];
   return cocktails.map((cocktail) => {
-    const ingredients = JSON.parse(cocktail.ingredients as string) as string[];
-    const missing = ingredients.filter((ingredient) => {
-      const normalized = ingredient.toLowerCase().replace(/^\d+(\.\d+)?\s*(ml|oz|tsp|dash(es)?)?\s*/,"");
-      return !common.some((x) => normalized.includes(x)) && !stock.some((x) => normalized.includes(x) || x.includes(normalized.split(" ").at(-1) ?? normalized));
-    });
-    return { ...cocktail, ingredients, missing, readiness: missing.length === 0 ? "ready" : missing.length === 1 ? "almost" : "missing" };
+    const matched = matchCocktail(cocktail, shelf);
+    return { ...cocktail, ...matched };
   });
 });
 
@@ -413,9 +410,11 @@ function parseGeneratedRecipe(result: string): GeneratedRecipe {
 }
 
 app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, reply) => {
-  const inventory = db.prepare("SELECT name,brand,category,fill_level FROM spirits WHERE fill_level > 1").all();
+  const spirits = db.prepare("SELECT name,brand,category,sub_category,fill_level,stock_count FROM spirits").all() as Array<Record<string, unknown>>;
+  const wines = db.prepare("SELECT name,producer,type,style,varietal,bottle_count FROM wines").all() as Array<Record<string, unknown>>;
+  const shelf = mixologistShelfSummary(buildShelf(spirits, wines));
   try {
-    const result = await callLlm(`You are an expert mixologist. Available inventory: ${JSON.stringify(inventory)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
+    const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
     return { recipe: parseGeneratedRecipe(result) };
   } catch (error) {
     app.log.error({ error }, "AI mixologist request failed");
@@ -437,6 +436,15 @@ app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, rep
     glassware=excluded.glassware,garnish=excluded.garnish,method=excluded.method,notes=excluded.notes,season=excluded.season`)
     .run(recipe.name.trim(), JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "", recipe.method, recipe.notes || "", recipe.season || "All");
   return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(recipe.name.trim()));
+});
+
+app.delete<{ Params: { id: string } }>("/api/cocktails/:id", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const row = db.prepare("SELECT id, collection FROM cocktails WHERE id=?").get(request.params.id) as { id: number; collection: string } | undefined;
+  if (!row) return reply.code(404).send({ error: "Recipe not found" });
+  if (row.collection !== "Custom Cocktails") return reply.code(403).send({ error: "Only custom recipes can be removed" });
+  db.prepare("DELETE FROM cocktails WHERE id=?").run(row.id);
+  return reply.code(204).send();
 });
 
 async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
