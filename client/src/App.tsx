@@ -17,7 +17,7 @@ import {
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
-  packagedCount, packagedStockLabel, packagedToTap
+  packagedCount, packagedStockLabel
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -330,13 +330,12 @@ export default function App() {
             openScanner={() => setScanner(true)}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
-            onPutOnTap={admin && (module.id === "brews" || module.id === "packaged_beer") ? async (item) => {
+            onPutOnTap={admin && module.id === "brews" ? async (brew) => {
               const taps = await api<Item[]>("/inventory/taps");
               const slot = [...taps].sort((a, b) => Number(a.tap_number) - Number(b.tap_number)).find(isTapEmpty) ?? taps[0];
-              const payload = module.id === "brews" ? brewToTap(item) : packagedToTap(item);
               setTapSeed({
                 ...(slot ?? { tap_number: firstEmptyTapNumber(taps) }),
-                ...payload,
+                ...brewToTap(brew),
                 id: slot?.id ?? 0,
                 tap_number: slot?.tap_number ?? firstEmptyTapNumber(taps),
                 keg_size_l: slot?.keg_size_l ?? DEFAULT_KEG_L
@@ -396,7 +395,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   }, [module.id]);
   useEffect(() => { load(); setViewing(undefined); }, [load]);
   useEffect(() => {
-    if (module.id !== "brews" && module.id !== "packaged_beer") {
+    if (module.id !== "brews") {
       setTaps([]);
       return;
     }
@@ -483,7 +482,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       onDelete={() => module.id === "taps" ? clearTap(viewing) : remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
       onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
-      tapNumbers={module.id === "brews" || module.id === "packaged_beer" ? tapsForBatch(taps, module.id === "brews" ? viewing.batch_name : viewing.name) : []}
+      tapNumbers={module.id === "brews" ? tapsForBatch(taps, viewing.batch_name) : []}
     />;
   }
 
@@ -507,9 +506,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."} actions={emptyActions}/> :
     !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
       <div className="inventory-grid">{listed.map((item) => {
-        const brewTaps = module.id === "brews" || module.id === "packaged_beer"
-          ? tapsForBatch(taps, module.id === "brews" ? item.batch_name : item.name)
-          : [];
+        const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
         const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
         const outOfStock = module.id === "packaged_beer" && packagedCount(item.count) <= 0;

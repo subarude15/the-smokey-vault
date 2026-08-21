@@ -8,7 +8,7 @@ import {
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch,
-  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, packagedToTap, preparePackagedWrite
+  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -107,21 +107,6 @@ test("brewToTap copies a brewery batch onto a homebrew tap", () => {
   assert.equal(tap.keg_size_l, 19.5);
   assert.equal(tap.remaining_l, 19.5);
   assert.equal(tap.tapped_date, "2026-08-21");
-});
-
-test("packagedToTap copies a cold-room beer onto a commercial tap", () => {
-  const tap = packagedToTap({
-    name: "Nugget Nectar",
-    brewery: "Tröegs",
-    style: "Imperial Amber",
-    abv: 7.5,
-    vessel: "Can"
-  }, "2026-08-21");
-  assert.equal(tap.source_type, "Commercial");
-  assert.equal(tap.brewery_batch, "Nugget Nectar");
-  assert.equal(tap.maker, "Tröegs");
-  assert.equal(tap.abv, 7.5);
-  assert.equal(tap.remaining_l, 19.5);
 });
 
 test("packaged stock labels, drink-one, and out-of-stock sort", () => {

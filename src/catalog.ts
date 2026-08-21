@@ -277,25 +277,6 @@ export function comparePackagedBeer(a: Record<string, unknown>, b: Record<string
   return String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { sensitivity: "base" });
 }
 
-export function packagedToTap(beer: Record<string, unknown>, tappedDate = new Date().toISOString().slice(0, 10)): Record<string, unknown> {
-  return {
-    maker: beer.brewery ?? beer.maker ?? "",
-    brewery_batch: beer.name ?? beer.brewery_batch ?? "",
-    style: beer.style ?? "",
-    abv: beer.abv ?? beer.calculated_abv ?? 0,
-    image_url: beer.image_url ?? "",
-    tasting_notes: beer.tasting_notes ?? "",
-    flavors: beer.flavors ?? "[]",
-    tags: beer.tags ?? "[]",
-    notes: beer.notes ?? "",
-    base_ingredient: beer.base_ingredient ?? "",
-    source_type: "Commercial",
-    keg_size_l: DEFAULT_KEG_L,
-    remaining_l: DEFAULT_KEG_L,
-    tapped_date: tappedDate
-  };
-}
-
 export function preparePackagedWrite(body: Record<string, unknown>): Record<string, unknown> {
   const next = { ...body };
   if (next.count !== undefined) next.count = packagedCount(next.count);
