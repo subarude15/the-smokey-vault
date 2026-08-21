@@ -4,6 +4,7 @@ import {
   LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, Search, Settings, Shuffle, Sparkles, Sun, Trash2, Upload, Wine, X
 } from "lucide-react";
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
+import { ImageField } from "./ImageField";
 import {
   BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
   parseList, parseTagInput, serializeList
@@ -30,7 +31,7 @@ const modules: Module[] = [
     { key:"sub_category",label:"Type" },{ key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS },
     { key:"abv",label:"ABV %",type:"number" },{ key:"volume_ml",label:"Volume (ml)",type:"number" },{ key:"fill_level",label:"Fill level",type:"percent",options:["100","75","50","25","0"] },
     { key:"purchase_date",label:"Purchase date",type:"date" },{ key:"opened_date",label:"Date opened",type:"date" },{ key:"shelf_location",label:"Shelf location" },{ key:"upc",label:"UPC" },
-    { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Image URL",type:"url" },
+    { key:"stock_count",label:"Bottle count",type:"number" },{ key:"image_url",label:"Photo",type:"image" },
     { key:"notes",label:"Cellar notes",type:"textarea" },{ key:"tasting_notes",label:"Tasting notes",type:"tasting" },
     { key:"flavors",label:"Flavors",type:"flavors" },{ key:"tags",label:"Tags",type:"tags" }
   ]},
@@ -38,6 +39,7 @@ const modules: Module[] = [
     {key:"tap_number",label:"Tap #",type:"number"},{key:"maker",label:"Brewery / maker"},{key:"brewery_batch",label:"Beer / batch"},
     {key:"keg_size_l",label:"Keg size (L)",type:"number"},{key:"source_type",label:"Source",options:["Commercial","Homebrew"]},
     {key:"abv",label:"ABV %",type:"number"},{key:"ibu",label:"IBU",type:"number"},{key:"tapped_date",label:"Date tapped",type:"date"},{key:"remaining_l",label:"Remaining (L)",type:"number"},
+    {key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
   { id: "brews", label: "Brewery", singular: "Batch", icon: FlaskConical, title: "Brewery Lab", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
@@ -45,17 +47,18 @@ const modules: Module[] = [
     {key:"brew_date",label:"Brew date",type:"date"},{key:"target_og",label:"Target OG",type:"number"},{key:"target_fg",label:"Target FG",type:"number"},
     {key:"measured_og",label:"Measured OG",type:"number"},{key:"measured_fg",label:"Measured FG",type:"number"},{key:"calculated_abv",label:"Calculated ABV %",type:"number"},
     {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},{key:"status",label:"Status",options:["Planned","Fermenting","Conditioning","Ready to Keg","Archived"]},
+    {key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Brew notes",type:"textarea"}
   ]},
   { id: "packaged_beer", label: "Packaged Beer", singular: "Beer", icon: Beer, title: "Packaged Beer", subtitle: "The cold-room count for cans and bottles.", primary: "name", secondary: "brewery", makerKey: "brewery", kindKey: "style", fields: [
     {key:"brewery",label:"Brewery / maker"},{key:"name",label:"Name"},
-    {key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Image URL",type:"url"},
+    {key:"count",label:"Can / bottle count",type:"number"},{key:"pack_date",label:"Pack date",type:"date"},{key:"abv",label:"ABV %",type:"number"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
   { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and ideal drinking windows.", primary: "name", secondary: "producer", makerKey: "producer", kindKey: "type", fields: [
     {key:"producer",label:"Producer / maker"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},{key:"type",label:"Type",options:["Red","White","Rosé","Sparkling","Dessert","Fortified"]},
     {key:"base_ingredient",label:"Base / fruit",options:BASE_INGREDIENTS},{key:"region",label:"Region"},{key:"sweetness",label:"Sweetness (1–5)",type:"range5"},{key:"body",label:"Body (1–5)",type:"range5"},{key:"bottle_count",label:"Bottle count",type:"number"},
-    {key:"drink_by_date",label:"Drink-by date",type:"date"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Image URL",type:"url"},
+    {key:"drink_by_date",label:"Drink-by date",type:"date"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
     {key:"notes",label:"Cellar notes",type:"textarea"},{key:"tasting_notes",label:"Tasting notes",type:"tasting"},
     {key:"flavors",label:"Flavors",type:"flavors"},{key:"tags",label:"Tags",type:"tags"}
   ]}
@@ -534,8 +537,12 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     return field.options ?? [];
   }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
-    {form.image_url ? <div className="form-image-preview"><img src={String(form.image_url)} alt=""/></div> : null}
     <div className="form-grid">{module.fields.map((field) => {
+      if (field.type === "image") {
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <ImageField value={String(form.image_url ?? "")} onChange={(url) => setForm({ ...form, image_url: url })}/>
+        </div>;
+      }
       if (field.type === "flavors") {
         const options = Array.from(new Set([...FLAVOR_OPTIONS, ...flavors]));
         return <label className="full" key={field.key}><span>{field.label}</span>

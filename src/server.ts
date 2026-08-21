@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
-import { imagesDir } from "./images.js";
+import { imagesDir, saveImageBuffer } from "./images.js";
 
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
@@ -19,8 +19,8 @@ const tables = new Set(["spirits", "taps", "brews", "packaged_beer", "wines"]);
 const publicTables = new Set([...tables, "cocktails"]);
 const tableFields: Record<string, string[]> = {
   spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count","tasting_notes","flavors","tags","base_ingredient"],
-  taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l","maker","notes","tasting_notes","flavors","tags","base_ingredient"],
-  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","tasting_notes","flavors","tags","base_ingredient"],
+  taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l","maker","notes","image_url","tasting_notes","flavors","tags","base_ingredient"],
+  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","image_url","tasting_notes","flavors","tags","base_ingredient"],
   packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url","notes","tasting_notes","flavors","tags","base_ingredient"],
   wines: ["producer","name","varietal","vintage","type","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url","tasting_notes","flavors","tags","base_ingredient"]
 };
@@ -205,8 +205,27 @@ const imageTypes: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".webp": "image/webp",
-  ".gif": "image/gif"
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".heif": "image/heif"
 };
+
+app.post("/api/media/upload", {
+  schema: { tags: ["Lookup"], summary: "Upload a bottle photo for inventory" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    const file = await request.file();
+    if (!file) return reply.code(400).send({ error: "Image required" });
+    const buffer = await file.toBuffer();
+    const url = saveImageBuffer(buffer, file.mimetype, file.filename);
+    return { url };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not save image";
+    const code = /too large|filesize|JPEG|PNG|required|limit/i.test(message) ? 400 : 500;
+    return reply.code(code).send({ error: message });
+  }
+});
 
 app.get<{ Params: { file: string } }>("/api/media/images/:file", {
   schema: { tags: ["Lookup"], summary: "Serve a locally cached bottle label image" }

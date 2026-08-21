@@ -28,14 +28,16 @@ CREATE TABLE IF NOT EXISTS taps (
   id INTEGER PRIMARY KEY AUTOINCREMENT, tap_number INTEGER NOT NULL UNIQUE, keg_size_l REAL DEFAULT 19,
   source_type TEXT DEFAULT 'Commercial', brewery_batch TEXT NOT NULL, style TEXT DEFAULT '', abv REAL DEFAULT 0,
   ibu REAL DEFAULT 0, tapped_date TEXT, remaining_l REAL DEFAULT 19, maker TEXT DEFAULT '', notes TEXT DEFAULT '',
-  tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '',
+  image_url TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
+  base_ingredient TEXT DEFAULT '',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS brews (
   id INTEGER PRIMARY KEY AUTOINCREMENT, batch_name TEXT NOT NULL, style TEXT DEFAULT '', brew_date TEXT,
   target_og REAL, target_fg REAL, measured_og REAL, measured_fg REAL, calculated_abv REAL DEFAULT 0,
   schedule TEXT DEFAULT '', status TEXT DEFAULT 'Planned', notes TEXT DEFAULT '', maker TEXT DEFAULT '',
-  tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]', base_ingredient TEXT DEFAULT '',
+  image_url TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
+  base_ingredient TEXT DEFAULT '',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS packaged_beer (
@@ -102,12 +104,14 @@ ensureColumn("wines", "flavors", "ALTER TABLE wines ADD COLUMN flavors TEXT DEFA
 ensureColumn("wines", "tags", "ALTER TABLE wines ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("wines", "base_ingredient", "ALTER TABLE wines ADD COLUMN base_ingredient TEXT DEFAULT ''");
 ensureColumn("taps", "maker", "ALTER TABLE taps ADD COLUMN maker TEXT DEFAULT ''");
+ensureColumn("taps", "image_url", "ALTER TABLE taps ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("taps", "notes", "ALTER TABLE taps ADD COLUMN notes TEXT DEFAULT ''");
 ensureColumn("taps", "tasting_notes", "ALTER TABLE taps ADD COLUMN tasting_notes TEXT DEFAULT ''");
 ensureColumn("taps", "flavors", "ALTER TABLE taps ADD COLUMN flavors TEXT DEFAULT '[]'");
 ensureColumn("taps", "tags", "ALTER TABLE taps ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("taps", "base_ingredient", "ALTER TABLE taps ADD COLUMN base_ingredient TEXT DEFAULT ''");
 ensureColumn("brews", "maker", "ALTER TABLE brews ADD COLUMN maker TEXT DEFAULT ''");
+ensureColumn("brews", "image_url", "ALTER TABLE brews ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("brews", "tasting_notes", "ALTER TABLE brews ADD COLUMN tasting_notes TEXT DEFAULT ''");
 ensureColumn("brews", "flavors", "ALTER TABLE brews ADD COLUMN flavors TEXT DEFAULT '[]'");
 ensureColumn("brews", "tags", "ALTER TABLE brews ADD COLUMN tags TEXT DEFAULT '[]'");
