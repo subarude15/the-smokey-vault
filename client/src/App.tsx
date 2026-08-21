@@ -6,6 +6,7 @@ import {
 import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
+import { GuestReviews } from "./GuestReviews";
 import {
   BASE_INGREDIENTS, BEER_STYLES, FLAVOR_OPTIONS, SPIRIT_FAMILIES, SPIRIT_TYPES,
   parseList, parseTagInput, serializeList
@@ -451,6 +452,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete }:{
       {flavors.length > 0 && <div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div>}
       {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
+      <GuestReviews table={module.id} itemId={item.id} admin={admin}/>
     </section>
   );
 }
