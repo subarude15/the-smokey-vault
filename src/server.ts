@@ -287,7 +287,6 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
     packaged,
     wines,
     cocktails,
-    tickets: listTickets("queued"),
     pours: listTonightPours(),
     keeperName: keeperName()
   });
@@ -567,7 +566,6 @@ function parseGeneratedRecipe(result: string): GeneratedRecipe {
 }
 
 app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, reply) => {
-  if (requireAdmin(request, reply)) return;
   const shelf = mixologistShelfSummary(currentShelf());
   try {
     const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
@@ -654,9 +652,13 @@ app.delete<{ Params: { id: string } }>("/api/cocktails/:id", async (request, rep
   return reply.code(204).send();
 });
 
-app.get("/api/cocktails/tickets", async () => listTickets("queued"));
+app.get("/api/cocktails/tickets", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return listTickets("queued");
+});
 
 app.post<{ Body: { cocktail_id?: number; name?: string; guest_name?: string; notes?: string; source_url?: string; image_url?: string } }>("/api/cocktails/tickets", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
   try {
     const ticket = createTicket({
       cocktail_id: request.body.cocktail_id,

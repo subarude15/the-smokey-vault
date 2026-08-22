@@ -118,14 +118,11 @@ export function overviewHeroCopy(snapshot: OverviewSnapshot, guest = false): str
       ? `${snapshot.cocktails.ready} off the menu`
       : `${snapshot.cocktails.ready} ready to mix`);
   }
-  if (snapshot.tickets.length) parts.push(`${snapshot.tickets.length} on the ticket`);
   if (snapshot.pours.length) parts.push(`${snapshot.pours.length} poured tonight`);
   if (snapshot.spirits.on_shelf) parts.push(`${snapshot.spirits.on_shelf} on the shelf`);
-  if (!guest) {
-    if (snapshot.wines.bottles) parts.push(`${snapshot.wines.bottles} in the cellar`);
-    if (snapshot.packaged.units) parts.push(`${snapshot.packaged.units} in the cold room`);
-    if (snapshot.brews.active) parts.push(`${snapshot.brews.active} in the lab`);
-  }
+  if (snapshot.wines.bottles) parts.push(`${snapshot.wines.bottles} in the cellar`);
+  if (snapshot.packaged.units) parts.push(`${snapshot.packaged.units} in the cold room`);
+  if (snapshot.brews.active) parts.push(`${snapshot.brews.active} in the lab`);
   if (!parts.length) {
     return guest
       ? "Browse the collection, see what is pouring, and find your next perfect drink."

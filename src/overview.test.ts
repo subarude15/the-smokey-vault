@@ -101,10 +101,12 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
   assert.ok(snap.low.some((item) => item.name.includes("Last pils")));
   assert.match(overviewHeroCopy(snap), /1 handle pouring/);
   assert.match(overviewHeroCopy(snap), /1 ready to mix/);
-  assert.match(overviewHeroCopy(snap), /1 on the ticket/);
   assert.match(overviewHeroCopy(snap), /1 poured tonight/);
+  assert.doesNotMatch(overviewHeroCopy(snap), /on the ticket/);
   assert.match(overviewHeroCopy(snap, true), /1 off the menu/);
-  assert.doesNotMatch(overviewHeroCopy(snap, true), /ready to mix|in the lab|cold room|cellar/);
+  assert.match(overviewHeroCopy(snap, true), /in the lab/);
+  assert.match(overviewHeroCopy(snap, true), /cold room/);
+  assert.doesNotMatch(overviewHeroCopy(snap, true), /ready to mix|on the ticket/);
 });
 
 test("overdue wines show on cellar watch even when the rack is otherwise stocked", () => {

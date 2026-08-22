@@ -240,7 +240,7 @@ function useHouse() {
   return useContext(HouseContext);
 }
 
-const GUEST_HIDDEN_PAGES = new Set(["brews", "packaged_beer", "mixologist", "scan", "restock", "settings"]);
+const GUEST_HIDDEN_PAGES = new Set(["scan", "restock", "settings"]);
 
 function scanProductName(result: ScanResult) {
   const product = result.product ?? {};
@@ -385,7 +385,7 @@ export default function App() {
     { id:"dashboard",label:"Overview",icon:LayoutDashboard },
     ...modules.filter((m) => admin || !GUEST_HIDDEN_PAGES.has(m.id)).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },
-    ...(admin ? [{ id:"mixologist",label:"AI Mixologist",icon:Sparkles }] : []),
+    { id:"mixologist",label:"AI Mixologist",icon:Sparkles },
     { id:"next",label:"What's next",icon:ThumbsUp }
   ];
   const keeperNav = [
@@ -445,7 +445,7 @@ export default function App() {
             } : undefined}
           />)}
           {page === "cocktails" && <Cocktails admin={admin} sharedUrl={admin ? sharedRecipeUrl : ""} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
-          {page === "mixologist" && admin && <Mixologist admin={admin}/>}
+          {page === "mixologist" && <Mixologist admin={admin}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
           {page === "scan" && admin && <ScanPage
             onProduct={handleScan}
@@ -499,36 +499,10 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: "What’s on tap tonight" },
     { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "OFF THE MENU", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Drinks the shelf can make" },
     { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: "Spirits & mixers" },
-    { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: "On the rack" }
+    { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: "On the rack" },
+    { id: "brews", icon: FlaskConical, value: snap.brews.active, label: "BREWING", hint: "What’s in the pipeline" },
+    { id: "packaged_beer", icon: Beer, value: snap.packaged.units, label: "COLD ROOM", hint: "Cans & bottles on hand" }
   ]) : [];
-  async function pourTicket(id: number) {
-    await api(`/cocktails/tickets/${id}/pour`, { method: "POST" });
-    load();
-  }
-  async function removeTicket(id: number) {
-    await api(`/cocktails/tickets/${id}`, { method: "DELETE" });
-    load();
-  }
-  const ticketBoard = snap && snap.tickets.length > 0 ? <section className="ticket-board">
-      <div className="section-heading"><div><span className="eyebrow">ON THE TICKET</span><h2>Make for someone</h2></div><span className="guest-badge">{snap.tickets.length}</span></div>
-      <div className="ticket-row">
-        {snap.tickets.map((ticket) => (
-          <article className="ticket-card" key={ticket.id}>
-            {ticket.image_url ? <img src={ticket.image_url} alt=""/> : null}
-            <div>
-              <span className="eyebrow">FOR {ticket.guest_name.toUpperCase()}</span>
-              <h3>{ticket.name}</h3>
-              {ticket.notes ? <p>{ticket.notes}</p> : null}
-            </div>
-            <div className="ticket-actions">
-              <button type="button" className="secondary" onClick={() => go("cocktails")}>Open recipes</button>
-              {admin && <button type="button" className="primary" onClick={() => void pourTicket(ticket.id)}>Poured</button>}
-              {admin && <button type="button" className="icon-button danger" aria-label="Remove ticket" onClick={() => void removeTicket(ticket.id)}><Trash2 size={16}/></button>}
-            </div>
-          </article>
-        ))}
-      </div>
-    </section> : null;
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
@@ -559,7 +533,6 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         ))}
       </div>
     </section>
-    {admin && ticketBoard}
     {snap && <section className="overview-board">
       <div className="section-heading"><div><span className="eyebrow">ON TAP</span><h2>What's pouring</h2></div><button type="button" className="secondary" onClick={() => go("taps")}>All handles</button></div>
       <div className="overview-taps">
@@ -605,7 +578,6 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         ))}
       </div>
     </section>}
-    {!admin && ticketBoard}
     {snap && snap.pours.length > 0 && <section className="ticket-board">
       <div className="section-heading"><div><span className="eyebrow">TONIGHT</span><h2>{admin ? "Poured since 4am" : "What’s gone out"}</h2></div><span className="guest-badge">{snap.pours.length}</span></div>
       <div className="ticket-row">
@@ -619,8 +591,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         ))}
       </div>
     </section>}
-    {admin && snap && snap.brews.list.length > 0 && <section className="overview-board">
-      <div className="section-heading"><div><span className="eyebrow">BREWERY LAB</span><h2>In the pipeline</h2></div><button type="button" className="secondary" onClick={() => go("brews")}>Open lab</button></div>
+    {snap && snap.brews.list.length > 0 && <section className="overview-board">
+      <div className="section-heading"><div><span className="eyebrow">BREWERY LAB</span><h2>In the pipeline</h2></div><button type="button" className="secondary" onClick={() => go("brews")}>{admin ? "Open lab" : "What’s brewing"}</button></div>
       <div className="overview-brew-row">
         {snap.brews.list.map((brew) => (
           <button type="button" className="overview-brew" key={brew.id || brew.batch_name} onClick={() => go("brews")}>
@@ -665,8 +637,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       </div>
     </section>}
     <section className="feature-grid">
-      <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes, random picks, and drinks on the ticket.</p></div><Shuffle size={56}/></button>
-      {admin && <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. We’ll mix from what’s on the shelf.</p></div><Sparkles size={56}/></button>}
+      <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes and random picks from what’s actually on the shelf.</p></div><Shuffle size={56}/></button>
+      <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. We’ll mix from what’s on the shelf, then show {keeperName} the drink.</p></div><Sparkles size={56}/></button>
       <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>What’s next?</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
     </section>
   </>;
@@ -1946,16 +1918,6 @@ type CocktailDrink = Item & {
   source_url?: string;
   bartender_fav?: number;
 };
-type CocktailTicket = {
-  id: number;
-  cocktail_id: number | null;
-  name: string;
-  guest_name: string;
-  notes: string;
-  source_url: string;
-  image_url: string;
-  status: string;
-};
 type ImportedRecipe = {
   name: string;
   ingredients: string[];
@@ -1967,8 +1929,6 @@ type ImportedRecipe = {
   image_url: string;
   source_url: string;
 };
-
-const GUEST_NAME_KEY = "smokey-reviewer";
 
 function readinessLabel(readiness: string, guest = false) {
   if (readiness === "ready") return guest ? "OFF THE MENU" : "READY TO POUR";
@@ -1987,7 +1947,6 @@ function cocktailLines(drink: CocktailDrink): IngredientLine[] {
 function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sharedUrl?: string; onSharedConsumed?: () => void }) {
   const { keeperName } = useHouse();
   const [drinks, setDrinks] = useState<CocktailDrink[]>([]);
-  const [tickets, setTickets] = useState<CocktailTicket[]>([]);
   const [filter, setFilter] = useState("ready");
   const [season, setSeason] = useState("All");
   const [collection, setCollection] = useState("All");
@@ -2000,9 +1959,6 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
     api<CocktailDrink[]>("/cocktails/match")
       .then((rows) => setDrinks([...rows].sort(compareCocktails)))
       .catch((err) => setLoadError(err instanceof Error ? err.message : "Could not load cocktail matches."));
-    api<CocktailTicket[]>("/cocktails/tickets")
-      .then(setTickets)
-      .catch(() => setTickets([]));
   }
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -2033,8 +1989,8 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
       eyebrow="THE RECIPE INDEX"
       title="What can I make?"
       subtitle={admin
-        ? `${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link on any phone, share it into the vault on Android, star ${keeperName}’s favorites, or put a drink on the ticket.`
-        : `${ready.length} off the menu · ${almost.length} one bottle away. Pick a drink, or put one on the ticket for ${keeperName}.`}
+        ? `${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link, star ${keeperName}’s favorites, or pick a drink to show at the bar.`
+        : `${ready.length} off the menu · ${almost.length} one bottle away. Pick a drink, then walk it over to ${keeperName}.`}
     />
     {loadError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load recipes</strong><span>{loadError}</span></div></div>}
     <div className="cocktail-toolbar">
@@ -2049,31 +2005,6 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
       </div>
     </div>
     <label className="search cocktail-search"><Search/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Negroni, mezcal, coupe…"/></label>
-    {tickets.length > 0 && <section className="ticket-board">
-      <div className="section-heading"><div><span className="eyebrow">ON THE TICKET</span><h2>Make for someone</h2></div><span className="guest-badge">{tickets.length}</span></div>
-      <div className="ticket-row">
-        {tickets.map((ticket) => (
-          <article className="ticket-card" key={ticket.id}>
-            {ticket.image_url ? <img src={ticket.image_url} alt=""/> : null}
-            <div>
-              <span className="eyebrow">FOR {ticket.guest_name.toUpperCase()}</span>
-              <h3>{ticket.name}</h3>
-              {ticket.notes ? <p>{ticket.notes}</p> : null}
-            </div>
-            <div className="ticket-actions">
-              {admin && <button type="button" className="primary" onClick={async () => {
-                await api(`/cocktails/tickets/${ticket.id}/pour`, { method: "POST" });
-                load();
-              }}>Poured</button>}
-              {admin && <button type="button" className="icon-button danger" aria-label="Remove ticket" onClick={async () => {
-                await api(`/cocktails/tickets/${ticket.id}`, { method: "DELETE" });
-                load();
-              }}><Trash2 size={16}/></button>}
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>}
     {favorites.length > 0 && <section className="favorite-board">
       <div className="section-heading"><div><span className="eyebrow">BEHIND THE STICK</span><h2>Bartender favorites</h2></div></div>
       <div className="favorite-row">
@@ -2141,9 +2072,6 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
 }) {
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
-  const [guestName, setGuestName] = useState(() => localStorage.getItem(GUEST_NAME_KEY) ?? "");
-  const [ticketNote, setTicketNote] = useState("");
-  const [ticketed, setTicketed] = useState(false);
   const [fav, setFav] = useState(Number(drink.bartender_fav) > 0);
   const lines = cocktailLines(drink);
   const custom = drink.collection === "Custom Cocktails";
@@ -2170,28 +2098,6 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update favorite");
-    }
-  }
-  async function addToTicket() {
-    setError("");
-    try {
-      await api("/cocktails/tickets", {
-        method: "POST",
-        body: JSON.stringify({
-          cocktail_id: drink.id,
-          name: drink.name,
-          guest_name: guestName,
-          notes: ticketNote,
-          image_url: drink.image_url,
-          source_url: drink.source_url
-        })
-      });
-      localStorage.setItem(GUEST_NAME_KEY, guestName.trim());
-      setTicketed(true);
-      setTicketNote("");
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add to the ticket");
     }
   }
   return (
@@ -2232,12 +2138,6 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
         </div>
         {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
         {drink.missing.length > 0 && <p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}
-        <form className="ticket-form" onSubmit={(e) => { e.preventDefault(); void addToTicket(); }}>
-          <span className="eyebrow">MAKE FOR SOMEONE</span>
-          <label><span>Who is it for?</span><input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={40} placeholder="Sam, Dad, the table in the back…"/></label>
-          <label className="full"><span>Note (optional)</span><input value={ticketNote} onChange={(e) => setTicketNote(e.target.value)} maxLength={240} placeholder="Up, extra lime, no egg white…"/></label>
-          <button className="secondary" disabled={!guestName.trim() || ticketed}>{ticketed ? "On the ticket" : "Put it on the ticket"}</button>
-        </form>
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
           {admin && <button type="button" className={fav ? "primary" : "secondary"} onClick={toggleFav}><Star size={16}/> {fav ? "Bartender favorite" : "Mark favorite"}</button>}
@@ -2257,10 +2157,7 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
   const [error, setError] = useState("");
   const [recipe, setRecipe] = useState<ImportedRecipe>();
   const [source, setSource] = useState("");
-  const [guestName, setGuestName] = useState(() => localStorage.getItem(GUEST_NAME_KEY) ?? "");
-  const [ticketNote, setTicketNote] = useState("");
   const [favorite, setFavorite] = useState(false);
-  const [status, setStatus] = useState("");
   const autoRead = useRef(Boolean(initialUrl));
   async function parse(raw = url) {
     const link = raw.trim();
@@ -2268,7 +2165,6 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
     setLoading(true);
     setError("");
     setRecipe(undefined);
-    setStatus("");
     try {
       const data = await api<{ recipe: ImportedRecipe; source: string }>("/cocktails/import", {
         method: "POST",
@@ -2322,26 +2218,6 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
       setError(err instanceof Error ? err.message : "Could not save recipe");
     }
   }
-  async function saveTicket() {
-    if (!recipe) return;
-    setError("");
-    try {
-      await api("/cocktails/tickets", {
-        method: "POST",
-        body: JSON.stringify({
-          name: recipe.name,
-          guest_name: guestName,
-          notes: ticketNote,
-          source_url: recipe.source_url,
-          image_url: recipe.image_url
-        })
-      });
-      localStorage.setItem(GUEST_NAME_KEY, guestName.trim());
-      setStatus(`On the ticket for ${guestName.trim()}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add to the ticket");
-    }
-  }
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <section className="modal recipe-modal">
@@ -2367,14 +2243,7 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
             <ul>{recipe.ingredients.map((line) => <li key={line}>{line}</li>)}</ul>
           </div>
         </div>}
-        {recipe && <form className="ticket-form" onSubmit={(e) => { e.preventDefault(); void saveTicket(); }}>
-          <span className="eyebrow">MAKE FOR SOMEONE</span>
-          <label><span>Who is it for?</span><input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={40} placeholder="Nick, Sam…"/></label>
-          <label className="full"><span>Note (optional)</span><input value={ticketNote} onChange={(e) => setTicketNote(e.target.value)} maxLength={240}/></label>
-          <button className="secondary" disabled={!guestName.trim()}>Put it on the ticket</button>
-        </form>}
         {recipe && admin && <label className="fav-check"><input type="checkbox" checked={favorite} onChange={(e) => setFavorite(e.target.checked)}/> Save as a bartender favorite</label>}
-        {status ? <small>{status}</small> : null}
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
           <button type="button" className="secondary" onClick={close}>Close</button>
@@ -2392,7 +2261,7 @@ function Mixologist({admin}:{admin:boolean}) {
   const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
   async function ask(request=prompt){setLoading(true);setRecipe(undefined);setError("");setSaved(false);try{const data=await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request})});setRecipe(data.recipe);}catch(e){setError(e instanceof Error?e.message:"The AI service could not generate a recipe.");}finally{setLoading(false);}}
   async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
-  return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples."/>
+  return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples. Walk the drink over to the bar when you want it made."/>
     <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from my vault</button></div>
     {loading&&<div className="ai-loading"><LoaderCircle className="spinner"/><div><strong>The mixologist is measuring…</strong><span>Balancing your inventory, flavors, and request.</span></div></div>}
     {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
@@ -2465,7 +2334,7 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
       <section className="settings-card">
         <span className="eyebrow">THE HOUSE</span>
         <h3>Keeper name</h3>
-        <p>Used on What’s next, tickets, and guest copy instead of a hardcoded name.</p>
+        <p>Used on What’s next and guest copy instead of a hardcoded name.</p>
         <label><span>Name</span><input value={keeperDraft} maxLength={MAX_KEEPER_NAME} onChange={(e)=>setKeeperDraft(e.target.value)} placeholder={DEFAULT_KEEPER_NAME}/></label>
         <button type="button" className="primary" onClick={() => void saveKeeper()}>Save house name</button>
       </section>
