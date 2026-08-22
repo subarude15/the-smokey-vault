@@ -117,3 +117,13 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .settings-pin input{min-height:48px;letter-spacing:.18em;font-size:20px}
 .theme-grid button{min-height:72px}
 @media(max-width:700px){.theme-grid{grid-template-columns:1fr}}
+.scan-stage{max-width:640px}
+.scan-stage .segmented{margin-bottom:14px}
+.scan-stage .camera-frame{aspect-ratio:3/4;max-height:min(62vh,560px);border:1px solid var(--line);background:#050505;border-radius:16px;overflow:hidden;margin-bottom:12px}
+.scan-stage .camera-frame video{width:100%;height:100%;object-fit:cover}
+.scan-stage .scanner-hint,.scan-stage .scanner-status{color:var(--muted);font-size:14px;line-height:1.5;margin:8px 0 12px}
+.scan-stage .scanner-status{font-weight:600;color:var(--text)}
+.scan-stage .vision-card{text-align:left;border:1px dashed var(--line);padding:28px 22px;border-radius:16px;margin-bottom:12px;background:var(--surface)}
+.scan-stage .vision-card h3{font:600 24px "Playfair Display";margin:10px 0 8px}
+.scan-stage .file-button{margin-top:0}
+@media(min-width:700px){.scan-stage .camera-frame{aspect-ratio:4/3}}

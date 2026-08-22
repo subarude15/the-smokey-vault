@@ -260,7 +260,6 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [admin, setAdmin] = useState(tokenExists());
   const [mobileNav, setMobileNav] = useState(false);
-  const [scanner, setScanner] = useState(false);
   const [unlock, setUnlock] = useState(false);
   const [theme, setTheme] = useState(storedTheme);
   const [backupDue, setBackupDue] = useState(false);
@@ -271,7 +270,6 @@ export default function App() {
   const lock = useCallback(() => {
     clearToken();
     setAdmin(false);
-    setScanner(false);
     setScanDraft(undefined);
     setUnlock(false);
     setPage((current) => ["scan", "restock", "settings"].includes(current) ? "dashboard" : current);
@@ -312,7 +310,6 @@ export default function App() {
       : scannedInventoryDraft(result);
     setScanDraft(draft);
     navigate(draft.moduleId);
-    if (draft.mode === "view") setScanner(false);
     return new Promise<ScanReviewOutcome>((resolve) => {
       scanReviewResolver.current = resolve;
     });
@@ -321,6 +318,7 @@ export default function App() {
     setScanDraft(undefined);
     scanReviewResolver.current?.(outcome);
     scanReviewResolver.current = undefined;
+    setPage("scan");
   }
   const collectionNav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
@@ -366,7 +364,7 @@ export default function App() {
             admin={admin}
             scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined}
             finishScanReview={finishScanReview}
-            openScanner={() => setScanner(true)}
+            openScanner={() => navigate("scan")}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
             onPutOnTap={admin && module.id === "brews" ? async (brew) => {
@@ -385,13 +383,12 @@ export default function App() {
           {page === "cocktails" && <Cocktails admin={admin} sharedUrl={sharedRecipeUrl} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
           {page === "mixologist" && <Mixologist admin={admin}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
-          {page === "scan" && admin && <ScanPage onStart={() => setScanner(true)}/>}
+          {page === "scan" && admin && <ScanPage onProduct={handleScan}/>}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
-      {admin && scanner && !scanDraft && !unlock && <Scanner onClose={() => setScanner(false)} onProduct={handleScan}/>}
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
     </div>
   );
@@ -940,16 +937,14 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
   </>;
 }
 
-function ScanPage({ onStart }: { onStart: () => void }) {
+function ScanPage({ onProduct }: { onProduct: (result: ScanResult) => Promise<ScanReviewOutcome> }) {
   return <>
     <PageTitle
       eyebrow="VAULT TOOLS"
       title="Scan a bottle."
-      subtitle="Point the camera at a UPC or snap a label. Hits the vault first, then COLA. This stays off the guest menu."
+      subtitle="Point at a UPC. Already on the shelf? We’ll open it. New? Review and add. No barcode? Snap the front label."
     />
-    <div className="toolbar-actions">
-      <button type="button" className="primary" onClick={onStart}><ScanBarcode size={18}/> Start scan</button>
-    </div>
+    <Scanner onProduct={onProduct}/>
   </>;
 }
 
@@ -1492,7 +1487,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       return abv != null ? { ...next, calculated_abv: abv } : next;
     });
   }
-  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => {
       if (field.type === "image") {
         return <div className="full field-block" key={field.key}><span>{field.label}</span>

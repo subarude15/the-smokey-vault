@@ -1,5 +1,5 @@
 import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
-import { Camera, ScanBarcode, Sparkles, X } from "lucide-react";
+import { Camera, ScanBarcode, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
@@ -17,20 +17,47 @@ export type ScanResult = {
 };
 
 export type ScanReviewOutcome = "saved" | "cancelled" | "viewed";
-type Props = { onClose: () => void; onProduct: (result: ScanResult) => Promise<ScanReviewOutcome> };
+type Props = { onProduct: (result: ScanResult) => Promise<ScanReviewOutcome> };
 
-export function Scanner({ onClose, onProduct }: Props) {
+function sourceLabel(source: ScanResult["source"]) {
+  if (source === "cola_cloud") return "COLA";
+  if (source === "cache") return "a saved lookup";
+  if (source === "openfoodfacts" || source === "upcitemdb") return "the catalog";
+  if (source === "vault") return "the vault";
+  if (source === "vision") return "the label photo";
+  if (source === "not_found") return "no match";
+  return source;
+}
+
+export function Scanner({ onProduct }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const controls = useRef<IScannerControls | undefined>(undefined);
   const isProcessing = useRef(false);
   const isMounted = useRef(true);
   const [mode, setMode] = useState<"barcode" | "vision">("barcode");
-  const [status, setStatus] = useState("Point the camera at a UPC barcode");
+  const [status, setStatus] = useState("Point the camera at a UPC");
 
   useEffect(() => () => {
     isMounted.current = false;
     controls.current?.stop();
   }, []);
+
+  useEffect(() => {
+    if (mode !== "barcode") {
+      controls.current?.stop();
+      controls.current = undefined;
+      setStatus("Photograph the front label");
+      return;
+    }
+    setStatus("Point the camera at a UPC");
+    void startCamera();
+    return () => {
+      controls.current?.stop();
+      controls.current = undefined;
+    };
+    // startCamera is stable enough for mode changes; video node is mounted with barcode mode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   function playSuccessDing() {
     try {
@@ -57,7 +84,7 @@ export function Scanner({ onClose, onProduct }: Props) {
   async function startCamera() {
     if (isProcessing.current || controls.current) return;
     if (!window.isSecureContext || !navigator.mediaDevices) {
-      setStatus("Camera streaming requires HTTPS or localhost. Use photo capture below.");
+      setStatus("Live camera needs HTTPS or localhost. Snap a photo of the barcode instead.");
       return;
     }
     try {
@@ -73,66 +100,60 @@ export function Scanner({ onClose, onProduct }: Props) {
         isProcessing.current = false;
         if (isMounted.current && mode === "barcode") void startCamera();
       });
-      setStatus("Scanning… one item at a time");
+      setStatus("Scanning… one bottle at a time");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Camera unavailable");
+      setStatus(error instanceof Error ? error.message : "Camera unavailable. Snap a photo of the barcode instead.");
     }
   }
 
   async function lookupAndReview(upc: string) {
-    setStatus(`Looking up ${upc}…`);
+    setStatus("Looking that up…");
     try {
       const data = await api<ScanResult>(`/scan/upc/${encodeURIComponent(upc)}`);
-      const sourceLabel = data.source === "cola_cloud" ? "COLA Cloud"
-        : data.source === "cache" ? "cached catalog data"
-        : data.source === "openfoodfacts" ? "Open Food Facts"
-        : data.source === "upcitemdb" ? "UPC catalog"
-        : data.source === "vault" ? "your vault"
-        : data.source === "not_found" ? "no catalog match"
-        : data.source;
       const hasName = Boolean(data.product?.name || data.product?.product_name);
-      const quotaHint = data.quota?.detail_views_remaining != null
-        ? ` · ${data.quota.detail_views_remaining} COLA detail views left`
-        : "";
-      const quotaWarn = data.quota?.detail_views_remaining === "0"
-        ? " COLA detail quota is exhausted."
-        : "";
+      const label = sourceLabel(data.source);
       setStatus(hasName
-        ? `Matched via ${sourceLabel}${quotaHint}. Review to continue.`
-        : `${data.message ?? "No catalog match."}${quotaWarn} Review the UPC and fill details, or search by name.`);
+        ? `Found in ${label}. Check the details, then save.`
+        : `${data.message ?? "No match yet."} Fill in what you can, or search by name.`);
       const outcome = await onProduct({
         ...data,
         upc: data.upc ?? upc,
         product: data.product ?? { upc },
         source: data.source === "not_found" ? "not_found" : data.source
       });
-      setStatus(outcome === "saved" ? "Saved. Ready for the next bottle."
-        : outcome === "viewed" ? "Opened from your vault. Ready for the next bottle."
-        : "Cancelled. Ready for the next bottle.");
+      if (!isMounted.current) return;
+      setStatus(outcome === "saved" ? "Saved. Next bottle."
+        : outcome === "viewed" ? "That’s already in the vault. Next bottle."
+        : "Skipped. Next bottle.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Product not found";
-      setStatus(`${message}. Review the UPC manually.`);
+      const message = error instanceof Error ? error.message : "Could not look that up";
+      setStatus(`${message}. You can still add it by hand.`);
       await onProduct({ source: "unresolved", upc, product: { upc } });
+      if (!isMounted.current) return;
     }
   }
 
   async function photo(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
     if (mode === "vision") {
       const body = new FormData();
       body.append("image", file);
-      setStatus("Reading the bottle label…");
+      setStatus("Reading the front label…");
       try {
         const data = await api<{ result: string }>("/ai/vision", { method: "POST", body });
         const json = JSON.parse(data.result.replace(/```json|```/g, "").trim());
-        await onProduct({ source: "vision", product: json });
-        setStatus("Review complete");
-      } catch (error) { setStatus(error instanceof Error ? error.message : "Could not read label"); }
+        const outcome = await onProduct({ source: "vision", product: json });
+        if (!isMounted.current) return;
+        setStatus(outcome === "saved" ? "Saved. Next bottle." : "Skipped. Next bottle.");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Could not read that label");
+      }
       return;
     }
     try {
-      setStatus("Reading barcode from photo…");
+      setStatus("Reading the barcode…");
       const url = URL.createObjectURL(file);
       const result = await new BrowserMultiFormatReader().decodeFromImageUrl(url);
       URL.revokeObjectURL(url);
@@ -141,31 +162,35 @@ export function Scanner({ onClose, onProduct }: Props) {
       playSuccessDing();
       await lookupAndReview(result.getText());
       isProcessing.current = false;
-    } catch { setStatus("No barcode found. Try a closer, sharper photo."); }
+    } catch {
+      setStatus("No barcode in that photo. Get closer, or try Front label.");
+    }
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <section className="modal scanner-modal">
-        <header className="modal-header">
-          <div><span className="eyebrow">DUAL SCANNER</span><h2>Capture inventory</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close"><X /></button>
-        </header>
-        <div className="segmented">
-          <button className={mode === "barcode" ? "active" : ""} onClick={() => setMode("barcode")}><ScanBarcode size={18}/> UPC barcode</button>
-          <button className={mode === "vision" ? "active" : ""} onClick={() => setMode("vision")}><Sparkles size={18}/> AI label</button>
+    <section className="scan-stage">
+      <div className="segmented">
+        <button type="button" className={mode === "barcode" ? "active" : ""} onClick={() => setMode("barcode")}><ScanBarcode size={18}/> Barcode</button>
+        <button type="button" className={mode === "vision" ? "active" : ""} onClick={() => setMode("vision")}><Sparkles size={18}/> Front label</button>
+      </div>
+      {mode === "barcode" && (
+        <>
+          <div className="camera-frame"><video ref={video} muted playsInline /></div>
+          <p className="scanner-hint">It pauses after each hit so you can review, then comes back for the next one.</p>
+        </>
+      )}
+      {mode === "vision" && (
+        <div className="vision-card">
+          <Sparkles size={32}/>
+          <h3>No barcode? Snap the front.</h3>
+          <p>We’ll read the name, brand, and ABV from the label. You still review before it hits the shelf.</p>
         </div>
-        {mode === "barcode" && (
-          <>
-            <div className="camera-frame"><video ref={video} muted playsInline /></div>
-            <p className="scanner-hint">The camera pauses after each successful scan and resumes after review.</p>
-            <button className="primary wide" onClick={startCamera}><Camera size={18}/> Start live camera</button>
-          </>
-        )}
-        {mode === "vision" && <div className="vision-card"><Sparkles size={32}/><h3>Photograph the front label</h3><p>Your configured vision model extracts brand, name, category, and ABV.</p></div>}
-        <label className="secondary wide file-button"><Camera size={18}/> {mode === "vision" ? "Take label photo" : "Capture / choose barcode photo"}<input type="file" accept="image/*" capture="environment" onChange={photo}/></label>
-        <p className="scanner-status">{status}</p>
-      </section>
-    </div>
+      )}
+      <label className="secondary wide file-button">
+        <Camera size={18}/> {mode === "vision" ? "Take label photo" : "Snap a barcode photo"}
+        <input type="file" accept="image/*" capture="environment" onChange={photo}/>
+      </label>
+      <p className="scanner-status">{status}</p>
+    </section>
   );
 }
