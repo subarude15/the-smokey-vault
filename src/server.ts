@@ -696,18 +696,16 @@ app.get("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const rows = db.prepare("SELECT key,value,updated_at FROM settings WHERE key != 'pinHash'").all();
   const settings = Object.fromEntries((rows as Array<{key:string;value:string}>).map((r) => [r.key, r.value]));
-  const ai = resolveAiConfig();
-  return {
-    ...settings,
-    aiConfiguredViaEnvironment: String(ai.fromEnvironment),
-    aiEnvironmentProvider: ai.fromEnvironment ? ai.provider : "",
-    aiEnvironmentModel: ai.fromEnvironment ? ai.model : ""
-  };
+  delete settings.aiApiKey;
+  delete settings.aiProvider;
+  delete settings.aiBaseUrl;
+  delete settings.aiModel;
+  return settings;
 });
 
 app.put<{ Body: Record<string, string> }>("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
-  const allowed = new Set(["theme","themeTokens","aiProvider","aiApiKey","aiBaseUrl","aiModel","restockPackagedBelow","restockSpiritFill","restockWineBelow"]);
+  const allowed = new Set(["theme","themeTokens","restockPackagedBelow","restockSpiritFill","restockWineBelow"]);
   for (const [key, value] of Object.entries(request.body)) {
     if (!allowed.has(key)) continue;
     if (key.startsWith("restock")) {
