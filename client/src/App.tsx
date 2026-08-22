@@ -271,7 +271,7 @@ export default function App() {
   const [theme, setTheme] = useState(storedTheme);
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
-  const [scanMissUpc, setScanMissUpc] = useState("");
+  const [scanMiss, setScanMiss] = useState<{ upc: string } | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
@@ -279,7 +279,7 @@ export default function App() {
     clearToken();
     setAdmin(false);
     setScanDraft(undefined);
-    setScanMissUpc("");
+    setScanMiss(null);
     setUnlock(false);
     setPage((current) => ["scan", "restock", "settings"].includes(current) ? "dashboard" : current);
   }, []);
@@ -315,13 +315,13 @@ export default function App() {
     const table = result.table;
     const vaultId = result.source === "vault" && table ? itemId(result.product) : 0;
     if (!vaultId && (result.source === "not_found" || result.source === "unresolved" || !scanProductName(result))) {
-      setScanMissUpc(result.upc ?? "");
+      setScanMiss({ upc: result.upc ?? "" });
       return Promise.resolve("cancelled" as ScanReviewOutcome);
     }
     const draft: ScanDraft = vaultId && table
       ? { moduleId: table, key: Date.now(), values: result.product, mode: "view" }
       : scannedInventoryDraft(result);
-    setScanMissUpc("");
+    setScanMiss(null);
     setScanDraft(draft);
     navigate(draft.moduleId);
     return new Promise<ScanReviewOutcome>((resolve) => {
@@ -348,19 +348,19 @@ export default function App() {
           // Still open the bottle; the UPC can be saved from the form later.
         }
       }
-      setScanMissUpc("");
+      setScanMiss(null);
       setScanDraft({ moduleId: table, key: Date.now(), values: nextValues, mode: "view" });
       navigate(table);
       return;
     }
     const values = await resolveSuggestion(module, hit, upc);
-    setScanMissUpc("");
+    setScanMiss(null);
     setScanDraft({ moduleId: table, key: Date.now(), values, mode: "create" });
     navigate(table);
   }
   function handleScanManual(table: ScanModuleId, upc: string) {
     const draft = scannedInventoryDraft({ source: "not_found", upc, table, product: { upc, name: "", brand: "" } });
-    setScanMissUpc("");
+    setScanMiss(null);
     setScanDraft(draft);
     navigate(draft.moduleId);
   }
@@ -429,9 +429,9 @@ export default function App() {
           {page === "next" && <WhatsNextPage admin={admin}/>}
           {page === "scan" && admin && <ScanPage
             onProduct={handleScan}
-            missUpc={scanMissUpc}
-            onMiss={setScanMissUpc}
-            onRescan={() => setScanMissUpc("")}
+            miss={scanMiss}
+            onMiss={(upc) => setScanMiss({ upc })}
+            onRescan={() => setScanMiss(null)}
             onPickMiss={handleScanMissPick}
             onManual={handleScanManual}
           />}
@@ -989,10 +989,10 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
 }
 
 function ScanPage({
-  onProduct, missUpc, onMiss, onRescan, onPickMiss, onManual
+  onProduct, miss, onMiss, onRescan, onPickMiss, onManual
 }: {
   onProduct: (result: ScanResult) => Promise<ScanReviewOutcome>;
-  missUpc: string;
+  miss: { upc: string } | null;
   onMiss: (upc: string) => void;
   onRescan: () => void;
   onPickMiss: (hit: BottleSearchHit, upc: string) => Promise<void>;
@@ -1001,13 +1001,15 @@ function ScanPage({
   return <>
     <PageTitle
       eyebrow="VAULT TOOLS"
-      title={missUpc ? "Look it up." : "Scan a bottle."}
-      subtitle={missUpc
-        ? "No catalog match. Search by name and we’ll stamp this UPC on whatever you add."
-        : "Scan once. We’ll open the bottle if it’s in the vault, or the add form if we know it. No match? Search from here."}
+      title={miss ? "Look it up." : "Scan a bottle."}
+      subtitle={miss
+        ? (miss.upc
+          ? "No catalog match. Search by name and we’ll stamp this UPC on whatever you add."
+          : "We couldn’t read a match. Search by name, or add it by hand.")
+        : "Barcode for a UPC. Label to read the front of the bottle. One scan, then we take you to the bottle or to search."}
     />
-    {missUpc
-      ? <ScanMissSearch upc={missUpc} onPick={onPickMiss} onManual={onManual} onRescan={onRescan}/>
+    {miss
+      ? <ScanMissSearch upc={miss.upc} onPick={onPickMiss} onManual={onManual} onRescan={onRescan}/>
       : <Scanner onProduct={onProduct} onMiss={onMiss}/>}
   </>;
 }
@@ -1074,7 +1076,9 @@ function ScanMissSearch({
     <section className="scan-stage scan-miss">
       <p className="eyebrow">NO CATALOG MATCH</p>
       <h3>Search by name</h3>
-      <p className="scanner-hint">Kept UPC <strong className="upc-chip">{upc}</strong>. We’ll fill it in when you pick a bottle or add by hand.</p>
+      <p className="scanner-hint">{upc
+        ? <>Kept UPC <strong className="upc-chip">{upc}</strong>. We’ll fill it in when you pick a bottle or add by hand.</>
+        : "Search your vault and COLA, or add it by hand."}</p>
       <div className="chip-row">
         {SCAN_SEARCH_SCOPES.map((item) => (
           <button type="button" key={item.id} className={scope === item.id ? "chip active" : "chip"} onClick={() => setScope(item.id)}>{item.label}</button>

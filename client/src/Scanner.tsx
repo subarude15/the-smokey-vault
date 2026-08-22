@@ -1,5 +1,5 @@
 import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
-import { Camera, ScanBarcode, Sparkles } from "lucide-react";
+import { Camera, ScanBarcode, ScanText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
@@ -17,6 +17,7 @@ export type ScanResult = {
 };
 
 export type ScanReviewOutcome = "saved" | "cancelled" | "viewed";
+type Mode = "barcode" | "label";
 type Props = {
   onProduct: (result: ScanResult) => Promise<ScanReviewOutcome>;
   onMiss: (upc: string) => void;
@@ -27,7 +28,7 @@ function sourceLabel(source: ScanResult["source"]) {
   if (source === "cache") return "a saved lookup";
   if (source === "openfoodfacts" || source === "upcitemdb") return "the catalog";
   if (source === "vault") return "the vault";
-  if (source === "vision") return "the label photo";
+  if (source === "vision") return "the label";
   if (source === "not_found") return "no match";
   return source;
 }
@@ -40,30 +41,44 @@ function resultName(result: ScanResult) {
 export function Scanner({ onProduct, onMiss }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const controls = useRef<IScannerControls | undefined>(undefined);
+  const previewStream = useRef<MediaStream | undefined>(undefined);
+  const cameraGen = useRef(0);
   const isProcessing = useRef(false);
   const isMounted = useRef(true);
-  const [mode, setMode] = useState<"barcode" | "vision">("barcode");
+  const [mode, setMode] = useState<Mode>("barcode");
+  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Point the camera at a UPC");
 
   useEffect(() => () => {
     isMounted.current = false;
-    controls.current?.stop();
+    stopCamera();
   }, []);
 
   useEffect(() => {
-    if (mode !== "barcode") {
-      controls.current?.stop();
-      controls.current = undefined;
-      setStatus("Photograph the front label");
-      return;
+    const gen = ++cameraGen.current;
+    isProcessing.current = false;
+    setBusy(false);
+    stopCamera();
+    if (mode === "barcode") {
+      setStatus("Point the camera at a UPC");
+      void startBarcodeCamera(gen);
+    } else {
+      setStatus("Line up the front label, then tap Scan label");
+      void startLabelPreview(gen);
     }
-    setStatus("Point the camera at a UPC");
-    void startCamera();
     return () => {
-      controls.current?.stop();
-      controls.current = undefined;
+      cameraGen.current += 1;
+      stopCamera();
     };
   }, [mode]);
+
+  function stopCamera() {
+    controls.current?.stop();
+    controls.current = undefined;
+    previewStream.current?.getTracks().forEach((track) => track.stop());
+    previewStream.current = undefined;
+    if (video.current) video.current.srcObject = null;
+  }
 
   function playSuccessDing() {
     try {
@@ -87,7 +102,7 @@ export function Scanner({ onProduct, onMiss }: Props) {
     }
   }
 
-  async function startCamera() {
+  async function startBarcodeCamera(gen: number) {
     if (isProcessing.current || controls.current) return;
     if (!window.isSecureContext || !navigator.mediaDevices) {
       setStatus("Live camera needs HTTPS or localhost. Snap a photo of the barcode instead.");
@@ -95,19 +110,54 @@ export function Scanner({ onProduct, onMiss }: Props) {
     }
     try {
       const reader = new BrowserMultiFormatReader();
-      controls.current = await reader.decodeFromVideoDevice(undefined, video.current!, async (result) => {
+      const next = await reader.decodeFromVideoDevice(undefined, video.current!, async (result) => {
         if (!result) return;
+        if (cameraGen.current !== gen) return;
         if (isProcessing.current) return;
         isProcessing.current = true;
+        setBusy(true);
         controls.current?.stop();
         controls.current = undefined;
         playSuccessDing();
         await lookupAndReview(result.getText());
         isProcessing.current = false;
+        if (isMounted.current) setBusy(false);
       });
+      if (cameraGen.current !== gen) {
+        next.stop();
+        return;
+      }
+      controls.current = next;
       setStatus("Scanning…");
     } catch (error) {
+      if (cameraGen.current !== gen) return;
       setStatus(error instanceof Error ? error.message : "Camera unavailable. Snap a photo of the barcode instead.");
+    }
+  }
+
+  async function startLabelPreview(gen = cameraGen.current) {
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      setStatus("Live camera needs HTTPS or localhost. Take a photo of the label instead.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: "environment" } }
+      });
+      if (!isMounted.current || cameraGen.current !== gen) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      previewStream.current = stream;
+      if (video.current) {
+        video.current.srcObject = stream;
+        await video.current.play().catch(() => undefined);
+      }
+      setStatus("Line up the front label, then tap Scan label");
+    } catch (error) {
+      if (cameraGen.current !== gen) return;
+      setStatus(error instanceof Error ? error.message : "Camera unavailable. Take a photo of the label instead.");
     }
   }
 
@@ -137,22 +187,67 @@ export function Scanner({ onProduct, onMiss }: Props) {
     }
   }
 
+  async function readLabel(file: Blob) {
+    isProcessing.current = true;
+    setBusy(true);
+    setStatus("Reading the label…");
+    stopCamera();
+    try {
+      const body = new FormData();
+      body.append("image", file, "label.jpg");
+      const data = await api<ScanResult>("/ai/vision", { method: "POST", body });
+      const product = data.product ?? {};
+      const code = String(data.upc ?? product.upc ?? "").trim();
+      if (!isMounted.current) return;
+      if (!resultName({ ...data, product })) {
+        setStatus("Couldn’t read a name. Search by name, or try the label again.");
+        onMiss(code);
+        return;
+      }
+      playSuccessDing();
+      setStatus("Found on the label. Opening…");
+      await onProduct({
+        source: "vision",
+        upc: code || undefined,
+        product: { ...product, upc: code || product.upc }
+      });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not read that label");
+      isProcessing.current = false;
+      setBusy(false);
+      if (isMounted.current && mode === "label") void startLabelPreview();
+      return;
+    }
+    isProcessing.current = false;
+    if (isMounted.current) setBusy(false);
+  }
+
+  async function captureLabel() {
+    if (busy || isProcessing.current) return;
+    const node = video.current;
+    if (!node || node.readyState < 2 || !node.videoWidth) {
+      setStatus("Camera isn’t ready yet. Wait a beat, or take a photo instead.");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = node.videoWidth;
+    canvas.height = node.videoHeight;
+    canvas.getContext("2d")?.drawImage(node, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    if (!blob) {
+      setStatus("Could not grab that frame. Take a photo instead.");
+      return;
+    }
+    playSuccessDing();
+    await readLabel(blob);
+  }
+
   async function photo(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (mode === "vision") {
-      const body = new FormData();
-      body.append("image", file);
-      setStatus("Reading the front label…");
-      try {
-        const data = await api<{ result: string }>("/ai/vision", { method: "POST", body });
-        const json = JSON.parse(data.result.replace(/```json|```/g, "").trim());
-        setStatus("Found on the label. Opening…");
-        await onProduct({ source: "vision", product: json });
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "Could not read that label");
-      }
+    if (mode === "label") {
+      await readLabel(file);
       return;
     }
     try {
@@ -162,36 +257,42 @@ export function Scanner({ onProduct, onMiss }: Props) {
       URL.revokeObjectURL(url);
       if (isProcessing.current) return;
       isProcessing.current = true;
+      setBusy(true);
       playSuccessDing();
       await lookupAndReview(result.getText());
       isProcessing.current = false;
+      if (isMounted.current) setBusy(false);
     } catch {
-      setStatus("No barcode in that photo. Get closer, or try Front label.");
+      setStatus("No barcode in that photo. Get closer, or try the Label tab.");
     }
   }
 
   return (
     <section className="scan-stage">
-      <div className="segmented">
-        <button type="button" className={mode === "barcode" ? "active" : ""} onClick={() => setMode("barcode")}><ScanBarcode size={18}/> Barcode</button>
-        <button type="button" className={mode === "vision" ? "active" : ""} onClick={() => setMode("vision")}><Sparkles size={18}/> Front label</button>
+      <div className="scan-tabs" role="tablist" aria-label="Scan method">
+        <button type="button" role="tab" aria-selected={mode === "barcode"} className={mode === "barcode" ? "active" : ""} onClick={() => setMode("barcode")} disabled={busy}>
+          <ScanBarcode size={18}/> Barcode
+        </button>
+        <button type="button" role="tab" aria-selected={mode === "label"} className={mode === "label" ? "active" : ""} onClick={() => setMode("label")} disabled={busy}>
+          <ScanText size={18}/> Label
+        </button>
       </div>
-      {mode === "barcode" && (
-        <>
-          <div className="camera-frame"><video ref={video} muted playsInline /></div>
-          <p className="scanner-hint">One scan opens the bottle, or search if we don’t know it yet.</p>
-        </>
-      )}
-      {mode === "vision" && (
-        <div className="vision-card">
-          <Sparkles size={32}/>
-          <h3>No barcode? Snap the front.</h3>
-          <p>We’ll read the name, brand, and ABV from the label, then take you to the details.</p>
-        </div>
+      <div className={`camera-frame${mode === "label" ? " label-frame" : ""}`}>
+        <video ref={video} muted playsInline autoPlay />
+      </div>
+      <p className="scanner-hint">
+        {mode === "barcode"
+          ? "One scan opens the bottle, or search if we don’t know it yet."
+          : "We’ll read the name from the front of the bottle, then take you to the details."}
+      </p>
+      {mode === "label" && (
+        <button type="button" className="primary wide scan-shutter" onClick={() => void captureLabel()} disabled={busy}>
+          <ScanText size={18}/> {busy ? "Reading…" : "Scan label"}
+        </button>
       )}
       <label className="secondary wide file-button">
-        <Camera size={18}/> {mode === "vision" ? "Take label photo" : "Snap a barcode photo"}
-        <input type="file" accept="image/*" capture="environment" onChange={photo}/>
+        <Camera size={18}/> {mode === "label" ? "Use a photo instead" : "Snap a barcode photo"}
+        <input type="file" accept="image/*" capture="environment" onChange={photo} disabled={busy}/>
       </label>
       <p className="scanner-status">{status}</p>
     </section>
