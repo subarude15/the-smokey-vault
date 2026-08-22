@@ -1920,8 +1920,10 @@ type ImportedRecipe = {
 
 const GUEST_NAME_KEY = "smokey-reviewer";
 
-function readinessLabel(readiness: string) {
-  return readiness === "ready" ? "READY TO POUR" : readiness === "almost" ? "ONE ITEM AWAY" : "BUILD THE SHELF";
+function readinessLabel(readiness: string, guest = false) {
+  if (readiness === "ready") return guest ? "OFF THE MENU" : "READY TO POUR";
+  if (readiness === "almost") return guest ? "ONE BOTTLE AWAY" : "ONE ITEM AWAY";
+  return guest ? "NOT TONIGHT" : "BUILD THE SHELF";
 }
 
 function cocktailLines(drink: CocktailDrink): IngredientLine[] {
@@ -1979,12 +1981,14 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
     <PageTitle
       eyebrow="THE RECIPE INDEX"
       title="What can I make?"
-      subtitle={`${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link on any phone, share it into the vault on Android, star Nick’s favorites, or put a drink on the ticket.`}
+      subtitle={admin
+        ? `${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link on any phone, share it into the vault on Android, star Nick’s favorites, or put a drink on the ticket.`
+        : `${ready.length} off the menu · ${almost.length} one bottle away. Pick a drink, or put one on the ticket for Nick.`}
     />
     {loadError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load recipes</strong><span>{loadError}</span></div></div>}
     <div className="cocktail-toolbar">
       <div className="segmented cocktail-filters">
-        {[["ready", "Ready now"], ["almost", "Missing one"], ["all", "All recipes"]].map(([id, label]) => (
+        {([["ready", admin ? "Ready now" : "Off the menu"], ["almost", "Missing one"], ["all", "All recipes"]] as const).map(([id, label]) => (
           <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
         ))}
       </div>
@@ -2026,7 +2030,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
           <button type="button" className="favorite-card" key={drink.id} onClick={() => setSelected(drink)}>
             <div className="card-icon">{drink.image_url ? <img src={String(drink.image_url)} alt=""/> : <Star/>}</div>
             <div>
-              <span className="eyebrow">{readinessLabel(drink.readiness)}</span>
+              <span className="eyebrow">{readinessLabel(drink.readiness, !admin)}</span>
               <strong>{drink.name}</strong>
               <small>{drink.method} · {drink.glassware}</small>
             </div>
@@ -2059,7 +2063,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
         return (
           <button className="recipe-card" key={drink.id} onClick={() => setSelected(drink)}>
             {drink.image_url ? <img className="recipe-thumb" src={String(drink.image_url)} alt=""/> : null}
-            <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness)}</span>
+            <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness, !admin)}</span>
             {Number(drink.bartender_fav) > 0 && <span className="fav-tag">Favorite</span>}
             {drink.season !== "All" && <span className="season-tag">{drink.season}</span>}
             <h3>{drink.name}</h3>
