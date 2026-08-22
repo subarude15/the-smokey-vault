@@ -14,6 +14,8 @@ import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.j
 import { createTicket, deleteTicket, listTickets, setTicketStatus } from "./cocktail_tickets.js";
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
+import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
+import { listTonightPours, maybeInventoryPour, recordPour } from "./pours.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
@@ -32,7 +34,7 @@ const tableFields: Record<string, string[]> = {
   taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l","maker","notes","image_url","tasting_notes","flavors","tags","base_ingredient"],
   brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","image_url","tasting_notes","flavors","tags","base_ingredient","hops"],
   packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url","notes","tasting_notes","flavors","tags","base_ingredient","vessel"],
-  wines: ["producer","name","varietal","vintage","type","style","region","sweetness","bottle_count","pairings","notes","upc","image_url","tasting_notes","flavors","tags","base_ingredient"]
+  wines: ["producer","name","varietal","vintage","type","style","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url","tasting_notes","flavors","tags","base_ingredient"]
 };
 
 await app.register(cors, { origin: true });
@@ -65,7 +67,24 @@ function requireAdmin(request: { headers: { authorization?: string } }, reply: {
   if (!isAdmin(request.headers.authorization)) return reply.code(401).send({ error: "Admin session required" });
 }
 
+function keeperName() {
+  return clipKeeperName(getSetting("keeperName") || DEFAULT_KEEPER_NAME);
+}
+
+function currentShelf() {
+  const spirits = db.prepare("SELECT name,brand,category,sub_category,fill_level,stock_count FROM spirits").all() as Array<Record<string, unknown>>;
+  const wines = db.prepare("SELECT name,producer,type,style,varietal,bottle_count FROM wines").all() as Array<Record<string, unknown>>;
+  const packaged = db.prepare("SELECT name,brewery,style,count FROM packaged_beer").all() as Array<Record<string, unknown>>;
+  const taps = db.prepare("SELECT brewery_batch,maker,style FROM taps").all() as Array<Record<string, unknown>>;
+  return buildShelf(spirits, wines, packaged, taps);
+}
+
 app.get("/api/health", { schema: { tags: ["System"], summary: "Health check" } }, async () => ({ ok: true, version: "1.0.0" }));
+
+app.get("/api/house", { schema: { tags: ["System"], summary: "Public house name and unlock hint" } }, async () => ({
+  keeperName: keeperName(),
+  defaultPinHint: verifyPin(process.env.DEFAULT_PIN ?? "1234")
+}));
 
 app.post<{ Body: { pin?: string } }>("/api/auth/unlock", {
   schema: { tags: ["Auth"], summary: "Unlock admin mode", body: { type: "object", required: ["pin"], properties: { pin: { type: "string" } } } }
@@ -121,9 +140,8 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
-  const existing = table === "brews"
-    ? db.prepare("SELECT * FROM brews WHERE id=?").get(request.params.id) as Record<string, unknown> | undefined
-    : undefined;
+  const existing = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id) as Record<string, unknown> | undefined;
+  if (!existing) return reply.code(404).send({ error: "Item not found" });
   const body = table === "brews"
     ? prepareBrewWrite({ ...request.body }, existing)
     : table === "packaged_beer"
@@ -139,7 +157,9 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   db.prepare(`UPDATE ${table} SET ${values.map((f) => `${f}=?`).join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`)
     .run(...values.map((field) => body[field] as never), request.params.id);
-  return db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id);
+  const updated = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id) as Record<string, unknown>;
+  maybeInventoryPour(table, existing, updated);
+  return updated;
 });
 
 app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id", async (request, reply) => {
@@ -243,9 +263,7 @@ app.delete<{ Params: { id: string } }>("/api/next/:id", {
 });
 
 app.get("/api/cocktails/match", async () => {
-  const spirits = db.prepare("SELECT name,brand,category,sub_category,fill_level,stock_count FROM spirits").all() as Array<Record<string, unknown>>;
-  const wines = db.prepare("SELECT name,producer,type,style,varietal,bottle_count FROM wines").all() as Array<Record<string, unknown>>;
-  const shelf = buildShelf(spirits, wines);
+  const shelf = currentShelf();
   const cocktails = db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>;
   return cocktails.map((cocktail) => {
     const matched = matchCocktail(cocktail, shelf);
@@ -259,7 +277,7 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
   const brews = db.prepare("SELECT * FROM brews").all() as Array<Record<string, unknown>>;
   const packaged = db.prepare("SELECT * FROM packaged_beer").all() as Array<Record<string, unknown>>;
   const wines = db.prepare("SELECT * FROM wines").all() as Array<Record<string, unknown>>;
-  const shelf = buildShelf(spirits, wines);
+  const shelf = buildShelf(spirits, wines, packaged, taps);
   const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
     .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
   return buildOverview({
@@ -269,7 +287,9 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
     packaged,
     wines,
     cocktails,
-    tickets: listTickets("queued")
+    tickets: listTickets("queued"),
+    pours: listTonightPours(),
+    keeperName: keeperName()
   });
 });
 
@@ -285,7 +305,8 @@ function restockPayload() {
   const spirits = db.prepare("SELECT * FROM spirits").all() as Array<Record<string, unknown>>;
   const packaged = db.prepare("SELECT * FROM packaged_beer").all() as Array<Record<string, unknown>>;
   const wines = db.prepare("SELECT * FROM wines").all() as Array<Record<string, unknown>>;
-  const shelf = buildShelf(spirits, wines);
+  const taps = db.prepare("SELECT * FROM taps").all() as Array<Record<string, unknown>>;
+  const shelf = buildShelf(spirits, wines, packaged, taps);
   const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
     .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
   const thresholds = restockThresholds();
@@ -546,9 +567,8 @@ function parseGeneratedRecipe(result: string): GeneratedRecipe {
 }
 
 app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, reply) => {
-  const spirits = db.prepare("SELECT name,brand,category,sub_category,fill_level,stock_count FROM spirits").all() as Array<Record<string, unknown>>;
-  const wines = db.prepare("SELECT name,producer,type,style,varietal,bottle_count FROM wines").all() as Array<Record<string, unknown>>;
-  const shelf = mixologistShelfSummary(buildShelf(spirits, wines));
+  if (requireAdmin(request, reply)) return;
+  const shelf = mixologistShelfSummary(currentShelf());
   try {
     const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
     return { recipe: parseGeneratedRecipe(result) };
@@ -561,6 +581,7 @@ app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, re
 });
 
 app.post<{ Body: { url?: string } }>("/api/cocktails/import", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
   const url = String(request.body?.url ?? "").trim();
   if (!url) return reply.code(400).send({ error: "Paste a recipe link." });
   try {
@@ -656,6 +677,13 @@ app.post<{ Params: { id: string } }>("/api/cocktails/tickets/:id/pour", async (r
   if (requireAdmin(request, reply)) return;
   const ticket = setTicketStatus(Number(request.params.id), "poured");
   if (!ticket) return reply.code(404).send({ error: "Ticket not found" });
+  recordPour({
+    module: "cocktails",
+    item_id: ticket.cocktail_id ?? 0,
+    name: ticket.name,
+    amount: "Ticket",
+    guest_name: ticket.guest_name
+  });
   return ticket;
 });
 
@@ -666,6 +694,7 @@ app.delete<{ Params: { id: string } }>("/api/cocktails/tickets/:id", async (requ
 });
 
 async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
+  if (requireAdmin(request, reply)) return;
   const file = await request.file();
   if (!file) return reply.code(400).send({ error: "Image required" });
   try {
@@ -696,20 +725,23 @@ app.get("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const rows = db.prepare("SELECT key,value,updated_at FROM settings WHERE key != 'pinHash'").all();
   const settings = Object.fromEntries((rows as Array<{key:string;value:string}>).map((r) => [r.key, r.value]));
-  const ai = resolveAiConfig();
-  return {
-    ...settings,
-    aiConfiguredViaEnvironment: String(ai.fromEnvironment),
-    aiEnvironmentProvider: ai.fromEnvironment ? ai.provider : "",
-    aiEnvironmentModel: ai.fromEnvironment ? ai.model : ""
-  };
+  delete settings.aiApiKey;
+  delete settings.aiProvider;
+  delete settings.aiBaseUrl;
+  delete settings.aiModel;
+  settings.keeperName = keeperName();
+  return settings;
 });
 
 app.put<{ Body: Record<string, string> }>("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
-  const allowed = new Set(["theme","themeTokens","aiProvider","aiApiKey","aiBaseUrl","aiModel","restockPackagedBelow","restockSpiritFill","restockWineBelow"]);
+  const allowed = new Set(["theme","restockPackagedBelow","restockSpiritFill","restockWineBelow","keeperName"]);
   for (const [key, value] of Object.entries(request.body)) {
     if (!allowed.has(key)) continue;
+    if (key === "keeperName") {
+      setSetting(key, clipKeeperName(value).slice(0, MAX_KEEPER_NAME) || DEFAULT_KEEPER_NAME);
+      continue;
+    }
     if (key.startsWith("restock")) {
       const parsed = parseRestockThresholds({ [key]: String(value) });
       const stored = key === "restockPackagedBelow" ? parsed.packagedBelow : key === "restockSpiritFill" ? parsed.spiritFill : parsed.wineBelow;

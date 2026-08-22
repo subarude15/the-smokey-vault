@@ -27,6 +27,8 @@ test("empty vault snapshot is zeros and a stock-the-shelf line", () => {
   assert.equal(snap.wines.bottles, 0);
   assert.equal(snap.cocktails.ready, 0);
   assert.equal(snap.tickets.length, 0);
+  assert.equal(snap.pours.length, 0);
+  assert.equal(snap.keeperName, "Nick");
   assert.equal(snap.cocktails.offMenu.length, 0);
   assert.match(overviewHeroCopy(snap), /Stock the shelf/);
   assert.match(overviewHeroCopy(snap, true), /Browse the collection/);
@@ -65,7 +67,11 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
     ],
     tickets: [
       { id: 50, name: "Negroni", guest_name: "Sam", notes: "Up", image_url: "" }
-    ]
+    ],
+    pours: [
+      { id: 60, module: "taps", name: "House Pils", amount: "Pint", guest_name: "", created_at: "2026-08-21T23:00:00.000Z" }
+    ],
+    keeperName: "Alex"
   });
 
   assert.equal(snap.spirits.on_shelf, 2);
@@ -88,12 +94,26 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
   assert.equal(snap.cocktails.favorites[0].name, "Negroni");
   assert.deepEqual(snap.cocktails.offMenu.map((drink) => drink.name), ["Negroni"]);
   assert.equal(snap.tickets[0].guest_name, "Sam");
+  assert.equal(snap.pours[0].name, "House Pils");
+  assert.equal(snap.keeperName, "Alex");
   assert.ok(snap.low.some((item) => item.name.includes("Last mezcal") && item.detail.includes("25%")));
   assert.ok(snap.low.some((item) => item.name.includes("Last bubbles") && item.detail === "Last bottle"));
   assert.ok(snap.low.some((item) => item.name.includes("Last pils")));
   assert.match(overviewHeroCopy(snap), /1 handle pouring/);
   assert.match(overviewHeroCopy(snap), /1 ready to mix/);
   assert.match(overviewHeroCopy(snap), /1 on the ticket/);
+  assert.match(overviewHeroCopy(snap), /1 poured tonight/);
   assert.match(overviewHeroCopy(snap, true), /1 off the menu/);
   assert.doesNotMatch(overviewHeroCopy(snap, true), /ready to mix|in the lab|cold room|cellar/);
+});
+
+test("overdue wines show on cellar watch even when the rack is otherwise stocked", () => {
+  const snap = buildOverview({
+    wines: [
+      { id: 1, name: "Village Rouge", producer: "Foo", bottle_count: 4, drink_by_date: "2020-01-01" }
+    ],
+    keeperName: "Sam"
+  });
+  assert.equal(snap.keeperName, "Sam");
+  assert.ok(snap.low.some((item) => item.name.includes("Village Rouge") && item.detail.includes("Drink by 2020-01-01")));
 });

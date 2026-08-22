@@ -1,34 +1,23 @@
-import { db } from "./db.js";
+import { db, getSetting } from "./db.js";
+import { clipKeeperName, DEFAULT_KEEPER_NAME } from "./shared-types.js";
+import type { NextBoard, NextKind, NextItem, NextBoards } from "./shared-types.js";
+import { MAX_NEXT_NAME, MAX_NEXT_MAKER, MAX_NEXT_NOTE, MAX_NEXT_PER_BOARD } from "./shared-types.js";
 
-export const NEXT_BOARDS = ["shelf", "keg", "brew"] as const;
-export type NextBoard = (typeof NEXT_BOARDS)[number];
-export type NextKind = "spirits" | "wines" | "keg" | "brew";
+export {
+  type NextBoard,
+  type NextKind,
+  type NextItem,
+  type NextBoards,
+  NEXT_BOARDS,
+  MAX_NEXT_NAME,
+  MAX_NEXT_MAKER,
+  MAX_NEXT_NOTE,
+  MAX_NEXT_PER_BOARD
+} from "./shared-types.js";
 
-export const MAX_NEXT_NAME = 80;
-export const MAX_NEXT_MAKER = 80;
-export const MAX_NEXT_NOTE = 120;
-export const MAX_NEXT_PER_BOARD = 80;
-
-export type NextItem = {
-  id: number;
-  board: NextBoard;
-  kind: NextKind;
-  name: string;
-  maker: string;
-  note: string;
-  image_url: string;
-  up: number;
-  down: number;
-  net: number;
-  votes: number;
-  mine: 1 | -1 | null;
-};
-
-export type NextBoards = {
-  shelf: NextItem[];
-  keg: NextItem[];
-  brew: NextItem[];
-};
+function keeperName() {
+  return clipKeeperName(getSetting("keeperName") || DEFAULT_KEEPER_NAME);
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS stock_requests (
@@ -72,7 +61,7 @@ function asKind(board: NextBoard, value: unknown): NextKind {
   if (board === "keg") return "keg";
   if (board === "brew") return "brew";
   if (value === "wines") return "wines";
-  if (value === "packaged_beer") throw new Error("Beer kegs and batches are Nick's boards — guests can request liquor and wine");
+  if (value === "packaged_beer") throw new Error(`Beer kegs and batches are ${keeperName()}'s boards — guests can request liquor and wine`);
   return "spirits";
 }
 

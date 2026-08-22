@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, FlaskConical, Grape, LayoutDashboard,
   Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, ScanBarcode, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Wine, X, ClipboardPaste, Zap
@@ -20,10 +20,11 @@ import {
   packagedCount, packagedStockLabel, FILL_STOPS, compareSpirits, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason,
-  overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type RestockItem, type RestockThresholds,
+  overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
-  type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME
+  type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME,
+  DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME, clipKeeperName, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 
@@ -84,8 +85,9 @@ const modules: Module[] = [
   { id: "wines", label: "Wine Cellar", singular: "Wine", icon: Grape, title: "The Wine Cellar", subtitle: "Track bottles, vintages, pairings, and what's on the shelf.", primary: "name", secondary: "producer", makerKey: "producer", kindKey: "type", fields: [
     {key:"producer",label:"Producer / maker"},{key:"name",label:"Wine name"},{key:"varietal",label:"Varietal"},{key:"vintage",label:"Vintage",type:"number"},
     {key:"type",label:"Family",options:[...WINE_FAMILIES]},{key:"style",label:"Sparkling style",options:[...SPARKLING_STYLES]},
-    {key:"base_ingredient",label:"Base / fruit",options:BASE_INGREDIENTS},{key:"region",label:"Region"},{key:"sweetness",label:"Sweetness",type:"wineSweetness"},
-    {key:"bottle_count",label:"Bottle count",type:"number"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
+    {key:"base_ingredient",label:"Base / fruit",options:BASE_INGREDIENTS},{key:"region",label:"Region"},
+    {key:"sweetness",label:"Sweetness",type:"wineSweetness"},{key:"body",label:"Body",type:"wineBody"},
+    {key:"bottle_count",label:"Bottle count",type:"number"},{key:"drink_by_date",label:"Drink by",type:"date"},{key:"pairings",label:"Pairings"},{key:"upc",label:"UPC"},{key:"image_url",label:"Photo",type:"image"},
     {key:"notes",label:"Cellar notes",type:"textarea"},{key:"tasting_notes",label:"Tasting notes",type:"tasting"},
     {key:"flavors",label:"Flavors",type:"flavors"},{key:"tags",label:"Tags",type:"tags"}
   ]}
@@ -232,6 +234,14 @@ function findBeerLabel(moduleId: string) {
   return moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer" ? "Find beer" : "Find bottle";
 }
 
+type HouseInfo = { keeperName: string; defaultPinHint: boolean };
+const HouseContext = createContext<HouseInfo>({ keeperName: DEFAULT_KEEPER_NAME, defaultPinHint: false });
+function useHouse() {
+  return useContext(HouseContext);
+}
+
+const GUEST_HIDDEN_PAGES = new Set(["brews", "packaged_beer", "mixologist", "scan", "restock", "settings"]);
+
 function scanProductName(result: ScanResult) {
   const product = result.product ?? {};
   return String(product.name ?? product.product_name ?? product.product_name_en ?? "").trim();
@@ -274,6 +284,7 @@ export default function App() {
   const [scanMiss, setScanMiss] = useState<{ upc: string } | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
+  const [house, setHouse] = useState<HouseInfo>({ keeperName: DEFAULT_KEEPER_NAME, defaultPinHint: false });
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const lock = useCallback(() => {
     clearToken();
@@ -281,10 +292,16 @@ export default function App() {
     setScanDraft(undefined);
     setScanMiss(null);
     setUnlock(false);
-    setPage((current) => ["scan", "restock", "settings"].includes(current) ? "dashboard" : current);
+    setPage((current) => GUEST_HIDDEN_PAGES.has(current) ? "dashboard" : current);
   }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
+  useEffect(() => {
+    api<HouseInfo>("/house").then(setHouse).catch(() => {});
+  }, [admin]);
+  useEffect(() => {
+    if (!admin && GUEST_HIDDEN_PAGES.has(page)) setPage("dashboard");
+  }, [admin, page]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const found = extractSharedRecipeUrl({
@@ -365,8 +382,10 @@ export default function App() {
     navigate(draft.moduleId);
   }
   const collectionNav = [
-    { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
-    { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },{ id:"mixologist",label:"AI Mixologist",icon:Sparkles },
+    { id:"dashboard",label:"Overview",icon:LayoutDashboard },
+    ...modules.filter((m) => admin || !GUEST_HIDDEN_PAGES.has(m.id)).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
+    { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },
+    ...(admin ? [{ id:"mixologist",label:"AI Mixologist",icon:Sparkles }] : []),
     { id:"next",label:"What's next",icon:ThumbsUp }
   ];
   const keeperNav = [
@@ -379,6 +398,7 @@ export default function App() {
   }
 
   return (
+    <HouseContext.Provider value={house}>
     <div className="app-shell">
       <aside className={`sidebar ${mobileNav ? "open" : ""}`}>
         <button className="mobile-close icon-button" onClick={() => setMobileNav(false)}><X/></button>
@@ -389,7 +409,7 @@ export default function App() {
           {admin && keeperNav.map(navButton)}
         </nav>
         <div className="sidebar-footer">
-          <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Admin unlocked" : "Guest menu"}</strong><small>{admin ? "Tap to lock" : "Read-only access"}</small></span></button>
+          <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Admin unlocked" : "Guest night"}</strong><small>{admin ? "Tap to lock" : "Tap to unlock"}</small></span></button>
         </div>
       </aside>
       <main>
@@ -424,8 +444,8 @@ export default function App() {
               navigate("taps");
             } : undefined}
           />)}
-          {page === "cocktails" && <Cocktails admin={admin} sharedUrl={sharedRecipeUrl} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
-          {page === "mixologist" && <Mixologist admin={admin}/>}
+          {page === "cocktails" && <Cocktails admin={admin} sharedUrl={admin ? sharedRecipeUrl : ""} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
+          {page === "mixologist" && admin && <Mixologist admin={admin}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
           {page === "scan" && admin && <ScanPage
             onProduct={handleScan}
@@ -436,16 +456,18 @@ export default function App() {
             onManual={handleScanManual}
           />}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
-          {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
+          {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme} onHouseChange={(next) => setHouse((current) => ({ ...current, ...next }))}/>}
         </div>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
     </div>
+    </HouseContext.Provider>
   );
 }
 
 function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }) {
+  const { keeperName } = useHouse();
   const [snap, setSnap] = useState<OverviewSnapshot>();
   const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
   const [error, setError] = useState("");
@@ -475,7 +497,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "READY TO POUR", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Matched to the shelf" }
   ] : [
     { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: "What’s on tap tonight" },
-    { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "OFF THE MENU", hint: "We’ve never tried this before" },
+    { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "OFF THE MENU", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Drinks the shelf can make" },
     { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: "Spirits & mixers" },
     { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: "On the rack" }
   ]) : [];
@@ -548,7 +570,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
             <span className="eyebrow">TAP {tap.tap_number}</span>
             <strong>{tap.title}</strong>
             <small>{tap.empty ? "Nothing pouring" : [tap.style, tap.abv ? `${tap.abv}%` : "", admin && tap.pints ? `${tap.pints} pints` : ""].filter(Boolean).join(" · ")}</small>
-            {!tap.empty && <span className="overview-tap-fill"><span style={{ width: `${tap.remaining_pct}%` }}/></span>}
+            {admin && !tap.empty && <span className="overview-tap-fill"><span style={{ width: `${tap.remaining_pct}%` }}/></span>}
           </button>
         ))}
       </div>
@@ -584,6 +606,19 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       </div>
     </section>}
     {!admin && ticketBoard}
+    {snap && snap.pours.length > 0 && <section className="ticket-board">
+      <div className="section-heading"><div><span className="eyebrow">TONIGHT</span><h2>{admin ? "Poured since 4am" : "What’s gone out"}</h2></div><span className="guest-badge">{snap.pours.length}</span></div>
+      <div className="ticket-row">
+        {snap.pours.map((pour: OverviewPour) => (
+          <article className="ticket-card" key={pour.id}>
+            <div>
+              <span className="eyebrow">{pour.amount ? pour.amount.toUpperCase() : "POUR"}{pour.guest_name ? ` · FOR ${pour.guest_name.toUpperCase()}` : ""}</span>
+              <h3>{pour.name}</h3>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>}
     {admin && snap && snap.brews.list.length > 0 && <section className="overview-board">
       <div className="section-heading"><div><span className="eyebrow">BREWERY LAB</span><h2>In the pipeline</h2></div><button type="button" className="secondary" onClick={() => go("brews")}>Open lab</button></div>
       <div className="overview-brew-row">
@@ -631,8 +666,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     </section>}
     <section className="feature-grid">
       <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes, random picks, and drinks on the ticket.</p></div><Shuffle size={56}/></button>
-      <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>{admin ? "Describe the mood. The server key powers the pour." : "Describe the mood. We’ll mix from what’s on the shelf."}</p></div><Sparkles size={56}/></button>
-      <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>What’s next?</h2><p>Request liquor and wine, then vote the next keg and brew Nick puts up.</p></div><ThumbsUp size={56}/></button>
+      {admin && <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. We’ll mix from what’s on the shelf.</p></div><Sparkles size={56}/></button>}
+      <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>What’s next?</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
     </section>
   </>;
 }
@@ -816,6 +851,7 @@ function nextKindLabel(kind: NextKind) {
 }
 
 function WhatsNextPage({ admin }: { admin: boolean }) {
+  const { keeperName } = useHouse();
   const [boards, setBoards] = useState<NextBoards>({ shelf: [], keg: [], brew: [] });
   const [error, setError] = useState("");
   const [shelfKind, setShelfKind] = useState<NextKind>("spirits");
@@ -926,7 +962,7 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
     <PageTitle
       eyebrow="GUEST PICKS"
       title="What’s next."
-      subtitle="Ask for liquor and wine you want in the vault. Nick puts kegs and brew ideas on the board — tap up or down for what you’d actually drink."
+      subtitle={`Ask for liquor and wine you want in the vault. ${keeperName} puts kegs and brew ideas on the board — tap up or down for what you’d actually drink.`}
     />
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not update What’s next</strong><span>{error}</span></div></div>}
 
@@ -951,7 +987,7 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
 
     <section className="next-board">
       <div className="section-heading"><div><span className="eyebrow">ON TAP</span><h2>Next keg</h2></div></div>
-      <p className="next-lede">What would you actually drink if Nick tapped one of these?</p>
+      <p className="next-lede">What would you actually drink if {keeperName} tapped one of these?</p>
       {admin && <div className="next-add">
         <form className="wanted-form" onSubmit={(event) => submitFreeform(event, "keg")}>
           <div className="suggest-wrap">
@@ -966,12 +1002,12 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
           ))}
         </div>
       </div>}
-      {boardList(boards.keg, "updown", admin ? "Add keg options guests can vote on." : "Nick hasn’t put kegs up for a vote yet.")}
+      {boardList(boards.keg, "updown", admin ? "Add keg options guests can vote on." : `${keeperName} hasn’t put kegs up for a vote yet.`)}
     </section>
 
     <section className="next-board">
       <div className="section-heading"><div><span className="eyebrow">IN THE LAB</span><h2>Next brew</h2></div></div>
-      <p className="next-lede">Help Nick pick the next batch from the options he puts up.</p>
+      <p className="next-lede">Help {keeperName} pick the next batch from the options they put up.</p>
       {admin && <div className="next-add">
         <div className="chip-row restock-stops">
           {BEER_STYLES.filter((style) => style !== "Other").map((style) => (
@@ -983,7 +1019,7 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
           <button className="primary" type="submit" disabled={!brewName.trim()}><Plus size={16}/> Put on the board</button>
         </form>
       </div>}
-      {boardList(boards.brew, "updown", admin ? "Add brew ideas guests can vote on." : "Nick hasn’t put brew ideas up for a vote yet.")}
+      {boardList(boards.brew, "updown", admin ? "Add brew ideas guests can vote on." : `${keeperName} hasn’t put brew ideas up for a vote yet.`)}
     </section>
   </>;
 }
@@ -1281,8 +1317,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
-          {module.id === "spirits" && <div className="fill"><span style={{width:`${nearestFillStop(item.fill_level)}%`}}/><small>{fillStopLabel(item.fill_level)}</small></div>}
-          {module.id === "taps" && !isTapEmpty(item) && (() => {
+          {admin && module.id === "spirits" && <div className="fill"><span style={{width:`${nearestFillStop(item.fill_level)}%`}}/><small>{fillStopLabel(item.fill_level)}</small></div>}
+          {admin && module.id === "taps" && !isTapEmpty(item) && (() => {
             const remaining = Number(item.remaining_l ?? 0);
             const size = Number(item.keg_size_l || DEFAULT_KEG_L);
             const pints = pintsRemaining(remaining);
@@ -1317,6 +1353,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
     : "";
+  const drinkBy = module.id === "wines" ? String(item.drink_by_date ?? "").slice(0, 10) : "";
+  const overdue = module.id === "wines" && wineDrinkByOverdue(item);
   const bottlesLeft = Number(item.bottle_count ?? 0);
   const packagedLeft = packagedCount(item.count);
   const packagedLabel = module.id === "packaged_beer" ? packagedStockLabel(item.count, item.vessel) : "";
@@ -1423,6 +1461,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       </div>
       <div className="bottle-detail-grid">
         {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
+        {module.id === "wines" && <div><span>Body</span><strong>{wineBodyLabel(item.body)}</strong></div>}
+        {module.id === "wines" && drinkBy ? <div><span>Drink by</span><strong>{overdue ? `${drinkBy} · past` : drinkBy}</strong></div> : null}
         {module.id === "brews" && <div className="full"><span>Status</span>
           <BrewStatusScale
             value={brewStatus}
@@ -1431,15 +1471,15 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
             onChange={admin ? (status) => { void patchItem({ status }, "Could not update status"); } : undefined}
           />
         </div>}
-        {module.id === "taps" && !isTapEmpty(item) && <div className="full">
+        {admin && module.id === "taps" && !isTapEmpty(item) && <div className="full">
           <span>Keg remaining</span>
           <div className="fill tap-fill"><span style={{width:`${kegFillPercent(kegLeft, kegSize)}%`}}/><small>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${kegSizeLabel(kegSize)}`}</small></div>
         </div>}
-        {module.id === "spirits" && <div className="full">
+        {admin && module.id === "spirits" && <div className="full">
           <span>Fill</span>
           <FillLevelScale
             value={item.fill_level}
-            onChange={admin ? (fill) => { void patchItem({ fill_level: fill }, "Could not update fill"); } : undefined}
+            onChange={(fill) => { void patchItem({ fill_level: fill }, "Could not update fill"); }}
           />
           <small className="field-hint">{fillStopLabel(item.fill_level)} · {spiritStockLabel(item.stock_count)}</small>
         </div>}
@@ -1549,11 +1589,12 @@ function BottleFinder({ module, onClose, onPick }:{
 }
 
 function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
+  const { keeperName } = useHouse();
   const [form,setForm] = useState<Record<string,unknown>>(() => {
     const defaults = (item ?? (module.id === "spirits"
       ? { category: "Whiskey", fill_level: 100, stock_count: 1 }
       : module.id === "wines"
-        ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1 }
+        ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1, body: 3 }
         : module.id === "taps"
           ? { tap_number: 1, keg_size_l: DEFAULT_KEG_L, remaining_l: 0, source_type: "Commercial", brewery_batch: "" }
           : module.id === "brews"
@@ -1567,7 +1608,8 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       hops: parseList(item?.hops),
       tags: parseList(item?.tags),
       ...(module.id === "wines" ? {
-        sweetness: migrateWineSweetnessValue(defaults.sweetness, String(defaults.type ?? ""), String(defaults.style ?? ""))
+        sweetness: migrateWineSweetnessValue(defaults.sweetness, String(defaults.type ?? ""), String(defaults.style ?? "")),
+        body: wineBodyValue(defaults.body)
       } : {}),
       ...(module.id === "packaged_beer" ? {
         vessel: normalizeBeerVessel(defaults.vessel),
@@ -1611,6 +1653,9 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     if (module.id === "spirits") {
       payload.fill_level = nearestFillStop(payload.fill_level);
       payload.stock_count = spiritStock(payload.stock_count ?? 1);
+    }
+    if (module.id === "wines") {
+      payload.body = wineBodyValue(payload.body);
     }
     try {
       await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(payload)});
@@ -1687,7 +1732,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             <input value={hopDraft} onChange={(e)=>setHopDraft(e.target.value)} placeholder="Add a hop name" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const next = hopDraft.trim(); if (!next) return; setForm({ ...form, hops: hops.some((entry) => entry.toLowerCase() === next.toLowerCase()) ? hops : [...hops, next] }); setHopDraft(""); } }}/>
             <button type="button" className="secondary" disabled={!hopDraft.trim()} onClick={() => { const next = hopDraft.trim(); setForm({ ...form, hops: hops.some((entry) => entry.toLowerCase() === next.toLowerCase()) ? hops : [...hops, next] }); setHopDraft(""); }}>Add</button>
           </div>
-          <small className="field-hint">Tap every hop in the bill, or type a name Nick uses that is not listed.</small>
+          <small className="field-hint">Tap every hop in the bill, or type a name {keeperName} uses that is not listed.</small>
         </label>;
       }
       if (field.type === "tags") {
@@ -1710,6 +1755,11 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
             value={migrateWineSweetnessValue(form.sweetness, String(form.type ?? ""), String(form.style ?? ""))}
             onChange={(sweetness) => setForm({ ...form, sweetness })}
           />
+        </div>;
+      }
+      if (field.type === "wineBody") {
+        return <div className="full field-block" key={field.key}><span>{field.label}</span>
+          <WineBodyScale value={form.body} onChange={(body) => setForm({ ...form, body })}/>
         </div>;
       }
       if (field.type === "brewStatus") {
@@ -1935,6 +1985,7 @@ function cocktailLines(drink: CocktailDrink): IngredientLine[] {
 }
 
 function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sharedUrl?: string; onSharedConsumed?: () => void }) {
+  const { keeperName } = useHouse();
   const [drinks, setDrinks] = useState<CocktailDrink[]>([]);
   const [tickets, setTickets] = useState<CocktailTicket[]>([]);
   const [filter, setFilter] = useState("ready");
@@ -1982,8 +2033,8 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
       eyebrow="THE RECIPE INDEX"
       title="What can I make?"
       subtitle={admin
-        ? `${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link on any phone, share it into the vault on Android, star Nick’s favorites, or put a drink on the ticket.`
-        : `${ready.length} off the menu · ${almost.length} one bottle away. Pick a drink, or put one on the ticket for Nick.`}
+        ? `${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link on any phone, share it into the vault on Android, star ${keeperName}’s favorites, or put a drink on the ticket.`
+        : `${ready.length} off the menu · ${almost.length} one bottle away. Pick a drink, or put one on the ticket for ${keeperName}.`}
     />
     {loadError && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load recipes</strong><span>{loadError}</span></div></div>}
     <div className="cocktail-toolbar">
@@ -1993,7 +2044,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
         ))}
       </div>
       <div className="toolbar-actions">
-        <button className="secondary" onClick={() => setImporter(true)}><Link size={17}/> Add from a link</button>
+        {admin && <button className="secondary" onClick={() => setImporter(true)}><Link size={17}/> Add from a link</button>}
         <button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button>
       </div>
     </div>
@@ -2081,7 +2132,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
       onChanged={() => { load(); }}
       onDeleted={() => { setSelected(undefined); load(); }}
     />}
-    {importer && <RecipeImportModal admin={admin} initialUrl={sharedUrl} close={closeImporter} saved={() => { closeImporter(); load(); }}/>}
+    {importer && admin && <RecipeImportModal admin={admin} initialUrl={sharedUrl} close={closeImporter} saved={() => { closeImporter(); load(); }}/>}
   </>;
 }
 
@@ -2358,12 +2409,27 @@ function lastBackupLabel(iso?: string) {
   return `Last portable copy was ${days} days ago.`;
 }
 
-function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void}) {
+function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:string)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void}) {
   const [settings,setSettings] = useState<Record<string,string>>({});
+  const [keeperDraft,setKeeperDraft] = useState(DEFAULT_KEEPER_NAME);
   const [message,setMessage]=useState("");
   useEffect(()=>{
-    api<Record<string,string>>("/settings").then(setSettings).catch((err)=>setMessage(err instanceof Error?err.message:"Could not load settings"));
+    api<Record<string,string>>("/settings").then((values) => {
+      setSettings(values);
+      setKeeperDraft(clipKeeperName(values.keeperName));
+    }).catch((err)=>setMessage(err instanceof Error?err.message:"Could not load settings"));
   },[]);
+  async function saveKeeper() {
+    const name = clipKeeperName(keeperDraft);
+    try {
+      await api("/settings", { method: "PUT", body: JSON.stringify({ keeperName: name }) });
+      setKeeperDraft(name);
+      onHouseChange({ keeperName: name });
+      setMessage("House name saved");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not save the house name");
+    }
+  }
   async function saveRestock(partial: Partial<RestockThresholds>) {
     const current = parseRestockThresholds(settings);
     const next = {
@@ -2393,14 +2459,23 @@ function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void})
     <PageTitle
       eyebrow="THE KEEPER"
       title="The house keys."
-      subtitle="PIN, restock cutoffs, and a copy of the vault you can take with you."
+      subtitle="House name, PIN, restock cutoffs, and a copy of the vault you can take with you."
     />
     <div className="settings-grid">
+      <section className="settings-card">
+        <span className="eyebrow">THE HOUSE</span>
+        <h3>Keeper name</h3>
+        <p>Used on What’s next, tickets, and guest copy instead of a hardcoded name.</p>
+        <label><span>Name</span><input value={keeperDraft} maxLength={MAX_KEEPER_NAME} onChange={(e)=>setKeeperDraft(e.target.value)} placeholder={DEFAULT_KEEPER_NAME}/></label>
+        <button type="button" className="primary" onClick={() => void saveKeeper()}>Save house name</button>
+      </section>
       <section className="settings-card">
         <span className="eyebrow">UNLOCK</span>
         <h3>Master PIN</h3>
         <p>4–12 digits. Changing it does not lock you out of this session.</p>
-        <PinChange onMessage={setMessage}/>
+        <PinChange onMessage={setMessage} onPinChanged={() => {
+          api<HouseInfo>("/house").then((next) => onHouseChange(next)).catch(() => {});
+        }}/>
       </section>
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
@@ -2431,7 +2506,7 @@ function SettingsPage({theme,setTheme}:{theme:string;setTheme:(v:string)=>void})
   </>;
 }
 
-function PinChange({onMessage}:{onMessage:(value:string)=>void}){
+function PinChange({onMessage,onPinChanged}:{onMessage:(value:string)=>void;onPinChanged?:()=>void}){
   const [currentPin,setCurrentPin]=useState("");
   const [newPin,setNewPin]=useState("");
   async function change(){
@@ -2440,6 +2515,7 @@ function PinChange({onMessage}:{onMessage:(value:string)=>void}){
       setCurrentPin("");
       setNewPin("");
       onMessage("Master PIN updated");
+      onPinChanged?.();
     }catch(error){
       onMessage(error instanceof Error?error.message:"Could not update PIN");
     }
@@ -2452,9 +2528,10 @@ function PinChange({onMessage}:{onMessage:(value:string)=>void}){
 }
 
 function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
+  const { defaultPinHint } = useHouse();
   const [pin,setPinValue]=useState("");const [error,setError]=useState("");
   async function submit(e:React.FormEvent){e.preventDefault();try{const data=await api<{token:string}>("/auth/unlock",{method:"POST",body:JSON.stringify({pin})});setToken(data.token);onSuccess();}catch{setError("That PIN did not open the vault.");}}
-  return <div className="modal-backdrop"><form className="modal unlock-modal" onSubmit={submit}><button type="button" className="icon-button close" onClick={onClose}><X/></button><div className="lock-seal"><Lock/></div><span className="eyebrow">ADMIN ACCESS</span><h2>Unlock the vault</h2><p>Enter your master PIN to manage the collection.</p><input autoFocus inputMode="numeric" pattern="\d*" maxLength={12} type="password" value={pin} onChange={(e)=>setPinValue(e.target.value)} placeholder="••••"/>{error&&<p className="error">{error}</p>}<button className="primary wide">Unlock</button><small>First launch default: 1234</small></form></div>;
+  return <div className="modal-backdrop"><form className="modal unlock-modal" onSubmit={submit}><button type="button" className="icon-button close" onClick={onClose}><X/></button><div className="lock-seal"><Lock/></div><span className="eyebrow">ADMIN ACCESS</span><h2>Unlock the vault</h2><p>Enter your master PIN to manage the collection.</p><input autoFocus inputMode="numeric" pattern="\d*" maxLength={12} type="password" value={pin} onChange={(e)=>setPinValue(e.target.value)} placeholder="••••"/>{error&&<p className="error">{error}</p>}<button className="primary wide">Unlock</button>{defaultPinHint && <small>First launch default: 1234</small>}</form></div>;
 }
 
 function uniqueValues(items: Item[], key: string) {
@@ -2487,6 +2564,28 @@ function FillLevelScale({ value, onChange }:{
           <span role="listitem" key={stop.percent} className={stop.percent === current ? "wine-scale-stop active" : "wine-scale-stop"}>{stop.label}</span>
         ) : (
           <button type="button" key={stop.percent} className={stop.percent === current ? "wine-scale-stop active" : "wine-scale-stop"} aria-pressed={stop.percent === current} onClick={() => onChange(stop.percent)}>{stop.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+function WineBodyScale({ value, onChange }:{
+  value: unknown; onChange?: (body: number) => void;
+}) {
+  const current = wineBodyValue(value);
+  const index = Math.max(0, WINE_BODY_STOPS.findIndex((stop) => stop.value === current));
+  const pct = WINE_BODY_STOPS.length > 1 ? (index / (WINE_BODY_STOPS.length - 1)) * 100 : 0;
+  const readOnly = !onChange;
+  return (
+    <div className={`wine-scale fill-scale${readOnly ? " read-only" : ""}`}>
+      <div className="wine-scale-track" aria-hidden="true">
+        <span className="wine-scale-marker" style={{ left: `${pct}%` }}/>
+      </div>
+      <div className="wine-scale-stops" role={readOnly ? "list" : "radiogroup"} aria-label="Body">
+        {WINE_BODY_STOPS.map((stop) => readOnly ? (
+          <span role="listitem" key={stop.value} className={stop.value === current ? "wine-scale-stop active" : "wine-scale-stop"}>{stop.label}</span>
+        ) : (
+          <button type="button" key={stop.value} className={stop.value === current ? "wine-scale-stop active" : "wine-scale-stop"} aria-pressed={stop.value === current} onClick={() => onChange(stop.value)}>{stop.label}</button>
         ))}
       </div>
     </div>

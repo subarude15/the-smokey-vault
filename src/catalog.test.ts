@@ -10,7 +10,8 @@ import {
   onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch,
   comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite,
   compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
-  prepareSpiritWrite, spiritStock, spiritStockLabel
+  prepareSpiritWrite, spiritStock, spiritStockLabel,
+  wineBodyLabel, wineBodyValue, wineDrinkByOverdue
 } from "./catalog.js";
 
 test("parseTagInput strips hashes and dedupes", () => {
@@ -260,4 +261,14 @@ test("prepareBrewWrite normalizes gravity and stores calculated ABV", () => {
 test("parseCommaList keeps multi-word hop names", () => {
   assert.deepEqual(parseCommaList("Citra, Mosaic, Idaho 7"), ["Citra", "Mosaic", "Idaho 7"]);
   assert.deepEqual(parseCommaList('["Nelson Sauvin"]'), ["Nelson Sauvin"]);
+});
+
+test("wine body snaps to 1–5 and overdue drink-by is calendar-local", () => {
+  assert.equal(wineBodyValue(4), 4);
+  assert.equal(wineBodyValue(9), 3);
+  assert.equal(wineBodyLabel(1), "Light");
+  assert.equal(wineBodyLabel(""), "Medium");
+  assert.equal(wineDrinkByOverdue({ drink_by_date: "2020-01-01" }, new Date(2026, 7, 21)), true);
+  assert.equal(wineDrinkByOverdue({ drink_by_date: "2099-12-31" }, new Date(2026, 7, 21)), false);
+  assert.equal(wineDrinkByOverdue({ drink_by_date: "" }, new Date(2026, 7, 21)), false);
 });

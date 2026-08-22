@@ -13,6 +13,9 @@ import {
   tapsForBatch
 } from "./catalog.js";
 import { compareCocktails, spiritOnShelf, wineOnShelf } from "./cocktails.js";
+import { wineDrinkByOverdue } from "./catalog.js";
+import { DEFAULT_KEEPER_NAME } from "./shared-types.js";
+import type { Pour } from "./pours.js";
 
 export type OverviewTap = {
   tap_number: number;
@@ -61,6 +64,15 @@ export type OverviewTicket = {
   image_url: string;
 };
 
+export type OverviewPour = {
+  id: number;
+  module: string;
+  name: string;
+  amount: string;
+  guest_name: string;
+  created_at: string;
+};
+
 export type OverviewSnapshot = {
   spirits: { on_shelf: number; low: number; labels: number };
   taps: { pouring: number; empty: number; handles: number; list: OverviewTap[] };
@@ -69,7 +81,9 @@ export type OverviewSnapshot = {
   wines: { bottles: number; labels: number };
   cocktails: { ready: number; almost: number; favorites: OverviewFavorite[]; offMenu: OverviewFavorite[] };
   tickets: OverviewTicket[];
+  pours: OverviewPour[];
   low: OverviewLow[];
+  keeperName: string;
 };
 
 export function overviewGreeting(date = new Date(), guest = false): { eyebrow: string; line: string; emphasize: string } {
@@ -105,6 +119,7 @@ export function overviewHeroCopy(snapshot: OverviewSnapshot, guest = false): str
       : `${snapshot.cocktails.ready} ready to mix`);
   }
   if (snapshot.tickets.length) parts.push(`${snapshot.tickets.length} on the ticket`);
+  if (snapshot.pours.length) parts.push(`${snapshot.pours.length} poured tonight`);
   if (snapshot.spirits.on_shelf) parts.push(`${snapshot.spirits.on_shelf} on the shelf`);
   if (!guest) {
     if (snapshot.wines.bottles) parts.push(`${snapshot.wines.bottles} in the cellar`);
@@ -141,6 +156,8 @@ export function buildOverview(input: {
   wines?: Array<Record<string, unknown>>;
   cocktails?: Array<Record<string, unknown>>;
   tickets?: Array<Record<string, unknown>>;
+  pours?: Array<Pour | Record<string, unknown>>;
+  keeperName?: string;
 }): OverviewSnapshot {
   const spirits = input.spirits ?? [];
   const taps = [...(input.taps ?? [])].sort((a, b) => num(a.tap_number) - num(b.tap_number));
@@ -149,6 +166,8 @@ export function buildOverview(input: {
   const wines = input.wines ?? [];
   const cocktails = input.cocktails ?? [];
   const tickets = input.tickets ?? [];
+  const pours = input.pours ?? [];
+  const keeperName = text(input.keeperName) || DEFAULT_KEEPER_NAME;
 
   const onShelfSpirits = spirits.filter((item) => spiritOnShelf(item));
   const lowSpirits = onShelfSpirits.filter((item) => num(item.fill_level) <= 25);
@@ -216,6 +235,15 @@ export function buildOverview(input: {
         image_url: text(item.image_url)
       })),
     ...wines
+      .filter((item) => wineDrinkByOverdue(item) && Math.floor(num(item.bottle_count)) > 0)
+      .map((item) => ({
+        module: "wines" as const,
+        id: itemId(item.id),
+        name: [text(item.name), text(item.producer)].filter(Boolean).join(" · ") || "Untitled wine",
+        detail: `Drink by ${text(item.drink_by_date).slice(0, 10)}`,
+        image_url: text(item.image_url)
+      })),
+    ...wines
       .filter((item) => Math.floor(num(item.bottle_count)) === 1)
       .map((item) => ({
         module: "wines" as const,
@@ -249,6 +277,15 @@ export function buildOverview(input: {
       notes: text(ticket.notes),
       image_url: text(ticket.image_url)
     })),
-    low
+    pours: pours.slice(0, 16).map((pour) => ({
+      id: itemId(pour.id),
+      module: text(pour.module),
+      name: text(pour.name),
+      amount: text(pour.amount),
+      guest_name: text(pour.guest_name),
+      created_at: text(pour.created_at)
+    })),
+    low,
+    keeperName
   };
 }

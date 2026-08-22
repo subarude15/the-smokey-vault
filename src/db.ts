@@ -107,6 +107,8 @@ ensureColumn("wines", "flavors", "ALTER TABLE wines ADD COLUMN flavors TEXT DEFA
 ensureColumn("wines", "tags", "ALTER TABLE wines ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("wines", "base_ingredient", "ALTER TABLE wines ADD COLUMN base_ingredient TEXT DEFAULT ''");
 ensureColumn("wines", "style", "ALTER TABLE wines ADD COLUMN style TEXT DEFAULT ''");
+ensureColumn("wines", "body", "ALTER TABLE wines ADD COLUMN body INTEGER DEFAULT 3");
+ensureColumn("wines", "drink_by_date", "ALTER TABLE wines ADD COLUMN drink_by_date TEXT");
 ensureColumn("taps", "maker", "ALTER TABLE taps ADD COLUMN maker TEXT DEFAULT ''");
 ensureColumn("taps", "image_url", "ALTER TABLE taps ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("taps", "notes", "ALTER TABLE taps ADD COLUMN notes TEXT DEFAULT ''");
@@ -177,6 +179,7 @@ export function setSetting(key: string, value: string) {
 
 if (!getSetting("pinHash")) setPin(process.env.DEFAULT_PIN ?? "1234");
 if (!getSetting("theme")) setSetting("theme", "dark");
+if (!getSetting("keeperName")) setSetting("keeperName", "Nick");
 if (!getSetting("lastBackupDownload")) setSetting("lastBackupDownload", new Date().toISOString());
 if (!getSetting("restockPackagedBelow")) setSetting("restockPackagedBelow", "3");
 if (!getSetting("restockSpiritFill")) setSetting("restockSpiritFill", "25");

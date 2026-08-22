@@ -231,6 +231,34 @@ export function fillStopLabel(fill: unknown): string {
   return FILL_STOPS.find((stop) => stop.percent === pct)?.label ?? `${pct}%`;
 }
 
+export const WINE_BODY_STOPS = [
+  { value: 1, label: "Light" },
+  { value: 2, label: "Light-medium" },
+  { value: 3, label: "Medium" },
+  { value: 4, label: "Medium-full" },
+  { value: 5, label: "Full" }
+] as const;
+
+export function wineBodyValue(value: unknown): number {
+  const n = Math.round(Number(value));
+  return n >= 1 && n <= 5 ? n : 3;
+}
+
+export function wineBodyLabel(value: unknown): string {
+  const n = wineBodyValue(value);
+  return WINE_BODY_STOPS.find((stop) => stop.value === n)?.label ?? "Medium";
+}
+
+export function wineDrinkByOverdue(item: Record<string, unknown> | null | undefined, now = new Date()): boolean {
+  const raw = String(item?.drink_by_date ?? "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const due = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(due.getTime())) return false;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return due < today;
+}
+
 export function pourSpirit(fill: unknown): number {
   return Math.max(0, nearestFillStop(fill) - 25);
 }

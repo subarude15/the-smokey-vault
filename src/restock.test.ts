@@ -139,3 +139,15 @@ test("restock share text lists open items as a checklist and skips grabbed", () 
   assert.doesNotMatch(text, /Empty Rye/);
   assert.equal(formatRestockShare(items.filter((item) => item.got)), "");
 });
+
+test("wines past drink-by land on the restock list", () => {
+  const items = buildRestockList({
+    wines: [
+      { id: 40, name: "Village Rouge", producer: "Foo", bottle_count: 4, drink_by_date: "2020-01-01" },
+      { id: 41, name: "Still good", producer: "Bar", bottle_count: 4, drink_by_date: "2099-12-31" }
+    ]
+  });
+  const names = items.map((item) => item.name);
+  assert.ok(names.some((name) => name.includes("Village Rouge")));
+  assert.ok(!names.some((name) => name.includes("Still good")));
+});

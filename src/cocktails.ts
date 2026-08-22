@@ -1,3 +1,5 @@
+import { isTapEmpty, packagedCount } from "./catalog.js";
+
 export const SEASONS = ["All", "Spring", "Summer", "Fall", "Winter", "Holiday"] as const;
 export type Season = typeof SEASONS[number];
 export type Readiness = "ready" | "almost" | "missing";
@@ -32,12 +34,16 @@ const SUBSTITUTION_FAMILIES = [
   ["bourbon", "rye", "whiskey", "whisky", "tennessee", "scotch", "irish", "canadian", "japanese", "corn whiskey", "wheat whiskey"],
   ["tequila", "mezcal"],
   ["cognac", "brandy", "armagnac"],
-  ["rum", "white rum", "gold rum", "dark rum", "amber rum", "agricole", "overproof", "cachaca", "cachaça"],
+  ["white rum", "light rum", "silver rum"],
+  ["dark rum", "black rum", "navy rum"],
+  ["rum", "gold rum", "amber rum", "agricole", "overproof", "cachaca", "cachaça"],
   ["champagne", "prosecco", "cava", "sparkling", "cremant", "crémant", "pet-nat", "pét-nat"],
   ["triple sec", "curacao", "curaçao", "cointreau", "grand marnier", "orange liqueur", "orange curacao"],
-  ["vermouth", "sweet vermouth", "dry vermouth"],
+  ["sweet vermouth", "rosso vermouth", "red vermouth", "punt e mes"],
+  ["dry vermouth", "extra dry vermouth", "blanc vermouth", "white vermouth"],
   ["bitters", "angostura", "peychaud", "peychaud's"],
-  ["coffee liqueur", "kahlua", "kahlúa"]
+  ["coffee liqueur", "kahlua", "kahlúa"],
+  ["ginger beer", "ginger ale"]
 ];
 
 export function spiritOnShelf(item: Record<string, unknown> | null | undefined): boolean {
@@ -51,6 +57,15 @@ export function spiritOnShelf(item: Record<string, unknown> | null | undefined):
 export function wineOnShelf(item: Record<string, unknown> | null | undefined): boolean {
   if (!item) return false;
   return Number(item.bottle_count ?? 0) > 0;
+}
+
+export function packagedOnShelf(item: Record<string, unknown> | null | undefined): boolean {
+  if (!item) return false;
+  return packagedCount(item.count) > 0;
+}
+
+export function tapOnShelf(item: Record<string, unknown> | null | undefined): boolean {
+  return Boolean(item) && !isTapEmpty(item);
 }
 
 export function isPlaceholderIngredients(value: unknown): boolean {
@@ -94,21 +109,29 @@ function bottleLabel(item: Record<string, unknown>): string {
 }
 
 function bottleHaystack(item: Record<string, unknown>): string {
+  const category = fold(item.category);
+  const sub = fold(item.sub_category);
+  const extras: string[] = [];
+  if (category === "rum" && sub) extras.push(`${sub} rum`);
+  if (category === "whiskey" && sub) extras.push(sub.replace(/x/g, " "));
+  if (category === "mixer" && sub) extras.push(sub);
   return [
-    item.name, item.brand, item.producer, item.maker, item.category, item.sub_category,
-    item.type, item.style, item.varietal
+    item.name, item.brand, item.producer, item.maker, item.brewery, item.brewery_batch,
+    item.category, item.sub_category, item.type, item.style, item.varietal, ...extras
   ].map(fold).filter(Boolean).join(" ");
 }
 
 export type ShelfBottle = {
   label: string;
   haystack: string;
-  kind: "spirit" | "wine";
+  kind: "spirit" | "wine" | "beer";
 };
 
 export function buildShelf(
   spirits: Array<Record<string, unknown>> = [],
-  wines: Array<Record<string, unknown>> = []
+  wines: Array<Record<string, unknown>> = [],
+  packaged: Array<Record<string, unknown>> = [],
+  taps: Array<Record<string, unknown>> = []
 ): ShelfBottle[] {
   const shelf: ShelfBottle[] = [];
   for (const item of spirits) {
@@ -118,6 +141,15 @@ export function buildShelf(
   for (const item of wines) {
     if (!wineOnShelf(item)) continue;
     shelf.push({ label: bottleLabel(item), haystack: bottleHaystack(item), kind: "wine" });
+  }
+  for (const item of packaged) {
+    if (!packagedOnShelf(item)) continue;
+    shelf.push({ label: bottleLabel(item), haystack: bottleHaystack(item), kind: "beer" });
+  }
+  for (const item of taps) {
+    if (!tapOnShelf(item)) continue;
+    const tapItem = { ...item, name: item.brewery_batch, brand: item.maker };
+    shelf.push({ label: bottleLabel(tapItem), haystack: bottleHaystack(tapItem), kind: "beer" });
   }
   return shelf;
 }
@@ -133,7 +165,7 @@ function familyOf(token: string): string[] | null {
 
 const GENERIC_WORDS = new Set([
   "whiskey", "whisky", "liqueur", "juice", "wine", "soda", "syrup", "cream",
-  "white", "gold", "dark", "dry", "sweet", "fresh", "aged", "bottle"
+  "white", "gold", "dark", "dry", "sweet", "fresh", "aged", "bottle", "vermouth"
 ]);
 
 function directMatch(option: string, bottle: ShelfBottle): boolean {
@@ -142,7 +174,33 @@ function directMatch(option: string, bottle: ShelfBottle): boolean {
   return words.some((word) => hasWord(bottle.haystack, word));
 }
 
+function vermouthKind(value: string): "sweet" | "dry" | "any" | null {
+  const hay = value.toLowerCase();
+  if (!hasWord(hay, "vermouth")) return null;
+  const sweet = hasWord(hay, "sweet") || hasWord(hay, "rosso") || hasWord(hay, "red") || hasWord(hay, "punt e mes");
+  const dry = hasWord(hay, "dry") || hasWord(hay, "blanc") || hasWord(hay, "extra dry");
+  if (sweet && !dry) return "sweet";
+  if (dry && !sweet) return "dry";
+  return "any";
+}
+
+function vermouthFamilies(option: string): string[][] {
+  const kind = vermouthKind(option);
+  if (!kind) return [];
+  const sweet = SUBSTITUTION_FAMILIES.find((family) => family[0] === "sweet vermouth") ?? [];
+  const dry = SUBSTITUTION_FAMILIES.find((family) => family[0] === "dry vermouth") ?? [];
+  if (kind === "sweet") return [sweet];
+  if (kind === "dry") return [dry];
+  return [sweet, dry];
+}
+
 function substituteMatch(option: string, bottle: ShelfBottle): boolean {
+  const needed = vermouthKind(option);
+  if (needed) {
+    const onShelf = vermouthKind(bottle.haystack);
+    if (onShelf) return needed === "any" || onShelf === "any" || needed === onShelf;
+    return vermouthFamilies(option).some((family) => family.some((member) => hasWord(bottle.haystack, member)));
+  }
   const family = familyOf(option);
   if (!family) return false;
   return family.some((member) => hasWord(bottle.haystack, member));

@@ -78,3 +78,39 @@ test("recipe book replaces placeholder specs", () => {
   assert.ok(COCKTAIL_RECIPES.some((recipe) => recipe.name === "Paper Plane"));
   assert.ok(COCKTAIL_RECIPES.find((recipe) => recipe.name === "Old Fashioned")?.ingredients.some((line) => /bourbon|rye/.test(line)));
 });
+
+test("packaged ginger beer and a pouring tap count toward the shelf", () => {
+  const shelf = buildShelf(
+    [{ name: "Bacardi", category: "Rum", sub_category: "White", fill_level: 75, stock_count: 1 }],
+    [],
+    [{ name: "Ginger Beer", brewery: "Fever-Tree", style: "Mixer", count: 6 }],
+    [{ brewery_batch: "House Pils", maker: "Vault", style: "Pilsner" }]
+  );
+  assert.equal(matchIngredient("120 ml ginger beer", shelf).state, "have");
+  assert.equal(matchIngredient("90 ml pilsner", shelf).state, "have");
+  const mule = matchCocktail({
+    ingredients: ["45 ml white rum", "15 ml lime juice", "120 ml ginger beer"]
+  }, shelf);
+  assert.equal(mule.readiness, "ready");
+});
+
+test("sweet vermouth does not cover dry vermouth, but unlabeled vermouth covers both", () => {
+  const dryOnly = buildShelf([
+    { name: "Noilly Prat", category: "Mixer", sub_category: "Dry vermouth", fill_level: 100, stock_count: 1 }
+  ]);
+  assert.equal(matchIngredient("20 ml sweet vermouth", dryOnly).state, "missing");
+  assert.equal(matchIngredient("20 ml dry vermouth", dryOnly).state, "have");
+  const generic = buildShelf([
+    { name: "House vermouth", category: "Mixer", sub_category: "Vermouth", fill_level: 100, stock_count: 1 }
+  ]);
+  assert.notEqual(matchIngredient("20 ml sweet vermouth", generic).state, "missing");
+  assert.notEqual(matchIngredient("20 ml dry vermouth", generic).state, "missing");
+});
+
+test("scanner Bourbonxrye labels still match whiskey recipes", () => {
+  const shelf = buildShelf([
+    { name: "Knob Creek", category: "Whiskey", sub_category: "Bourbonxrye", fill_level: 100, stock_count: 1 }
+  ]);
+  assert.notEqual(matchIngredient("50 ml bourbon", shelf).state, "missing");
+  assert.notEqual(matchIngredient("50 ml rye whiskey", shelf).state, "missing");
+});
