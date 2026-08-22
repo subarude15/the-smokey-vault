@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { db } from "./db.js";
-import { colaProductTypeForTable, foldSearch, matchesQuery, queryTokens, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
+import { colaProductTypeForTable, foldSearch, getFromCache, matchesQuery, queryTokens, rememberUnresolvedUpc, saveToCache, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
 
 test("foldSearch strips diacritics so troegs matches Tröegs", () => {
   assert.equal(foldSearch("Tröegs"), "troegs");
@@ -44,6 +44,43 @@ test("searchTableForModule maps taps to beer and COLA malt beverage", () => {
   assert.equal(colaProductTypeForTable("packaged_beer"), "malt beverage");
   assert.equal(colaProductTypeForTable("spirits"), "distilled spirits");
   assert.equal(colaProductTypeForTable("wines"), "wine");
+});
+
+test("unresolved UPCs stay in cache so a later match can fill the barcode", () => {
+  const upc = "012345678905";
+  try {
+    rememberUnresolvedUpc(upc);
+    const pending = db.prepare("SELECT upc, name, source FROM cola_cache WHERE upc = ?").get(upc) as { upc: string; name: string; source: string } | undefined;
+    assert.equal(pending?.upc, upc);
+    assert.equal(pending?.source, "pending");
+    assert.equal(pending?.name, "");
+    assert.equal(getFromCache(upc), null);
+
+    saveToCache({
+      upc,
+      name: "Eagle Rare 10 Year",
+      brand: "Buffalo Trace",
+      category: "Whiskey",
+      abv: 45,
+      image_url: null,
+      fill_level_percent: 100,
+      bottle_count: 1,
+      notes: null,
+      volume_ml: 750,
+      product_type: "DISTILLED SPIRITS",
+      ttb_id: "ttb-test",
+      origin: null,
+      approval_date: null
+    }, null, null, "cola_cloud");
+
+    const filled = getFromCache(upc);
+    assert.equal(filled?.name, "Eagle Rare 10 Year");
+    assert.equal(filled?.upc, upc);
+    rememberUnresolvedUpc(upc);
+    assert.equal(getFromCache(upc)?.name, "Eagle Rare 10 Year");
+  } finally {
+    db.prepare("DELETE FROM cola_cache WHERE upc=?").run(upc);
+  }
 });
 
 test("searchVault includes brewery lab batches when filling a tap", () => {

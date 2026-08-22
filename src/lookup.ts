@@ -121,9 +121,33 @@ function cacheRowToProduct(row: CacheRow): ProductSchema {
 export function getFromCache(upc: string, { allowStale = false } = {}): ProductSchema | null {
   const row = db.prepare("SELECT * FROM cola_cache WHERE upc = ?").get(upc) as CacheRow | undefined;
   if (!row) return null;
+  if (!String(row.name ?? "").trim()) return null;
   const age = Math.floor(Date.now() / 1000) - Number(row.cached_at ?? 0);
   if (!allowStale && age > CACHE_TTL_SECONDS) return null;
   return cacheRowToProduct(row);
+}
+
+export function rememberUnresolvedUpc(rawUpc: string) {
+  const upc = normalizeUpc(rawUpc);
+  if (!upc) return;
+  const existing = db.prepare("SELECT name FROM cola_cache WHERE upc = ?").get(upc) as { name?: string } | undefined;
+  if (String(existing?.name ?? "").trim()) return;
+  saveToCache({
+    upc,
+    name: "",
+    brand: "",
+    category: "",
+    abv: null,
+    image_url: null,
+    fill_level_percent: 100,
+    bottle_count: 1,
+    notes: null,
+    volume_ml: null,
+    product_type: null,
+    ttb_id: null,
+    origin: null,
+    approval_date: null
+  }, null, null, "pending");
 }
 
 export function saveToCache(
@@ -320,6 +344,7 @@ export async function lookupProduct(
     // Not found.
   }
 
+  rememberUnresolvedUpc(upc);
   return {
     source: "not_found",
     upc,
@@ -335,7 +360,7 @@ export async function lookupProduct(
       stock_count: 1,
       volume_ml: 750
     },
-    message: `No catalog match for UPC ${upc}. Add details manually or search by name.`,
+    message: `No catalog match for UPC ${upc}. Search by name — we’ll keep this code.`,
     quota: getLastQuota()
   };
 }

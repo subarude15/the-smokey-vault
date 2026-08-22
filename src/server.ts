@@ -342,7 +342,7 @@ async function handleBarcodeLookup(
     || request.query.force === "true" || request.query.force === "1";
   try {
     const result = await lookupProduct(request.params.code, { enrich, forceRefresh });
-    // Always 200 so the scanner can open a prefilled (or UPC-only) form.
+    // Always 200 so a miss can still keep the UPC and open search.
     return result;
   } catch (error) {
     app.log.error({ error }, "Barcode lookup failed");

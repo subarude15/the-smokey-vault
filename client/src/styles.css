@@ -126,4 +126,9 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .scan-stage .vision-card{text-align:left;border:1px dashed var(--line);padding:28px 22px;border-radius:16px;margin-bottom:12px;background:var(--surface)}
 .scan-stage .vision-card h3{font:600 24px "Playfair Display";margin:10px 0 8px}
 .scan-stage .file-button{margin-top:0}
+.scan-miss h3{font:600 28px "Playfair Display";margin:8px 0 8px}
+.scan-miss .finder-search{margin:14px 0 8px}
+.scan-miss .finder-results{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.scan-miss .upc-chip{font-variant-numeric:tabular-nums;letter-spacing:.03em}
+.scan-miss-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 @media(min-width:700px){.scan-stage .camera-frame{aspect-ratio:4/3}}

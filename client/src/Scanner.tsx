@@ -17,7 +17,10 @@ export type ScanResult = {
 };
 
 export type ScanReviewOutcome = "saved" | "cancelled" | "viewed";
-type Props = { onProduct: (result: ScanResult) => Promise<ScanReviewOutcome> };
+type Props = {
+  onProduct: (result: ScanResult) => Promise<ScanReviewOutcome>;
+  onMiss: (upc: string) => void;
+};
 
 function sourceLabel(source: ScanResult["source"]) {
   if (source === "cola_cloud") return "COLA";
@@ -29,7 +32,12 @@ function sourceLabel(source: ScanResult["source"]) {
   return source;
 }
 
-export function Scanner({ onProduct }: Props) {
+function resultName(result: ScanResult) {
+  const product = result.product ?? {};
+  return String(product.name ?? product.product_name ?? product.product_name_en ?? "").trim();
+}
+
+export function Scanner({ onProduct, onMiss }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const controls = useRef<IScannerControls | undefined>(undefined);
   const isProcessing = useRef(false);
@@ -96,9 +104,8 @@ export function Scanner({ onProduct }: Props) {
         playSuccessDing();
         await lookupAndReview(result.getText());
         isProcessing.current = false;
-        if (isMounted.current && mode === "barcode") void startCamera();
       });
-      setStatus("Scanning… one bottle at a time");
+      setStatus("Scanning…");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Camera unavailable. Snap a photo of the barcode instead.");
     }
@@ -108,26 +115,25 @@ export function Scanner({ onProduct }: Props) {
     setStatus("Looking that up…");
     try {
       const data = await api<ScanResult>(`/scan/upc/${encodeURIComponent(upc)}`);
-      const hasName = Boolean(data.product?.name || data.product?.product_name);
-      const label = sourceLabel(data.source);
-      setStatus(hasName
-        ? `Found in ${label}. Check the details, then save.`
-        : `${data.message ?? "No match yet."} Fill in what you can, or search by name.`);
-      const outcome = await onProduct({
-        ...data,
-        upc: data.upc ?? upc,
-        product: data.product ?? { upc },
-        source: data.source === "not_found" ? "not_found" : data.source
-      });
+      const code = data.upc ?? upc;
+      const hasName = Boolean(resultName(data));
       if (!isMounted.current) return;
-      setStatus(outcome === "saved" ? "Saved. Next bottle."
-        : outcome === "viewed" ? "That’s already in the vault. Next bottle."
-        : "Skipped. Next bottle.");
+      if (data.source === "not_found" || data.source === "unresolved" || !hasName) {
+        setStatus("No match. Search by name — we’ll keep this UPC.");
+        onMiss(code);
+        return;
+      }
+      const label = sourceLabel(data.source);
+      setStatus(`Found in ${label}. Opening…`);
+      await onProduct({
+        ...data,
+        upc: code,
+        product: data.product ?? { upc: code }
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not look that up";
-      setStatus(`${message}. You can still add it by hand.`);
-      await onProduct({ source: "unresolved", upc, product: { upc } });
-      if (!isMounted.current) return;
+      setStatus(`${message}. Search by name — we’ll keep this UPC.`);
+      if (isMounted.current) onMiss(upc);
     }
   }
 
@@ -142,9 +148,8 @@ export function Scanner({ onProduct }: Props) {
       try {
         const data = await api<{ result: string }>("/ai/vision", { method: "POST", body });
         const json = JSON.parse(data.result.replace(/```json|```/g, "").trim());
-        const outcome = await onProduct({ source: "vision", product: json });
-        if (!isMounted.current) return;
-        setStatus(outcome === "saved" ? "Saved. Next bottle." : "Skipped. Next bottle.");
+        setStatus("Found on the label. Opening…");
+        await onProduct({ source: "vision", product: json });
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Could not read that label");
       }
@@ -174,14 +179,14 @@ export function Scanner({ onProduct }: Props) {
       {mode === "barcode" && (
         <>
           <div className="camera-frame"><video ref={video} muted playsInline /></div>
-          <p className="scanner-hint">It pauses after each hit so you can review, then comes back for the next one.</p>
+          <p className="scanner-hint">One scan opens the bottle, or search if we don’t know it yet.</p>
         </>
       )}
       {mode === "vision" && (
         <div className="vision-card">
           <Sparkles size={32}/>
           <h3>No barcode? Snap the front.</h3>
-          <p>We’ll read the name, brand, and ABV from the label. You still review before it hits the shelf.</p>
+          <p>We’ll read the name, brand, and ABV from the label, then take you to the details.</p>
         </div>
       )}
       <label className="secondary wide file-button">
