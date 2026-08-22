@@ -55,8 +55,6 @@ export function Scanner({ onProduct }: Props) {
       controls.current?.stop();
       controls.current = undefined;
     };
-    // startCamera is stable enough for mode changes; video node is mounted with barcode mode.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   function playSuccessDing() {
