@@ -232,7 +232,12 @@ function findBeerLabel(moduleId: string) {
   return moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer" ? "Find beer" : "Find bottle";
 }
 
-async function resolveSuggestion(module: Module, hit: BottleSearchHit) {
+function scanProductName(result: ScanResult) {
+  const product = result.product ?? {};
+  return String(product.name ?? product.product_name ?? product.product_name_en ?? "").trim();
+}
+
+async function resolveSuggestion(module: Module, hit: BottleSearchHit, upc = "") {
   if (hit.table === "brews") {
     return module.id === "taps" ? brewToTap(hit.product) : {
       maker: hit.product.maker ?? "",
@@ -244,35 +249,37 @@ async function resolveSuggestion(module: Module, hit: BottleSearchHit) {
   }
   let product = hit.product;
   if (hit.source === "cola_cloud" && hit.ttb_id) {
-    const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}`);
+    const qs = upc ? `?upc=${encodeURIComponent(upc)}` : "";
+    const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}${qs}`);
     if (enriched.product) product = enriched.product;
   }
   const draft = scannedInventoryDraft({
     source: hit.source === "vault" ? "vault" : "cola_cloud",
     table: hit.table,
-    upc: String(product.upc ?? ""),
+    upc: upc || String(product.upc ?? ""),
     product
   });
-  return mapDraftToModule(module, draft);
+  const mapped = mapDraftToModule(module, draft);
+  return upc ? { ...mapped, upc } : mapped;
 }
 
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [admin, setAdmin] = useState(tokenExists());
   const [mobileNav, setMobileNav] = useState(false);
-  const [scanner, setScanner] = useState(false);
   const [unlock, setUnlock] = useState(false);
   const [theme, setTheme] = useState(storedTheme);
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
+  const [scanMiss, setScanMiss] = useState<{ upc: string } | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const lock = useCallback(() => {
     clearToken();
     setAdmin(false);
-    setScanner(false);
     setScanDraft(undefined);
+    setScanMiss(null);
     setUnlock(false);
     setPage((current) => ["scan", "restock", "settings"].includes(current) ? "dashboard" : current);
   }, []);
@@ -304,15 +311,19 @@ export default function App() {
 
   const navigate = (next: string) => { setPage(next); setMobileNav(false); };
   function handleScan(result: ScanResult) {
+    if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
     const table = result.table;
     const vaultId = result.source === "vault" && table ? itemId(result.product) : 0;
-    if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
+    if (!vaultId && (result.source === "not_found" || result.source === "unresolved" || !scanProductName(result))) {
+      setScanMiss({ upc: result.upc ?? "" });
+      return Promise.resolve("cancelled" as ScanReviewOutcome);
+    }
     const draft: ScanDraft = vaultId && table
-      ? { moduleId: table, key: Date.now(), values: result.product, mode: "edit" }
+      ? { moduleId: table, key: Date.now(), values: result.product, mode: "view" }
       : scannedInventoryDraft(result);
+    setScanMiss(null);
     setScanDraft(draft);
     navigate(draft.moduleId);
-    if (draft.mode === "view") setScanner(false);
     return new Promise<ScanReviewOutcome>((resolve) => {
       scanReviewResolver.current = resolve;
     });
@@ -321,6 +332,37 @@ export default function App() {
     setScanDraft(undefined);
     scanReviewResolver.current?.(outcome);
     scanReviewResolver.current = undefined;
+  }
+  async function handleScanMissPick(hit: BottleSearchHit, upc: string) {
+    const table = (hit.table === "brews" ? "packaged_beer" : hit.table) as ScanModuleId;
+    if (table !== "spirits" && table !== "packaged_beer" && table !== "wines") return;
+    const module = modules.find((row) => row.id === table);
+    if (!module) return;
+    if (hit.source === "vault") {
+      const id = itemId(hit.product);
+      const nextValues = { ...hit.product, upc: String(hit.product.upc ?? "").trim() || upc };
+      if (id && upc && !String(hit.product.upc ?? "").trim()) {
+        try {
+          await api(`/inventory/${table}/${id}`, { method: "PUT", body: JSON.stringify(nextValues) });
+        } catch {
+          // Still open the bottle; the UPC can be saved from the form later.
+        }
+      }
+      setScanMiss(null);
+      setScanDraft({ moduleId: table, key: Date.now(), values: nextValues, mode: "view" });
+      navigate(table);
+      return;
+    }
+    const values = await resolveSuggestion(module, hit, upc);
+    setScanMiss(null);
+    setScanDraft({ moduleId: table, key: Date.now(), values, mode: "create" });
+    navigate(table);
+  }
+  function handleScanManual(table: ScanModuleId, upc: string) {
+    const draft = scannedInventoryDraft({ source: "not_found", upc, table, product: { upc, name: "", brand: "" } });
+    setScanMiss(null);
+    setScanDraft(draft);
+    navigate(draft.moduleId);
   }
   const collectionNav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard }, ...modules.map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
@@ -366,7 +408,7 @@ export default function App() {
             admin={admin}
             scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined}
             finishScanReview={finishScanReview}
-            openScanner={() => setScanner(true)}
+            openScanner={() => navigate("scan")}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
             onPutOnTap={admin && module.id === "brews" ? async (brew) => {
@@ -385,13 +427,19 @@ export default function App() {
           {page === "cocktails" && <Cocktails admin={admin} sharedUrl={sharedRecipeUrl} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
           {page === "mixologist" && <Mixologist admin={admin}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
-          {page === "scan" && admin && <ScanPage onStart={() => setScanner(true)}/>}
+          {page === "scan" && admin && <ScanPage
+            onProduct={handleScan}
+            miss={scanMiss}
+            onMiss={(upc) => setScanMiss({ upc })}
+            onRescan={() => setScanMiss(null)}
+            onPickMiss={handleScanMissPick}
+            onManual={handleScanManual}
+          />}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme}/>}
         </div>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
-      {admin && scanner && !scanDraft && !unlock && <Scanner onClose={() => setScanner(false)} onProduct={handleScan}/>}
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
     </div>
   );
@@ -940,17 +988,131 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
   </>;
 }
 
-function ScanPage({ onStart }: { onStart: () => void }) {
+function ScanPage({
+  onProduct, miss, onMiss, onRescan, onPickMiss, onManual
+}: {
+  onProduct: (result: ScanResult) => Promise<ScanReviewOutcome>;
+  miss: { upc: string } | null;
+  onMiss: (upc: string) => void;
+  onRescan: () => void;
+  onPickMiss: (hit: BottleSearchHit, upc: string) => Promise<void>;
+  onManual: (table: ScanModuleId, upc: string) => void;
+}) {
   return <>
     <PageTitle
       eyebrow="VAULT TOOLS"
-      title="Scan a bottle."
-      subtitle="Point the camera at a UPC or snap a label. Hits the vault first, then COLA. This stays off the guest menu."
+      title={miss ? "Look it up." : "Scan a bottle."}
+      subtitle={miss
+        ? (miss.upc
+          ? "No catalog match. Search by name and we’ll stamp this UPC on whatever you add."
+          : "We couldn’t read a match. Search by name, or add it by hand.")
+        : "Barcode for a UPC. Label to read the front of the bottle. One scan, then we take you to the bottle or to search."}
     />
-    <div className="toolbar-actions">
-      <button type="button" className="primary" onClick={onStart}><ScanBarcode size={18}/> Start scan</button>
-    </div>
+    {miss
+      ? <ScanMissSearch upc={miss.upc} onPick={onPickMiss} onManual={onManual} onRescan={onRescan}/>
+      : <Scanner onProduct={onProduct} onMiss={onMiss}/>}
   </>;
+}
+
+const SCAN_SEARCH_SCOPES = [
+  { id: "shelf", label: "All bottles" },
+  { id: "spirits", label: "Spirits & Mixers" },
+  { id: "wines", label: "Wine Cellar" },
+  { id: "packaged_beer", label: "Packaged Beer" }
+] as const;
+
+function ScanMissSearch({
+  upc, onPick, onManual, onRescan
+}: {
+  upc: string;
+  onPick: (hit: BottleSearchHit, upc: string) => Promise<void>;
+  onManual: (table: ScanModuleId, upc: string) => void;
+  onRescan: () => void;
+}) {
+  const [scope, setScope] = useState<(typeof SCAN_SEARCH_SCOPES)[number]["id"]>("shelf");
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<BottleSearchHit[]>([]);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("Type at least 2 characters to search your vault and COLA Cloud.");
+  const manualTable: ScanModuleId = scope === "shelf" ? "spirits" : scope;
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      setStatus("Type at least 2 characters to search your vault and COLA Cloud.");
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      setLoading(true); setError("");
+      try {
+        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(scope)}`);
+        const next = data.results.filter((hit) => hitFitsModule(scope, hit));
+        setResults(next);
+        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Search failed");
+      } finally {
+        setLoading(false);
+      }
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [query, scope]);
+
+  async function choose(hit: BottleSearchHit) {
+    try {
+      setLoading(true);
+      setError("");
+      await onPick(hit, upc);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load bottle details");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="scan-stage scan-miss">
+      <p className="eyebrow">NO CATALOG MATCH</p>
+      <h3>Search by name</h3>
+      <p className="scanner-hint">{upc
+        ? <>Kept UPC <strong className="upc-chip">{upc}</strong>. We’ll fill it in when you pick a bottle or add by hand.</>
+        : "Search your vault and COLA, or add it by hand."}</p>
+      <div className="chip-row">
+        {SCAN_SEARCH_SCOPES.map((item) => (
+          <button type="button" key={item.id} className={scope === item.id ? "chip active" : "chip"} onClick={() => setScope(item.id)}>{item.label}</button>
+        ))}
+      </div>
+      <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Eagle Rare, Lagavulin, Champagne…"/></label>
+      <p className="scanner-status">{loading ? "Searching…" : status}</p>
+      {error && <p className="error">{error}</p>}
+      <div className="finder-results">
+        {results.map((hit, index) => {
+          const name = String(hit.product.name ?? hit.product.product_name ?? hit.product.batch_name ?? "Untitled");
+          const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? hit.product.maker ?? "");
+          const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? "");
+          const origin = hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD";
+          return (
+            <button type="button" className="finder-result" key={`${hit.source}-${hit.ttb_id ?? hit.product.id ?? index}`} onClick={() => void choose(hit)}>
+              <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle/>}</div>
+              <div>
+                <span className="eyebrow">{origin} · {hit.table.replace("_", " ")}</span>
+                <strong>{name}</strong>
+                <small>{[brand, category].filter(Boolean).join(" · ")}</small>
+              </div>
+              <ChevronRight size={16}/>
+            </button>
+          );
+        })}
+      </div>
+      <div className="scan-miss-actions">
+        <button type="button" className="primary" onClick={() => onManual(manualTable, upc)}><Plus size={16}/> Add by hand</button>
+        <button type="button" className="secondary" onClick={onRescan}><ScanBarcode size={16}/> Scan another</button>
+      </div>
+      {scope === "shelf" ? <p className="scanner-hint">Add by hand lands in Spirits & Mixers. Pick Wine or Packaged Beer first to add there instead.</p> : null}
+    </section>
+  );
 }
 
 function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, seedCreate, onSeedConsumed, onPutOnTap }: {
@@ -1492,7 +1654,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       return abv != null ? { ...next, calculated_abv: abv } : next;
     });
   }
-  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"SCAN REVIEW":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     <div className="form-grid">{module.fields.map((field) => {
       if (field.type === "image") {
         return <div className="full field-block" key={field.key}><span>{field.label}</span>
@@ -1685,6 +1847,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
                   setForm((currentForm) => ({
                     ...currentForm,
                     ...values,
+                    upc: String(currentForm.upc ?? "").trim() || values.upc,
                     tap_number: currentForm.tap_number,
                     keg_size_l: currentForm.keg_size_l ?? values.keg_size_l,
                     remaining_l: values.remaining_l ?? currentForm.keg_size_l ?? DEFAULT_KEG_L,

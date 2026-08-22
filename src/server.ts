@@ -18,6 +18,7 @@ import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeI
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
 import { isColaConfigured } from "./cola_client.js";
 import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
+import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
 import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
 import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
 import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
@@ -342,7 +343,7 @@ async function handleBarcodeLookup(
     || request.query.force === "true" || request.query.force === "1";
   try {
     const result = await lookupProduct(request.params.code, { enrich, forceRefresh });
-    // Always 200 so the scanner can open a prefilled (or UPC-only) form.
+    // Always 200 so a miss can still keep the UPC and open search.
     return result;
   } catch (error) {
     app.log.error({ error }, "Barcode lookup failed");
@@ -472,7 +473,7 @@ function maskSecret(value: string) {
 async function callLlm(prompt: string, image?: string) {
   const { provider, key, baseUrl, model } = resolveAiConfig();
   if (provider !== "ollama" && !key) {
-    throw new AiRequestError("Please configure your AI Provider API key in Settings.", 400);
+    throw new AiRequestError("Set AI_API_KEY in the server .env to read labels and mix drinks.", 400);
   }
   if (provider === "anthropic") {
     const content: unknown[] = [{ type: "text", text: prompt }];
@@ -481,7 +482,7 @@ async function callLlm(prompt: string, image?: string) {
     const data = await response.json() as { content?: Array<{ text: string }>; error?: { message?: string } };
     if (!response.ok) {
       app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
-      const message = response.status === 401 ? "Your AI Provider API key is invalid. Update it in Settings." : data.error?.message ?? "Anthropic could not generate a recipe.";
+      const message = response.status === 401 ? "Your AI API key is invalid. Check AI_API_KEY in the server .env." : data.error?.message ?? "Anthropic could not generate a recipe.";
       throw new AiRequestError(message, response.status);
     }
     return data.content?.[0]?.text ?? "";
@@ -498,7 +499,7 @@ async function callLlm(prompt: string, image?: string) {
   if (!response.ok) {
     app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
     const providerMessage = typeof data.error === "object" && data.error && "message" in data.error ? String((data.error as { message: unknown }).message) : "";
-    const message = response.status === 401 ? "Your AI Provider API key is invalid. Update it in Settings." : providerMessage || `${provider} could not generate a recipe.`;
+    const message = response.status === 401 ? "Your AI API key is invalid. Check AI_API_KEY in the server .env." : providerMessage || `${provider} could not generate a recipe.`;
     throw new AiRequestError(message, response.status);
   }
   return data.message?.content ?? data.choices?.[0]?.message.content ?? "";
@@ -668,12 +669,23 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
   const file = await request.file();
   if (!file) return reply.code(400).send({ error: "Image required" });
   try {
-    const result = await callLlm('Read this bottle label. Return only JSON with keys "brand","name","category","abv".', (await file.toBuffer()).toString("base64"));
-    return { result };
+    const buffer = await file.toBuffer();
+    const parsed = parseVisionLabel(await callLlm(VISION_LABEL_PROMPT, buffer.toString("base64")));
+    let imageUrl = "";
+    try {
+      imageUrl = saveImageBuffer(buffer, file.mimetype, file.filename);
+    } catch {
+      imageUrl = "";
+    }
+    return {
+      source: "vision",
+      upc: parsed.upc || undefined,
+      product: { ...parsed, image_url: imageUrl }
+    };
   } catch (error) {
     app.log.error({ error }, "AI vision-label request failed");
     const status = error instanceof AiRequestError ? error.statusCode : 502;
-    return reply.code(status).send({ error: error instanceof Error ? error.message : "Vision request failed" });
+    return reply.code(status).send({ error: error instanceof Error ? error.message : "Could not read that label" });
   }
 }
 
