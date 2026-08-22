@@ -5,3 +5,6 @@ data/*
 !data/.gitkeep
 .env
 *.log
+
+.gemini/
+gha-creds-*.json
