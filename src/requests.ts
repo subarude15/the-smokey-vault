@@ -1,34 +1,19 @@
 import { db } from "./db.js";
+import type { NextBoard, NextKind, NextItem, NextBoards } from "./shared-types.js";
+import { MAX_NEXT_NAME, MAX_NEXT_MAKER, MAX_NEXT_NOTE, MAX_NEXT_PER_BOARD } from "./shared-types.js";
 
-export const NEXT_BOARDS = ["shelf", "keg", "brew"] as const;
-export type NextBoard = (typeof NEXT_BOARDS)[number];
-export type NextKind = "spirits" | "wines" | "keg" | "brew";
+export {
+  type NextBoard,
+  type NextKind,
+  type NextItem,
+  type NextBoards,
+  NEXT_BOARDS,
+  MAX_NEXT_NAME,
+  MAX_NEXT_MAKER,
+  MAX_NEXT_NOTE,
+  MAX_NEXT_PER_BOARD
+} from "./shared-types.js";
 
-export const MAX_NEXT_NAME = 80;
-export const MAX_NEXT_MAKER = 80;
-export const MAX_NEXT_NOTE = 120;
-export const MAX_NEXT_PER_BOARD = 80;
-
-export type NextItem = {
-  id: number;
-  board: NextBoard;
-  kind: NextKind;
-  name: string;
-  maker: string;
-  note: string;
-  image_url: string;
-  up: number;
-  down: number;
-  net: number;
-  votes: number;
-  mine: 1 | -1 | null;
-};
-
-export type NextBoards = {
-  shelf: NextItem[];
-  keg: NextItem[];
-  brew: NextItem[];
-};
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS stock_requests (
