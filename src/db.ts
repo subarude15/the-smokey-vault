@@ -5,6 +5,9 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { DEFAULT_KEG_L, TAP_COUNT, migrateWineSweetnessValue, spiritFamilyFromLabel } from "./catalog.js";
 import { isPlaceholderIngredients } from "./cocktails.js";
 import { COCKTAIL_RECIPES } from "./cocktail-recipes.js";
+import {
+  DEFAULT_BAR_LOCATION_TEXT, DEFAULT_ENABLED_TABS_JSON, DEFAULT_HOUSE_TIP_BLURB, DEFAULT_TAB_ORDER_JSON
+} from "./speakeasy-shared.js";
 
 export const dbPath = process.env.DB_PATH ?? (process.env.NODE_ENV === "production" ? "/data/smokeyvault.db" : "./data/smokeyvault.db");
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -39,7 +42,7 @@ CREATE TABLE IF NOT EXISTS brews (
   target_og REAL, target_fg REAL, measured_og REAL, measured_fg REAL, calculated_abv REAL DEFAULT 0,
   schedule TEXT DEFAULT '', status TEXT DEFAULT 'Planned', notes TEXT DEFAULT '', maker TEXT DEFAULT '',
   image_url TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
-  base_ingredient TEXT DEFAULT '', hops TEXT DEFAULT '[]',
+  base_ingredient TEXT DEFAULT '', hops TEXT DEFAULT '[]', brewfather_id TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS packaged_beer (
@@ -79,6 +82,94 @@ CREATE TABLE IF NOT EXISTS cola_cache (
   cached_at INTEGER,
   source TEXT DEFAULT 'cola_cloud'
 );
+CREATE TABLE IF NOT EXISTS barcode_cache (
+  upc TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  brand TEXT NOT NULL,
+  category TEXT NOT NULL,
+  subcategory TEXT DEFAULT '',
+  abv REAL DEFAULT 0,
+  proof REAL DEFAULT 0,
+  volume_ml INTEGER DEFAULT 750,
+  description TEXT DEFAULT '',
+  image_url TEXT DEFAULT '',
+  source TEXT DEFAULT 'imported',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS patrons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  nickname TEXT DEFAULT '',
+  visit_count INTEGER NOT NULL DEFAULT 1,
+  notes TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_patrons_ranking ON patrons(visit_count DESC, updated_at ASC);
+CREATE TABLE IF NOT EXISTS daily_votes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_table TEXT NOT NULL,
+  item_id INTEGER NOT NULL,
+  patron_name TEXT NOT NULL,
+  vote_date TEXT NOT NULL,
+  value INTEGER NOT NULL CHECK(value IN (-1, 1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(target_table, item_id, patron_name, vote_date)
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender_name TEXT NOT NULL,
+  contact_info TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  discord_notified INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(is_read, created_at);
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  event_date TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  image_url TEXT DEFAULT '',
+  is_published INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS event_subscribers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  contact_info TEXT NOT NULL,
+  notes TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS merch_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  suggested_donation TEXT DEFAULT '',
+  image_url TEXT DEFAULT '',
+  is_available INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS staff_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  role TEXT DEFAULT '',
+  bio TEXT DEFAULT '',
+  image_url TEXT DEFAULT '',
+  display_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_staff_order ON staff_members(display_order ASC, id ASC);
+CREATE TABLE IF NOT EXISTS gallery_media (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filename TEXT NOT NULL,
+  media_type TEXT NOT NULL CHECK(media_type IN ('image', 'video')),
+  caption TEXT DEFAULT '',
+  uploaded_by TEXT DEFAULT 'Patron',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_gallery_recent ON gallery_media(created_at DESC, id DESC);
 `;
 db.exec(schema);
 
@@ -92,6 +183,7 @@ ensureColumn("spirits", "tasting_notes", "ALTER TABLE spirits ADD COLUMN tasting
 ensureColumn("spirits", "flavors", "ALTER TABLE spirits ADD COLUMN flavors TEXT DEFAULT '[]'");
 ensureColumn("spirits", "tags", "ALTER TABLE spirits ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("spirits", "base_ingredient", "ALTER TABLE spirits ADD COLUMN base_ingredient TEXT DEFAULT ''");
+ensureColumn("spirits", "blocked_from_ordering", "ALTER TABLE spirits ADD COLUMN blocked_from_ordering INTEGER NOT NULL DEFAULT 0");
 ensureColumn("packaged_beer", "upc", "ALTER TABLE packaged_beer ADD COLUMN upc TEXT DEFAULT ''");
 ensureColumn("packaged_beer", "image_url", "ALTER TABLE packaged_beer ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("packaged_beer", "notes", "ALTER TABLE packaged_beer ADD COLUMN notes TEXT DEFAULT ''");
@@ -109,6 +201,14 @@ ensureColumn("wines", "base_ingredient", "ALTER TABLE wines ADD COLUMN base_ingr
 ensureColumn("wines", "style", "ALTER TABLE wines ADD COLUMN style TEXT DEFAULT ''");
 ensureColumn("wines", "body", "ALTER TABLE wines ADD COLUMN body INTEGER DEFAULT 3");
 ensureColumn("wines", "drink_by_date", "ALTER TABLE wines ADD COLUMN drink_by_date TEXT");
+ensureColumn("wines", "blocked_from_ordering", "ALTER TABLE wines ADD COLUMN blocked_from_ordering INTEGER NOT NULL DEFAULT 0");
+// Indexed after the migrations above, since older databases add `upc` by ALTER TABLE.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_spirits_upc ON spirits(upc);
+  CREATE INDEX IF NOT EXISTS idx_packaged_beer_upc ON packaged_beer(upc);
+  CREATE INDEX IF NOT EXISTS idx_wines_upc ON wines(upc);
+`);
+
 ensureColumn("taps", "maker", "ALTER TABLE taps ADD COLUMN maker TEXT DEFAULT ''");
 ensureColumn("taps", "image_url", "ALTER TABLE taps ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("taps", "notes", "ALTER TABLE taps ADD COLUMN notes TEXT DEFAULT ''");
@@ -123,6 +223,8 @@ ensureColumn("brews", "flavors", "ALTER TABLE brews ADD COLUMN flavors TEXT DEFA
 ensureColumn("brews", "tags", "ALTER TABLE brews ADD COLUMN tags TEXT DEFAULT '[]'");
 ensureColumn("brews", "base_ingredient", "ALTER TABLE brews ADD COLUMN base_ingredient TEXT DEFAULT ''");
 ensureColumn("brews", "hops", "ALTER TABLE brews ADD COLUMN hops TEXT DEFAULT '[]'");
+ensureColumn("brews", "brewfather_id", "ALTER TABLE brews ADD COLUMN brewfather_id TEXT");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS brews_brewfather_id ON brews(brewfather_id) WHERE brewfather_id IS NOT NULL AND brewfather_id != ''");
 ensureColumn("cocktails", "season", "ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
 ensureColumn("cocktails", "image_url", "ALTER TABLE cocktails ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("cocktails", "source_url", "ALTER TABLE cocktails ADD COLUMN source_url TEXT DEFAULT ''");
@@ -184,6 +286,13 @@ if (!getSetting("lastBackupDownload")) setSetting("lastBackupDownload", new Date
 if (!getSetting("restockPackagedBelow")) setSetting("restockPackagedBelow", "3");
 if (!getSetting("restockSpiritFill")) setSetting("restockSpiritFill", "25");
 if (!getSetting("restockWineBelow")) setSetting("restockWineBelow", "2");
+if (!getSetting("enabled_tabs")) setSetting("enabled_tabs", DEFAULT_ENABLED_TABS_JSON);
+if (!getSetting("tab_order")) setSetting("tab_order", DEFAULT_TAB_ORDER_JSON);
+if (getSetting("bar_location_text") === undefined) setSetting("bar_location_text", DEFAULT_BAR_LOCATION_TEXT);
+if (getSetting("house_tip_blurb") === undefined) setSetting("house_tip_blurb", DEFAULT_HOUSE_TIP_BLURB);
+if (getSetting("guest_bartender_enabled") === undefined) setSetting("guest_bartender_enabled", "0");
+if (getSetting("discord_webhook_url") === undefined) setSetting("discord_webhook_url", "");
+if (getSetting("facebook_group_url") === undefined) setSetting("facebook_group_url", "");
 
 const insertCocktail = db.prepare("INSERT OR IGNORE INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season) VALUES(?,?,?,?,?,?,?,?)");
 const updatePlaceholder = db.prepare("UPDATE cocktails SET collection=?,ingredients=?,glassware=?,garnish=?,method=?,notes=?,season=? WHERE id=?");

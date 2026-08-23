@@ -16,8 +16,13 @@ import {
   searchColasByQuery
 } from "./cola_client.js";
 import { localizeImage } from "./images.js";
+import { barcodeEntryToProduct, getBarcodeCacheEntry, saveBarcodeCacheEntry } from "./barcode_cache.js";
+import type { AiBarcodeProduct } from "./ai_barcode.js";
 
-export type LookupSource = "vault" | "cache" | "cola_cloud" | "openfoodfacts" | "upcitemdb" | "not_found";
+export type LookupSource = "vault" | "cache" | "cola_cloud" | "openfoodfacts" | "upcitemdb" | "ai" | "not_found";
+
+/** Supplied by the server so the lookup pipeline stays free of LLM wiring. */
+export type AiBarcodeResolver = (upc: string) => Promise<AiBarcodeProduct | null>;
 
 export type LookupResult = {
   source: LookupSource;
@@ -276,7 +281,7 @@ async function success(source: LookupSource, upc: string, product: ProductSchema
 
 export async function lookupProduct(
   rawUpc: string,
-  { enrich = true, forceRefresh = false }: { enrich?: boolean; forceRefresh?: boolean } = {}
+  { enrich = true, forceRefresh = false, ai }: { enrich?: boolean; forceRefresh?: boolean; ai?: AiBarcodeResolver } = {}
 ): Promise<LookupResult> {
   const upc = normalizeUpc(rawUpc);
   if (!upc) {
@@ -286,6 +291,11 @@ export async function lookupProduct(
   const vaultHit = findInVault(upc, rawUpc);
   if (vaultHit) {
     return { source: "vault", table: vaultHit.table, upc, product: vaultHit.product, quota: getLastQuota() };
+  }
+
+  if (!forceRefresh) {
+    const remembered = getBarcodeCacheEntry(upc);
+    if (remembered) return await success("cache", upc, barcodeEntryToProduct(remembered));
   }
 
   let staleFallback: ProductSchema | null = null;
@@ -342,6 +352,20 @@ export async function lookupProduct(
     }
   } catch {
     // Not found.
+  }
+
+  if (ai) {
+    try {
+      const found = await ai(upc);
+      if (found) {
+        // The model's photo link is fetched once here so guests never hit a third-party host.
+        const localImage = (await localizeImage(found.image_url)) ?? "";
+        saveBarcodeCacheEntry({ ...found, upc, image_url: localImage, source: "ai" });
+        return await success("ai", upc, barcodeEntryToProduct({ ...found, upc, image_url: localImage, source: "ai" }));
+      }
+    } catch {
+      // An AI outage should still land on the manual-search miss below.
+    }
   }
 
   rememberUnresolvedUpc(upc);

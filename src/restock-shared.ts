@@ -35,7 +35,7 @@ function pickStop(value: unknown, stops: number[], fallback: number): number {
   return stops.includes(n) ? n : fallback;
 }
 
-export function parseRestockThresholds(settings?: Record<string, string | undefined> | null): RestockThresholds {
+export function parseRestockThresholds(settings?: Record<string, unknown> | null): RestockThresholds {
   return {
     packagedBelow: pickStop(settings?.restockPackagedBelow, RESTOCK_PACKAGED_STOPS, DEFAULT_RESTOCK_THRESHOLDS.packagedBelow),
     spiritFill: pickStop(settings?.restockSpiritFill, RESTOCK_SPIRIT_STOPS, DEFAULT_RESTOCK_THRESHOLDS.spiritFill),

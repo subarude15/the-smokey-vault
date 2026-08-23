@@ -114,3 +114,67 @@ test("scanner Bourbonxrye labels still match whiskey recipes", () => {
   assert.notEqual(matchIngredient("50 ml bourbon", shelf).state, "missing");
   assert.notEqual(matchIngredient("50 ml rye whiskey", shelf).state, "missing");
 });
+
+test("bottles blocked from ordering never reach the guest shelf", () => {
+  const shelf = buildShelf(
+    [
+      { name: "Eagle Rare", brand: "Buffalo Trace", category: "Whiskey", sub_category: "Bourbon", fill_level: 80, stock_count: 1 },
+      { name: "Pappy Van Winkle", brand: "Old Rip", category: "Whiskey", sub_category: "Bourbon", fill_level: 90, stock_count: 1, blocked_from_ordering: 1 }
+    ],
+    [{ name: "Reserve Barolo", producer: "Vietti", type: "Red", bottle_count: 2, blocked_from_ordering: 1 }],
+    [{ name: "Cellar Stout", brewery: "Vault", style: "Stout", count: 4, blocked_from_ordering: 1 }],
+    [{ brewery_batch: "Private Pils", maker: "Vault", style: "Pilsner", blocked_from_ordering: 1 }]
+  );
+  assert.deepEqual(shelf.map((bottle) => bottle.name), ["Eagle Rare"]);
+});
+
+test("blocked bottles are excluded from substitute options", () => {
+  const shelf = buildShelf([
+    { name: "Eagle Rare", brand: "Buffalo Trace", category: "Whiskey", sub_category: "Bourbon", fill_level: 60, stock_count: 1 },
+    { name: "Pappy Van Winkle", brand: "Old Rip", category: "Whiskey", sub_category: "Bourbon", fill_level: 95, stock_count: 1, blocked_from_ordering: 1 }
+  ]);
+  const line = matchIngredient("50 ml rye whiskey", shelf);
+  assert.equal(line.state, "substitute");
+  assert.deepEqual(line.substitute_options, [{ name: "Eagle Rare", brand: "Buffalo Trace", fill_level: 60 }]);
+});
+
+test("substitute lines list every candidate bottle with brand and fill level", () => {
+  const shelf = buildShelf([
+    { name: "Eagle Rare", brand: "Buffalo Trace", category: "Whiskey", sub_category: "Bourbon", fill_level: 60, stock_count: 1 },
+    { name: "Redbreast", brand: "Midleton", category: "Whiskey", sub_category: "Irish", fill_level: 25, stock_count: 1 }
+  ]);
+  const line = matchIngredient("50 ml rye whiskey", shelf);
+  assert.equal(line.state, "substitute");
+  assert.deepEqual(line.substitute_options, [
+    { name: "Eagle Rare", brand: "Buffalo Trace", fill_level: 60 },
+    { name: "Redbreast", brand: "Midleton", fill_level: 25 }
+  ]);
+});
+
+test("matchCocktail flags substitutes and direct matches carry no options", () => {
+  const shelf = buildShelf([
+    { name: "Eagle Rare", brand: "Buffalo Trace", category: "Whiskey", sub_category: "Bourbon", fill_level: 60, stock_count: 1 },
+    { name: "Carpano Antica", brand: "Carpano", category: "Mixer", sub_category: "Sweet vermouth", fill_level: 100, stock_count: 1 },
+    { name: "Angostura", category: "Bitters", fill_level: 100, stock_count: 1 }
+  ]);
+  const manhattan = matchCocktail({
+    name: "Manhattan",
+    ingredients: ["50 ml rye whiskey", "20 ml sweet vermouth", "1 dash bitters"]
+  }, shelf);
+  assert.equal(manhattan.readiness, "ready");
+  assert.equal(manhattan.has_substitutes, true);
+  assert.equal(manhattan.lines[0].substitute_options?.length, 1);
+  assert.equal(manhattan.lines[1].state, "have");
+  assert.equal(manhattan.lines[1].substitute_options, undefined);
+
+  const bare = matchCocktail({ name: "Highball", ingredients: ["60 ml bourbon", "120 ml soda water"] }, shelf);
+  assert.equal(bare.has_substitutes, false);
+});
+
+test("keg fill level is reported as a percentage of the keg", () => {
+  const shelf = buildShelf([], [], [], [
+    { brewery_batch: "House Pils", maker: "Vault", style: "Pilsner", keg_size_l: 19, remaining_l: 9.5 }
+  ]);
+  assert.equal(shelf[0].fill_level, 50);
+  assert.equal(shelf[0].brand, "Vault");
+});

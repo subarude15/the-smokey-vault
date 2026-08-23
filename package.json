@@ -11,7 +11,7 @@
     "build": "npm run build:client && tsc -p tsconfig.server.json",
     "build:client": "vite build --config client/vite.config.ts",
     "start": "node dist/server.js",
-    "test": "tsx --test src/*.test.ts"
+    "test": "tsx --import ./src/test-setup.ts --test src/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "latest",
@@ -25,6 +25,7 @@
     "fastify": "latest",
     "lucide-react": "latest",
     "nanoid": "latest",
+    "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",

@@ -25,7 +25,9 @@ const ALLOWED_HOST_HINTS = [
   "openfoodfacts",
   "openfoodfacts.org",
   "upcitemdb",
-  "amazonaws.com"
+  "amazonaws.com",
+  "brewfather.app",
+  "googleapis.com"
 ];
 
 function extensionFrom(url: string, contentType?: string | null) {

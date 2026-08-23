@@ -1,9 +1,9 @@
 import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowLeft, Beer, BottleWine as Bottle, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, FlaskConical, Grape, LayoutDashboard,
-  Link, LoaderCircle, Lock, LockOpen, Menu, Moon, Plus, Save, ScanBarcode, Search, Settings, Share2, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Wine, X, ClipboardPaste, Zap
+  ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, Grape, HandCoins, LayoutDashboard,
+  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Users, Wine, X, ClipboardPaste, Zap
 } from "lucide-react";
-import { api, clearToken, downloadExport, Item, setToken, tokenExists } from "./api";
+import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
@@ -24,9 +24,23 @@ import {
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
   type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME,
-  DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME, clipKeeperName, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS
+  DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME, clipKeeperName, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS,
+  AI_MIXOLOGIST_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
+  TAB_KEYS, parseEnabledTabs, parseTabOrder, serializeEnabledTabs, serializeTabOrder,
+  type EnabledTabs, type SubstituteOption, type TabKey
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
+import { BreweryLab } from "./BreweryLab";
+import { ContactModal, GuestFooter } from "./ContactModal";
+import { EventsPage } from "./EventsPage";
+import { GalleryPage } from "./GalleryPage";
+import { MerchPage } from "./MerchPage";
+import { MessagesInbox } from "./MessagesInbox";
+import { PatronsPage } from "./PatronsPage";
+import { StaffPage } from "./StaffPage";
+import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
+import { TipJarPage } from "./TipJarPage";
+import { clearDraft, useFormDraft } from "./useFormDraft";
 
 type Field = { key: string; label: string; type?: string; options?: string[] };
 type Module = {
@@ -234,13 +248,91 @@ function findBeerLabel(moduleId: string) {
   return moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer" ? "Find beer" : "Find bottle";
 }
 
-type HouseInfo = { keeperName: string; defaultPinHint: boolean };
-const HouseContext = createContext<HouseInfo>({ keeperName: DEFAULT_KEEPER_NAME, defaultPinHint: false });
+type HouseInfo = {
+  keeperName: string;
+  defaultPinHint: boolean;
+  brewfatherConfigured: boolean;
+  enabledTabs: EnabledTabs;
+  settings: Record<string, string>;
+};
+const EMPTY_HOUSE: HouseInfo = {
+  keeperName: DEFAULT_KEEPER_NAME,
+  defaultPinHint: false,
+  brewfatherConfigured: false,
+  enabledTabs: DEFAULT_ENABLED_TABS,
+  settings: {}
+};
+const HouseContext = createContext<HouseInfo>(EMPTY_HOUSE);
 function useHouse() {
   return useContext(HouseContext);
 }
 
-const GUEST_HIDDEN_PAGES = new Set(["scan", "restock", "settings"]);
+const GUEST_HIDDEN_PAGES = new Set(["scan", "restock", "settings", "messages"]);
+
+/** Admin-only pages are never gated by the guest tab switches. */
+const KEEPER_PAGES = new Set(["scan", "restock", "settings", "messages"]);
+
+/** Which guest tab switch controls each page. */
+const PAGE_TAB: Record<string, TabKey> = {
+  dashboard: "overview",
+  cocktails: "cocktails",
+  mixologist: "cocktails",
+  spirits: "cellar",
+  wines: "cellar",
+  packaged_beer: "cellar",
+  taps: "brewery",
+  brews: "brewery",
+  brewery: "brewery",
+  patrons: "patrons",
+  staff: "staff",
+  gallery: "gallery",
+  events: "events",
+  tipjar: "tipjar",
+  merch: "merch",
+  next: "whatsnext"
+};
+
+/** Guest-facing names for the tab switches in Settings. */
+const TAB_LABELS: Record<TabKey, string> = {
+  overview: "Overview",
+  cocktails: "Cocktails",
+  cellar: "Spirits & wine",
+  brewery: "Brewery Lab",
+  patrons: "Regulars",
+  staff: "Meet the Crew",
+  gallery: "Bar Gallery",
+  events: "Events & Parties",
+  tipjar: "Tip Jar",
+  merch: "Merch",
+  whatsnext: "Give us your 2 cents"
+};
+
+/**
+ * Guest devices only see pages whose tab is switched on. The keeper keeps access to
+ * everything so a tab can be switched back on from the page it controls.
+ */
+function pageEnabled(page: string, tabs: EnabledTabs, admin = false): boolean {
+  if (admin || KEEPER_PAGES.has(page)) return true;
+  const tab = PAGE_TAB[page];
+  return tab ? tabs[tab] === 1 : true;
+}
+
+/**
+ * Position of a page's controlling tab in the keeper's custom order. Pages that share a
+ * tab all return the same rank, so a stable sort keeps their relative order intact.
+ */
+function tabRank(page: string, order: TabKey[]): number {
+  const tab = PAGE_TAB[page];
+  const index = tab ? order.indexOf(tab) : -1;
+  return index < 0 ? order.length : index;
+}
+
+/** Falls back to the first guest-visible page whose tab is switched on, in tab order. */
+function firstEnabledPage(tabs: EnabledTabs, order: TabKey[], candidates: string[]): string {
+  return [...candidates]
+    .sort((a, b) => tabRank(a, order) - tabRank(b, order))
+    .find((page) => pageEnabled(page, tabs)) ?? "dashboard";
+}
 
 function scanProductName(result: ScanResult) {
   const product = result.product ?? {};
@@ -284,23 +376,69 @@ export default function App() {
   const [scanMiss, setScanMiss] = useState<{ upc: string } | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
-  const [house, setHouse] = useState<HouseInfo>({ keeperName: DEFAULT_KEEPER_NAME, defaultPinHint: false });
+  const [house, setHouse] = useState<HouseInfo>(EMPTY_HOUSE);
+  const [unread, setUnread] = useState(0);
+  const [contactOpen, setContactOpen] = useState(false);
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
+  const enabledTabs = house.enabledTabs;
+  const tabOrder = parseTabOrder(house.settings.tab_order);
+  /** Guest landing page, respecting the keeper's tab order and visibility switches. */
+  const guestLanding = firstEnabledPage(enabledTabs, tabOrder, [
+    "dashboard", "taps", "brewery", "cocktails", "spirits", "wines", "packaged_beer",
+    "patrons", "staff", "gallery", "events", "tipjar", "merch", "next"
+  ]);
+  const guestLandingRef = useRef(guestLanding);
+  guestLandingRef.current = guestLanding;
+
   const lock = useCallback(() => {
     clearToken();
     setAdmin(false);
     setScanDraft(undefined);
     setScanMiss(null);
     setUnlock(false);
-    setPage((current) => GUEST_HIDDEN_PAGES.has(current) ? "dashboard" : current);
+    setUnread(0);
+    setPage((current) => GUEST_HIDDEN_PAGES.has(current) ? guestLandingRef.current : current);
+  }, []);
+
+  /** Hands the iPad back to a guest: drops the token and returns to the guest landing page. */
+  const handToGuest = useCallback(() => {
+    clearToken();
+    setAdmin(false);
+    setScanDraft(undefined);
+    setScanMiss(null);
+    setUnlock(false);
+    setUnread(0);
+    setMobileNav(false);
+    setPage(guestLandingRef.current);
   }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
   useEffect(() => {
-    api<HouseInfo>("/house").then(setHouse).catch(() => {});
+    api<Record<string, unknown>>("/house").then((values) => {
+      setHouse({
+        keeperName: String(values.keeperName ?? DEFAULT_KEEPER_NAME),
+        defaultPinHint: Boolean(values.defaultPinHint),
+        brewfatherConfigured: Boolean(values.brewfatherConfigured),
+        enabledTabs: parseEnabledTabs(values.enabled_tabs),
+        settings: Object.fromEntries(Object.entries(values)
+          .filter(([, value]) => typeof value === "string")
+          .map(([key, value]) => [key, String(value)]))
+      });
+    }).catch(() => {});
   }, [admin]);
   useEffect(() => {
-    if (!admin && GUEST_HIDDEN_PAGES.has(page)) setPage("dashboard");
+    if (!admin && GUEST_HIDDEN_PAGES.has(page)) setPage(guestLanding);
+  }, [admin, page, guestLanding]);
+  useEffect(() => {
+    if (pageEnabled(page, enabledTabs, admin)) return;
+    setPage(guestLanding);
+  }, [page, enabledTabs, guestLanding, admin]);
+  useEffect(() => {
+    if (!admin) return;
+    const poll = () => api<{ unread: number }>("/messages/unread").then((data) => setUnread(data.unread)).catch(() => {});
+    poll();
+    const timer = window.setInterval(poll, 60_000);
+    return () => clearInterval(timer);
   }, [admin, page]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -320,11 +458,13 @@ export default function App() {
       const last = Date.parse(values.lastBackupDownload ?? "");
       setBackupDue(!last || Date.now() - last > 30 * 86400000);
     }).catch(() => {});
-    let timer = window.setTimeout(lock, 15 * 60_000);
-    const touch = () => { clearTimeout(timer); timer = window.setTimeout(lock, 15 * 60_000); };
-    ["pointerdown","keydown","scroll"].forEach((event) => window.addEventListener(event, touch, { passive:true }));
-    return () => { clearTimeout(timer); ["pointerdown","keydown","scroll"].forEach((event) => window.removeEventListener(event, touch)); };
-  }, [admin, lock]);
+    // Shared-iPad kiosk rule: three idle minutes hands the tablet back to guests.
+    const events = ["touchstart", "mousemove", "keydown", "pointerdown", "scroll"];
+    let timer = window.setTimeout(handToGuest, KIOSK_IDLE_MS);
+    const touch = () => { clearTimeout(timer); timer = window.setTimeout(handToGuest, KIOSK_IDLE_MS); };
+    events.forEach((event) => window.addEventListener(event, touch, { passive: true }));
+    return () => { clearTimeout(timer); events.forEach((event) => window.removeEventListener(event, touch)); };
+  }, [admin, handToGuest]);
 
   const navigate = (next: string) => { setPage(next); setMobileNav(false); };
   function handleScan(result: ScanResult) {
@@ -384,17 +524,32 @@ export default function App() {
   const collectionNav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard },
     ...modules.filter((m) => admin || !GUEST_HIDDEN_PAGES.has(m.id)).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
+    { id:"brewery",label:"Brewery Lab",icon:FlaskConical },
     { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },
     { id:"mixologist",label:"AI Mixologist",icon:Sparkles },
-    { id:"next",label:"What's next",icon:ThumbsUp }
-  ];
+    { id:"patrons",label:"Regulars",icon:Users },
+    { id:"staff",label:"Meet the Crew",icon:Users },
+    { id:"gallery",label:"Bar Gallery",icon:Camera },
+    { id:"events",label:"Events & Parties",icon:CalendarDays },
+    { id:"tipjar",label:"Tip Jar",icon:HandCoins },
+    { id:"merch",label:"Merch",icon:Shirt },
+    { id:"next",label:"Give us your 2 cents",icon:ThumbsUp }
+  ]
+    .filter((item) => pageEnabled(item.id, enabledTabs, admin))
+    .sort((a, b) => tabRank(a.id, tabOrder) - tabRank(b.id, tabOrder));
   const keeperNav = [
+    { id:"messages",label:"Inbox",icon:Mail,badge:unread },
     { id:"scan",label:"Scan bottles",icon:ScanBarcode },
     { id:"restock",label:"Restock",icon:ShoppingBag },
     { id:"settings",label:"Settings",icon:Settings }
   ];
-  function navButton(item: { id: string; label: string; icon: typeof Bottle }) {
-    return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}><item.icon size={19}/>{item.label}<ChevronRight size={15}/></button>;
+  const facebookGroupUrl = house.settings.facebook_group_url?.trim() ?? "";
+  function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
+    return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
+      <item.icon size={19}/>{item.label}
+      {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
+      <ChevronRight size={15}/>
+    </button>;
   }
 
   return (
@@ -406,16 +561,30 @@ export default function App() {
         <nav>
           <span className="nav-label">COLLECTION</span>
           {collectionNav.map(navButton)}
-          {admin && keeperNav.map(navButton)}
+          {admin && <>
+            <span className="nav-label">KEEPER</span>
+            {keeperNav.map(navButton)}
+          </>}
+          {facebookGroupUrl && <a className="nav-external" href={facebookGroupUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={19}/>Private Facebook Group<ChevronRight size={15}/>
+          </a>}
         </nav>
         <div className="sidebar-footer">
-          <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Admin unlocked" : "Guest night"}</strong><small>{admin ? "Tap to lock" : "Tap to unlock"}</small></span></button>
+          <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong><small>{admin ? "Tap to lock" : "Tap for Keeper Mode"}</small></span></button>
         </div>
       </aside>
       <main>
         <header className="topbar">
           <button className="icon-button menu-button" onClick={() => setMobileNav(true)}><Menu/></button>
           <div className="top-actions">
+            {admin && <button className="kiosk-lock" onClick={handToGuest}>
+              <Lock size={18}/> Lock / Hand to Guest
+            </button>}
+            {admin && <button className="icon-button topbar-inbox" onClick={() => navigate("messages")} aria-label={unread ? `${unread} unread messages` : "Inbox"}>
+              <Mail/>
+              {unread > 0 && <span className="topbar-badge">{unread > 99 ? "99+" : unread}</span>}
+            </button>}
+            {!admin && <button className="icon-button" onClick={() => setUnlock(true)} aria-label="Enter Keeper PIN"><Key size={18}/></button>}
             <button className="icon-button" onClick={() => setTheme(cycleTheme(theme))} aria-label="Change theme">{theme === "light" ? <Sun/> : theme === "punk" ? <Zap/> : <Moon/>}</button>
           </div>
         </header>
@@ -456,11 +625,25 @@ export default function App() {
             onManual={handleScanManual}
           />}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
-          {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme} onHouseChange={(next) => setHouse((current) => ({ ...current, ...next }))}/>}
+          {page === "messages" && admin && <MessagesInbox onUnreadChange={setUnread}/>}
+          {page === "brewery" && <BreweryLab admin={admin} keeperName={house.keeperName} go={navigate}/>}
+          {page === "patrons" && <PatronsPage admin={admin} keeperName={house.keeperName}/>}
+          {page === "staff" && <StaffPage admin={admin} keeperName={house.keeperName}/>}
+          {page === "gallery" && <GalleryPage admin={admin} keeperName={house.keeperName}/>}
+          {page === "events" && <EventsPage admin={admin} keeperName={house.keeperName}/>}
+          {page === "tipjar" && <TipJarPage settings={house.settings} keeperName={house.keeperName}/>}
+          {page === "merch" && <MerchPage admin={admin} keeperName={house.keeperName}/>}
+          {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme} onHouseChange={(next) => setHouse((current) => ({
+            ...current,
+            ...next,
+            settings: { ...current.settings, ...(next.settings ?? {}) }
+          }))}/>}
         </div>
+        {!admin && <GuestFooter locationText={house.settings.bar_location_text ?? ""} onContact={() => setContactOpen(true)}/>}
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
+      {contactOpen && <ContactModal keeperName={house.keeperName} close={() => setContactOpen(false)}/>}
     </div>
     </HouseContext.Provider>
   );
@@ -519,7 +702,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     <section>
       <div className="section-heading">
         <div><span className="eyebrow">AT A GLANCE</span><h2>Inside the vault</h2></div>
-        {!admin && <span className="guest-badge"><Lock size={13}/> DIGITAL BAR MENU</span>}
+        {!admin && <span className="guest-badge"><Lock size={13}/> PATRON MODE</span>}
       </div>
       <div className={`stat-grid${!admin ? " guest-stats" : ""}`}>
         {stats.map((stat) => (
@@ -639,7 +822,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     <section className="feature-grid">
       <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes and random picks from what’s actually on the shelf.</p></div><Shuffle size={56}/></button>
       <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. We’ll mix from what’s on the shelf, then show {keeperName} the drink.</p></div><Sparkles size={56}/></button>
-      <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>What’s next?</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
+      <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>Give us your 2 cents</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
     </section>
   </>;
 }
@@ -838,7 +1021,7 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
     setError("");
     api<NextBoards>(`/next?voter=${encodeURIComponent(voter)}`)
       .then(setBoards)
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load What’s next."));
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the board."));
   }
   useEffect(() => { load(); }, []);
 
@@ -865,7 +1048,7 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
   }
 
   async function drop(item: NextItem) {
-    if (!confirm(`Remove ${item.name} from What’s next?`)) return;
+    if (!confirm(`Remove ${item.name} from the board?`)) return;
     try {
       await api(`/next/${item.id}`, { method: "DELETE" });
       load();
@@ -933,10 +1116,10 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
   return <>
     <PageTitle
       eyebrow="GUEST PICKS"
-      title="What’s next."
+      title="Give us your 2 cents."
       subtitle={`Ask for liquor and wine you want in the vault. ${keeperName} puts kegs and brew ideas on the board — tap up or down for what you’d actually drink.`}
     />
-    {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not update What’s next</strong><span>{error}</span></div></div>}
+    {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not update the board</strong><span>{error}</span></div></div>}
 
     <section className="next-board">
       <div className="section-heading"><div><span className="eyebrow">ON THE SHELF</span><h2>Liquor &amp; wine</h2></div></div>
@@ -1127,6 +1310,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
   seedCreate?: Item; onSeedConsumed?: () => void; onPutOnTap?: (item: Item) => void;
 }) {
+  const { brewfatherConfigured } = useHouse();
   const [items,setItems] = useState<Item[]>([]);
   const [search,setSearch] = useState("");
   const [editing,setEditing] = useState<Item | null | undefined>();
@@ -1134,6 +1318,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   const [finderOpen,setFinderOpen] = useState(false);
   const [loadError,setLoadError] = useState("");
   const [taps,setTaps] = useState<Item[]>([]);
+  const [syncing,setSyncing] = useState(false);
   const openedScanKey = useRef<number | undefined>(undefined);
   const load = useCallback(() => {
     setLoadError("");
@@ -1141,7 +1326,23 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       setLoadError(err instanceof Error ? err.message : "Could not load this section.");
     });
   }, [module.id]);
-  useEffect(() => { load(); setViewing(undefined); }, [load]);
+  const syncFromBrewfather = useCallback(async (force = false) => {
+    setSyncing(true);
+    let syncError = "";
+    try {
+      await api("/brews/sync", { method: "POST", body: JSON.stringify({ force }) });
+    } catch (err) {
+      if (force) syncError = err instanceof Error ? err.message : "Could not sync Brewfather.";
+    }
+    await load();
+    if (syncError) setLoadError(syncError);
+    setSyncing(false);
+  }, [load]);
+  useEffect(() => {
+    setViewing(undefined);
+    if (admin && module.id === "brews" && brewfatherConfigured) void syncFromBrewfather(false);
+    else void load();
+  }, [admin, module.id, brewfatherConfigured, load, syncFromBrewfather]);
   useEffect(() => {
     if (module.id !== "brews") {
       setTaps([]);
@@ -1216,11 +1417,16 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
           ? [...filtered].sort(compareSpirits)
           : filtered;
   const canFind = ["spirits","packaged_beer","wines","taps","brews"].includes(module.id);
+  const brewfatherReady = admin && module.id === "brews" && brewfatherConfigured;
   const emptyActions = admin ? <>
+    {brewfatherReady && <button className="secondary" disabled={syncing} onClick={() => void syncFromBrewfather(true)}><RefreshCw size={17}/> {syncing ? "Syncing…" : "Sync from Brewfather"}</button>}
     {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {findBeerLabel(module.id)}</button>}
     <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>
     <button className="secondary" onClick={openScanner}><Search size={17}/> Scan bottle</button>
   </> : undefined;
+  const emptyText = brewfatherReady
+    ? "Sync batches from Brewfather, or add one by hand."
+    : admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet.";
 
   if (viewing) {
     return <BottleDetail
@@ -1241,6 +1447,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     <div className="toolbar">
       <label className="search"><Search/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder={`Filter ${module.label.toLowerCase()}…`}/></label>
       {admin && <div className="toolbar-actions">
+        {brewfatherReady && <button className="secondary" disabled={syncing} onClick={() => void syncFromBrewfather(true)}><RefreshCw size={17}/> {syncing ? "Syncing…" : "Sync now"}</button>}
         {canFind && <button className="secondary" onClick={() => setFinderOpen(true)}><Search size={17}/> {findBeerLabel(module.id)}</button>}
         {module.id !== "taps" && <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>}
       </div>}
@@ -1253,7 +1460,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       {activeFilters && <button type="button" className="secondary" onClick={() => { setSearch(""); setMaker("All"); setKind("All"); setTag("All"); setFlavor("All"); }}>Clear</button>}
     </div>}
     {loadError ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
-    !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet."} actions={emptyActions}/> :
+    !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={emptyText} actions={emptyActions}/> :
     !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
       <div className="inventory-grid">{listed.map((item) => {
         const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
@@ -1261,7 +1468,9 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
         const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
         const outOfStock = (module.id === "packaged_beer" && packagedCount(item.count) <= 0)
           || (module.id === "spirits" && isSpiritEmpty(item));
-        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}`} key={item.id} onClick={() => setViewing(item)}>
+        const blocked = Number(item.blocked_from_ordering ?? 0) === 1;
+        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}${blocked ? " blocked-bottle" : ""}`} key={item.id} onClick={() => setViewing(item)}>
+        {blocked && <span className="blocked-ribbon">{BLOCKED_RIBBON_LABEL}</span>}
         <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
@@ -1395,6 +1604,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
         </div>
         <div>
           <span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.makerKey] ?? item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
+          {Number(item.blocked_from_ordering ?? 0) === 1 && <span className="blocked-ribbon detail-ribbon">{BLOCKED_RIBBON_LABEL}</span>}
           <h1>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h1>
           <div className="meta">
             {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
@@ -1599,9 +1809,16 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   const [error,setError] = useState("");
   const [suggestLock,setSuggestLock] = useState(() => String(item?.[module.primary] ?? ""));
   const existing = Boolean(item?.id);
+  // Drafts are keyed per module and per record so a tap edit never restores into a spirit.
+  const draftScope = `${module.id}:${item?.id ?? "new"}`;
+  const { recovered, discard, dismiss, commit } = useFormDraft(draftScope, form, !review);
   const flavors = parseList(form.flavors);
   const hops = parseList(form.hops);
   const tags = parseList(form.tags);
+  function restoreDraft() {
+    if (recovered) setForm(recovered);
+    dismiss();
+  }
   async function submit(e:React.FormEvent) {
     e.preventDefault();
     const payload: Record<string, unknown> = {
@@ -1631,6 +1848,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     }
     try {
       await api(`/inventory/${module.id}${existing ? `/${item!.id}` : ""}`,{method:existing?"PUT":"POST",body:JSON.stringify(payload)});
+      commit();
       saved();
     } catch(err) {
       setError(err instanceof Error?err.message:"Could not save");
@@ -1672,7 +1890,18 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     });
   }
   return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
-    <div className="form-grid">{module.fields.map((field) => {
+    {recovered && <div className="draft-restore">
+      <div><strong>Unsaved draft found</strong><span>You left this form part-way through. Restore what you had typed?</span></div>
+      <div className="draft-restore-actions">
+        <button type="button" className="secondary" onClick={discard}>Start fresh</button>
+        <button type="button" className="primary" onClick={restoreDraft}>Restore draft</button>
+      </div>
+    </div>}
+    <div className="form-grid">{(module.id === "spirits" || module.id === "wines") && <label className="full toggle-field">
+      <input type="checkbox" checked={Number(form.blocked_from_ordering ?? 0) === 1} onChange={(e) => setForm({ ...form, blocked_from_ordering: e.target.checked ? 1 : 0 })}/>
+      <span><strong>Not for bar patrons</strong><small>Hides this bottle from the cocktail shelf and substitute suggestions, and flags it with an amber ribbon.</small></span>
+    </label>}
+    {module.fields.map((field) => {
       if (field.type === "image") {
         return <div className="full field-block" key={field.key}><span>{field.label}</span>
           <ImageField value={String(form.image_url ?? "")} onChange={(url) => setForm({ ...form, image_url: url })}/>
@@ -1902,12 +2131,18 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     {error && <p className="error">{error}</p>}<footer className="modal-footer"><button type="button" className="secondary" onClick={close}>Cancel</button><button className="primary">Save to vault</button></footer></form></div>;
 }
 
-type IngredientLine = { text: string; state: "have" | "pantry" | "substitute" | "missing"; using?: string };
+type IngredientLine = {
+  text: string;
+  state: "have" | "pantry" | "substitute" | "missing";
+  using?: string;
+  substitute_options?: SubstituteOption[];
+};
 type CocktailDrink = Item & {
   ingredients: string[];
   lines?: IngredientLine[];
   missing: string[];
   readiness: string;
+  has_substitutes?: boolean;
   season: string;
   garnish: string;
   method: string;
@@ -1942,6 +2177,12 @@ function cocktailLines(drink: CocktailDrink): IngredientLine[] {
     text,
     state: drink.missing?.includes(text) ? "missing" : "have"
   }));
+}
+
+function substituteGroups(lines: IngredientLine[]): SubstituteGroup[] {
+  return lines
+    .filter((line) => Boolean(line.substitute_options?.length))
+    .map((line) => ({ ingredient: line.text, options: line.substitute_options ?? [] }));
 }
 
 function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sharedUrl?: string; onSharedConsumed?: () => void }) {
@@ -2073,7 +2314,9 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
   const [error, setError] = useState("");
   const [removing, setRemoving] = useState(false);
   const [fav, setFav] = useState(Number(drink.bartender_fav) > 0);
+  const [substitutesOpen, setSubstitutesOpen] = useState(false);
   const lines = cocktailLines(drink);
+  const groups = substituteGroups(lines);
   const custom = drink.collection === "Custom Cocktails";
   async function remove() {
     if (!custom || !admin || !confirm("Remove this custom recipe?")) return;
@@ -2128,6 +2371,9 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
                 </li>
               ))}
             </ul>
+            {groups.length > 0 && <button type="button" className="secondary substitutes-trigger" onClick={() => setSubstitutesOpen(true)}>
+              <Library size={16}/> View Substitutes
+            </button>}
           </div>
           <div className="recipe-details">
             <div><span>METHOD</span><strong>{drink.method}</strong></div>
@@ -2145,6 +2391,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
           <button className="primary" onClick={close}>Cheers</button>
         </footer>
       </section>
+      {substitutesOpen && <SubstitutesDrawer groups={groups} close={() => setSubstitutesOpen(false)}/>}
     </div>
   );
 }
@@ -2248,7 +2495,7 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
         <footer className="modal-footer">
           <button type="button" className="secondary" onClick={close}>Close</button>
           {recipe && admin && <button type="button" className="primary" onClick={saveBook}><Save size={16}/> Save to Custom Cocktails</button>}
-          {recipe && !admin && <small>Unlock admin to save this to the recipe book.</small>}
+          {recipe && !admin && <small>Switch to Keeper Mode to save this to the recipe book.</small>}
         </footer>
       </section>
     </div>
@@ -2259,7 +2506,22 @@ type GeneratedRecipe = { name:string; ingredients:string[]; method:string; glass
 
 function Mixologist({admin}:{admin:boolean}) {
   const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
-  async function ask(request=prompt){setLoading(true);setRecipe(undefined);setError("");setSaved(false);try{const data=await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request})});setRecipe(data.recipe);}catch(e){setError(e instanceof Error?e.message:"The AI service could not generate a recipe.");}finally{setLoading(false);}}
+  async function ask(request=prompt){
+    setLoading(true);setRecipe(undefined);setError("");setSaved(false);
+    // The kiosk gives up after five seconds rather than leaving a guest staring at a spinner.
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => abort.abort(), AI_MIXOLOGIST_TIMEOUT_MS);
+    try {
+      const data = await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request}),signal:abort.signal});
+      setRecipe(data.recipe);
+    } catch(e) {
+      const timedOut = abort.signal.aborted || (e instanceof DOMException && e.name === "AbortError");
+      setError(timedOut ? AI_UNAVAILABLE_NOTICE : e instanceof Error ? e.message : "The AI service could not generate a recipe.");
+    } finally {
+      clearTimeout(timeout);
+      setLoading(false);
+    }
+  }
   async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
   return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples. Walk the drink over to the bar when you want it made."/>
     <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from my vault</button></div>
@@ -2278,14 +2540,30 @@ function lastBackupLabel(iso?: string) {
   return `Last portable copy was ${days} days ago.`;
 }
 
+function lastBrewfatherSyncLabel(iso?: string) {
+  const stamp = Date.parse(iso ?? "");
+  if (!stamp) return "Not synced yet.";
+  const minutes = Math.max(0, Math.floor((Date.now() - stamp) / 60_000));
+  if (minutes < 1) return "Last sync was just now.";
+  if (minutes === 1) return "Last sync was a minute ago.";
+  if (minutes < 60) return `Last sync was ${minutes} minutes ago.`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "Last sync was an hour ago.";
+  if (hours < 24) return `Last sync was ${hours} hours ago.`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Last sync was yesterday.";
+  return `Last sync was ${days} days ago.`;
+}
+
 function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:string)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void}) {
-  const [settings,setSettings] = useState<Record<string,string>>({});
+  const [settings,setSettings] = useState<Record<string, string | boolean>>({});
   const [keeperDraft,setKeeperDraft] = useState(DEFAULT_KEEPER_NAME);
   const [message,setMessage]=useState("");
+  const [syncing,setSyncing]=useState(false);
   useEffect(()=>{
-    api<Record<string,string>>("/settings").then((values) => {
+    api<Record<string, string | boolean>>("/settings").then((values) => {
       setSettings(values);
-      setKeeperDraft(clipKeeperName(values.keeperName));
+      setKeeperDraft(clipKeeperName(String(values.keeperName ?? "")));
     }).catch((err)=>setMessage(err instanceof Error?err.message:"Could not load settings"));
   },[]);
   async function saveKeeper() {
@@ -2315,6 +2593,22 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
       setMessage(err instanceof Error ? err.message : "Could not save restock rules");
     }
   }
+  async function syncBrewfather() {
+    setSyncing(true);
+    try {
+      const result = await api<{ skipped: boolean; inserted: number; updated: number; lastSync: string | null }>("/brews/sync", {
+        method: "POST",
+        body: JSON.stringify({ force: true })
+      });
+      setSettings((current) => ({ ...current, brewfatherLastSync: result.lastSync ?? current.brewfatherLastSync }));
+      onHouseChange({ brewfatherConfigured: true });
+      setMessage(result.skipped ? "Already synced recently." : `Brewfather sync added ${result.inserted} and updated ${result.updated}.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not sync Brewfather");
+    } finally {
+      setSyncing(false);
+    }
+  }
   const download=()=>{
     downloadExport("db")
       .then(() => {
@@ -2323,18 +2617,62 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
       })
       .catch(()=>setMessage("Export failed"));
   };
+  const [restarting,setRestarting]=useState(false);
+  function text(key: string) {
+    return String(settings[key] ?? "");
+  }
+  async function saveSettings(partial: Record<string, string>) {
+    setSettings((current) => ({ ...current, ...partial }));
+    try {
+      await api("/settings", { method: "PUT", body: JSON.stringify(partial) });
+      setMessage("Saved");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not save that setting");
+    }
+  }
+  const enabledTabs = parseEnabledTabs(text("enabled_tabs"));
+  const tabOrder = parseTabOrder(text("tab_order"));
+  async function moveTab(index: number, delta: number) {
+    const target = index + delta;
+    if (target < 0 || target >= tabOrder.length) return;
+    const next = [...tabOrder];
+    [next[index], next[target]] = [next[target], next[index]];
+    const json = serializeTabOrder(next);
+    await saveSettings({ tab_order: json });
+    onHouseChange({ settings: { tab_order: json } });
+  }
+  async function toggleTab(tab: TabKey) {
+    const next = { ...enabledTabs, [tab]: enabledTabs[tab] ? 0 : 1 } as EnabledTabs;
+    const json = serializeEnabledTabs(next);
+    setSettings((current) => ({ ...current, enabled_tabs: json }));
+    await saveSettings({ enabled_tabs: json });
+    onHouseChange({ enabledTabs: next });
+  }
+  async function restartContainer() {
+    if (!confirm("Checkpoint the database and restart the container? The vault will be unavailable for a few seconds.")) return;
+    setRestarting(true);
+    try {
+      await api("/system/restart", { method: "POST" });
+      setMessage("Restarting. Reload the page in a few seconds.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not restart the container");
+      setRestarting(false);
+    }
+  }
   const restockRules = parseRestockThresholds(settings);
+  const brewfatherOn = settings.brewfatherConfigured === true || settings.brewfatherConfigured === "true";
+  const bartenderOn = text("guest_bartender_enabled") === "1";
   return <>
     <PageTitle
       eyebrow="THE KEEPER"
       title="The house keys."
-      subtitle="House name, PIN, restock cutoffs, and a copy of the vault you can take with you."
+      subtitle="House name, guest tabs, tip handles, PIN, restock cutoffs, Brewfather, and a copy of the vault you can take with you."
     />
     <div className="settings-grid">
       <section className="settings-card">
         <span className="eyebrow">THE HOUSE</span>
         <h3>Keeper name</h3>
-        <p>Used on What’s next and guest copy instead of a hardcoded name.</p>
+        <p>Used on Give us your 2 cents and guest copy instead of a hardcoded name.</p>
         <label><span>Name</span><input value={keeperDraft} maxLength={MAX_KEEPER_NAME} onChange={(e)=>setKeeperDraft(e.target.value)} placeholder={DEFAULT_KEEPER_NAME}/></label>
         <button type="button" className="primary" onClick={() => void saveKeeper()}>Save house name</button>
       </section>
@@ -2349,7 +2687,7 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Light, dark, or punk. Guest night uses the same toggle in the top bar.</p>
+        <p>Light, dark, or punk. Patron Mode uses the same toggle in the top bar.</p>
         <div className="theme-grid">{(["light","dark","punk"] as const).map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}
@@ -2365,24 +2703,182 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
         <label><span>Wine — flag when below</span><div className="chip-row restock-stops">{RESTOCK_WINE_STOPS.map((count) => <button type="button" key={count} className={`chip${restockRules.wineBelow === count ? " active" : ""}`} onClick={() => void saveRestock({ wineBelow: count })}>{count}</button>)}</div></label>
       </section>
       <section className="settings-card">
+        <span className="eyebrow">BREWFATHER</span>
+        <h3>Brewery sync</h3>
+        <p>{brewfatherOn
+          ? "Batches pull from Brewfather. The vault displays them; packaged beer and taps stay here."
+          : "Add BREWFATHER_USER_ID and BREWFATHER_API_KEY on the host to pull batches. Keys never appear here."}</p>
+        {brewfatherOn && <p>{lastBrewfatherSyncLabel(String(settings.brewfatherLastSync ?? ""))}</p>}
+        <button type="button" className="secondary" disabled={!brewfatherOn || syncing} onClick={() => void syncBrewfather()}>
+          <RefreshCw size={17}/> {syncing ? "Syncing…" : "Sync now"}
+        </button>
+      </section>
+      <BulkImport onMessage={setMessage}/>
+      <section className="settings-card">
+        <span className="eyebrow">GUEST PORTAL</span>
+        <h3>Visible tabs</h3>
+        <p>Switch a tab off and it disappears from every guest device. Keeper pages are never hidden.</p>
+        <div className="chip-row">{TAB_KEYS.map((tab) => (
+          <button type="button" key={tab} className={`chip${enabledTabs[tab] ? " active" : ""}`} onClick={() => void toggleTab(tab)}>{TAB_LABELS[tab]}</button>
+        ))}</div>
+
+        <h3 className="settings-subhead">Sidebar order</h3>
+        <p>Arrange how the tabs stack in the sidebar. Patrons see the same order, minus anything switched off above.</p>
+        <ol className="tab-order-list">{tabOrder.map((tab, index) => (
+          <li className={`tab-order-row${enabledTabs[tab] ? "" : " tab-order-off"}`} key={tab}>
+            <span className="tab-order-rank">{index + 1}</span>
+            <span className="tab-order-name">{TAB_LABELS[tab]}</span>
+            {!enabledTabs[tab] && <span className="tab-order-hidden">Hidden</span>}
+            <div className="tab-order-actions">
+              <button type="button" className="icon-button" aria-label={`Move ${TAB_LABELS[tab]} up`} disabled={index === 0} onClick={() => void moveTab(index, -1)}><ChevronUp size={17}/></button>
+              <button type="button" className="icon-button" aria-label={`Move ${TAB_LABELS[tab]} down`} disabled={index === tabOrder.length - 1} onClick={() => void moveTab(index, 1)}><ChevronDown size={17}/></button>
+            </div>
+          </li>
+        ))}</ol>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">THE DOOR</span>
+        <h3>Location &amp; community</h3>
+        <p>Shown in the guest footer. Keep the exact address out of it — guests message you for that.</p>
+        <label><span>Location line</span><input value={text("bar_location_text")} onChange={(e)=>setSettings({...settings, bar_location_text: e.target.value})} onBlur={(e)=>void saveSettings({ bar_location_text: e.target.value })} placeholder="Located in 19605"/></label>
+        <label><span>Private Facebook group URL</span><input value={text("facebook_group_url")} onChange={(e)=>setSettings({...settings, facebook_group_url: e.target.value})} onBlur={(e)=>void saveSettings({ facebook_group_url: e.target.value })} placeholder="https://facebook.com/groups/…"/></label>
+        <label><span>Discord webhook for unanswered messages</span><input value={text("discord_webhook_url")} onChange={(e)=>setSettings({...settings, discord_webhook_url: e.target.value})} onBlur={(e)=>void saveSettings({ discord_webhook_url: e.target.value })} placeholder="https://discord.com/api/webhooks/…"/></label>
+        <small className="field-hint">A DISCORD_WEBHOOK_URL environment variable overrides this value.</small>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">HOUSE TIP JAR</span>
+        <h3>Tip handles</h3>
+        <p>Guests get a tappable deep link plus an on-screen QR code for each handle you fill in.</p>
+        <label><span>Blurb</span><textarea value={text("house_tip_blurb")} onChange={(e)=>setSettings({...settings, house_tip_blurb: e.target.value})} onBlur={(e)=>void saveSettings({ house_tip_blurb: e.target.value })}/></label>
+        <label><span>Venmo</span><input value={text("tip_venmo")} onChange={(e)=>setSettings({...settings, tip_venmo: e.target.value})} onBlur={(e)=>void saveSettings({ tip_venmo: e.target.value })} placeholder="@Nick-Vault"/></label>
+        <label><span>Cash App</span><input value={text("tip_cashapp")} onChange={(e)=>setSettings({...settings, tip_cashapp: e.target.value})} onBlur={(e)=>void saveSettings({ tip_cashapp: e.target.value })} placeholder="$smokybarrel"/></label>
+        <label><span>PayPal</span><input value={text("tip_paypal")} onChange={(e)=>setSettings({...settings, tip_paypal: e.target.value})} onBlur={(e)=>void saveSettings({ tip_paypal: e.target.value })} placeholder="paypal.me handle"/></label>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">GUEST BARTENDER</span>
+        <h3>Behind the stick tonight</h3>
+        <p>Turn this on and a guest bartender card sits above the house tip jar, with an Apple Cash action and QR code.</p>
+        <label className="toggle-field">
+          <input type="checkbox" checked={bartenderOn} onChange={(e)=>void saveSettings({ guest_bartender_enabled: e.target.checked ? "1" : "0" })}/>
+          <span><strong>Show the guest bartender card</strong></span>
+        </label>
+        {bartenderOn && <>
+          <label><span>Name</span><input value={text("guest_bartender_name")} onChange={(e)=>setSettings({...settings, guest_bartender_name: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_name: e.target.value })}/></label>
+          <label><span>Bio</span><textarea value={text("guest_bartender_bio")} onChange={(e)=>setSettings({...settings, guest_bartender_bio: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_bio: e.target.value })}/></label>
+          <label><span>Photo URL</span><input value={text("guest_bartender_photo")} onChange={(e)=>setSettings({...settings, guest_bartender_photo: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_photo: e.target.value })}/></label>
+          <label><span>Apple Cash phone number</span><input value={text("guest_bartender_applecash")} onChange={(e)=>setSettings({...settings, guest_bartender_applecash: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_applecash: e.target.value })} placeholder="(610) 555-0134"/></label>
+          <label><span>Venmo</span><input value={text("guest_bartender_venmo")} onChange={(e)=>setSettings({...settings, guest_bartender_venmo: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_venmo: e.target.value })}/></label>
+          <label><span>Cash App</span><input value={text("guest_bartender_cashapp")} onChange={(e)=>setSettings({...settings, guest_bartender_cashapp: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_cashapp: e.target.value })}/></label>
+          <label><span>PayPal</span><input value={text("guest_bartender_paypal")} onChange={(e)=>setSettings({...settings, guest_bartender_paypal: e.target.value})} onBlur={(e)=>void saveSettings({ guest_bartender_paypal: e.target.value })}/></label>
+        </>}
+      </section>
+      <section className="settings-card">
         <span className="eyebrow">PORTABLE COPY</span>
         <h3>Backup</h3>
-        <p>Daily snapshots stay on this machine. Download a copy when you want one in the drawer. {lastBackupLabel(settings.lastBackupDownload)}</p>
+        <p>Daily snapshots stay on this machine. Download a copy when you want one in the drawer. {lastBackupLabel(String(settings.lastBackupDownload ?? ""))}</p>
         <button type="button" className="secondary" onClick={download}><Database/> Download the vault</button>
+      </section>
+      <section className="settings-card">
+        <span className="eyebrow">MAINTENANCE</span>
+        <h3>Restart the container</h3>
+        <p>Checkpoints the write-ahead log, then exits so your restart policy brings the vault back up. Nothing is lost.</p>
+        <button type="button" className="secondary danger" disabled={restarting} onClick={() => void restartContainer()}>
+          <Power size={17}/> {restarting ? "Restarting…" : "Safe restart"}
+        </button>
       </section>
     </div>
     {message&&<div className="toast">{message}</div>}
   </>;
 }
 
+const BULK_IMPORT_SAMPLE = `[
+  { "upc": "080686000891", "name": "Buffalo Trace", "brand": "Buffalo Trace", "category": "Bourbon", "abv": 45, "volume_ml": 750 },
+  { "table": "packaged_beer", "name": "Sip of Sunshine", "brand": "Lawson's Finest", "style": "IPA", "abv": 8, "count": 4 }
+]`;
+
+type ImportOutcome = {
+  imported: number;
+  cached: number;
+  skipped: number;
+  items: Array<{ table: string; name: string }>;
+  rejected: Array<{ name: string; reason: string }>;
+};
+
+function BulkImport({onMessage}:{onMessage:(value:string)=>void}){
+  const [text,setText]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [outcome,setOutcome]=useState<ImportOutcome|null>(null);
+  const [error,setError]=useState("");
+
+  async function run(){
+    setError("");
+    setOutcome(null);
+    let parsed: unknown;
+    try{
+      parsed=JSON.parse(text);
+    }catch{
+      setError("That is not valid JSON. Paste an array of items, or { \"items\": [...] }.");
+      return;
+    }
+    const items=Array.isArray(parsed)?parsed:(parsed as {items?:unknown})?.items;
+    if(!Array.isArray(items)||!items.length){
+      setError("Paste a JSON array of bottles, or an object with an \"items\" array.");
+      return;
+    }
+    setBusy(true);
+    try{
+      const result=await api<ImportOutcome>("/inventory/import-batch",{method:"POST",body:JSON.stringify({ items })});
+      setOutcome(result);
+      onMessage(`Imported ${result.imported} bottle${result.imported===1?"":"s"}`);
+      if(result.imported) setText("");
+    }catch(err){
+      setError(err instanceof Error?err.message:"Import failed");
+    }finally{
+      setBusy(false);
+    }
+  }
+
+  return <section className="settings-card">
+    <span className="eyebrow">CATALOG</span>
+    <h3>Bulk barcode / catalog import</h3>
+    <p>Paste a JSON array of bottles to seed the vault in one pass. Each row also fills the barcode cache, so scanning any of these codes later resolves instantly without a web lookup.</p>
+    <textarea className="bulk-import-input" rows={8} spellCheck={false} value={text} placeholder={BULK_IMPORT_SAMPLE} onChange={(e)=>setText(e.target.value)}/>
+    <div className="bulk-import-actions">
+      <button type="button" className="primary" disabled={busy||!text.trim()} onClick={() => void run()}>
+        <Database size={17}/> {busy?"Importing…":"Import & Cache Barcodes"}
+      </button>
+      <button type="button" className="secondary" disabled={busy} onClick={()=>{setText(BULK_IMPORT_SAMPLE);setOutcome(null);setError("");}}>Load example</button>
+    </div>
+    {error && <p className="error">{error}</p>}
+    {outcome && <>
+      <p className="bulk-import-banner">
+        Successfully imported {outcome.imported} bottle{outcome.imported===1?"":"s"} and cached {outcome.cached} barcode{outcome.cached===1?"":"s"}.
+        {outcome.skipped>0 && ` ${outcome.skipped} row${outcome.skipped===1?"":"s"} skipped.`}
+      </p>
+      <div className="bulk-import-result">
+        {outcome.items.map((item,index)=>(<span key={`in-${index}`}>{item.name} → {item.table.replace("_"," ")}</span>))}
+        {outcome.rejected.map((item,index)=>(<span className="muted" key={`out-${index}`}>{item.name}: {item.reason}</span>))}
+      </div>
+    </>}
+  </section>;
+}
+
 function PinChange({onMessage,onPinChanged}:{onMessage:(value:string)=>void;onPinChanged?:()=>void}){
   const [currentPin,setCurrentPin]=useState("");
   const [newPin,setNewPin]=useState("");
+  const [confirmPin,setConfirmPin]=useState("");
+  const digitsOnly=(value:string)=>value.replace(/\D/g,"").slice(0,12);
+  /** The new fields stay locked until the keeper proves they know the current PIN. */
+  const verified=/^\d{4,12}$/.test(currentPin);
+  const longEnough=/^\d{4,12}$/.test(newPin);
+  const matches=longEnough&&newPin===confirmPin;
+  const mismatch=Boolean(confirmPin)&&newPin!==confirmPin;
   async function change(){
     try{
       await api("/auth/pin",{method:"POST",body:JSON.stringify({currentPin,newPin})});
       setCurrentPin("");
       setNewPin("");
+      setConfirmPin("");
       onMessage("Master PIN updated");
       onPinChanged?.();
     }catch(error){
@@ -2390,17 +2886,113 @@ function PinChange({onMessage,onPinChanged}:{onMessage:(value:string)=>void;onPi
     }
   }
   return <div className="stack settings-pin">
-    <label><span>Current PIN</span><input type="password" inputMode="numeric" autoComplete="off" value={currentPin} onChange={(e)=>setCurrentPin(e.target.value.replace(/\D/g,"").slice(0,12))}/></label>
-    <label><span>New PIN</span><input type="password" inputMode="numeric" autoComplete="off" value={newPin} onChange={(e)=>setNewPin(e.target.value.replace(/\D/g,"").slice(0,12))}/></label>
-    <button type="button" className="primary" disabled={!currentPin||!/^\d{4,12}$/.test(newPin)} onClick={() => void change()}>Update master PIN</button>
+    <label><span>Current PIN</span><input type="password" inputMode="numeric" autoComplete="off" value={currentPin} onChange={(e)=>setCurrentPin(digitsOnly(e.target.value))}/></label>
+    <label><span>New PIN</span><input type="password" inputMode="numeric" autoComplete="off" disabled={!verified} value={newPin} onChange={(e)=>setNewPin(digitsOnly(e.target.value))}/></label>
+    <label><span>Confirm new PIN</span><input type="password" inputMode="numeric" autoComplete="off" disabled={!verified} value={confirmPin} onChange={(e)=>setConfirmPin(digitsOnly(e.target.value))}/></label>
+    {!verified && <small>Enter the current PIN to unlock these fields.</small>}
+    {mismatch && <p className="error">Those PINs do not match.</p>}
+    <button type="button" className="primary" disabled={!verified||!matches} onClick={() => void change()}>Update master PIN</button>
+    <small>Four digits keeps the PIN enterable on the unlock numpad.</small>
   </div>;
 }
 
+const PIN_LENGTH = 4;
+const NUMPAD_DIGITS = ["1","2","3","4","5","6","7","8","9"];
+
+/**
+ * Touch-first PIN entry. There is deliberately no text input: an on-screen pad keeps the
+ * iOS keyboard from covering the modal on a shared iPad, so a hardware keyboard is wired
+ * up separately for desktop keepers.
+ */
 function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
   const { defaultPinHint } = useHouse();
-  const [pin,setPinValue]=useState("");const [error,setError]=useState("");
-  async function submit(e:React.FormEvent){e.preventDefault();try{const data=await api<{token:string}>("/auth/unlock",{method:"POST",body:JSON.stringify({pin})});setToken(data.token);onSuccess();}catch{setError("That PIN did not open the vault.");}}
-  return <div className="modal-backdrop"><form className="modal unlock-modal" onSubmit={submit}><button type="button" className="icon-button close" onClick={onClose}><X/></button><div className="lock-seal"><Lock/></div><span className="eyebrow">ADMIN ACCESS</span><h2>Unlock the vault</h2><p>Enter your master PIN to manage the collection.</p><input autoFocus inputMode="numeric" pattern="\d*" maxLength={12} type="password" value={pin} onChange={(e)=>setPinValue(e.target.value)} placeholder="••••"/>{error&&<p className="error">{error}</p>}<button className="primary wide">Unlock</button>{defaultPinHint && <small>First launch default: 1234</small>}</form></div>;
+  const [pin,setPin]=useState("");
+  const [error,setError]=useState("");
+  const [shake,setShake]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const shakeTimer=useRef<number|undefined>(undefined);
+  const busyRef=useRef(false);
+
+  useEffect(()=>()=>{ if(shakeTimer.current) window.clearTimeout(shakeTimer.current); },[]);
+
+  const reject=useCallback((message:string)=>{
+    setError(message);
+    setPin("");
+    setShake(true);
+    if(shakeTimer.current) window.clearTimeout(shakeTimer.current);
+    shakeTimer.current=window.setTimeout(()=>setShake(false),450);
+  },[]);
+
+  const attempt=useCallback(async (candidate:string)=>{
+    if(!candidate||busyRef.current) return;
+    busyRef.current=true;
+    setBusy(true);
+    try{
+      const data=await api<{token:string}>("/auth/unlock",{method:"POST",body:JSON.stringify({pin:candidate})});
+      setToken(data.token);
+      onSuccess();
+    }catch(err){
+      if(err instanceof ApiError&&err.status===401) reject("Incorrect PIN");
+      else if(err instanceof ApiError&&err.status===UNREACHABLE_STATUS) reject("Cannot reach the vault server — check that it is running.");
+      else reject(err instanceof Error?`Unlock failed: ${err.message}`:"Unlock failed");
+    }finally{
+      busyRef.current=false;
+      setBusy(false);
+    }
+  },[onSuccess,reject]);
+
+  const press=useCallback((digit:string)=>{
+    if(busyRef.current) return;
+    setError("");
+    setPin((current)=>{
+      if(current.length>=PIN_LENGTH) return current;
+      const next=current+digit;
+      if(next.length===PIN_LENGTH) void attempt(next);
+      return next;
+    });
+  },[attempt]);
+
+  const backspace=useCallback(()=>{
+    if(busyRef.current) return;
+    setError("");
+    setPin((current)=>current.slice(0,-1));
+  },[]);
+
+  useEffect(()=>{
+    function onKey(event:KeyboardEvent){
+      if(event.key>="0"&&event.key<="9"){ event.preventDefault(); press(event.key); }
+      else if(event.key==="Backspace"){ event.preventDefault(); backspace(); }
+      else if(event.key==="Escape"){ event.preventDefault(); onClose(); }
+    }
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[press,backspace,onClose]);
+
+  return <div className="modal-backdrop"><div className="modal unlock-modal" role="dialog" aria-modal="true" aria-label="Enter Keeper PIN">
+    <button type="button" className="icon-button close" onClick={onClose} aria-label="Close"><X/></button>
+    <div className="lock-seal"><Lock/></div>
+    <span className="eyebrow">KEEPER ACCESS</span>
+    <h2>Enter Keeper PIN</h2>
+    <p>Switch to Keeper Mode to manage the collection.</p>
+    <div className={`pin-dots${shake?" shake":""}`} role="status" aria-label={`${pin.length} of ${PIN_LENGTH} digits entered`}>
+      {Array.from({length:PIN_LENGTH},(_,index)=>(
+        <span key={index} className={`pin-dot${index<pin.length?" filled":""}`}/>
+      ))}
+    </div>
+    <p className={`pin-message${error?" error":""}`}>{error || (busy?"Checking…":"\u00a0")}</p>
+    <div className="numpad-grid">
+      {NUMPAD_DIGITS.map((digit)=>(
+        <button type="button" key={digit} className="numpad-btn" disabled={busy} onClick={()=>press(digit)}>{digit}</button>
+      ))}
+      <button type="button" className="numpad-btn numpad-aux" disabled={busy||!pin} onClick={backspace} aria-label="Delete last digit"><ArrowLeft size={22}/></button>
+      <button type="button" className="numpad-btn" disabled={busy} onClick={()=>press("0")}>0</button>
+      <button type="button" className="numpad-btn numpad-enter" disabled={busy||!pin} onClick={()=>void attempt(pin)} aria-label="Unlock">
+        {busy?<LoaderCircle size={22} className="spinner"/>:<LockOpen size={22}/>}
+      </button>
+    </div>
+    <button type="button" className="secondary wide" onClick={onClose}>Cancel</button>
+    {defaultPinHint && <small>First launch default: 1234</small>}
+  </div></div>;
 }
 
 function uniqueValues(items: Item[], key: string) {

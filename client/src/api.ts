@@ -12,18 +12,35 @@ export function clearToken() {
   sessionStorage.removeItem("smokey-token");
 }
 
+/** Carries the status so callers can tell a refused request from an unreachable server. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export const UNREACHABLE_STATUS = 0;
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers: {
-      ...(options.body && !(options.body instanceof FormData) ? { "content-type": "application/json" } : {}),
-      ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
-      ...options.headers
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      ...options,
+      headers: {
+        ...(options.body && !(options.body instanceof FormData) ? { "content-type": "application/json" } : {}),
+        ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
+        ...options.headers
+      }
+    });
+  } catch {
+    throw new ApiError("Cannot reach the vault server", UNREACHABLE_STATUS);
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? "Request failed");
+    throw new ApiError(body.error ?? "Request failed", response.status);
   }
   return response.status === 204 ? undefined as T : response.json();
 }

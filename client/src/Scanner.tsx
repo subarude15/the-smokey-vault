@@ -164,7 +164,7 @@ export function Scanner({ onProduct, onMiss }: Props) {
   async function lookupAndReview(upc: string) {
     setStatus("Looking that up…");
     try {
-      const data = await api<ScanResult>(`/scan/upc/${encodeURIComponent(upc)}`);
+      const data = await api<ScanResult>(`/lookup/barcode?code=${encodeURIComponent(upc)}`);
       const code = data.upc ?? upc;
       const hasName = Boolean(resultName(data));
       if (!isMounted.current) return;

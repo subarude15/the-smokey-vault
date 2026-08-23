@@ -94,7 +94,16 @@ export function ImageField({ value, onChange }: { value: string; onChange: (url:
     <div className="image-field">
       {value ? (
         <div className="image-field-preview">
-          <img src={value} alt="Bottle photo"/>
+          {/* Tapping the photo itself is the fastest way to retake it behind the bar. */}
+          <label className="image-field-retake">
+            <img src={value} alt="Bottle photo"/>
+            <span className="image-field-retake-hint"><Camera size={15}/> Tap the photo to retake</span>
+            <input type="file" accept="image/*" capture="environment" aria-label="Retake bottle photo" onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void uploadFile(file);
+            }}/>
+          </label>
           <button type="button" className="icon-button" aria-label="Remove photo" onClick={() => onChange("")}><Trash2 size={16}/></button>
         </div>
       ) : null}

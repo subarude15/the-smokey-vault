@@ -1,14 +1,23 @@
 import { isTapEmpty, packagedCount } from "./catalog.js";
+import { isBlocked } from "./speakeasy-shared.js";
 
 export const SEASONS = ["All", "Spring", "Summer", "Fall", "Winter", "Holiday"] as const;
 export type Season = typeof SEASONS[number];
 export type Readiness = "ready" | "almost" | "missing";
 export type IngredientState = "have" | "pantry" | "substitute" | "missing";
 
+export type SubstituteOption = {
+  name: string;
+  brand: string;
+  fill_level: number;
+};
+
 export type IngredientLine = {
   text: string;
   state: IngredientState;
   using?: string;
+  /** Every on-shelf bottle that can stand in, when the match came from a substitution family. */
+  substitute_options?: SubstituteOption[];
 };
 
 export type CocktailRecipe = {
@@ -125,7 +134,33 @@ export type ShelfBottle = {
   label: string;
   haystack: string;
   kind: "spirit" | "wine" | "beer";
+  name: string;
+  brand: string;
+  fill_level: number;
 };
+
+/** Percent of the container still available, so count-based stock reads as a full bottle. */
+function shelfFillLevel(item: Record<string, unknown>): number {
+  const fill = Number(item.fill_level);
+  if (Number.isFinite(fill) && fill > 0) return Math.max(0, Math.min(100, Math.round(fill)));
+  const kegSize = Number(item.keg_size_l);
+  const remaining = Number(item.remaining_l);
+  if (Number.isFinite(kegSize) && kegSize > 0 && Number.isFinite(remaining)) {
+    return Math.max(0, Math.min(100, Math.round((remaining / kegSize) * 100)));
+  }
+  return 100;
+}
+
+function shelfBottle(item: Record<string, unknown>, kind: ShelfBottle["kind"]): ShelfBottle {
+  return {
+    label: bottleLabel(item),
+    haystack: bottleHaystack(item),
+    kind,
+    name: String(item.name ?? item.batch_name ?? item.varietal ?? "").trim() || bottleLabel(item),
+    brand: String(item.brand ?? item.producer ?? item.maker ?? item.brewery ?? "").trim(),
+    fill_level: shelfFillLevel(item)
+  };
+}
 
 export function buildShelf(
   spirits: Array<Record<string, unknown>> = [],
@@ -135,21 +170,21 @@ export function buildShelf(
 ): ShelfBottle[] {
   const shelf: ShelfBottle[] = [];
   for (const item of spirits) {
-    if (!spiritOnShelf(item)) continue;
-    shelf.push({ label: bottleLabel(item), haystack: bottleHaystack(item), kind: "spirit" });
+    if (isBlocked(item) || !spiritOnShelf(item)) continue;
+    shelf.push(shelfBottle(item, "spirit"));
   }
   for (const item of wines) {
-    if (!wineOnShelf(item)) continue;
-    shelf.push({ label: bottleLabel(item), haystack: bottleHaystack(item), kind: "wine" });
+    if (isBlocked(item) || !wineOnShelf(item)) continue;
+    shelf.push(shelfBottle(item, "wine"));
   }
   for (const item of packaged) {
-    if (!packagedOnShelf(item)) continue;
-    shelf.push({ label: bottleLabel(item), haystack: bottleHaystack(item), kind: "beer" });
+    if (isBlocked(item) || !packagedOnShelf(item)) continue;
+    shelf.push(shelfBottle(item, "beer"));
   }
   for (const item of taps) {
-    if (!tapOnShelf(item)) continue;
+    if (isBlocked(item) || !tapOnShelf(item)) continue;
     const tapItem = { ...item, name: item.brewery_batch, brand: item.maker };
-    shelf.push({ label: bottleLabel(tapItem), haystack: bottleHaystack(tapItem), kind: "beer" });
+    shelf.push(shelfBottle(tapItem, "beer"));
   }
   return shelf;
 }
@@ -206,6 +241,10 @@ function substituteMatch(option: string, bottle: ShelfBottle): boolean {
   return family.some((member) => hasWord(bottle.haystack, member));
 }
 
+function substituteOption(bottle: ShelfBottle): SubstituteOption {
+  return { name: bottle.name || bottle.label, brand: bottle.brand, fill_level: bottle.fill_level };
+}
+
 export function matchIngredient(ingredient: string, shelf: ShelfBottle[]): IngredientLine {
   const normalized = stripMeasure(ingredient);
   if (!normalized) return { text: ingredient, state: "pantry" };
@@ -217,8 +256,15 @@ export function matchIngredient(ingredient: string, shelf: ShelfBottle[]): Ingre
     const direct = shelf.find((bottle) => directMatch(option, bottle));
     if (direct) return { text: ingredient, state: "have", using: direct.label };
     if (!substitute) {
-      const swapped = shelf.find((bottle) => substituteMatch(option, bottle));
-      if (swapped) substitute = { text: ingredient, state: "substitute", using: swapped.label };
+      const swapped = shelf.filter((bottle) => substituteMatch(option, bottle));
+      if (swapped.length) {
+        substitute = {
+          text: ingredient,
+          state: "substitute",
+          using: swapped[0].label,
+          substitute_options: swapped.map(substituteOption)
+        };
+      }
     }
   }
   return substitute ?? { text: ingredient, state: "missing" };
@@ -241,12 +287,14 @@ export function matchCocktail(cocktail: Record<string, unknown>, shelf: ShelfBot
   lines: IngredientLine[];
   missing: string[];
   readiness: Readiness;
+  has_substitutes: boolean;
 } {
   const ingredients = parseIngredients(cocktail.ingredients);
   const lines = ingredients.map((ingredient) => matchIngredient(ingredient, shelf));
   const missing = lines.filter((line) => line.state === "missing").map((line) => line.text);
   const readiness: Readiness = missing.length === 0 ? "ready" : missing.length === 1 ? "almost" : "missing";
-  return { ingredients, lines, missing, readiness };
+  const hasSubstitutes = lines.some((line) => Boolean(line.substitute_options?.length));
+  return { ingredients, lines, missing, readiness, has_substitutes: hasSubstitutes };
 }
 
 export function compareCocktails(

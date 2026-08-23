@@ -10,9 +10,9 @@ test("overviewGreeting follows the clock", () => {
   assert.equal(overviewGreeting(new Date(2026, 7, 21, 2, 0, 0)).eyebrow, "AFTER HOURS");
 });
 
-test("guest greeting is tonight at the vault", () => {
+test("patron greeting is tonight at the vault", () => {
   const guest = overviewGreeting(new Date(2026, 7, 21, 19, 0, 0), true);
-  assert.equal(guest.eyebrow, "GOOD EVENING · GUEST NIGHT");
+  assert.equal(guest.eyebrow, "GOOD EVENING · PATRON LOUNGE");
   assert.equal(guest.line, "Tonight at");
   assert.equal(guest.emphasize, "the vault.");
 });

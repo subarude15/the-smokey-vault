@@ -1,0 +1,27 @@
+{
+  "_id": "bf-test-citra-smash",
+  "name": "Citra Smash",
+  "batchNo": 12,
+  "status": "Fermenting",
+  "brewer": "Nick",
+  "hidden": false,
+  "brewDate": 1713657600000,
+  "img_url": "https://brewfather.app/images/example.jpg",
+  "measuredOg": 1.052,
+  "measuredFg": null,
+  "estimatedOg": 1.05,
+  "estimatedFg": 1.01,
+  "measuredAbv": null,
+  "recipe": {
+    "name": "Citra Smash",
+    "abv": 5.2,
+    "og": 1.05,
+    "fg": 1.01,
+    "style": { "name": "American Pale Ale" },
+    "hops": [
+      { "name": "Citra", "use": "Boil" },
+      { "name": "Citra", "use": "Dry Hop" },
+      { "name": "Mosaic", "use": "Dry Hop" }
+    ]
+  }
+}
