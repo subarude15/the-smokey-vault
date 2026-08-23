@@ -557,7 +557,7 @@ export default function App() {
     <div className="app-shell">
       <aside className={`sidebar ${mobileNav ? "open" : ""}`}>
         <button className="mobile-close icon-button" onClick={() => setMobileNav(false)}><X/></button>
-        <div className="brand"><div className="brand-mark"><Wine/></div><div><strong>The Smokey Vault</strong><span>PRIVATE CELLAR</span></div></div>
+        <div className="brand"><div className="brand-mark"><Wine/></div><div><strong>The Smokey Barrel Bar &amp; Brewing</strong><span>PRIVATE CELLAR</span></div></div>
         <nav>
           <span className="nav-label">COLLECTION</span>
           {collectionNav.map(navButton)}
@@ -911,7 +911,7 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
     }
     try {
       if (canShare) {
-        await navigator.share({ title: "Smokey Vault restock", text });
+        await navigator.share({ title: "Smokey Barrel restock", text });
         return;
       }
     } catch (err) {
@@ -2472,7 +2472,7 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
           <div>
             <span className="eyebrow">ADD FROM A LINK</span>
             <h2>Import a recipe</h2>
-            <p>Paste a URL from Punch, Liquor.com, a blog, or anywhere that publishes a recipe. On Android you can also Share to The Smokey Vault. The vault reads the page and grabs a photo when it can.</p>
+            <p>Paste a URL from Punch, Liquor.com, a blog, or anywhere that publishes a recipe. On Android you can also Share to The Smokey Barrel Bar &amp; Brewing. The vault reads the page and grabs a photo when it can.</p>
           </div>
           <button type="button" className="icon-button" onClick={close}><X/></button>
         </header>

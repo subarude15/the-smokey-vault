@@ -11,8 +11,9 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       manifest: {
-        name: "The Smokey Vault",
-        short_name: "Smokey Vault",
+        name: "The Smokey Barrel Bar & Brewing",
+        // Home-screen labels get truncated past ~12 characters, so this stays short.
+        short_name: "Smokey Barrel",
         description: "Your private bar, cellar, and brewery.",
         theme_color: "#15130f",
         background_color: "#0b0a08",

@@ -65,7 +65,7 @@ const SHARE_GROUPS: Array<{ kind: RestockKind; heading: string }> = [
 export function formatRestockShare(items: RestockItem[]): string {
   const open = items.filter((item) => !item.got);
   if (!open.length) return "";
-  const lines = ["The Smokey Vault — pick up"];
+  const lines = ["The Smokey Barrel Bar & Brewing — pick up"];
   for (const group of SHARE_GROUPS) {
     const rows = open.filter((item) => item.kind === group.kind);
     if (!rows.length) continue;

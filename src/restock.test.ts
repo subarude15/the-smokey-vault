@@ -133,7 +133,7 @@ test("restock share text lists open items as a checklist and skips grabbed", () 
     got: ["spirits:2"]
   });
   const text = formatRestockShare(items);
-  assert.match(text, /^The Smokey Vault — pick up/);
+  assert.match(text, /^The Smokey Barrel Bar & Brewing — pick up/);
   assert.match(text, /Wanted\n☐ Green Chartreuse — 750/);
   assert.match(text, /Cold room\n☐ Gone lager · Vault — Out of stock/);
   assert.doesNotMatch(text, /Empty Rye/);
