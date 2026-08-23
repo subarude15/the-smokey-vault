@@ -95,6 +95,8 @@ export {
   clipKeeperName
 } from "../../src/shared-types";
 export { extractSharedRecipeUrl } from "../../src/recipe_share";
+export { FRAME_ASPECT, clamp01, cropIsDefault, cropRect } from "../../src/image_frame";
+export type { CropRect, FrameKind } from "../../src/image_frame";
 
 export {
   TAB_KEYS,
@@ -102,6 +104,7 @@ export {
   DEFAULT_BAR_LOCATION_TEXT,
   DEFAULT_HOUSE_TIP_BLURB,
   AI_UNAVAILABLE_NOTICE,
+  AI_TIMEOUT_NOTICE,
   AI_MIXOLOGIST_TIMEOUT_MS,
   BLOCKED_RIBBON_LABEL,
   TOP_PATRON_BANNER,

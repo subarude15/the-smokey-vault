@@ -56,7 +56,15 @@ export function serializeTabOrder(order: TabKey[]): string {
 export const DEFAULT_BAR_LOCATION_TEXT = "Located in 19605";
 export const DEFAULT_HOUSE_TIP_BLURB = "Drinks are always on the house at The Smoky Barrel Bar! Tips go directly toward party supplies, fresh kegs, and our annual holiday bashes.";
 export const AI_UNAVAILABLE_NOTICE = "Sorry. Due to Roo's vet bills, We can't afford all of the AI needed for this feature right now.";
-export const AI_MIXOLOGIST_TIMEOUT_MS = 5000;
+/** Shown when the kiosk budget expires before the provider answers — not a quota check. */
+export const AI_TIMEOUT_NOTICE = "The mixologist took too long to answer. Try again in a moment.";
+/**
+ * Guest-facing budget for a mixologist round-trip. The server waits up to 45s per
+ * provider; the kiosk gives up sooner so a hung key does not leave someone staring
+ * at a spinner. Five seconds (and even fifteen) aborted measured Gemini Flash calls,
+ * which land in the 16–22s range once the shelf is in the prompt.
+ */
+export const AI_MIXOLOGIST_TIMEOUT_MS = 30_000;
 export const BLOCKED_RIBBON_LABEL = "Not for bar patrons";
 export const TOP_PATRON_BANNER = "\u{1F451} #1 Bar Legend & Top Supporter";
 

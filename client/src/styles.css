@@ -301,7 +301,7 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 /* ------------------------------- Meet the crew ----------------------------- */
 .crew-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
 .crew-card{position:relative;border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:20px;display:flex;flex-direction:column;gap:14px}
-.crew-portrait{width:100%;height:220px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
+.crew-portrait{width:100%;aspect-ratio:4/3;height:auto;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
 .crew-portrait img{width:100%;height:100%;object-fit:cover}
 .crew-initials{font:600 46px "Playfair Display",serif;color:var(--accent-2)}
 .crew-body h3{font:600 24px "Playfair Display",serif;margin:0 0 8px}
@@ -383,10 +383,21 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .tab-order-actions .icon-button:disabled{opacity:.35;cursor:not-allowed}
 @media(max-width:700px){
   .gallery-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-  .crew-portrait{height:180px}
   .lightbox-stage img,.lightbox-stage video{max-height:56vh}
   .lightbox-stage figcaption{flex-direction:column;align-items:flex-start}
   .tab-order-actions .icon-button{width:40px;height:40px}
   .numpad-btn{min-height:64px;font-size:26px}
   .pin-dots{gap:18px}
 }
+
+.photo-frame{display:flex;flex-direction:column;gap:10px}
+.photo-frame-stage{position:relative;width:100%;overflow:hidden;border-radius:12px;border:1px solid var(--line);background:#0c0b0a;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.photo-frame-stage:active{cursor:grabbing}
+.photo-frame-stage img{position:absolute;max-width:none;max-height:none;pointer-events:none}
+.photo-frame-hint{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;background:#000000ad;color:#fff;font-size:11px;letter-spacing:.04em;pointer-events:none}
+.photo-frame-zoom{display:flex;align-items:center;gap:12px}
+.photo-frame-zoom span{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.photo-frame-zoom input{flex:1;accent-color:var(--accent)}
+.image-field-preview{height:auto;overflow:visible;border:0;background:transparent;border-radius:0;display:flex;flex-direction:column;gap:10px}
+.image-field-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.gallery-frame{margin:0 0 14px}

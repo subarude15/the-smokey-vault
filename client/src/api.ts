@@ -35,7 +35,13 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         ...options.headers
       }
     });
-  } catch {
+  } catch (error) {
+    const aborted = options.signal?.aborted
+      || (error instanceof DOMException && error.name === "AbortError")
+      || (error instanceof Error && error.name === "AbortError");
+    if (aborted) {
+      throw error instanceof Error ? error : new DOMException("The operation was aborted.", "AbortError");
+    }
     throw new ApiError("Cannot reach the vault server", UNREACHABLE_STATUS);
   }
   if (!response.ok) {

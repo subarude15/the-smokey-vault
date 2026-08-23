@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAiFailoverChain, defaultAiModel, isRetryableAiStatus, type AiProviderConfig } from "./ai_providers.js";
+import { buildAiFailoverChain, defaultAiModel, isRetryableAiStatus, resolveAiModel, type AiProviderConfig } from "./ai_providers.js";
 
 const gemini: AiProviderConfig = {
   provider: "gemini",
@@ -74,4 +74,11 @@ test("a rejected key or a bad request stops the walk", () => {
 test("the OpenRouter fallback reads labels as well as text", () => {
   const chain = buildAiFailoverChain(gemini, { OPENROUTER_API_KEY: "router-key" });
   assert.equal(chain[1].model, "stealth/ox-alpha");
+});
+
+test("retired Gemini model names fall back to the current Flash alias", () => {
+  assert.equal(resolveAiModel("gemini", "gemini-2.5-flash"), "gemini-3.6-flash");
+  assert.equal(resolveAiModel("gemini", "models/gemini-2.0-flash"), "gemini-3.6-flash");
+  assert.equal(resolveAiModel("gemini", "gemini-3.6-flash"), "gemini-3.6-flash");
+  assert.equal(resolveAiModel("openrouter", "stealth/ox-alpha"), "stealth/ox-alpha");
 });

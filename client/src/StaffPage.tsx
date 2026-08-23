@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type Ref } from "react";
 import { ChevronDown, ChevronUp, CircleAlert, Pencil, Plus, Save, Trash2, Users, X } from "lucide-react";
 import { api } from "./api";
-import { ImageField } from "./ImageField";
+import { ImageField, type ImageFieldHandle } from "./ImageField";
 import { MAX_STAFF_BIO, MAX_STAFF_NAME, MAX_STAFF_ROLE, STAFF_ROLE_SUGGESTIONS, type StaffMember } from "./catalog";
 
 type Draft = { name: string; role: string; bio: string; image_url: string };
@@ -21,6 +21,8 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY_DRAFT);
+  const addPhotoRef = useRef<ImageFieldHandle>(null);
+  const editPhotoRef = useRef<ImageFieldHandle>(null);
 
   const load = useCallback(() => {
     api<{ staff: StaffMember[] }>("/staff")
@@ -32,7 +34,8 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
   async function addMember() {
     setBusy(true);
     try {
-      await api("/staff", { method: "POST", body: JSON.stringify(draft) });
+      const image_url = await addPhotoRef.current?.flush() ?? draft.image_url;
+      await api("/staff", { method: "POST", body: JSON.stringify({ ...draft, image_url }) });
       setDraft(EMPTY_DRAFT);
       setAdding(false);
       setNotice("Crew member added");
@@ -52,7 +55,8 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
   async function saveEdit(id: number) {
     setBusy(true);
     try {
-      await api(`/staff/${id}`, { method: "PUT", body: JSON.stringify(editDraft) });
+      const image_url = await editPhotoRef.current?.flush() ?? editDraft.image_url;
+      await api(`/staff/${id}`, { method: "PUT", body: JSON.stringify({ ...editDraft, image_url }) });
       setEditingId(null);
       setNotice("Saved");
       load();
@@ -83,7 +87,7 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
     }
   }
 
-  function draftFields(current: Draft, set: (next: Draft) => void) {
+  function draftFields(current: Draft, set: (next: Draft) => void, photoRef: Ref<ImageFieldHandle>) {
     return <>
       <label><span>Name</span>
         <input value={current.name} maxLength={MAX_STAFF_NAME} onChange={(e) => set({ ...current, name: e.target.value })} placeholder="Roo"/>
@@ -95,8 +99,9 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
       <label><span>Bio</span>
         <textarea value={current.bio} maxLength={MAX_STAFF_BIO} onChange={(e) => set({ ...current, bio: e.target.value })} placeholder="Greets every patron at the door. Works for treats."/>
       </label>
-      <label className="full"><span>Photo</span></label>
-      <ImageField value={current.image_url} onChange={(url) => set({ ...current, image_url: url })}/>
+      <div className="full field-block"><span>Photo</span>
+        <ImageField ref={photoRef} value={current.image_url} onChange={(url) => set({ ...current, image_url: url })} frame="crew" alt={current.name || "Crew photo"}/>
+      </div>
     </>;
   }
 
@@ -120,7 +125,7 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
         </button>
       </div>
       {adding && <>
-        <div className="form-grid">{draftFields(draft, setDraft)}</div>
+        <div className="form-grid">{draftFields(draft, setDraft, addPhotoRef)}</div>
         <button type="button" className="primary" disabled={busy || !draft.name.trim()} onClick={() => void addMember()}>
           <Plus size={17}/> Add to the crew
         </button>
@@ -131,7 +136,7 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
       <div className="crew-grid">{crew.map((member, index) => (
         <article className="crew-card" key={member.id}>
           {editingId === member.id ? <div className="crew-edit">
-            <div className="form-grid">{draftFields(editDraft, setEditDraft)}</div>
+            <div className="form-grid">{draftFields(editDraft, setEditDraft, editPhotoRef)}</div>
             <div className="card-actions">
               <button type="button" className="primary" disabled={busy || !editDraft.name.trim()} onClick={() => void saveEdit(member.id)}><Save size={16}/> Save</button>
               <button type="button" className="secondary" onClick={() => setEditingId(null)}>Cancel</button>

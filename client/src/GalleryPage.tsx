@@ -6,6 +6,7 @@ import { api } from "./api";
 import {
   MAX_GALLERY_BYTES, MAX_GALLERY_CAPTION, MAX_PATRON_NAME, type GalleryMedia, type Patron
 } from "./catalog";
+import { PhotoFrame, type PhotoFrameHandle } from "./PhotoFrame";
 
 const ACCEPTED = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime";
 
@@ -127,12 +128,14 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
 function UploadModal({ close, done }: { close: () => void; done: (message: string) => void }) {
   const [names, setNames] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState("");
   const [name, setName] = useState("");
   const [caption, setCaption] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
+  const frameRef = useRef<PhotoFrameHandle>(null);
 
   useEffect(() => {
     api<{ patrons: Patron[] }>("/patrons")
@@ -140,16 +143,23 @@ function UploadModal({ close, done }: { close: () => void; done: (message: strin
       .catch(() => setNames([]));
   }, []);
 
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
   function choose(list: FileList | null) {
     const picked = list?.[0] ?? null;
     if (!picked) return;
     if (picked.size > MAX_GALLERY_BYTES) {
       setError(`That file is ${megabytes(picked.size)}. The limit is ${megabytes(MAX_GALLERY_BYTES)}.`);
       setFile(null);
+      setPreview("");
       return;
     }
     setError("");
     setFile(picked);
+    setPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return picked.type.startsWith("image/") ? URL.createObjectURL(picked) : "";
+    });
   }
 
   async function submit(event: React.FormEvent) {
@@ -158,11 +168,19 @@ function UploadModal({ close, done }: { close: () => void; done: (message: strin
     setBusy(true);
     setError("");
     try {
+      let payload = file;
+      if (preview && frameRef.current) {
+        try {
+          payload = await frameRef.current.cropToFile(file.name);
+        } catch {
+          payload = file;
+        }
+      }
       const body = new FormData();
       // Text fields must precede the file so the server sees them while streaming.
       body.append("uploaded_by", name.trim() || "Patron");
       body.append("caption", caption.trim());
-      body.append("media", file);
+      body.append("media", payload);
       await api<GalleryMedia>("/gallery/upload", { method: "POST", body });
       done("Added to the gallery");
     } catch (err) {
@@ -186,7 +204,8 @@ function UploadModal({ close, done }: { close: () => void; done: (message: strin
         <input ref={pickerRef} type="file" accept={ACCEPTED} hidden onChange={(e) => choose(e.target.files)}/>
       </div>
 
-      {file && <p className="gallery-chosen">{file.type.startsWith("video/") ? <Film size={15}/> : <ImagePlus size={15}/>} {file.name} · {megabytes(file.size)}</p>}
+      {preview ? <div className="gallery-frame"><PhotoFrame ref={frameRef} src={preview} kind="square" alt="Gallery tile preview" hint="This is the gallery tile. Drag to move the photo."/></div> : null}
+      {file && !preview ? <p className="gallery-chosen"><Film size={15}/> {file.name} · {megabytes(file.size)}</p> : null}
 
       <label><span>Your name</span>
         <input list="gallery-patron-names" autoComplete="off" value={name} maxLength={MAX_PATRON_NAME} onChange={(e) => setName(e.target.value)} placeholder="Regulars: start typing"/>

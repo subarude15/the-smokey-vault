@@ -4,7 +4,7 @@ import {
   Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Users, Wine, X, ClipboardPaste, Zap
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
-import { ImageField } from "./ImageField";
+import { ImageField, type ImageFieldHandle } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
@@ -25,7 +25,7 @@ import {
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
   type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME,
   DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME, clipKeeperName, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS,
-  AI_MIXOLOGIST_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
+  AI_MIXOLOGIST_TIMEOUT_MS, AI_TIMEOUT_NOTICE, AI_UNAVAILABLE_NOTICE, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
   TAB_KEYS, parseEnabledTabs, parseTabOrder, serializeEnabledTabs, serializeTabOrder,
   type EnabledTabs, type SubstituteOption, type TabKey
 } from "./catalog";
@@ -252,6 +252,8 @@ type HouseInfo = {
   keeperName: string;
   defaultPinHint: boolean;
   brewfatherConfigured: boolean;
+  colaConfigured: boolean;
+  aiConfigured: boolean;
   enabledTabs: EnabledTabs;
   settings: Record<string, string>;
 };
@@ -259,6 +261,8 @@ const EMPTY_HOUSE: HouseInfo = {
   keeperName: DEFAULT_KEEPER_NAME,
   defaultPinHint: false,
   brewfatherConfigured: false,
+  colaConfigured: false,
+  aiConfigured: false,
   enabledTabs: DEFAULT_ENABLED_TABS,
   settings: {}
 };
@@ -419,6 +423,8 @@ export default function App() {
         keeperName: String(values.keeperName ?? DEFAULT_KEEPER_NAME),
         defaultPinHint: Boolean(values.defaultPinHint),
         brewfatherConfigured: Boolean(values.brewfatherConfigured),
+        colaConfigured: Boolean(values.colaConfigured),
+        aiConfigured: Boolean(values.aiConfigured),
         enabledTabs: parseEnabledTabs(values.enabled_tabs),
         settings: Object.fromEntries(Object.entries(values)
           .filter(([, value]) => typeof value === "string")
@@ -1220,6 +1226,7 @@ function ScanMissSearch({
   onManual: (table: ScanModuleId, upc: string) => void;
   onRescan: () => void;
 }) {
+  const { colaConfigured } = useHouse();
   const [scope, setScope] = useState<(typeof SCAN_SEARCH_SCOPES)[number]["id"]>("shelf");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1232,7 +1239,9 @@ function ScanMissSearch({
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
-      setStatus("Type at least 2 characters to search your vault and COLA Cloud.");
+      setStatus(colaConfigured
+        ? "Type at least 2 characters to search your vault and COLA Cloud."
+        : "Type at least 2 characters to search this vault. Catalog search is off on this host.");
       return;
     }
     const timer = window.setTimeout(async () => {
@@ -1241,7 +1250,9 @@ function ScanMissSearch({
         const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(scope)}`);
         const next = data.results.filter((hit) => hitFitsModule(scope, hit));
         setResults(next);
-        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
+        setStatus(next.length ? `${next.length} matches` : colaConfigured
+          ? "No matches yet — try a brand or bottle name."
+          : "Nothing in this vault matched. Catalog search is off until COLA_API_KEY is set on this host.");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
       } finally {
@@ -1249,7 +1260,7 @@ function ScanMissSearch({
       }
     }, 320);
     return () => window.clearTimeout(timer);
-  }, [query, scope]);
+  }, [query, scope, colaConfigured]);
 
   async function choose(hit: BottleSearchHit) {
     try {
@@ -1696,17 +1707,19 @@ function BottleFinder({ module, onClose, onPick }:{
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<BottleSearchHit[]>([]);
   const [error, setError] = useState("");
+  const { colaConfigured } = useHouse();
+  const catalogHint = colaConfigured ? "and COLA Cloud" : "(catalog search needs COLA_API_KEY on this host)";
   const [status, setStatus] = useState(module.id === "taps" || module.id === "brews" || module.id === "packaged_beer"
-    ? "Type at least 2 characters to search packaged beer, the brewery lab, and COLA Cloud."
-    : "Type at least 2 characters to search your vault and COLA Cloud.");
+    ? `Type at least 2 characters to search packaged beer, the brewery lab, ${catalogHint}.`
+    : `Type at least 2 characters to search your vault ${catalogHint}.`);
 
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
       setStatus(module.id === "taps" || module.id === "brews" || module.id === "packaged_beer"
-        ? "Type at least 2 characters to search packaged beer, the brewery lab, and COLA Cloud."
-        : "Type at least 2 characters to search your vault and COLA Cloud.");
+        ? `Type at least 2 characters to search packaged beer, the brewery lab, ${catalogHint}.`
+        : `Type at least 2 characters to search your vault ${catalogHint}.`);
       return;
     }
     const timer = window.setTimeout(async () => {
@@ -1715,7 +1728,9 @@ function BottleFinder({ module, onClose, onPick }:{
         const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(module.id)}`);
         const next = data.results.filter((hit) => hitFitsModule(module.id, hit));
         setResults(next);
-        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
+        setStatus(next.length ? `${next.length} matches` : colaConfigured
+          ? "No matches yet — try a brand or bottle name."
+          : "Nothing in this vault matched. Catalog search is off until COLA_API_KEY is set on this host.");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
       } finally {
@@ -1723,7 +1738,7 @@ function BottleFinder({ module, onClose, onPick }:{
       }
     }, 320);
     return () => clearTimeout(timer);
-  }, [query, module.id]);
+  }, [query, module.id, colaConfigured, catalogHint]);
 
   async function choose(hit: BottleSearchHit) {
     try {
@@ -1807,6 +1822,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   const [flavorDraft,setFlavorDraft] = useState("");
   const [hopDraft,setHopDraft] = useState("");
   const [error,setError] = useState("");
+  const photoRef = useRef<ImageFieldHandle>(null);
   const [suggestLock,setSuggestLock] = useState(() => String(item?.[module.primary] ?? ""));
   const existing = Boolean(item?.id);
   // Drafts are keyed per module and per record so a tap edit never restores into a spirit.
@@ -1821,8 +1837,16 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
   }
   async function submit(e:React.FormEvent) {
     e.preventDefault();
+    let imageUrl = String(form.image_url ?? "");
+    try {
+      imageUrl = await photoRef.current?.flush() ?? imageUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save that crop");
+      return;
+    }
     const payload: Record<string, unknown> = {
       ...form,
+      image_url: imageUrl,
       flavors: serializeList(flavors),
       hops: serializeList(hopDraft.trim() ? [...hops, hopDraft.trim()] : hops),
       tags: serializeList(parseTagInput([...tags, tagDraft].join(" ")))
@@ -1904,7 +1928,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
     {module.fields.map((field) => {
       if (field.type === "image") {
         return <div className="full field-block" key={field.key}><span>{field.label}</span>
-          <ImageField value={String(form.image_url ?? "")} onChange={(url) => setForm({ ...form, image_url: url })}/>
+          <ImageField ref={photoRef} value={String(form.image_url ?? "")} onChange={(url) => setForm({ ...form, image_url: url })} frame="bottle" alt="Bottle photo"/>
         </div>;
       }
       if (field.type === "flavors") {
@@ -2508,15 +2532,17 @@ function Mixologist({admin}:{admin:boolean}) {
   const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
   async function ask(request=prompt){
     setLoading(true);setRecipe(undefined);setError("");setSaved(false);
-    // The kiosk gives up after five seconds rather than leaving a guest staring at a spinner.
+    // The kiosk gives up after 30 seconds rather than leaving a guest staring at a spinner.
     const abort = new AbortController();
     const timeout = window.setTimeout(() => abort.abort(), AI_MIXOLOGIST_TIMEOUT_MS);
     try {
       const data = await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request}),signal:abort.signal});
       setRecipe(data.recipe);
     } catch(e) {
-      const timedOut = abort.signal.aborted || (e instanceof DOMException && e.name === "AbortError");
-      setError(timedOut ? AI_UNAVAILABLE_NOTICE : e instanceof Error ? e.message : "The AI service could not generate a recipe.");
+      const timedOut = abort.signal.aborted || (e instanceof DOMException && e.name === "AbortError") || (e instanceof Error && e.name === "AbortError");
+      if (timedOut) setError(AI_TIMEOUT_NOTICE);
+      else if (e instanceof ApiError && e.status === 429) setError(AI_UNAVAILABLE_NOTICE);
+      else setError(e instanceof Error ? e.message : "The AI service could not generate a recipe.");
     } finally {
       clearTimeout(timeout);
       setLoading(false);
@@ -2933,6 +2959,7 @@ function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
       onSuccess();
     }catch(err){
       if(err instanceof ApiError&&err.status===401) reject("Incorrect PIN");
+      else if(err instanceof ApiError&&err.status===429) reject(err.message);
       else if(err instanceof ApiError&&err.status===UNREACHABLE_STATUS) reject("Cannot reach the vault server — check that it is running.");
       else reject(err instanceof Error?`Unlock failed: ${err.message}`:"Unlock failed");
     }finally{
