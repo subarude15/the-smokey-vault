@@ -110,7 +110,7 @@ const modules: Module[] = [
 const themePresets: Record<string, Record<string,string>> = {
   light: { "--bg":"#f4f0e8","--surface":"#fffdf8","--surface-2":"#ebe5d9","--text":"#252018","--muted":"#70675b","--line":"#d8d0c2","--accent":"#8f4d2e","--accent-2":"#dba95f" },
   dark: { "--bg":"#11100e","--surface":"#1a1815","--surface-2":"#24211c","--text":"#f4ecdf","--muted":"#a69b8b","--line":"#39342c","--accent":"#c77647","--accent-2":"#e1b46e" },
-  punk: { "--bg":"#0b0709","--surface":"#1a0e14","--surface-2":"#2a1420","--text":"#f7efe6","--muted":"#c49aaa","--line":"#5c2438","--accent":"#ff2d6a","--accent-2":"#ffe14a" }
+  punk: { "--bg":"#0a0a0a","--surface":"#161616","--surface-2":"#222222","--text":"#f2f2f2","--muted":"#8a8a8a","--line":"#3a3a3a","--accent":"#00e5ff","--accent-2":"#ffe600" }
 };
 
 function storedTheme() {
