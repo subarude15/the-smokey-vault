@@ -252,6 +252,8 @@ type HouseInfo = {
   keeperName: string;
   defaultPinHint: boolean;
   brewfatherConfigured: boolean;
+  colaConfigured: boolean;
+  aiConfigured: boolean;
   enabledTabs: EnabledTabs;
   settings: Record<string, string>;
 };
@@ -259,6 +261,8 @@ const EMPTY_HOUSE: HouseInfo = {
   keeperName: DEFAULT_KEEPER_NAME,
   defaultPinHint: false,
   brewfatherConfigured: false,
+  colaConfigured: false,
+  aiConfigured: false,
   enabledTabs: DEFAULT_ENABLED_TABS,
   settings: {}
 };
@@ -419,6 +423,8 @@ export default function App() {
         keeperName: String(values.keeperName ?? DEFAULT_KEEPER_NAME),
         defaultPinHint: Boolean(values.defaultPinHint),
         brewfatherConfigured: Boolean(values.brewfatherConfigured),
+        colaConfigured: Boolean(values.colaConfigured),
+        aiConfigured: Boolean(values.aiConfigured),
         enabledTabs: parseEnabledTabs(values.enabled_tabs),
         settings: Object.fromEntries(Object.entries(values)
           .filter(([, value]) => typeof value === "string")
@@ -1220,6 +1226,7 @@ function ScanMissSearch({
   onManual: (table: ScanModuleId, upc: string) => void;
   onRescan: () => void;
 }) {
+  const { colaConfigured } = useHouse();
   const [scope, setScope] = useState<(typeof SCAN_SEARCH_SCOPES)[number]["id"]>("shelf");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1232,7 +1239,9 @@ function ScanMissSearch({
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
-      setStatus("Type at least 2 characters to search your vault and COLA Cloud.");
+      setStatus(colaConfigured
+        ? "Type at least 2 characters to search your vault and COLA Cloud."
+        : "Type at least 2 characters to search this vault. Catalog search is off on this host.");
       return;
     }
     const timer = window.setTimeout(async () => {
@@ -1241,7 +1250,9 @@ function ScanMissSearch({
         const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(scope)}`);
         const next = data.results.filter((hit) => hitFitsModule(scope, hit));
         setResults(next);
-        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
+        setStatus(next.length ? `${next.length} matches` : colaConfigured
+          ? "No matches yet — try a brand or bottle name."
+          : "Nothing in this vault matched. Catalog search is off until COLA_API_KEY is set on this host.");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
       } finally {
@@ -1249,7 +1260,7 @@ function ScanMissSearch({
       }
     }, 320);
     return () => window.clearTimeout(timer);
-  }, [query, scope]);
+  }, [query, scope, colaConfigured]);
 
   async function choose(hit: BottleSearchHit) {
     try {
@@ -1696,17 +1707,19 @@ function BottleFinder({ module, onClose, onPick }:{
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<BottleSearchHit[]>([]);
   const [error, setError] = useState("");
+  const { colaConfigured } = useHouse();
+  const catalogHint = colaConfigured ? "and COLA Cloud" : "(catalog search needs COLA_API_KEY on this host)";
   const [status, setStatus] = useState(module.id === "taps" || module.id === "brews" || module.id === "packaged_beer"
-    ? "Type at least 2 characters to search packaged beer, the brewery lab, and COLA Cloud."
-    : "Type at least 2 characters to search your vault and COLA Cloud.");
+    ? `Type at least 2 characters to search packaged beer, the brewery lab, ${catalogHint}.`
+    : `Type at least 2 characters to search your vault ${catalogHint}.`);
 
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
       setStatus(module.id === "taps" || module.id === "brews" || module.id === "packaged_beer"
-        ? "Type at least 2 characters to search packaged beer, the brewery lab, and COLA Cloud."
-        : "Type at least 2 characters to search your vault and COLA Cloud.");
+        ? `Type at least 2 characters to search packaged beer, the brewery lab, ${catalogHint}.`
+        : `Type at least 2 characters to search your vault ${catalogHint}.`);
       return;
     }
     const timer = window.setTimeout(async () => {
@@ -1715,7 +1728,9 @@ function BottleFinder({ module, onClose, onPick }:{
         const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(module.id)}`);
         const next = data.results.filter((hit) => hitFitsModule(module.id, hit));
         setResults(next);
-        setStatus(next.length ? `${next.length} matches` : "No matches yet — try a brand or bottle name.");
+        setStatus(next.length ? `${next.length} matches` : colaConfigured
+          ? "No matches yet — try a brand or bottle name."
+          : "Nothing in this vault matched. Catalog search is off until COLA_API_KEY is set on this host.");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
       } finally {
@@ -1723,7 +1738,7 @@ function BottleFinder({ module, onClose, onPick }:{
       }
     }, 320);
     return () => clearTimeout(timer);
-  }, [query, module.id]);
+  }, [query, module.id, colaConfigured, catalogHint]);
 
   async function choose(hit: BottleSearchHit) {
     try {
@@ -2933,6 +2948,7 @@ function Unlock({onClose,onSuccess}:{onClose:()=>void;onSuccess:()=>void}) {
       onSuccess();
     }catch(err){
       if(err instanceof ApiError&&err.status===401) reject("Incorrect PIN");
+      else if(err instanceof ApiError&&err.status===429) reject(err.message);
       else if(err instanceof ApiError&&err.status===UNREACHABLE_STATUS) reject("Cannot reach the vault server — check that it is running.");
       else reject(err instanceof Error?`Unlock failed: ${err.message}`:"Unlock failed");
     }finally{

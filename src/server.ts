@@ -21,7 +21,8 @@ import { isColaConfigured } from "./cola_client.js";
 import { aiBarcodePrompt, parseAiBarcode } from "./ai_barcode.js";
 import { saveBarcodeCacheEntry } from "./barcode_cache.js";
 import { normalizeImportItem, readImportPayload } from "./import_batch.js";
-import { buildAiFailoverChain, defaultAiBaseUrl, defaultAiModel, isRetryableAiStatus, type AiProviderConfig } from "./ai_providers.js";
+import { buildAiFailoverChain, defaultAiBaseUrl, defaultAiModel, isRetryableAiStatus, resolveAiModel, type AiProviderConfig } from "./ai_providers.js";
+import { pruneAttempts, recordFailure, retryAfterMs, type PinAttempts } from "./pin_guard.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
 import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
@@ -41,7 +42,14 @@ import {
 } from "./speakeasy.js";
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
 
-const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
+/**
+ * Behind a reverse proxy every request otherwise arrives from the proxy's address, which
+ * would collapse all visitors into one throttle bucket and let a stranger's guessing spree
+ * slow the keeper down. Only enable where a proxy actually sets X-Forwarded-For, since
+ * trusting that header when directly exposed lets a client invent its own address.
+ */
+const trustProxy = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY?.trim() ?? "");
+const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024, trustProxy });
 const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
 const tables = new Set(["spirits", "taps", "brews", "packaged_beer", "wines"]);
 const publicTables = new Set([...tables, "cocktails"]);
@@ -109,13 +117,25 @@ function publicSettings() {
   return Object.fromEntries(PUBLIC_SETTING_KEYS.map((key) => [key, getSetting(key) ?? ""]));
 }
 
-app.get("/api/house", { schema: { tags: ["System"], summary: "Public house name, unlock hint, and guest-safe settings" } }, async () => ({
-  keeperName: keeperName(),
-  defaultPinHint: verifyPin(process.env.DEFAULT_PIN ?? "1234"),
-  brewfatherConfigured: isBrewfatherConfigured(),
-  ...publicSettings(),
-  enabledTabs: parseEnabledTabs(getSetting("enabled_tabs"))
-}));
+/**
+ * The "default PIN" hint helps a first launch on a home network, but on a public host it is
+ * an unauthenticated endpoint volunteering that the admin PIN was never changed. Opt in
+ * explicitly rather than guessing from the request address, which a reverse proxy rewrites.
+ */
+const showPinHint = /^(1|true|yes)$/i.test(process.env.SHOW_PIN_HINT?.trim() ?? "");
+
+app.get("/api/house", { schema: { tags: ["System"], summary: "Public house name, unlock hint, and guest-safe settings" } }, async () => {
+  const ai = resolveAiConfig();
+  return {
+    keeperName: keeperName(),
+    defaultPinHint: showPinHint && verifyPin(process.env.DEFAULT_PIN ?? "1234"),
+    brewfatherConfigured: isBrewfatherConfigured(),
+    colaConfigured: isColaConfigured(),
+    aiConfigured: ai.provider === "ollama" || Boolean(ai.key),
+    ...publicSettings(),
+    enabledTabs: parseEnabledTabs(getSetting("enabled_tabs"))
+  };
+});
 
 function samePin(pin: string, candidate?: string) {
   if (!candidate) return false;
@@ -132,10 +152,31 @@ function pinAccepted(pin: string) {
   return verifyPin(pin) || samePin(pin, process.env.ADMIN_PIN) || samePin(pin, process.env.MASTER_PIN);
 }
 
+/** Failed unlock attempts per client address. In memory on purpose: a restart is a reset. */
+const pinAttempts = new Map<string, PinAttempts>();
+
 app.post<{ Body: { pin?: string } }>("/api/auth/unlock", {
   schema: { tags: ["Auth"], summary: "Unlock admin mode", body: { type: "object", required: ["pin"], properties: { pin: { type: "string" } } } }
 }, async (request, reply) => {
-  if (!request.body.pin || !pinAccepted(request.body.pin)) return reply.code(401).send({ error: "Incorrect PIN" });
+  const now = Date.now();
+  const who = request.ip || "unknown";
+  const wait = retryAfterMs(pinAttempts.get(who), now);
+  if (wait > 0) {
+    const seconds = Math.ceil(wait / 1000);
+    app.log.warn({ ip: who, seconds, fails: pinAttempts.get(who)?.fails }, "Throttled a PIN attempt");
+    return reply.code(429).header("retry-after", String(seconds)).send({
+      error: `Too many attempts. Try again in ${seconds}s.`,
+      retryAfterSeconds: seconds
+    });
+  }
+  if (!request.body.pin || !pinAccepted(request.body.pin)) {
+    const next = recordFailure(pinAttempts.get(who), now);
+    pinAttempts.set(who, next);
+    pruneAttempts(pinAttempts, now);
+    app.log.warn({ ip: who, fails: next.fails }, "Rejected a PIN attempt");
+    return reply.code(401).send({ error: "Incorrect PIN" });
+  }
+  pinAttempts.delete(who);
   return { token: token(), expiresIn: 900 };
 });
 
@@ -609,7 +650,7 @@ function resolveAiConfig() {
   const baseUrl = (environmentBaseUrl || defaultBaseUrl).replace(/\/$/, "");
   const defaultModel = defaultAiModel(provider);
   const environmentModel = process.env.AI_MODEL?.trim() || "";
-  const model = environmentModel || getSetting("aiModel") || defaultModel;
+  const model = resolveAiModel(provider, environmentModel || getSetting("aiModel") || defaultModel);
   const fromEnvironment = Boolean(environmentProvider || environmentKey || environmentBaseUrl || environmentModel || process.env.OLLAMA_HOST);
   return { provider, key, baseUrl, model, fromEnvironment, keyFromEnvironment: Boolean(environmentKey) };
 }

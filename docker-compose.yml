@@ -1,17 +1,34 @@
+# Synology / NAS compose for The Smokey Barrel Bar.
+# Do not replace this with the laptop compose — that one builds locally and
+# mounts ./data. This stack pulls the published image and keeps Watchtower.
+#
+# Keys come from the .env sitting next to this file. Recreate the container
+# after editing either file:  docker compose up -d
+# In Container Manager: Project → Build / Recreate (not just Restart).
+
+version: "3.8"
+
 services:
-  smokey-vault:
-    build: .
-    image: the-smokey-vault:latest
+  the-smokey-vault:
+    image: ghcr.io/subarude15/the-smokey-vault:latest
     container_name: smokey-vault
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "6616:8080"
+    volumes:
+      # App reads DB_PATH=/data/smokeyvault.db. The old /app/data mount
+      # left the live site on an empty internal volume.
+      - /volume1/docker/thesmokeyvault/data:/data
     environment:
       NODE_ENV: production
       PORT: 8080
       DB_PATH: /data/smokeyvault.db
-      SESSION_SECRET: ${SESSION_SECRET:-change-this-on-your-server}
-      DEFAULT_PIN: ${DEFAULT_PIN:-1234}
+      # Public hostname sits behind the Synology reverse proxy.
+      TRUST_PROXY: "true"
+      SESSION_SECRET: ${SESSION_SECRET:-1800AlsacerdReadingPa19604}
+      DEFAULT_PIN: ${DEFAULT_PIN:-6616}
       ADMIN_PIN: ${ADMIN_PIN:-}
       MASTER_PIN: ${MASTER_PIN:-}
       AI_PROVIDER: ${AI_PROVIDER:-}
@@ -28,5 +45,14 @@ services:
       COLA_BURST_LIMIT: ${COLA_BURST_LIMIT:-10}
       BREWFATHER_USER_ID: ${BREWFATHER_USER_ID:-}
       BREWFATHER_API_KEY: ${BREWFATHER_API_KEY:-}
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
     volumes:
-      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_POLL_INTERVAL: "300"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_INCLUDE_RESTARTING: "true"

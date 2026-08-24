@@ -34,6 +34,23 @@ export function defaultAiModel(provider: string) {
   return "gpt-4o-mini";
 }
 
+/** Google retires Flash aliases without notice. A stale AI_MODEL should not take the mixologist down. */
+const RETIRED_GEMINI_MODELS = new Set([
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-latest",
+  "gemini-1.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-001",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-latest"
+]);
+
+export function resolveAiModel(provider: string, model: string) {
+  const id = model.replace(/^models\//, "").trim();
+  if (provider === "gemini" && (!id || RETIRED_GEMINI_MODELS.has(id))) return defaultAiModel("gemini");
+  return id || defaultAiModel(provider);
+}
+
 /**
  * Rate limits, timeouts, and upstream faults are worth asking someone else about.
  * A rejected key or a malformed request would fail the same way everywhere, so those

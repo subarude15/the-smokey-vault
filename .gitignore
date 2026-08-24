@@ -9,3 +9,4 @@ data/*
 .gemini/
 gha-creds-*.json
 repomix-output.xml
+.env
