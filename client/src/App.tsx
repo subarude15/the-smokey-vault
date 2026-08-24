@@ -118,6 +118,53 @@ function storedTheme() {
   return themePresets[value] ? value : "dark";
 }
 
+const MOBILE_SHORT_LABELS: Record<string, string> = {
+  dashboard: "Home",
+  taps: "On Tap",
+  cocktails: "Drinks",
+  mixologist: "AI Mix",
+  gallery: "Gallery",
+  events: "Events",
+  patrons: "Regulars",
+  staff: "Crew",
+  tipjar: "Tips",
+  merch: "Merch",
+  next: "Feedback",
+  brewery: "Brewery",
+  spirits: "Spirits",
+  wines: "Wine",
+  brews: "Brews",
+  packaged_beer: "Beer",
+  scan: "Scan",
+  messages: "Inbox",
+  restock: "Restock",
+  settings: "Settings"
+};
+
+function mobileQuickNav(
+  collectionNav: { id: string; label: string; icon: typeof Bottle }[],
+  admin: boolean,
+  keeperNav: { id: string; label: string; icon: typeof Bottle; badge?: number }[]
+) {
+  const preferred = admin ? ["dashboard", "scan", "taps", "cocktails"] : ["dashboard", "taps", "cocktails", "gallery"];
+  const items: { id: string; label: string; icon: typeof Bottle; badge?: number }[] = [];
+  for (const id of preferred) {
+    const fromCollection = collectionNav.find((item) => item.id === id);
+    if (fromCollection) items.push(fromCollection);
+    else if (admin) {
+      const fromKeeper = keeperNav.find((item) => item.id === id);
+      if (fromKeeper) items.push(fromKeeper);
+    }
+    if (items.length >= 3) break;
+  }
+  while (items.length < 3) {
+    const next = collectionNav.find((item) => !items.some((row) => row.id === item.id));
+    if (!next) break;
+    items.push(next);
+  }
+  return items.slice(0, 3);
+}
+
 function cycleTheme(current: string) {
   if (current === "light") return "dark";
   if (current === "dark") return "punk";
@@ -373,6 +420,7 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [admin, setAdmin] = useState(tokenExists());
   const [mobileNav, setMobileNav] = useState(false);
+  const [navHint, setNavHint] = useState(() => !localStorage.getItem("smokey-nav-hint-dismissed"));
   const [unlock, setUnlock] = useState(false);
   const [theme, setTheme] = useState(storedTheme);
   const [backupDue, setBackupDue] = useState(false);
@@ -417,6 +465,10 @@ export default function App() {
   }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
+  useEffect(() => {
+    document.body.classList.toggle("nav-open", mobileNav);
+    return () => document.body.classList.remove("nav-open");
+  }, [mobileNav]);
   useEffect(() => {
     api<Record<string, unknown>>("/house").then((values) => {
       setHouse({
@@ -472,7 +524,7 @@ export default function App() {
     return () => { clearTimeout(timer); events.forEach((event) => window.removeEventListener(event, touch)); };
   }, [admin, handToGuest]);
 
-  const navigate = (next: string) => { setPage(next); setMobileNav(false); };
+  const navigate = (next: string) => { setPage(next); setMobileNav(false); if (navHint) dismissNavHint(); };
   function handleScan(result: ScanResult) {
     if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
     const table = result.table;
@@ -550,6 +602,13 @@ export default function App() {
     { id:"settings",label:"Settings",icon:Settings }
   ];
   const facebookGroupUrl = house.settings.facebook_group_url?.trim() ?? "";
+  const quickNav = mobileQuickNav(collectionNav, admin, keeperNav);
+  const allNav = [...collectionNav, ...(admin ? keeperNav : [])];
+  const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Vault";
+  function dismissNavHint() {
+    localStorage.setItem("smokey-nav-hint-dismissed", "1");
+    setNavHint(false);
+  }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
     return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
       <item.icon size={19}/>{item.label}
@@ -579,9 +638,14 @@ export default function App() {
           <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong><small>{admin ? "Tap to lock" : "Tap for Keeper Mode"}</small></span></button>
         </div>
       </aside>
-      <main>
+      <main className="has-mobile-nav">
         <header className="topbar">
-          <button className="icon-button menu-button" onClick={() => setMobileNav(true)}><Menu/></button>
+          <div className="topbar-start">
+            <button className="menu-button" onClick={() => { setMobileNav(true); if (navHint) dismissNavHint(); }} aria-label="Open navigation menu">
+              <Menu size={18}/><span>Menu</span>
+            </button>
+            <span className="topbar-title">{pageTitle}</span>
+          </div>
           <div className="top-actions">
             {admin && <button className="kiosk-lock" onClick={handToGuest}>
               <Lock size={18}/> Lock / Hand to Guest
@@ -595,6 +659,11 @@ export default function App() {
           </div>
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
+        {navHint && <div className="nav-hint-banner" role="status">
+          <Menu size={16}/>
+          <span>More sections live in <strong>Menu</strong> — or use the tabs below.</span>
+          <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
+        </div>}
         <div className="page">
           {page === "dashboard" && <Dashboard admin={admin} go={navigate}/>}
           {modules.map((module) => page === module.id && <Inventory
@@ -646,6 +715,19 @@ export default function App() {
           }))}/>}
         </div>
         {!admin && <GuestFooter locationText={house.settings.bar_location_text ?? ""} onContact={() => setContactOpen(true)}/>}
+        <nav className="mobile-bottom-nav" aria-label="Quick navigation">
+          {quickNav.map((item) => (
+            <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
+              <item.icon size={20}/>
+              <span>{MOBILE_SHORT_LABELS[item.id] ?? item.label}</span>
+              {item.badge ? <span className="mobile-nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
+            </button>
+          ))}
+          <button type="button" className={mobileNav ? "active" : ""} onClick={() => { setMobileNav(true); if (navHint) dismissNavHint(); }} aria-label="Open full menu">
+            <Menu size={20}/>
+            <span>More</span>
+          </button>
+        </nav>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
