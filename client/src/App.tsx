@@ -110,7 +110,18 @@ const modules: Module[] = [
 const themePresets: Record<string, Record<string,string>> = {
   light: { "--bg":"#f4f0e8","--surface":"#fffdf8","--surface-2":"#ebe5d9","--text":"#252018","--muted":"#70675b","--line":"#d8d0c2","--accent":"#8f4d2e","--accent-2":"#dba95f" },
   dark: { "--bg":"#11100e","--surface":"#1a1815","--surface-2":"#24211c","--text":"#f4ecdf","--muted":"#a69b8b","--line":"#39342c","--accent":"#c77647","--accent-2":"#e1b46e" },
-  punk: { "--bg":"#0b0709","--surface":"#1a0e14","--surface-2":"#2a1420","--text":"#f7efe6","--muted":"#c49aaa","--line":"#5c2438","--accent":"#ff2d6a","--accent-2":"#ffe14a" }
+  punk: {
+    "--bg": "#09060a",
+    "--surface": "#160c12",
+    "--surface-2": "#25141c",
+    "--text": "#f8efe6",
+    "--muted": "#c9a0ad",
+    "--line": "#6a2840",
+    "--accent": "#ff2d6a",
+    "--accent-2": "#ffe14a",
+    "--punk-shadow": "#ff2d6a",
+    "--punk-marker": "#ffe14a"
+  }
 };
 
 function storedTheme() {
@@ -178,8 +189,10 @@ function themeLabel(theme: string) {
 
 function applyTheme(theme: string, tokens?: Record<string,string>) {
   const values = { ...(themePresets[theme] ?? themePresets.dark), ...tokens };
-  Object.entries(values).forEach(([key,value]) => document.documentElement.style.setProperty(key, value));
+  Object.entries(values).forEach(([key, value]) => document.documentElement.style.setProperty(key, value));
   document.documentElement.dataset.theme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", values["--bg"] ?? "#15130f");
 }
 
 type ScanModuleId = "spirits" | "packaged_beer" | "wines";
@@ -2784,7 +2797,7 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Light, dark, or punk. Patron Mode uses the same toggle in the top bar.</p>
+        <p>Light, dark, or imperfect punk. Patron Mode uses the same toggle in the top bar.</p>
         <div className="theme-grid">{(["light","dark","punk"] as const).map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}
