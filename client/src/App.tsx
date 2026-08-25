@@ -110,18 +110,7 @@ const modules: Module[] = [
 const themePresets: Record<string, Record<string,string>> = {
   light: { "--bg":"#f4f0e8","--surface":"#fffdf8","--surface-2":"#ebe5d9","--text":"#252018","--muted":"#70675b","--line":"#d8d0c2","--accent":"#8f4d2e","--accent-2":"#dba95f" },
   dark: { "--bg":"#11100e","--surface":"#1a1815","--surface-2":"#24211c","--text":"#f4ecdf","--muted":"#a69b8b","--line":"#39342c","--accent":"#c77647","--accent-2":"#e1b46e" },
-  punk: {
-    "--bg": "#09060a",
-    "--surface": "#160c12",
-    "--surface-2": "#25141c",
-    "--text": "#f8efe6",
-    "--muted": "#c9a0ad",
-    "--line": "#6a2840",
-    "--accent": "#ff2d6a",
-    "--accent-2": "#ffe14a",
-    "--punk-shadow": "#ff2d6a",
-    "--punk-marker": "#ffe14a"
-  }
+  punk: { "--bg":"#0b0709","--surface":"#1a0e14","--surface-2":"#2a1420","--text":"#f7efe6","--muted":"#c49aaa","--line":"#5c2438","--accent":"#ff2d6a","--accent-2":"#ffe14a" }
 };
 
 function storedTheme() {
@@ -189,10 +178,8 @@ function themeLabel(theme: string) {
 
 function applyTheme(theme: string, tokens?: Record<string,string>) {
   const values = { ...(themePresets[theme] ?? themePresets.dark), ...tokens };
-  Object.entries(values).forEach(([key, value]) => document.documentElement.style.setProperty(key, value));
+  Object.entries(values).forEach(([key,value]) => document.documentElement.style.setProperty(key, value));
   document.documentElement.dataset.theme = theme;
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", values["--bg"] ?? "#15130f");
 }
 
 type ScanModuleId = "spirits" | "packaged_beer" | "wines";
@@ -678,7 +665,7 @@ export default function App() {
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
-          {page === "dashboard" && <Dashboard admin={admin} go={navigate} punk={theme === "punk"}/>}
+          {page === "dashboard" && <Dashboard admin={admin} go={navigate}/>}
           {modules.map((module) => page === module.id && <Inventory
             key={module.id}
             module={module}
@@ -750,7 +737,7 @@ export default function App() {
   );
 }
 
-function Dashboard({ admin, go, punk = false }: { admin: boolean; go: (page: string) => void; punk?: boolean }) {
+function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }) {
   const { keeperName } = useHouse();
   const [snap, setSnap] = useState<OverviewSnapshot>();
   const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
@@ -789,14 +776,7 @@ function Dashboard({ admin, go, punk = false }: { admin: boolean; go: (page: str
   ]) : [];
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
-    <div className={`hero${punk ? " punk-hero" : ""}`}>
-      {punk && <>
-        <span className="punk-tape" aria-hidden="true"/>
-        <span className="punk-scribble" aria-hidden="true"/>
-        <span className="punk-stars" aria-hidden="true"/>
-        <span className="punk-doodle" aria-hidden="true"/>
-        <span className="punk-sticker" aria-hidden="true">NO RULES<br/>JUST POUR</span>
-      </>}
+    <div className="hero">
       <div className="hero-copy">
         <span className="eyebrow">{greeting.eyebrow}</span>
         <h1>{greeting.line}<br/><em>{greeting.emphasize}</em></h1>
@@ -807,9 +787,9 @@ function Dashboard({ admin, go, punk = false }: { admin: boolean; go: (page: str
       </div>
       <p className="hero-lede">{snap ? overviewHeroCopy(snap, !admin) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
     </div>
-    <section className={punk ? "punk-section" : undefined}>
+    <section>
       <div className="section-heading">
-        <div><span className="eyebrow">AT A GLANCE</span><h2>{punk ? <>Inside the <em>vault</em></> : "Inside the vault"}</h2></div>
+        <div><span className="eyebrow">AT A GLANCE</span><h2>Inside the vault</h2></div>
         {!admin && <span className="guest-badge"><Lock size={13}/> PATRON MODE</span>}
       </div>
       <div className={`stat-grid${!admin ? " guest-stats" : ""}`}>
@@ -2804,7 +2784,7 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Light, dark, or imperfect punk. Patron Mode uses the same toggle in the top bar.</p>
+        <p>Light, dark, or punk. Patron Mode uses the same toggle in the top bar.</p>
         <div className="theme-grid">{(["light","dark","punk"] as const).map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}
