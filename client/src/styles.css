@@ -417,35 +417,52 @@ body.nav-open{overflow:hidden}
 
 /* ===================== Imperfect Punk theme (data-theme=punk) ===================== */
 html[data-theme="punk"]{
-  --punk-hard: 5px 5px 0 #12060c;
-  --punk-hard-y: 4px 4px 0 #12060c;
-  --punk-hard-sm: 3px 3px 0 #12060c;
+  --punk-hard: 5px 5px 0 #0a0408;
+  --punk-hard-y: 4px 4px 0 #0a0408;
+  --punk-hard-sm: 3px 3px 0 #0a0408;
+  --punk-paper: #f3e6d4;
   color-scheme: dark;
 }
 html[data-theme="punk"] body{
   background:
-    radial-gradient(1200px 700px at 12% -10%, color-mix(in srgb,var(--accent) 18%,transparent), transparent 55%),
-    radial-gradient(900px 600px at 100% 0%, color-mix(in srgb,#7a1028 35%,transparent), transparent 50%),
+    radial-gradient(1100px 640px at 8% -8%, color-mix(in srgb,var(--accent) 22%,transparent), transparent 58%),
+    radial-gradient(900px 520px at 100% 0%, color-mix(in srgb,#6a0f28 42%,transparent), transparent 52%),
+    radial-gradient(700px 480px at 70% 110%, color-mix(in srgb,var(--accent-2) 8%,transparent), transparent 50%),
     var(--bg);
   font-family: "DM Sans", sans-serif;
 }
+/* Heavy xerox / film grain */
 html[data-theme="punk"] body::before{
   content:"";
   position:fixed;
   inset:0;
   pointer-events:none;
   z-index:10000;
-  opacity:.22;
-  mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.95'/%3E%3C/svg%3E");
-  background-size:160px 160px;
+  opacity:.34;
+  mix-blend-mode:soft-light;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:140px 140px;
+}
+html[data-theme="punk"] body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:9999;
+  opacity:.12;
+  mix-blend-mode:multiply;
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 2px, #00000018 2px, #00000018 3px),
+    repeating-linear-gradient(90deg, transparent, transparent 3px, #00000010 3px, #00000010 4px);
 }
 html[data-theme="punk"] .eyebrow,
 html[data-theme="punk"] .nav-label,
 html[data-theme="punk"] .guest-badge,
-html[data-theme="punk"] .chip{
+html[data-theme="punk"] .chip,
+html[data-theme="punk"] .mobile-bottom-nav button,
+html[data-theme="punk"] .menu-button{
   font-family:"Archivo Black", "DM Sans", sans-serif;
-  letter-spacing:.14em;
+  letter-spacing:.12em;
 }
 html[data-theme="punk"] .brand strong,
 html[data-theme="punk"] .hero h1,
@@ -457,52 +474,130 @@ html[data-theme="punk"] .modal-header h2,
 html[data-theme="punk"] .topbar-title{
   font-family:"Playfair Display", serif;
 }
+html[data-theme="punk"] .section-heading h2 em,
 html[data-theme="punk"] .hero h1 em{
-  color:var(--accent-2);
-  text-decoration:underline;
-  text-decoration-color:var(--accent);
-  text-decoration-thickness:6px;
-  text-underline-offset:6px;
-  font-style:italic;
+  font-family:"Caveat", "Permanent Marker", cursive;
+  font-style:normal;
+  font-weight:700;
+  letter-spacing:.01em;
+}
+html[data-theme="punk"] .hero h1 em{
+  position:relative;
+  display:inline-block;
+  color:#12060c;
+  padding:0 .18em .04em;
+  margin-top:.08em;
+  transform:rotate(-1.8deg);
+  background:transparent;
+  text-decoration:none;
+  z-index:1;
+}
+html[data-theme="punk"] .hero h1 em::before{
+  content:"";
+  position:absolute;
+  inset:-.08em -.12em -.18em;
+  z-index:-1;
+  background:url("/punk/marker-stroke.svg") center / 100% 100% no-repeat;
+  transform:rotate(1deg) scaleY(1.15);
+}
+html[data-theme="punk"] .section-heading h2 em{
+  color:var(--accent);
+  padding:0 .1em;
+}
+html[data-theme="punk"] .section-heading h2 em::after{
+  content:"";
+  display:block;
+  width:100%;
+  height:10px;
+  margin-top:-4px;
+  background:url("/punk/underline.svg") center / 100% 100% no-repeat;
 }
 html[data-theme="punk"] .brand-mark{
-  transform:rotate(38deg);
-  border-width:2px;
+  transform:rotate(34deg);
+  border-width:2.5px;
   border-color:var(--accent-2);
+  border-radius:8px;
   box-shadow:var(--punk-hard-sm);
-  background:color-mix(in srgb,var(--accent) 18%,var(--surface));
+  background:color-mix(in srgb,var(--accent) 22%,var(--surface));
 }
 html[data-theme="punk"] .sidebar{
-  background:color-mix(in srgb,var(--surface) 92%,#000);
-  border-right:2px solid var(--line);
+  background:
+    linear-gradient(180deg, color-mix(in srgb,var(--surface) 88%,#000), color-mix(in srgb,#1a0a12 90%,#000));
+  border-right:2.5px solid #0a0408;
+  box-shadow:inset -1px 0 0 color-mix(in srgb,var(--accent) 35%,transparent);
 }
 html[data-theme="punk"] .sidebar nav button{
-  border-radius:8px;
-  border:1px solid transparent;
+  border-radius:6px;
+  border:1.5px solid transparent;
 }
 html[data-theme="punk"] .sidebar nav button.active{
-  background:color-mix(in srgb,var(--accent-2) 88%,#fff);
+  background:transparent;
   color:#12060c;
-  box-shadow:inset 0 0 0 0 transparent, var(--punk-hard-sm);
-  border-color:#12060c;
-  transform:rotate(-0.4deg);
+  border-color:transparent;
+  box-shadow:none;
+  transform:rotate(-1.1deg);
+  position:relative;
+  z-index:1;
+  font-weight:800;
+}
+html[data-theme="punk"] .sidebar nav button.active::before{
+  content:"";
+  position:absolute;
+  inset:-2px -4px;
+  z-index:-1;
+  background:url("/punk/marker-stroke.svg") center / 115% 140% no-repeat;
+  transform:rotate(-1deg);
 }
 html[data-theme="punk"] .sidebar nav button.active svg{color:#12060c}
-html[data-theme="punk"] .sidebar nav button.active svg:last-child{opacity:.75;color:#12060c}
+html[data-theme="punk"] .sidebar nav button.active svg:last-child{opacity:.8;color:#12060c}
 html[data-theme="punk"] .sidebar nav button:hover:not(.active){
   border-color:var(--accent);
-  background:color-mix(in srgb,var(--accent) 12%,var(--surface-2));
+  background:color-mix(in srgb,var(--accent) 14%,var(--surface-2));
+}
+html[data-theme="punk"] .sidebar-footer{
+  position:relative;
+  margin-top:14px;
+  padding-top:18px;
+}
+html[data-theme="punk"] .sidebar-footer::before{
+  content:"";
+  position:absolute;
+  left:18%;
+  right:18%;
+  top:-2px;
+  height:18px;
+  background:url("/punk/tape.svg") center / contain no-repeat;
+  opacity:.95;
+  transform:rotate(-3deg);
+}
+html[data-theme="punk"] .sidebar-footer button{
+  background:color-mix(in srgb,var(--accent) 18%,var(--punk-paper));
+  color:#1a1008;
+  border:2px solid #0a0408;
+  border-radius:4px;
+  padding:10px 12px;
+  box-shadow:var(--punk-hard-sm);
+  transform:rotate(-1deg);
+}
+html[data-theme="punk"] .sidebar-footer strong{color:#1a1008}
+html[data-theme="punk"] .sidebar-footer small{color:#5a4038}
+html[data-theme="punk"] .sidebar-footer svg{
+  border:2px solid #0a0408;
+  background:var(--accent);
+  color:#fff;
+  box-shadow:none;
+  border-radius:6px;
 }
 html[data-theme="punk"] .topbar{
-  border-bottom:2px solid var(--line);
-  background:color-mix(in srgb,var(--bg) 78%,transparent);
+  border-bottom:2.5px solid #0a0408;
+  background:color-mix(in srgb,var(--bg) 72%,transparent);
 }
 html[data-theme="punk"] .icon-button,
 html[data-theme="punk"] .scan-button,
 html[data-theme="punk"] .secondary,
 html[data-theme="punk"] .guest-footer button{
-  border-width:2px;
-  border-radius:10px;
+  border:2.5px solid #0a0408;
+  border-radius:8px;
   box-shadow:var(--punk-hard-sm);
   background:var(--surface);
 }
@@ -510,49 +605,52 @@ html[data-theme="punk"] .icon-button:hover,
 html[data-theme="punk"] .secondary:hover,
 html[data-theme="punk"] .guest-footer button:hover{
   transform:translate(-1px,-1px);
-  box-shadow:4px 4px 0 #12060c;
+  box-shadow:4px 4px 0 #0a0408;
 }
 html[data-theme="punk"] .primary{
-  border-width:2px;
-  border-color:#12060c;
+  border:2.5px solid #0a0408;
   box-shadow:var(--punk-hard-y);
-  border-radius:10px;
+  border-radius:8px;
   color:#12060c;
   background:var(--accent-2);
-  font-weight:800;
+  font-family:"Archivo Black", "DM Sans", sans-serif;
+  letter-spacing:.04em;
+  text-transform:uppercase;
 }
 html[data-theme="punk"] .primary:hover{
-  background:color-mix(in srgb,var(--accent-2) 85%,#fff);
+  background:color-mix(in srgb,var(--accent-2) 82%,#fff);
   transform:translate(-1px,-1px);
 }
 html[data-theme="punk"] .menu-button{
-  border:2px solid #12060c !important;
+  border:2.5px solid #0a0408 !important;
   background:var(--accent-2) !important;
   color:#12060c !important;
-  box-shadow:var(--punk-hard);
-  border-radius:8px !important;
-  font-family:"Archivo Black", "DM Sans", sans-serif;
-  letter-spacing:.06em;
+  box-shadow:5px 5px 0 var(--accent) !important;
+  border-radius:4px !important;
   text-transform:uppercase;
-  transform:rotate(-1.5deg);
+  transform:rotate(-2.2deg);
+  clip-path:polygon(2% 8%, 96% 0%, 100% 88%, 6% 100%);
 }
 html[data-theme="punk"] .menu-button svg{color:#12060c !important}
 html[data-theme="punk"] .menu-button:hover{
-  transform:rotate(-1.5deg) translate(-1px,-1px);
-  box-shadow:6px 6px 0 #12060c;
+  transform:rotate(-2.2deg) translate(-1px,-1px);
+  box-shadow:6px 6px 0 var(--accent) !important;
 }
 html[data-theme="punk"] .nav-hint-banner{
-  border-bottom:2px solid #12060c;
+  border-bottom:2.5px solid #0a0408;
+  border-top:1px dashed color-mix(in srgb,var(--accent-2) 50%,transparent);
   background:
-    repeating-linear-gradient(-12deg, color-mix(in srgb,var(--accent-2) 22%,transparent) 0 10px, transparent 10px 20px),
-    color-mix(in srgb,var(--accent) 16%,var(--surface));
-  color:var(--text);
-  font-weight:600;
+    repeating-linear-gradient(-18deg, color-mix(in srgb,var(--accent-2) 28%,transparent) 0 9px, transparent 9px 18px),
+    #12060c;
+  color:var(--punk-paper);
+  font-family:"Permanent Marker", "Caveat", cursive;
+  letter-spacing:.02em;
+  font-size:14px;
 }
 html[data-theme="punk"] .nav-hint-banner strong{
   color:var(--accent-2);
-  font-family:"Archivo Black", "DM Sans", sans-serif;
-  letter-spacing:.04em;
+  font-family:"Archivo Black", sans-serif;
+  letter-spacing:.05em;
 }
 html[data-theme="punk"] .stat-card,
 html[data-theme="punk"] .feature-card,
@@ -576,108 +674,198 @@ html[data-theme="punk"] .bartender-card,
 html[data-theme="punk"] .tip-jar-card,
 html[data-theme="punk"] .wanted-card,
 html[data-theme="punk"] .modal{
-  border-width:2px;
-  border-color:var(--line);
-  border-radius:12px;
+  border:2.5px solid #0a0408;
+  border-radius:10px;
   box-shadow:var(--punk-hard-sm);
-  background:color-mix(in srgb,var(--surface) 94%,#000);
+  background:
+    linear-gradient(160deg, color-mix(in srgb,var(--surface) 92%,#000), color-mix(in srgb,#1c0d14 94%,#000));
+  outline:1px solid color-mix(in srgb,var(--accent) 40%,transparent);
+  outline-offset:-5px;
 }
-html[data-theme="punk"] .stat-card:nth-child(3n){transform:rotate(0.6deg)}
-html[data-theme="punk"] .stat-card:nth-child(3n+1){transform:rotate(-0.5deg)}
+html[data-theme="punk"] .stat-card:nth-child(3n){transform:rotate(1.1deg)}
+html[data-theme="punk"] .stat-card:nth-child(3n+1){transform:rotate(-1deg)}
+html[data-theme="punk"] .stat-card:nth-child(3n+2){transform:rotate(.4deg)}
 html[data-theme="punk"] .stat-card:hover,
 html[data-theme="punk"] .overview-tap:hover,
 html[data-theme="punk"] .overview-brew:hover,
 html[data-theme="punk"] .overview-low:hover,
 html[data-theme="punk"] .feature-card:hover{
-  border-color:var(--accent-2);
-  box-shadow:var(--punk-hard-y);
-  transform:translate(-2px,-2px) rotate(0deg);
+  border-color:#0a0408;
+  outline-color:var(--accent-2);
+  box-shadow:5px 5px 0 var(--accent);
+  transform:translate(-2px,-2px) rotate(-.4deg);
 }
 html[data-theme="punk"] .feature-card.warm{
   background:
-    linear-gradient(135deg, color-mix(in srgb,var(--accent) 34%,var(--surface)), color-mix(in srgb,var(--accent-2) 12%,var(--surface)));
-  border-color:var(--accent);
+    linear-gradient(135deg, color-mix(in srgb,var(--accent) 42%,var(--surface)), color-mix(in srgb,var(--accent-2) 18%,var(--surface)));
+  border-color:#0a0408;
 }
-html[data-theme="punk"] .hero{
-  border-bottom:2px solid var(--line);
+html[data-theme="punk"] .feature-card h2{
+  font-family:"Archivo Black", "DM Sans", sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  font-size:clamp(22px,2.4vw,30px);
+}
+
+/* ---- Hero collage / zine decorations ---- */
+html[data-theme="punk"] .punk-hero{
+  border-bottom:2.5px solid #0a0408;
   position:relative;
+  overflow:visible;
+  background:
+    radial-gradient(ellipse at 20% 40%, color-mix(in srgb,#5a1020 35%,transparent), transparent 55%);
+  padding-top:8px;
+}
+html[data-theme="punk"] .punk-tape{
+  position:absolute;
+  top:-6px;
+  left:18%;
+  width:min(170px,34vw);
+  height:28px;
+  background:url("/punk/tape.svg") center / contain no-repeat;
+  transform:rotate(-4deg);
+  z-index:3;
+  pointer-events:none;
+}
+html[data-theme="punk"] .punk-scribble{
+  position:absolute;
+  left:4%;
+  top:42%;
+  width:min(260px,55vw);
+  height:70px;
+  background:url("/punk/scribble.svg") center / contain no-repeat;
+  opacity:.88;
+  transform:rotate(-6deg);
+  z-index:2;
+  pointer-events:none;
+  mix-blend-mode:multiply;
+}
+html[data-theme="punk"] .punk-stars{
+  position:absolute;
+  right:38%;
+  top:8%;
+  width:120px;
+  height:40px;
+  background:url("/punk/stars.svg") center / contain no-repeat;
+  transform:rotate(8deg);
+  z-index:2;
+  pointer-events:none;
+}
+html[data-theme="punk"] .punk-doodle{
+  position:absolute;
+  right:2%;
+  bottom:-18px;
+  width:74px;
+  height:74px;
+  background:url("/punk/doodle-dead.svg") center / contain no-repeat;
+  transform:rotate(8deg);
+  z-index:4;
+  pointer-events:none;
+  filter:drop-shadow(3px 3px 0 #0a0408);
+}
+html[data-theme="punk"] .punk-sticker{
+  position:absolute;
+  top:6px;
+  right:4px;
+  z-index:4;
+  pointer-events:none;
+  background:var(--accent);
+  color:#fff;
+  border:2.5px solid #0a0408;
+  box-shadow:4px 4px 0 #0a0408;
+  padding:8px 10px;
+  font:700 11px/1.15 "Archivo Black", sans-serif;
+  letter-spacing:.06em;
+  text-align:center;
+  transform:rotate(7deg);
 }
 html[data-theme="punk"] .hero-orbit{
-  border-width:2px;
-  box-shadow:var(--punk-hard);
+  border:2.5px solid #0a0408;
+  box-shadow:5px 5px 0 var(--accent);
   background:
-    radial-gradient(circle, color-mix(in srgb,var(--accent) 22%,var(--surface-2)), transparent 65%);
+    radial-gradient(circle, color-mix(in srgb,var(--accent) 24%,var(--surface-2)), transparent 65%);
+  outline:2px dashed color-mix(in srgb,var(--accent-2) 70%,transparent);
+  outline-offset:8px;
 }
-html[data-theme="punk"] .hero-orbit:after{border-color:var(--accent-2);border-width:2px}
+html[data-theme="punk"] .hero-orbit:after{border-color:var(--accent-2);border-width:2.5px}
+html[data-theme="punk"] .hero-orbit span{color:var(--accent)}
 html[data-theme="punk"] .chip{
-  border-width:2px;
-  border-radius:8px;
-  box-shadow:1px 1px 0 color-mix(in srgb,var(--accent) 50%,transparent);
+  border:2px solid #0a0408;
+  border-radius:6px;
+  box-shadow:2px 2px 0 #0a0408;
 }
 html[data-theme="punk"] .chip.active,
 html[data-theme="punk"] .chip.static{
   background:var(--accent-2);
   color:#12060c;
-  border-color:#12060c;
+  border-color:#0a0408;
 }
 html[data-theme="punk"] .mobile-bottom-nav{
-  border-top:2px solid var(--line);
-  background:color-mix(in srgb,var(--bg) 90%,#000);
+  border-top:2.5px solid #0a0408;
+  background:#0a0408ee;
+  gap:2px;
 }
 html[data-theme="punk"] .mobile-bottom-nav button{
-  border-radius:10px;
-  font-family:"Archivo Black", "DM Sans", sans-serif;
-  letter-spacing:.04em;
+  border-radius:6px;
   text-transform:uppercase;
   font-size:9px;
+  border:2px solid transparent;
 }
 html[data-theme="punk"] .mobile-bottom-nav button.active{
   color:#12060c;
-  background:var(--accent-2);
-  box-shadow:var(--punk-hard-sm);
-  border:2px solid #12060c;
-  transform:rotate(-1deg);
+  background:transparent;
+  border-color:transparent;
+  box-shadow:none;
+  transform:rotate(-1.4deg);
+  position:relative;
+  z-index:1;
+}
+html[data-theme="punk"] .mobile-bottom-nav button.active::before{
+  content:"";
+  position:absolute;
+  inset:-2px -3px;
+  z-index:-1;
+  background:url("/punk/marker-stroke.svg") center / 120% 145% no-repeat;
 }
 html[data-theme="punk"] .kiosk-lock{
-  border:2px solid #12060c;
+  border:2.5px solid #0a0408;
   box-shadow:var(--punk-hard-y);
-  border-radius:10px;
+  border-radius:8px;
 }
 html[data-theme="punk"] .backup-banner{
-  border-bottom:2px solid var(--accent);
+  border-bottom:2.5px solid #0a0408;
   background:
-    repeating-linear-gradient(90deg, color-mix(in srgb,var(--accent) 18%,transparent) 0 12px, transparent 12px 24px),
-    color-mix(in srgb,var(--accent) 16%,var(--surface));
+    repeating-linear-gradient(90deg, color-mix(in srgb,var(--accent) 22%,transparent) 0 11px, transparent 11px 22px),
+    color-mix(in srgb,var(--accent) 18%,var(--surface));
 }
-html[data-theme="punk"] .search{
-  border-width:2px;
-  box-shadow:var(--punk-hard-sm);
-  border-radius:10px;
-}
+html[data-theme="punk"] .search,
 html[data-theme="punk"] input,
 html[data-theme="punk"] select,
 html[data-theme="punk"] textarea{
-  border-width:2px;
+  border:2.5px solid #0a0408;
   border-radius:8px;
+  box-shadow:2px 2px 0 color-mix(in srgb,var(--accent) 35%,transparent);
 }
 html[data-theme="punk"] .theme-grid button.active{
-  border-width:2px;
-  border-color:var(--accent-2);
+  border:2.5px solid #0a0408;
   box-shadow:var(--punk-hard-sm);
+  outline:2px solid var(--accent-2);
+  outline-offset:2px;
 }
-html[data-theme="punk"] .sidebar-footer svg{
-  border:2px solid var(--accent);
-  box-shadow:var(--punk-hard-sm);
-}
+html[data-theme="punk"] .punk-section .section-heading h2{position:relative}
 @media(max-width:1050px){
   html[data-theme="punk"] .menu-button{animation:punk-menu-pulse 2.8s ease-in-out infinite}
+  html[data-theme="punk"] .punk-sticker{font-size:9px;padding:6px 7px;top:2px;right:0}
+  html[data-theme="punk"] .punk-doodle{width:58px;height:58px;bottom:-10px}
+  html[data-theme="punk"] .punk-scribble{top:48%;width:min(210px,70vw)}
 }
 @keyframes punk-menu-pulse{
-  0%,100%{box-shadow:5px 5px 0 #12060c}
-  50%{box-shadow:6px 6px 0 var(--accent)}
+  0%,100%{box-shadow:5px 5px 0 var(--accent)}
+  50%{box-shadow:7px 7px 0 #0a0408}
 }
 @media(prefers-reduced-motion:reduce){
   html[data-theme="punk"] .menu-button{animation:none}
   html[data-theme="punk"] .stat-card:nth-child(3n),
-  html[data-theme="punk"] .stat-card:nth-child(3n+1){transform:none}
+  html[data-theme="punk"] .stat-card:nth-child(3n+1),
+  html[data-theme="punk"] .stat-card:nth-child(3n+2){transform:none}
 }

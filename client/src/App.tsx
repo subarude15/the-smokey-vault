@@ -678,7 +678,7 @@ export default function App() {
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
-          {page === "dashboard" && <Dashboard admin={admin} go={navigate}/>}
+          {page === "dashboard" && <Dashboard admin={admin} go={navigate} punk={theme === "punk"}/>}
           {modules.map((module) => page === module.id && <Inventory
             key={module.id}
             module={module}
@@ -750,7 +750,7 @@ export default function App() {
   );
 }
 
-function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }) {
+function Dashboard({ admin, go, punk = false }: { admin: boolean; go: (page: string) => void; punk?: boolean }) {
   const { keeperName } = useHouse();
   const [snap, setSnap] = useState<OverviewSnapshot>();
   const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
@@ -789,7 +789,14 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   ]) : [];
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
-    <div className="hero">
+    <div className={`hero${punk ? " punk-hero" : ""}`}>
+      {punk && <>
+        <span className="punk-tape" aria-hidden="true"/>
+        <span className="punk-scribble" aria-hidden="true"/>
+        <span className="punk-stars" aria-hidden="true"/>
+        <span className="punk-doodle" aria-hidden="true"/>
+        <span className="punk-sticker" aria-hidden="true">NO RULES<br/>JUST POUR</span>
+      </>}
       <div className="hero-copy">
         <span className="eyebrow">{greeting.eyebrow}</span>
         <h1>{greeting.line}<br/><em>{greeting.emphasize}</em></h1>
@@ -800,9 +807,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       </div>
       <p className="hero-lede">{snap ? overviewHeroCopy(snap, !admin) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
     </div>
-    <section>
+    <section className={punk ? "punk-section" : undefined}>
       <div className="section-heading">
-        <div><span className="eyebrow">AT A GLANCE</span><h2>Inside the vault</h2></div>
+        <div><span className="eyebrow">AT A GLANCE</span><h2>{punk ? <>Inside the <em>vault</em></> : "Inside the vault"}</h2></div>
         {!admin && <span className="guest-badge"><Lock size={13}/> PATRON MODE</span>}
       </div>
       <div className={`stat-grid${!admin ? " guest-stats" : ""}`}>
