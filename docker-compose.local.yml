@@ -1,0 +1,28 @@
+# Local / laptop compose for The Smokey Barrel Bar.
+# Builds from this directory and mounts ./data. Do not use this on the NAS —
+# production is docker-compose.yml (published image + Watchtower).
+#
+#   docker compose -f docker-compose.local.yml up -d --build
+
+services:
+  smokey-vault:
+    build: .
+    image: the-smokey-vault:latest
+    container_name: smokey-vault
+    restart: unless-stopped
+    ports:
+      - "6616:8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DB_PATH: /data/smokeyvault.db
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-on-your-server}
+      DEFAULT_PIN: ${DEFAULT_PIN:-1234}
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+      COLA_API_KEY: ${COLA_API_KEY:-}
+      COLA_BURST_LIMIT: ${COLA_BURST_LIMIT:-10}
+    volumes:
+      - ./data:/data

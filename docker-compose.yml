@@ -1,6 +1,6 @@
 # Synology / NAS compose for The Smokey Barrel Bar.
-# Do not replace this with the laptop compose — that one builds locally and
-# mounts ./data. This stack pulls the published image and keeps Watchtower.
+# Do not replace this with docker-compose.local.yml — that one builds locally
+# and mounts ./data. This stack pulls the published image and keeps Watchtower.
 #
 # Keys come from the .env sitting next to this file. Recreate the container
 # after editing either file:  docker compose up -d
@@ -27,8 +27,8 @@ services:
       DB_PATH: /data/smokeyvault.db
       # Public hostname sits behind the Synology reverse proxy.
       TRUST_PROXY: "true"
-      SESSION_SECRET: ${SESSION_SECRET:-1800AlsacerdReadingPa19604}
-      DEFAULT_PIN: ${DEFAULT_PIN:-6616}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      DEFAULT_PIN: ${DEFAULT_PIN:-}
       ADMIN_PIN: ${ADMIN_PIN:-}
       MASTER_PIN: ${MASTER_PIN:-}
       AI_PROVIDER: ${AI_PROVIDER:-}
