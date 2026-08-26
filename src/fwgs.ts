@@ -170,21 +170,29 @@ function emptySearch(html: string) {
   return /no results|0 results|did not match|nothing matched|couldn['’]t find|product request form/i.test(html);
 }
 
-/**
- * Reads a Fine Wine & Good Spirits search page. HTML can change; this walks
- * JSON-LD, product tiles, then Open Graph and never throws on unfamiliar markup.
- */
 export function parseFwgsHtml(html: string): FwgsProduct | null {
-  const text = String(html ?? "");
-  if (!text.trim() || emptySearch(text)) return null;
+  return parseFwgsHtmlAll(html, 1)[0] ?? null;
+}
+
+function collectFwgsProducts(text: string, limit: number): FwgsProduct[] {
+  if (!text.trim() || emptySearch(text)) return [];
+  const seen = new Set<string>();
+  const results: FwgsProduct[] = [];
+  const push = (product: FwgsProduct | null) => {
+    if (!product) return;
+    const key = product.name.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    results.push(product);
+  };
 
   const jsonBlocks = [...text.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
   for (const block of jsonBlocks) {
     try {
       const parsed: unknown = JSON.parse(block[1] ?? "");
       for (const node of jsonLdNodes(parsed)) {
-        const product = productFromJsonLd(node);
-        if (product) return product;
+        push(productFromJsonLd(node));
+        if (results.length >= limit) return results;
       }
     } catch {
       // Markup drift; try the next block.
@@ -192,21 +200,29 @@ export function parseFwgsHtml(html: string): FwgsProduct | null {
   }
 
   for (const card of pickCardHtml(text)) {
-    const product = productFromCard(card);
-    if (product) return product;
+    push(productFromCard(card));
+    if (results.length >= limit) return results;
   }
 
   const ogTitle = metaContent(text, "og:title") || metaContent(text, "twitter:title");
   if (ogTitle && usableFwgsName(ogTitle) && !/search/i.test(ogTitle)) {
-    return {
+    push({
       name: ogTitle.replace(/\s*[|\-–].*$/, "").trim(),
       brand: "",
       volume_ml: readVolume(ogTitle),
       price: readPrice(metaContent(text, "product:price:amount") || metaContent(text, "og:price:amount")),
       image_url: absUrl(metaContent(text, "og:image") || metaContent(text, "twitter:image")) || null
-    };
+    });
   }
-  return null;
+  return results.slice(0, limit);
+}
+
+/**
+ * Reads a Fine Wine & Good Spirits search page. HTML can change; this walks
+ * JSON-LD, product tiles, then Open Graph and never throws on unfamiliar markup.
+ */
+export function parseFwgsHtmlAll(html: string, limit = 6): FwgsProduct[] {
+  return collectFwgsProducts(String(html ?? ""), limit);
 }
 
 export function fwgsToSchema(upc: string, hit: FwgsProduct): ProductSchema {
@@ -232,6 +248,30 @@ export function fwgsToSchema(upc: string, hit: FwgsProduct): ProductSchema {
 export function isFwgsThin(hit: FwgsProduct | null): boolean {
   if (!hit?.name.trim()) return true;
   return hit.volume_ml == null;
+}
+
+export async function searchFwgsByQuery(query: string, limit = 6): Promise<FwgsProduct[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  await politePause();
+  lastFwgsAt = Date.now();
+  try {
+    const url = `${FWGS_SEARCH_URL}?Ntt=${encodeURIComponent(q)}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": BROWSER_UA
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(FWGS_TIMEOUT_MS)
+    });
+    if (!response.ok) return [];
+    const html = await response.text();
+    return parseFwgsHtmlAll(html, limit);
+  } catch {
+    return [];
+  }
 }
 
 export async function searchFwgs(upc: string): Promise<FwgsProduct | null> {

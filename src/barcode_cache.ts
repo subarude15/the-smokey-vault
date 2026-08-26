@@ -90,3 +90,24 @@ export function barcodeEntryToProduct(entry: BarcodeCacheEntry): ProductSchema {
     approval_date: null
   };
 }
+
+function foldCacheSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+}
+
+function cacheMatchesQuery(entry: BarcodeCacheEntry, query: string) {
+  const tokens = foldCacheSearch(query).split(/[^a-z0-9]+/).filter(Boolean);
+  if (!tokens.length) return false;
+  const haystack = foldCacheSearch([entry.name, entry.brand, entry.category, entry.subcategory].join(" "));
+  return tokens.every((token) => haystack.includes(token));
+}
+
+export function searchBarcodeCache(query: string, limit = 8): BarcodeCacheEntry[] {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const rows = db.prepare("SELECT * FROM barcode_cache WHERE name != '' ORDER BY created_at DESC").all() as BarcodeCacheRow[];
+  return rows.filter((row) => cacheMatchesQuery(row, q)).slice(0, limit);
+}
