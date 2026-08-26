@@ -1,4 +1,5 @@
 import { mapToSpiritCategory, mapToSpiritType, normalizeUpc, parseVolumeMl } from "./cola_client.js";
+import { inferProductTable } from "./catalog.js";
 import type { BarcodeCacheEntry } from "./barcode_cache.js";
 
 export type ImportTable = "spirits" | "wines" | "packaged_beer";
@@ -10,8 +11,6 @@ export type NormalizedImport = {
 };
 
 const TABLES = new Set<ImportTable>(["spirits", "wines", "packaged_beer"]);
-const BEER_WORDS = /\b(BEER|ALE|IPA|LAGER|STOUT|PORTER|PILSNER|SAISON|MALT|CIDER|SELTZER)\b/i;
-const WINE_WORDS = /\b(WINE|SPARKLING|CHAMPAGNE|PROSECCO|VERMOUTH|SAKE|MEAD|RIESLING|CABERNET|CHARDONNAY|PINOT|MERLOT|SYRAH|ZINFANDEL|MALBEC|SAUVIGNON|NEBBIOLO)\b/i;
 /** Canned and bottled beer is sold in 12 oz; everything else is a 750 ml bottle. */
 const BEER_VOLUME_ML = 355;
 const BOTTLE_VOLUME_ML = 750;
@@ -66,12 +65,14 @@ export function combineImportNotes(description: string, flavorProfile: unknown) 
 export function importTableFor(row: Record<string, unknown>): ImportTable {
   const declared = String(row.table ?? row.module ?? "").trim().toLowerCase();
   if (TABLES.has(declared as ImportTable)) return declared as ImportTable;
-  const haystack = [row.category, row.subcategory, row.sub_category, row.product_type, row.style, row.type]
-    .map((value) => String(value ?? ""))
-    .join(" ");
-  if (BEER_WORDS.test(haystack)) return "packaged_beer";
-  if (WINE_WORDS.test(haystack)) return "wines";
-  return "spirits";
+  return inferProductTable({
+    category: row.category,
+    sub_category: row.subcategory ?? row.sub_category,
+    product_type: row.product_type,
+    style: row.style,
+    type: row.type,
+    name: row.name ?? row.product_name ?? row.title
+  });
 }
 
 /**

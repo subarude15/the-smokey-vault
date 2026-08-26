@@ -53,7 +53,7 @@ export {
   parseList, parseTagInput, serializeList,
   WINE_FAMILIES, SPARKLING_STYLES, BEER_VESSELS, PACK_COUNT_STOPS, FILL_STOPS, KEG_SIZES, KEG_REMAINING_STOPS, DEFAULT_KEG_L, TAP_COUNT,
   BREW_STATUSES, ACTIVE_BREW_STATUSES,
-  defaultSweetnessForWine, inferWineFamilyAndStyle, isSparklingWine,
+  defaultSweetnessForWine, inferProductTable, inferWineFamilyAndStyle, isSparklingWine,
   migrateWineSweetnessValue, wineKindLabel, wineSweetnessStops,
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,

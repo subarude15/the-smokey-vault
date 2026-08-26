@@ -11,7 +11,7 @@ import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
   KEG_REMAINING_STOPS, KEG_SIZES, PACK_COUNT_STOPS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
-  BREW_STATUSES, defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
+  BREW_STATUSES, defaultSweetnessForWine, inferProductTable, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
   remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap,
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
@@ -204,8 +204,6 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const text = (...keys:string[]) => keys.map((key)=>product[key]).find((value)=>typeof value==="string"&&value.trim()) as string|undefined;
   const categories = text("categories","category") ?? "";
   const productType = text("product_type") ?? "";
-  const isBeer = /beer|ale|lager|stout|porter|ipa|cider|seltzer|malt/i.test(`${categories} ${productType}`);
-  const isWine = /wine|sparkling|vermouth|sake|mead/i.test(`${categories} ${productType}`);
   const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string,unknown>|undefined)?.alcohol_100g;
   const abv = typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")) || 0;
   const name = text("product_name","product_name_en","name") ?? "";
@@ -216,7 +214,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const volume = typeof product.volume_ml === "number" ? product.volume_ml : Number.parseFloat(String(product.volume_ml ?? "")) || 750;
   const moduleId = result.table === "packaged_beer" || result.table === "wines" || result.table === "spirits"
     ? result.table
-    : isBeer ? "packaged_beer" : isWine ? "wines" : "spirits";
+    : inferProductTable({ name, category: categories, product_type: productType, brand });
   if (moduleId === "packaged_beer") {
     return {
       moduleId: "packaged_beer",
