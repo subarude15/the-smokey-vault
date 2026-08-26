@@ -4,34 +4,44 @@ import {
   CACHE_TTL_SECONDS,
   ColaDetail,
   ColaSummary,
+  ColaQuotaError,
+  ean13Form,
   fetchColaQuota,
   getColaDetail,
   getLastQuota,
   isColaConfigured,
+  isColaPaused,
+  looksLikeBarcode,
   mapColaToSchema,
   normalizeUpc,
+  primaryCatalogUpc,
   ProductSchema,
   productToInventoryFields,
   searchByBarcode,
-  searchColasByQuery
+  searchColasByQuery,
+  upcAForm
 } from "./cola_client.js";
 import { localizeImage } from "./images.js";
-import { barcodeEntryToProduct, getBarcodeCacheEntry, saveBarcodeCacheEntry } from "./barcode_cache.js";
-import type { AiBarcodeProduct } from "./ai_barcode.js";
+import { barcodeEntryToProduct, getBarcodeCacheEntry } from "./barcode_cache.js";
+import { fwgsToSchema, isFwgsThin, searchFwgs, type FwgsProduct } from "./fwgs.js";
+import { spiritFamilyFromLabel } from "./catalog.js";
+import {
+  missMessage,
+  type ImportKind,
+  type LookupResult,
+  type LookupSource,
+  type MissReason
+} from "./lookup-shared.js";
 
-export type LookupSource = "vault" | "cache" | "cola_cloud" | "openfoodfacts" | "upcitemdb" | "ai" | "not_found";
-
-/** Supplied by the server so the lookup pipeline stays free of LLM wiring. */
-export type AiBarcodeResolver = (upc: string) => Promise<AiBarcodeProduct | null>;
-
-export type LookupResult = {
-  source: LookupSource;
-  upc: string;
-  table?: "spirits" | "packaged_beer" | "wines";
-  product: Record<string, unknown> | null;
-  message?: string;
-  quota?: ReturnType<typeof getLastQuota>;
-};
+export type { LookupResult, LookupSource } from "./lookup-shared.js";
+export {
+  isReadyLookup,
+  LOOKUP_SOURCE_LABELS,
+  LOOKUP_SOURCES,
+  MISS_REASON_LABELS,
+  MISS_REASONS,
+  missMessage
+} from "./lookup-shared.js";
 
 export type BottleSearchHit = {
   source: "vault" | "cola_cloud";
@@ -41,6 +51,20 @@ export type BottleSearchHit = {
 };
 
 export type SearchTable = BottleSearchHit["table"];
+
+export type LookupCatalogs = {
+  searchFwgs?: (upc: string) => Promise<FwgsProduct | null>;
+  searchCola?: (upc: string, waitOnBurst?: boolean) => Promise<ColaSummary | null>;
+  searchOff?: (upc: string) => Promise<ProductSchema | null>;
+  searchUpcItemDb?: (upc: string) => Promise<ProductSchema | null>;
+};
+
+export type LookupOptions = {
+  forceRefresh?: boolean;
+  kind?: ImportKind;
+  mode?: "live" | "batch";
+  catalogs?: LookupCatalogs;
+};
 
 export function searchTableForModule(moduleId?: string): SearchTable | undefined {
   if (moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer") return "packaged_beer";
@@ -192,12 +216,35 @@ export function saveToCache(
   );
 }
 
-function inferTable(product: ProductSchema | Record<string, unknown>): "spirits" | "packaged_beer" | "wines" {
+function inferTable(product: ProductSchema | Record<string, unknown>): NonNullable<LookupResult["table"]> {
   const record = product as Record<string, unknown>;
   const type = String(record.product_type ?? "").toUpperCase();
   const category = String(record.category ?? record.categories ?? "");
-  if (/MALT|BEER|ALE|LAGER|STOUT|PORTER|IPA|CIDER|SELTZER/i.test(`${type} ${category}`)) return "packaged_beer";
-  if (/WINE|SPARKLING|VERMOUTH|SAKE|MEAD/i.test(`${type} ${category}`)) return "wines";
+  const name = String(record.name ?? record.product_name ?? "");
+  const haystack = `${type} ${category} ${name}`;
+  if (/MALT|BEER|ALE|LAGER|STOUT|PORTER|IPA|CIDER|SELTZER/i.test(haystack)) return "packaged_beer";
+  if (/WINE|SPARKLING|VERMOUTH|SAKE|MEAD/i.test(haystack)) return "wines";
+  return "spirits";
+}
+
+export function inferImportKind(
+  product: ProductSchema | Record<string, unknown> | null | undefined,
+  hint?: ImportKind
+): ImportKind {
+  if (hint) return hint;
+  if (!product) return "spirits";
+  const table = inferTable(product);
+  if (table === "packaged_beer") return "beer";
+  if (table === "wines") return "wines";
+  const category = String((product as Record<string, unknown>).category ?? (product as Record<string, unknown>).categories ?? "");
+  const family = spiritFamilyFromLabel(category).family;
+  if (family === "Mixer" || family === "Bitters" || /mixer|bitter/i.test(category)) return "mixers";
+  return "spirits";
+}
+
+function tableForKind(kind: ImportKind): NonNullable<LookupResult["table"]> {
+  if (kind === "beer") return "packaged_beer";
+  if (kind === "wines") return "wines";
   return "spirits";
 }
 
@@ -268,34 +315,134 @@ async function lookupUpcItemDb(upc: string): Promise<ProductSchema | null> {
   };
 }
 
-async function success(source: LookupSource, upc: string, product: ProductSchema, table?: LookupResult["table"]): Promise<LookupResult> {
-  const localized = await withLocalImage(product);
+function variantsFor(upc: string): LookupResult["variants"] {
+  const upcA = upcAForm(upc);
+  const ean13 = ean13Form(upc);
+  if (!upcA && !ean13) return undefined;
+  return { upcA: upcA || upc, ean13: ean13 || upc };
+}
+
+function placeholderProduct(upc: string) {
   return {
-    source,
     upc,
-    table: table ?? inferTable(localized),
-    product: productToInventoryFields(localized),
-    quota: getLastQuota()
+    name: "",
+    brand: "",
+    category: "Mixer",
+    abv: 0,
+    image_url: "",
+    notes: "",
+    fill_level: 100,
+    stock_count: 1,
+    volume_ml: 750
   };
 }
 
-export async function lookupProduct(
-  rawUpc: string,
-  { enrich = true, forceRefresh = false, ai }: { enrich?: boolean; forceRefresh?: boolean; ai?: AiBarcodeResolver } = {}
+async function success(
+  source: LookupSource,
+  upc: string,
+  product: ProductSchema,
+  kindHint?: ImportKind
 ): Promise<LookupResult> {
-  const upc = normalizeUpc(rawUpc);
+  const localized = await withLocalImage(product);
+  const kind = inferImportKind(localized, kindHint);
+  return {
+    source,
+    upc,
+    table: tableForKind(kind),
+    kind,
+    product: productToInventoryFields(localized),
+    quota: getLastQuota() ?? undefined,
+    variants: variantsFor(upc)
+  };
+}
+
+function miss(
+  reason: MissReason,
+  upc: string,
+  kind?: ImportKind,
+  extra?: { raw?: string }
+): LookupResult {
+  const display = upc || extra?.raw || "";
+  return {
+    source: "not_found",
+    upc: display,
+    table: kind ? tableForKind(kind) : undefined,
+    kind,
+    product: placeholderProduct(display),
+    reason,
+    message: missMessage(reason, display, variantsFor(display)),
+    quota: getLastQuota() ?? undefined,
+    variants: variantsFor(display)
+  };
+}
+
+function rawDigitLength(raw: string) {
+  return String(raw ?? "").replace(/\D/g, "").length;
+}
+
+function formatAmbiguous(raw: string) {
+  const length = rawDigitLength(raw);
+  return length === 6 || length === 7 || length === 8 || (length >= 9 && length <= 11);
+}
+
+async function tryOffThenUpcitemdb(
+  upc: string,
+  catalogs: LookupCatalogs,
+  kindHint?: ImportKind
+): Promise<LookupResult | null> {
+  try {
+    const off = await (catalogs.searchOff ?? lookupOpenFoodFacts)(upc);
+    if (off?.name.trim()) {
+      const product = await withLocalImage(off);
+      saveToCache(product, null, null, "openfoodfacts");
+      return await success("openfoodfacts", upc, product, kindHint ?? inferImportKind(product));
+    }
+  } catch {
+    // Continue to upcitemdb.
+  }
+  try {
+    const item = await (catalogs.searchUpcItemDb ?? lookupUpcItemDb)(upc);
+    if (item?.name.trim()) {
+      const product = await withLocalImage(item);
+      saveToCache(product, null, null, "upcitemdb");
+      return await success("upcitemdb", upc, product, kindHint ?? inferImportKind(product));
+    }
+  } catch {
+    // Catalog miss.
+  }
+  return null;
+}
+
+export async function lookupProduct(rawUpc: string, options: LookupOptions = {}): Promise<LookupResult> {
+  const { forceRefresh = false, kind: kindHint, mode = "live", catalogs = {} } = options;
+  const waitOnBurst = mode === "batch";
+
+  if (!looksLikeBarcode(rawUpc)) {
+    return miss("invalid", rawUpc);
+  }
+
+  const upc = primaryCatalogUpc(rawUpc);
   if (!upc) {
-    return { source: "not_found", upc: rawUpc, product: null, message: "Invalid barcode." };
+    return miss("invalid", rawUpc);
   }
 
   const vaultHit = findInVault(upc, rawUpc);
   if (vaultHit) {
-    return { source: "vault", table: vaultHit.table, upc, product: vaultHit.product, quota: getLastQuota() };
+    const kind = inferImportKind(vaultHit.product, kindHint);
+    return {
+      source: "vault",
+      table: vaultHit.table,
+      kind,
+      upc,
+      product: vaultHit.product,
+      quota: getLastQuota() ?? undefined,
+      variants: variantsFor(upc)
+    };
   }
 
   if (!forceRefresh) {
-    const remembered = getBarcodeCacheEntry(upc);
-    if (remembered) return await success("cache", upc, barcodeEntryToProduct(remembered));
+    const remembered = getBarcodeCacheEntry(upc) ?? getBarcodeCacheEntry(rawUpc);
+    if (remembered) return await success("cache", upc, barcodeEntryToProduct(remembered), kindHint);
   }
 
   let staleFallback: ProductSchema | null = null;
@@ -303,96 +450,100 @@ export async function lookupProduct(
     const cached = getFromCache(upc);
     if (cached) {
       const cacheMeta = db.prepare("SELECT source FROM cola_cache WHERE upc = ?").get(upc) as { source?: string } | undefined;
-      const fromCola = cacheMeta?.source === "cola_cloud";
-      if (fromCola || !isColaConfigured()) return await success("cache", upc, cached);
+      const cacheSource = String(cacheMeta?.source ?? "");
+      if (cacheSource === "cola_cloud" || cacheSource === "fwgs" || !isColaConfigured()) {
+        return await success("cache", upc, cached, kindHint);
+      }
       staleFallback = cached;
     }
   }
 
-  if (isColaConfigured()) {
+  const kind = kindHint ?? "spirits";
+  const skipCatalogs = kind === "mixers";
+  const beerPath = kind === "beer";
+  let quotaHit = isColaPaused();
+  let colaQueried = false;
+  let colaFound = false;
+
+  if (skipCatalogs) {
+    rememberUnresolvedUpc(upc);
+    return miss("no_catalog", upc, "mixers");
+  }
+
+  const colaClient = catalogs.searchCola
+    ?? ((code: string, wait?: boolean) => searchByBarcode(code, { waitOnBurst: wait }));
+  const colaEnabled = Boolean(catalogs.searchCola) || (isColaConfigured() && !isColaPaused());
+
+  if (!beerPath) {
     try {
-      const summary = await searchByBarcode(upc);
-      if (summary) {
-        let detail: ColaDetail | null = null;
-        if (enrich && summary.ttb_id) {
+      const fwgsHit = await (catalogs.searchFwgs ?? searchFwgs)(upc);
+      if (fwgsHit?.name.trim()) {
+        let product = fwgsToSchema(upc, fwgsHit);
+        if (isFwgsThin(fwgsHit) && colaEnabled) {
           try {
-            detail = await getColaDetail(summary.ttb_id);
-          } catch {
-            detail = null;
+            colaQueried = true;
+            const summary = await colaClient(upc, waitOnBurst);
+            if (summary) {
+              colaFound = true;
+              const colaProduct = mapColaToSchema(upc, summary);
+              product = {
+                ...product,
+                brand: product.brand || colaProduct.brand,
+                category: colaProduct.category || product.category,
+                volume_ml: product.volume_ml ?? colaProduct.volume_ml,
+                product_type: colaProduct.product_type ?? product.product_type,
+                ttb_id: colaProduct.ttb_id,
+                origin: colaProduct.origin ?? product.origin,
+                approval_date: colaProduct.approval_date ?? product.approval_date,
+                notes: [product.notes, colaProduct.notes].filter(Boolean).join(" | ") || product.notes
+              };
+            }
+          } catch (error) {
+            if (error instanceof ColaQuotaError) quotaHit = true;
           }
         }
-        const product = await withLocalImage(mapColaToSchema(upc, summary, detail));
-        saveToCache(product, summary, detail, "cola_cloud");
-        return await success("cola_cloud", upc, product);
+        const localized = await withLocalImage(product);
+        saveToCache(localized, null, null, "fwgs");
+        return await success("fwgs", upc, localized, inferImportKind(localized, kindHint));
       }
     } catch {
-      // Fall through to Open Food Facts when COLA is unavailable.
+      // FWGS is parse-resilient; a thrown error still falls through.
     }
-  }
 
-  if (staleFallback) return await success("cache", upc, staleFallback);
-
-  try {
-    const off = await lookupOpenFoodFacts(upc);
-    if (off) {
-      const product = await withLocalImage(off);
-      saveToCache(product, null, null, "open_food_facts");
-      return await success("openfoodfacts", upc, product);
-    }
-  } catch {
-    // Continue to upcitemdb.
-  }
-
-  try {
-    const item = await lookupUpcItemDb(upc);
-    if (item) {
-      const product = await withLocalImage(item);
-      saveToCache(product, null, null, "upcitemdb");
-      return await success("upcitemdb", upc, product);
-    }
-  } catch {
-    // Not found.
-  }
-
-  if (ai) {
-    try {
-      const found = await ai(upc);
-      if (found) {
-        // The model's photo link is fetched once here so guests never hit a third-party host.
-        const localImage = (await localizeImage(found.image_url)) ?? "";
-        saveBarcodeCacheEntry({ ...found, upc, image_url: localImage, source: "ai" });
-        return await success("ai", upc, barcodeEntryToProduct({ ...found, upc, image_url: localImage, source: "ai" }));
+    if (colaEnabled) {
+      try {
+        colaQueried = true;
+        const summary = await colaClient(upc, waitOnBurst);
+        if (summary && (summary.product_name || summary.brand_name)) {
+          colaFound = true;
+          const product = await withLocalImage(mapColaToSchema(upc, summary));
+          saveToCache(product, summary, null, "cola_cloud");
+          return await success("cola_cloud", upc, product, kindHint);
+        }
+      } catch (error) {
+        if (error instanceof ColaQuotaError) quotaHit = true;
       }
-    } catch {
-      // An AI outage should still land on the manual-search miss below.
+    } else if (isColaConfigured() && isColaPaused()) {
+      quotaHit = true;
     }
   }
+
+  if (staleFallback) return await success("cache", upc, staleFallback, kindHint);
+
+  const webHit = await tryOffThenUpcitemdb(upc, catalogs, beerPath ? "beer" : kindHint);
+  if (webHit) return webHit;
 
   rememberUnresolvedUpc(upc);
-  return {
-    source: "not_found",
-    upc,
-    product: {
-      upc,
-      name: "",
-      brand: "",
-      category: "Mixer",
-      abv: 0,
-      image_url: "",
-      notes: "",
-      fill_level: 100,
-      stock_count: 1,
-      volume_ml: 750
-    },
-    message: `No catalog match for UPC ${upc}. Search by name — we’ll keep this code.`,
-    quota: getLastQuota()
-  };
+  if (quotaHit) return miss("quota", upc, kindHint);
+  if (formatAmbiguous(rawUpc)) return miss("variant", upc, kindHint, { raw: rawUpc });
+  if (!beerPath && colaQueried && !colaFound) return miss("cola_gap", upc, kindHint);
+  return miss("no_catalog", upc, beerPath ? "beer" : kindHint);
 }
 
 export async function enrichColaRecord(ttbId: string, upc = ""): Promise<LookupResult> {
   const detail = await getColaDetail(ttbId);
   if (!detail) {
-    return { source: "not_found", upc, product: null, message: "COLA record not found." };
+    return miss("cola_gap", upc);
   }
   const product = await withLocalImage(mapColaToSchema(upc || detail.barcodes?.[0]?.barcode_value || "", detail, detail));
   if (product.upc) saveToCache(product, detail, detail, "cola_cloud");
@@ -400,7 +551,7 @@ export async function enrichColaRecord(ttbId: string, upc = ""): Promise<LookupR
 }
 
 function findInVault(upc: string, rawUpc: string): { table: NonNullable<LookupResult["table"]>; product: Record<string, unknown> } | null {
-  const candidates = [...new Set([upc, rawUpc, ...barcodeVariants(upc)].filter((value) => value))];
+  const candidates = [...new Set([upc, rawUpc, ...barcodeVariants(upc), ...barcodeVariants(rawUpc)].filter((value) => value))];
   if (!candidates.length) return null;
   const placeholders = candidates.map(() => "?").join(",");
   for (const table of ["spirits", "packaged_beer", "wines"] as const) {
@@ -507,7 +658,7 @@ export async function searchBottles(query: string, options?: { table?: string })
   const results = searchVault(q, vaultTables);
   const seen = new Set(results.map(hitKey));
 
-  if (isColaConfigured()) {
+  if (isColaConfigured() && !isColaPaused()) {
     try {
       const colaQuery = queryTokens(q).join(" ") || q;
       const summaries = await searchColasByQuery(colaQuery, 10, colaTable ? { productType: colaProductTypeForTable(colaTable) } : undefined);

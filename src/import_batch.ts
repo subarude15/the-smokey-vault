@@ -151,11 +151,98 @@ export function normalizeImportItem(input: unknown): NormalizedImport | null {
 /** Accepts a bare array, `{ items: [...] }`, or `{ rows: [...] }` so pasted JSON just works. */
 export function readImportPayload(body: unknown): unknown[] {
   if (Array.isArray(body)) return body;
+  if (typeof body === "string") return parseImportText(body);
   if (body && typeof body === "object") {
     const record = body as Record<string, unknown>;
+    if (typeof record.csv === "string") return parseImportText(record.csv);
+    if (typeof record.text === "string") return parseImportText(record.text);
     for (const key of ["items", "rows", "products", "inventory"]) {
       if (Array.isArray(record[key])) return record[key] as unknown[];
     }
   }
   return [];
+}
+
+function splitCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (quoted) {
+      if (ch === "\"" && line[i + 1] === "\"") {
+        current += "\"";
+        i += 1;
+      } else if (ch === "\"") {
+        quoted = false;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      quoted = true;
+      continue;
+    }
+    if (ch === "," || ch === "\t" || ch === ";") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+const UPC_HEADER = /^(upc|barcode|ean|gtin|code)$/i;
+
+function headerKey(value: string) {
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (UPC_HEADER.test(key)) return "upc";
+  if (key === "module") return "table";
+  return key;
+}
+
+/** Harvester-style CSV: headered rows, or a bare list of UPCs. */
+export function parseImportCsv(text: string): Record<string, unknown>[] {
+  const lines = String(text ?? "").replace(/^\uFEFF/, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const first = splitCsvLine(lines[0]!);
+  const hasHeader = first.some((cell) => UPC_HEADER.test(cell) || /^(name|table|kind|brand)$/i.test(cell));
+  if (!hasHeader) {
+    return lines.map((line) => {
+      const cells = splitCsvLine(line);
+      const upc = cells.find((cell) => /\d{6,}/.test(cell.replace(/\D/g, ""))) ?? cells[0] ?? "";
+      return { upc };
+    });
+  }
+  const keys = first.map(headerKey);
+  const rows: Record<string, unknown>[] = [];
+  for (const line of lines.slice(1)) {
+    const cells = splitCsvLine(line);
+    const row: Record<string, unknown> = {};
+    keys.forEach((key, index) => {
+      if (key) row[key] = cells[index] ?? "";
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+export function parseImportText(text: string): unknown[] {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return readImportPayload(JSON.parse(trimmed));
+    } catch {
+      // Fall through to CSV so a paste that isn't quite JSON still works.
+    }
+  }
+  return parseImportCsv(trimmed);
+}
+
+export function importRowHasName(row: Record<string, unknown>) {
+  return Boolean(String(row.name ?? row.product_name ?? row.title ?? "").trim());
 }

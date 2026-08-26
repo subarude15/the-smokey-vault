@@ -95,6 +95,24 @@ export {
   clipKeeperName
 } from "../../src/shared-types";
 export { extractSharedRecipeUrl } from "../../src/recipe_share";
+export {
+  LOOKUP_SOURCES,
+  LOOKUP_SOURCE_LABELS,
+  MISS_REASONS,
+  MISS_REASON_LABELS,
+  IMPORT_KINDS,
+  IMPORT_KIND_LABELS,
+  isReadyLookup,
+  lookupHasName,
+  missMessage,
+  type LookupSource,
+  type MissReason,
+  type ImportKind,
+  type ImportRowStatus,
+  type ImportQueueRow,
+  type LookupResult,
+  type LookupVariants
+} from "../../src/lookup-shared";
 
 export {
   TAB_KEYS,

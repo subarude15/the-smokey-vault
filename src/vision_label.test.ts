@@ -23,6 +23,13 @@ test("parseVisionLabel fills beer category and ignores empty fields", () => {
   assert.equal(parsed.product_type, "beer");
 });
 
+test("parseVisionLabel keeps mixer as a last-resort miss path", () => {
+  const parsed = parseVisionLabel('{"name":"Fever-Tree Tonic","brand":"Fever-Tree","category":"Tonic","abv":null,"volume_ml":200,"upc":"","product_type":"mixer"}');
+  assert.equal(parsed.product_type, "mixer");
+  assert.equal(parsed.category, "Tonic");
+  assert.equal(parsed.name, "Fever-Tree Tonic");
+});
+
 test("parseVisionLabel rejects text with no JSON object", () => {
   assert.throws(() => parseVisionLabel("I cannot read this image"), /Could not read that label/);
 });

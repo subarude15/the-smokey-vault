@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, Grape, HandCoins, LayoutDashboard,
-  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Users, Wine, X, ClipboardPaste, Zap
+  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste, Zap
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
 import { ImageField } from "./ImageField";
@@ -27,9 +27,11 @@ import {
   DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME, clipKeeperName, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS,
   AI_MIXOLOGIST_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
   TAB_KEYS, parseEnabledTabs, parseTabOrder, serializeEnabledTabs, serializeTabOrder,
-  type EnabledTabs, type SubstituteOption, type TabKey
+  type EnabledTabs, type SubstituteOption, type TabKey,
+  LOOKUP_SOURCE_LABELS, type LookupSource
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
+import { ImportReview } from "./ImportReview";
 import { BreweryLab } from "./BreweryLab";
 import { ContactModal, GuestFooter } from "./ContactModal";
 import { EventsPage } from "./EventsPage";
@@ -136,6 +138,7 @@ const MOBILE_SHORT_LABELS: Record<string, string> = {
   brews: "Brews",
   packaged_beer: "Beer",
   scan: "Scan",
+  import: "Import",
   messages: "Inbox",
   restock: "Restock",
   settings: "Settings"
@@ -188,6 +191,7 @@ type ScanDraft = {
   values: Record<string, unknown>;
   key: number;
   mode: "view" | "edit" | "create";
+  source?: LookupSource;
 };
 
 function itemId(values: Record<string, unknown> | undefined) {
@@ -218,6 +222,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
       moduleId: "packaged_beer",
       key: Date.now(),
       mode: "create",
+      source: result.source,
       values: { name, brewery: brand, style: categories.split(",")[0] ?? "", abv, count: 1, vessel: /bottle/i.test(`${categories} ${productType} ${name}`) ? "Bottle" : "Can", upc, image_url: image }
     };
   }
@@ -227,6 +232,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
       moduleId: "wines",
       key: Date.now(),
       mode: "create",
+      source: result.source,
       values: {
         name,
         producer: brand,
@@ -246,6 +252,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
     moduleId: "spirits",
     key: Date.now(),
     mode: "create",
+    source: result.source,
     values: {
       name,
       brand,
@@ -318,10 +325,10 @@ function useHouse() {
   return useContext(HouseContext);
 }
 
-const GUEST_HIDDEN_PAGES = new Set(["scan", "restock", "settings", "messages"]);
+const GUEST_HIDDEN_PAGES = new Set(["scan", "import", "restock", "settings", "messages"]);
 
 /** Admin-only pages are never gated by the guest tab switches. */
-const KEEPER_PAGES = new Set(["scan", "restock", "settings", "messages"]);
+const KEEPER_PAGES = new Set(["scan", "import", "restock", "settings", "messages"]);
 
 /** Which guest tab switch controls each page. */
 const PAGE_TAB: Record<string, TabKey> = {
@@ -425,7 +432,7 @@ export default function App() {
   const [theme, setTheme] = useState(storedTheme);
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
-  const [scanMiss, setScanMiss] = useState<{ upc: string } | null>(null);
+  const [scanMiss, setScanMiss] = useState<ScanResult | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const [house, setHouse] = useState<HouseInfo>(EMPTY_HOUSE);
@@ -529,12 +536,12 @@ export default function App() {
     if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
     const table = result.table;
     const vaultId = result.source === "vault" && table ? itemId(result.product) : 0;
-    if (!vaultId && (result.source === "not_found" || result.source === "unresolved" || !scanProductName(result))) {
-      setScanMiss({ upc: result.upc ?? "" });
+    if (!vaultId && (result.source === "not_found" || result.reason || !scanProductName(result))) {
+      setScanMiss(result);
       return Promise.resolve("cancelled" as ScanReviewOutcome);
     }
     const draft: ScanDraft = vaultId && table
-      ? { moduleId: table, key: Date.now(), values: result.product, mode: "view" }
+      ? { moduleId: table, key: Date.now(), values: result.product, mode: "view", source: result.source }
       : scannedInventoryDraft(result);
     setScanMiss(null);
     setScanDraft(draft);
@@ -598,6 +605,7 @@ export default function App() {
   const keeperNav = [
     { id:"messages",label:"Inbox",icon:Mail,badge:unread },
     { id:"scan",label:"Scan bottles",icon:ScanBarcode },
+    { id:"import",label:"Import Review",icon:Upload },
     { id:"restock",label:"Restock",icon:ShoppingBag },
     { id:"settings",label:"Settings",icon:Settings }
   ];
@@ -694,11 +702,19 @@ export default function App() {
           {page === "scan" && admin && <ScanPage
             onProduct={handleScan}
             miss={scanMiss}
-            onMiss={(upc) => setScanMiss({ upc })}
+            onMiss={(result) => setScanMiss(result)}
             onRescan={() => setScanMiss(null)}
             onPickMiss={handleScanMissPick}
             onManual={handleScanManual}
           />}
+          {page === "import" && admin && <>
+            <PageTitle eyebrow="VAULT TOOLS" title="Import Review." subtitle="Overnight CSV hits wait here as Ready. Misses stay until you search, scan a label, add by hand, or skip. Commit writes Ready rows only."/>
+            <ImportReview
+              onConfirmHit={handleScan}
+              onManual={handleScanManual}
+              onSearchPick={handleScanMissPick}
+            />
+          </>}
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "messages" && admin && <MessagesInbox onUnreadChange={setUnread}/>}
           {page === "brewery" && <BreweryLab admin={admin} keeperName={house.keeperName} go={navigate}/>}
@@ -708,7 +724,7 @@ export default function App() {
           {page === "events" && <EventsPage admin={admin} keeperName={house.keeperName}/>}
           {page === "tipjar" && <TipJarPage settings={house.settings} keeperName={house.keeperName}/>}
           {page === "merch" && <MerchPage admin={admin} keeperName={house.keeperName}/>}
-          {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme} onHouseChange={(next) => setHouse((current) => ({
+          {page === "settings" && admin && <SettingsPage theme={theme} setTheme={setTheme} go={navigate} onHouseChange={(next) => setHouse((current) => ({
             ...current,
             ...next,
             settings: { ...current.settings, ...(next.settings ?? {}) }
@@ -1271,8 +1287,8 @@ function ScanPage({
   onProduct, miss, onMiss, onRescan, onPickMiss, onManual
 }: {
   onProduct: (result: ScanResult) => Promise<ScanReviewOutcome>;
-  miss: { upc: string } | null;
-  onMiss: (upc: string) => void;
+  miss: ScanResult | null;
+  onMiss: (result: ScanResult) => void;
   onRescan: () => void;
   onPickMiss: (hit: BottleSearchHit, upc: string) => Promise<void>;
   onManual: (table: ScanModuleId, upc: string) => void;
@@ -1282,121 +1298,24 @@ function ScanPage({
       eyebrow="VAULT TOOLS"
       title={miss ? "Look it up." : "Scan a bottle."}
       subtitle={miss
-        ? (miss.upc
-          ? "No catalog match. Search by name and we’ll stamp this UPC on whatever you add."
-          : "We couldn’t read a match. Search by name, or add it by hand.")
-        : "Barcode for a UPC. Label to read the front of the bottle. One scan, then we take you to the bottle or to search."}
+        ? (miss.reason === "quota"
+          ? "Lookup paused. COLA is holding — search by name, scan the label, or add by hand."
+          : miss.reason === "invalid"
+            ? "Not a barcode. Rescan only."
+            : "No catalog match. Search by name, scan the label, or add by hand.")
+        : "Barcode for a UPC. One scan, then we take you to the bottle or to review."}
     />
     {miss
-      ? <ScanMissSearch upc={miss.upc} onPick={onPickMiss} onManual={onManual} onRescan={onRescan}/>
+      ? <ImportReview
+          focusUpc={miss.upc}
+          liveMiss={miss}
+          onConfirmHit={onProduct}
+          onManual={onManual}
+          onSearchPick={onPickMiss}
+          onRescan={onRescan}
+        />
       : <Scanner onProduct={onProduct} onMiss={onMiss}/>}
   </>;
-}
-
-const SCAN_SEARCH_SCOPES = [
-  { id: "shelf", label: "All bottles" },
-  { id: "spirits", label: "Spirits & Mixers" },
-  { id: "wines", label: "Wine Cellar" },
-  { id: "packaged_beer", label: "Packaged Beer" }
-] as const;
-
-function ScanMissSearch({
-  upc, onPick, onManual, onRescan
-}: {
-  upc: string;
-  onPick: (hit: BottleSearchHit, upc: string) => Promise<void>;
-  onManual: (table: ScanModuleId, upc: string) => void;
-  onRescan: () => void;
-}) {
-  const { colaConfigured } = useHouse();
-  const [scope, setScope] = useState<(typeof SCAN_SEARCH_SCOPES)[number]["id"]>("shelf");
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<BottleSearchHit[]>([]);
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState("Type at least 2 characters to search your vault and COLA Cloud.");
-  const manualTable: ScanModuleId = scope === "shelf" ? "spirits" : scope;
-
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      setStatus(colaConfigured
-        ? "Type at least 2 characters to search your vault and COLA Cloud."
-        : "Type at least 2 characters to search this vault. Catalog search is off on this host.");
-      return;
-    }
-    const timer = window.setTimeout(async () => {
-      setLoading(true); setError("");
-      try {
-        const data = await api<{ results: BottleSearchHit[] }>(`/search/bottles?q=${encodeURIComponent(q)}&table=${encodeURIComponent(scope)}`);
-        const next = data.results.filter((hit) => hitFitsModule(scope, hit));
-        setResults(next);
-        setStatus(next.length ? `${next.length} matches` : colaConfigured
-          ? "No matches yet — try a brand or bottle name."
-          : "Nothing in this vault matched. Catalog search is off until COLA_API_KEY is set on this host.");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Search failed");
-      } finally {
-        setLoading(false);
-      }
-    }, 320);
-    return () => window.clearTimeout(timer);
-  }, [query, scope, colaConfigured]);
-
-  async function choose(hit: BottleSearchHit) {
-    try {
-      setLoading(true);
-      setError("");
-      await onPick(hit, upc);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load bottle details");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <section className="scan-stage scan-miss">
-      <p className="eyebrow">NO CATALOG MATCH</p>
-      <h3>Search by name</h3>
-      <p className="scanner-hint">{upc
-        ? <>Kept UPC <strong className="upc-chip">{upc}</strong>. We’ll fill it in when you pick a bottle or add by hand.</>
-        : "Search your vault and COLA, or add it by hand."}</p>
-      <div className="chip-row">
-        {SCAN_SEARCH_SCOPES.map((item) => (
-          <button type="button" key={item.id} className={scope === item.id ? "chip active" : "chip"} onClick={() => setScope(item.id)}>{item.label}</button>
-        ))}
-      </div>
-      <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Eagle Rare, Lagavulin, Champagne…"/></label>
-      <p className="scanner-status">{loading ? "Searching…" : status}</p>
-      {error && <p className="error">{error}</p>}
-      <div className="finder-results">
-        {results.map((hit, index) => {
-          const name = String(hit.product.name ?? hit.product.product_name ?? hit.product.batch_name ?? "Untitled");
-          const brand = String(hit.product.brand ?? hit.product.brands ?? hit.product.brewery ?? hit.product.producer ?? hit.product.maker ?? "");
-          const category = String(hit.product.category ?? hit.product.categories ?? hit.product.style ?? "");
-          const origin = hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD";
-          return (
-            <button type="button" className="finder-result" key={`${hit.source}-${hit.ttb_id ?? hit.product.id ?? index}`} onClick={() => void choose(hit)}>
-              <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle/>}</div>
-              <div>
-                <span className="eyebrow">{origin} · {hit.table.replace("_", " ")}</span>
-                <strong>{name}</strong>
-                <small>{[brand, category].filter(Boolean).join(" · ")}</small>
-              </div>
-              <ChevronRight size={16}/>
-            </button>
-          );
-        })}
-      </div>
-      <div className="scan-miss-actions">
-        <button type="button" className="primary" onClick={() => onManual(manualTable, upc)}><Plus size={16}/> Add by hand</button>
-        <button type="button" className="secondary" onClick={onRescan}><ScanBarcode size={16}/> Scan another</button>
-      </div>
-      {scope === "shelf" ? <p className="scanner-hint">Add by hand lands in Spirits & Mixers. Pick Wine or Packaged Beer first to add there instead.</p> : null}
-    </section>
-  );
 }
 
 function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, seedCreate, onSeedConsumed, onPutOnTap }: {
@@ -1612,7 +1531,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
         setEditing({id:0,...values} as Item);
       }
     }}/>}
-    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft)} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); setViewing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
+    {editing !== undefined && <ItemForm module={module} item={editing} review={Boolean(scanDraft)} source={scanDraft?.source} close={() => { setEditing(undefined); if(scanDraft)finishScanReview("cancelled"); }} saved={() => { setEditing(undefined); setViewing(undefined); load(); if(scanDraft)finishScanReview("saved"); }}/>}
   </>;
 }
 
@@ -1867,7 +1786,7 @@ function BottleFinder({ module, onClose, onPick }:{
   );
 }
 
-function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|null;review?:boolean;close:()=>void;saved:()=>void}) {
+function ItemForm({ module,item,review,source,close,saved }:{module:Module;item:Item|null;review?:boolean;source?: LookupSource;close:()=>void;saved:()=>void}) {
   const { keeperName } = useHouse();
   const [form,setForm] = useState<Record<string,unknown>>(() => {
     const defaults = (item ?? (module.id === "spirits"
@@ -1986,7 +1905,7 @@ function ItemForm({ module,item,review,close,saved }:{module:Module;item:Item|nu
       return abv != null ? { ...next, calculated_abv: abv } : next;
     });
   }
-  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2></div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2>{review && source && source !== "not_found" ? <span className="chip static source-chip">{LOOKUP_SOURCE_LABELS[source]}</span> : null}</div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     {recovered && <div className="draft-restore">
       <div><strong>Unsaved draft found</strong><span>You left this form part-way through. Restore what you had typed?</span></div>
       <div className="draft-restore-actions">
@@ -2652,7 +2571,7 @@ function lastBrewfatherSyncLabel(iso?: string) {
   return `Last sync was ${days} days ago.`;
 }
 
-function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:string)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void}) {
+function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(v:string)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void;go:(page:string)=>void}) {
   const [settings,setSettings] = useState<Record<string, string | boolean>>({});
   const [keeperDraft,setKeeperDraft] = useState(DEFAULT_KEEPER_NAME);
   const [message,setMessage]=useState("");
@@ -2810,7 +2729,7 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
           <RefreshCw size={17}/> {syncing ? "Syncing…" : "Sync now"}
         </button>
       </section>
-      <BulkImport onMessage={setMessage}/>
+      <BulkImport onMessage={setMessage} onQueued={() => go("import")}/>
       <section className="settings-card">
         <span className="eyebrow">GUEST PORTAL</span>
         <h3>Visible tabs</h3>
@@ -2888,48 +2807,47 @@ function SettingsPage({theme,setTheme,onHouseChange}:{theme:string;setTheme:(v:s
   </>;
 }
 
-const BULK_IMPORT_SAMPLE = `[
-  { "upc": "080686000891", "name": "Buffalo Trace", "brand": "Buffalo Trace", "category": "Bourbon", "abv": 45, "volume_ml": 750 },
-  { "table": "packaged_beer", "name": "Sip of Sunshine", "brand": "Lawson's Finest", "style": "IPA", "abv": 8, "count": 4 }
-]`;
+const BULK_IMPORT_SAMPLE = `upc,name,kind
+080686000891,Buffalo Trace,spirits
+012345678905,,beer`;
 
-type ImportOutcome = {
-  imported: number;
-  cached: number;
+type QueueOutcome = {
+  queued: number;
   skipped: number;
-  items: Array<{ table: string; name: string }>;
-  rejected: Array<{ name: string; reason: string }>;
+  started: boolean;
+  running: boolean;
 };
 
-function BulkImport({onMessage}:{onMessage:(value:string)=>void}){
+function BulkImport({onMessage,onQueued}:{onMessage:(value:string)=>void;onQueued:()=>void}){
   const [text,setText]=useState("");
   const [busy,setBusy]=useState(false);
-  const [outcome,setOutcome]=useState<ImportOutcome|null>(null);
+  const [outcome,setOutcome]=useState<QueueOutcome|null>(null);
   const [error,setError]=useState("");
 
   async function run(){
     setError("");
     setOutcome(null);
-    let parsed: unknown;
-    try{
-      parsed=JSON.parse(text);
-    }catch{
-      setError("That is not valid JSON. Paste an array of items, or { \"items\": [...] }.");
-      return;
-    }
-    const items=Array.isArray(parsed)?parsed:(parsed as {items?:unknown})?.items;
-    if(!Array.isArray(items)||!items.length){
-      setError("Paste a JSON array of bottles, or an object with an \"items\" array.");
-      return;
+    const trimmed=text.trim();
+    if(!trimmed) return;
+    let body: Record<string, unknown> = { csv: trimmed };
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        body = Array.isArray(parsed) ? { items: parsed } : parsed as Record<string, unknown>;
+      } catch {
+        setError("That JSON could not be read. Paste a CSV of UPCs, or a JSON array of items.");
+        return;
+      }
     }
     setBusy(true);
     try{
-      const result=await api<ImportOutcome>("/inventory/import-batch",{method:"POST",body:JSON.stringify({ items })});
+      const result=await api<QueueOutcome>("/inventory/import-batch",{method:"POST",body:JSON.stringify(body)});
       setOutcome(result);
-      onMessage(`Imported ${result.imported} bottle${result.imported===1?"":"s"}`);
-      if(result.imported) setText("");
+      onMessage(`Queued ${result.queued} row${result.queued===1?"":"s"} for Import Review. Nothing is written until you commit Ready rows.`);
+      if(result.queued) setText("");
+      onQueued();
     }catch(err){
-      setError(err instanceof Error?err.message:"Import failed");
+      setError(err instanceof Error?err.message:"Could not queue that import");
     }finally{
       setBusy(false);
     }
@@ -2937,26 +2855,21 @@ function BulkImport({onMessage}:{onMessage:(value:string)=>void}){
 
   return <section className="settings-card">
     <span className="eyebrow">CATALOG</span>
-    <h3>Bulk barcode / catalog import</h3>
-    <p>Paste a JSON array of bottles to seed the vault in one pass. Each row also fills the barcode cache, so scanning any of these codes later resolves instantly without a web lookup.</p>
+    <h3>Overnight CSV / JSON queue</h3>
+    <p>Paste a CSV of UPCs or a JSON array. List-only lookups fill Import Review overnight. Empty photos still count as Ready. Commit writes Ready rows only — misses stay in the queue.</p>
     <textarea className="bulk-import-input" rows={8} spellCheck={false} value={text} placeholder={BULK_IMPORT_SAMPLE} onChange={(e)=>setText(e.target.value)}/>
     <div className="bulk-import-actions">
       <button type="button" className="primary" disabled={busy||!text.trim()} onClick={() => void run()}>
-        <Database size={17}/> {busy?"Importing…":"Import & Cache Barcodes"}
+        <Upload size={17}/> {busy?"Queuing…":"Queue for Import Review"}
       </button>
       <button type="button" className="secondary" disabled={busy} onClick={()=>{setText(BULK_IMPORT_SAMPLE);setOutcome(null);setError("");}}>Load example</button>
     </div>
     {error && <p className="error">{error}</p>}
-    {outcome && <>
-      <p className="bulk-import-banner">
-        Successfully imported {outcome.imported} bottle{outcome.imported===1?"":"s"} and cached {outcome.cached} barcode{outcome.cached===1?"":"s"}.
-        {outcome.skipped>0 && ` ${outcome.skipped} row${outcome.skipped===1?"":"s"} skipped.`}
-      </p>
-      <div className="bulk-import-result">
-        {outcome.items.map((item,index)=>(<span key={`in-${index}`}>{item.name} → {item.table.replace("_"," ")}</span>))}
-        {outcome.rejected.map((item,index)=>(<span className="muted" key={`out-${index}`}>{item.name}: {item.reason}</span>))}
-      </div>
-    </>}
+    {outcome && <p className="bulk-import-banner">
+      Queued {outcome.queued} row{outcome.queued===1?"":"s"}
+      {outcome.skipped>0 ? ` · ${outcome.skipped} skipped` : ""}.
+      Open Import Review to confirm Ready bottles.
+    </p>}
   </section>;
 }
 

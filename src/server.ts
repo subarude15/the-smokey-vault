@@ -17,15 +17,28 @@ import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-t
 import { listTonightPours, maybeInventoryPour } from "./pours.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
+import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
-import { aiBarcodePrompt, parseAiBarcode } from "./ai_barcode.js";
-import { saveBarcodeCacheEntry } from "./barcode_cache.js";
-import { normalizeImportItem, readImportPayload } from "./import_batch.js";
+import { readImportPayload } from "./import_batch.js";
+import {
+  applyLabelToImportRow,
+  commitReadyImportRows,
+  getImportQueueRow,
+  importJobRunning,
+  importQueueCounts,
+  listImportQueue,
+  MAX_IMPORT_ROWS,
+  queueLookupResult,
+  seedImportQueue,
+  skipImportRow,
+  startImportJob
+} from "./import_queue.js";
 import { buildAiFailoverChain, defaultAiBaseUrl, defaultAiModel, isRetryableAiStatus, resolveAiModel, type AiProviderConfig } from "./ai_providers.js";
 import { pruneAttempts, recordFailure, retryAfterMs, type PinAttempts } from "./pin_guard.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
 import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
+import { downscaleVisionImage } from "./vision_image.js";
 import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
 import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
 import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
@@ -223,53 +236,65 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   return reply.code(201).send(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid));
 });
 
-const MAX_IMPORT_ROWS = 500;
-
 app.post<{ Body: unknown }>("/api/inventory/import-batch", {
-  schema: { tags: ["Lookup"], summary: "Seed spirits, wines, and packaged beer from a catalog array" }
+  schema: { tags: ["Lookup"], summary: "Queue CSV/JSON UPCs for overnight list-only catalog lookup. Nothing is written until Import Review commit." }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const rows = readImportPayload(request.body);
-  if (!rows.length) return reply.code(400).send({ error: "Send an array of items, or { items: [...] }" });
+  if (!rows.length) return reply.code(400).send({ error: "Send a CSV of UPCs, an array of items, or { items: [...] }" });
   if (rows.length > MAX_IMPORT_ROWS) return reply.code(400).send({ error: `Import up to ${MAX_IMPORT_ROWS} items at a time` });
+  const seeded = seedImportQueue(rows);
+  const started = startImportJob();
+  return {
+    queued: seeded.queued,
+    skipped: seeded.skipped,
+    started,
+    running: importJobRunning() || started,
+    counts: importQueueCounts()
+  };
+});
 
-  const imported: Array<{ table: string; id: number; name: string }> = [];
-  const skipped: Array<{ name: string; reason: string }> = [];
-  let cached = 0;
+app.get<{ Querystring: { status?: string; kind?: string; reason?: string } }>("/api/inventory/import-queue", {
+  schema: { tags: ["Lookup"], summary: "Import Review queue" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const status = request.query.status === "pending" || request.query.status === "ready"
+    || request.query.status === "needs_review" || request.query.status === "skipped"
+    ? request.query.status as ImportRowStatus
+    : "all";
+  const kind = request.query.kind && isImportKind(request.query.kind) ? request.query.kind : "all";
+  const reason = request.query.reason && isMissReason(request.query.reason) ? request.query.reason as MissReason : "all";
+  return {
+    rows: listImportQueue({ status, kind, reason }),
+    counts: importQueueCounts(),
+    running: importJobRunning()
+  };
+});
 
-  for (const [index, row] of rows.entries()) {
-    const normalized = normalizeImportItem(row);
-    if (!normalized) {
-      skipped.push({ name: `Row ${index + 1}`, reason: "No name to import" });
-      continue;
-    }
-    const { table, values, cache } = normalized;
-    const name = String(values.name);
-    try {
-      if (cache.upc) {
-        const clash = db.prepare(`SELECT id FROM ${table} WHERE upc = ? AND upc != '' LIMIT 1`).get(cache.upc) as { id?: number } | undefined;
-        if (clash?.id) {
-          // The bottle is already on the shelf, but the barcode is still worth caching.
-          if (saveBarcodeCacheEntry(cache)) cached += 1;
-          skipped.push({ name, reason: "Already in the vault under that barcode" });
-          continue;
-        }
-      }
-      if (typeof values.image_url === "string" && values.image_url) {
-        values.image_url = await localizeImage(values.image_url) ?? values.image_url;
-      }
-      const fields = tableFields[table].filter((field) => values[field] !== undefined && values[field] !== null);
-      const result = db.prepare(`INSERT INTO ${table} (${fields.join(",")}) VALUES (${fields.map(() => "?").join(",")})`)
-        .run(...fields.map((field) => values[field] as never));
-      if (saveBarcodeCacheEntry({ ...cache, image_url: String(values.image_url ?? cache.image_url) })) cached += 1;
-      imported.push({ table, id: Number(result.lastInsertRowid), name });
-    } catch (error) {
-      app.log.error({ error }, "Batch import row failed");
-      skipped.push({ name, reason: "Could not be written to the vault" });
-    }
-  }
+app.post<{ Body: { ids?: number[] } }>("/api/inventory/import-queue/commit", {
+  schema: { tags: ["Lookup"], summary: "Write Ready import rows to the vault" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const ids = Array.isArray(request.body?.ids)
+    ? request.body.ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : undefined;
+  return commitReadyImportRows(ids?.length ? ids : undefined);
+});
 
-  return { imported: imported.length, cached, skipped: skipped.length, items: imported, rejected: skipped };
+app.post<{ Params: { id: string } }>("/api/inventory/import-queue/:id/skip", {
+  schema: { tags: ["Lookup"], summary: "Skip an import row; it stays in the queue" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const row = skipImportRow(Number(request.params.id));
+  if (!row) return reply.code(404).send({ error: "Import row not found" });
+  return row;
+});
+
+app.get<{ Params: { id: string } }>("/api/inventory/import-queue/:id", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const row = getImportQueueRow(Number(request.params.id));
+  if (!row) return reply.code(404).send({ error: "Import row not found" });
+  return row;
 });
 
 app.post<{ Body: { force?: boolean } }>("/api/brews/sync", async (request, reply) => {
@@ -502,23 +527,18 @@ app.delete<{ Params: { id: string } }>("/api/restock/wanted/:id", async (request
   return restockPayload();
 });
 
-/** The AI tier, only offered when a provider is actually configured. */
-async function aiBarcodeLookup(upc: string) {
-  const { provider, key } = resolveAiConfig();
-  if (provider !== "ollama" && !key) return null;
-  return parseAiBarcode(await callLlm(aiBarcodePrompt(upc)), upc);
-}
-
 async function handleBarcodeLookup(
-  request: { params: { code: string }; query: { enrich?: string; refresh?: string; force?: string } },
+  request: { params: { code: string }; query: { enrich?: string; refresh?: string; force?: string; kind?: string } },
   reply: { code: (n: number) => { send: (v: unknown) => unknown } }
 ) {
-  const enrich = request.query.enrich !== "false" && request.query.enrich !== "0";
   const forceRefresh = request.query.refresh === "true" || request.query.refresh === "1"
     || request.query.force === "true" || request.query.force === "1";
+  const kind: ImportKind | undefined = request.query.kind && isImportKind(request.query.kind)
+    ? request.query.kind
+    : undefined;
   try {
-    const result = await lookupProduct(request.params.code, { enrich, forceRefresh, ai: enrich ? aiBarcodeLookup : undefined });
-    // Always 200 so a miss can still keep the UPC and open search.
+    const result = await lookupProduct(request.params.code, { forceRefresh, kind, mode: "live" });
+    if (!isReadyLookup(result)) queueLookupResult(result);
     return result;
   } catch (error) {
     app.log.error({ error }, "Barcode lookup failed");
@@ -526,9 +546,9 @@ async function handleBarcodeLookup(
   }
 }
 
-app.get<{ Querystring: { code?: string; upc?: string; enrich?: string; refresh?: string; force?: string } }>(
+app.get<{ Querystring: { code?: string; upc?: string; enrich?: string; refresh?: string; force?: string; kind?: string } }>(
   "/api/lookup/barcode",
-  { schema: { tags: ["Lookup"], summary: "Barcode lookup by query string (vault → cache → COLA → web → AI)" } },
+  { schema: { tags: ["Lookup"], summary: "Barcode lookup (vault → cache → FWGS → COLA list → Open Food Facts)" } },
   async (request, reply) => {
     const code = String(request.query.code ?? request.query.upc ?? "").trim();
     if (!code) return reply.code(400).send({ error: "Pass ?code=<barcode>" });
@@ -536,13 +556,13 @@ app.get<{ Querystring: { code?: string; upc?: string; enrich?: string; refresh?:
   }
 );
 
-app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string } }>(
+app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string; kind?: string } }>(
   "/api/scan/upc/:code",
-  { schema: { tags: ["Lookup"], summary: "Barcode lookup (vault → cache → COLA Cloud → Open Food Facts)" } },
+  { schema: { tags: ["Lookup"], summary: "Barcode lookup pipeline" } },
   handleBarcodeLookup
 );
 
-app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string } }>(
+app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: string; force?: string; kind?: string } }>(
   "/api/lookup/:code",
   { schema: { tags: ["Lookup"], summary: "Barcode lookup pipeline" } },
   handleBarcodeLookup
@@ -636,7 +656,7 @@ class AiRequestError extends Error {
 const AI_TIMEOUT_MS = 45_000;
 
 function resolveAiConfig() {
-  const providerFromKey = process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.GEMINI_API_KEY ? "gemini" : process.env.OPENAI_API_KEY ? "openai" : process.env.ANTHROPIC_API_KEY ? "anthropic" : "";
+  const providerFromKey = process.env.GEMINI_API_KEY ? "gemini" : process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.ANTHROPIC_API_KEY ? "anthropic" : process.env.OPENAI_API_KEY ? "openai" : "";
   const environmentProvider = process.env.AI_PROVIDER?.trim().toLowerCase() || providerFromKey || (process.env.AI_API_KEY ? "openai" : "");
   const provider = environmentProvider || getSetting("aiProvider")?.toLowerCase() || "ollama";
   const environmentKey = process.env.AI_API_KEY ||
@@ -913,17 +933,35 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
   if (!file) return reply.code(400).send({ error: "Image required" });
   try {
     const buffer = await file.toBuffer();
-    const parsed = parseVisionLabel(await callLlm(VISION_LABEL_PROMPT, buffer.toString("base64")));
+    const scaled = await downscaleVisionImage(buffer);
+    const parsed = parseVisionLabel(await callLlm(VISION_LABEL_PROMPT, scaled.base64));
     let imageUrl = "";
     try {
       imageUrl = saveImageBuffer(buffer, file.mimetype, file.filename);
     } catch {
       imageUrl = "";
     }
+    const product = { ...parsed, image_url: imageUrl };
+    const params = request.params as { id?: string };
+    const query = request.query as { row?: string };
+    const queueId = Number(params.id ?? query.row ?? "");
+    if (Number.isInteger(queueId) && queueId > 0) {
+      const row = applyLabelToImportRow(queueId, product, parsed.upc);
+      if (!row) return reply.code(404).send({ error: "Import row not found" });
+      return {
+        source: "label" as const,
+        upc: row.upc,
+        table: row.table,
+        kind: row.kind,
+        product: row.product,
+        reason: row.reason,
+        message: row.message
+      };
+    }
     return {
-      source: "vision",
+      source: "label" as const,
       upc: parsed.upc || undefined,
-      product: { ...parsed, image_url: imageUrl }
+      product
     };
   } catch (error) {
     app.log.error({ error }, "AI vision-label request failed");
@@ -934,6 +972,7 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
 
 app.post("/api/ai/vision", handleVisionLabel);
 app.post("/api/ai/vision-label", handleVisionLabel);
+app.post("/api/inventory/import-queue/:id/label", handleVisionLabel);
 
 /* ------------------------- Speakeasy: patrons & votes ----------------------- */
 
