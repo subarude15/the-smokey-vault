@@ -28,7 +28,7 @@ import {
   AI_MIXOLOGIST_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
   TAB_KEYS, parseEnabledTabs, parseTabOrder, serializeEnabledTabs, serializeTabOrder,
   type EnabledTabs, type SubstituteOption, type TabKey,
-  LOOKUP_SOURCE_LABELS, type LookupSource
+  LOOKUP_SOURCE_LABELS, missMessage, type LookupSource
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 import { ImportReview } from "./ImportReview";
@@ -1298,11 +1298,7 @@ function ScanPage({
       eyebrow="VAULT TOOLS"
       title={miss ? "Look it up." : "Scan a bottle."}
       subtitle={miss
-        ? (miss.reason === "quota"
-          ? "Lookup paused. COLA is holding — search by name, scan the label, or add by hand."
-          : miss.reason === "invalid"
-            ? "Not a barcode. Rescan only."
-            : "No catalog match. Search by name, scan the label, or add by hand.")
+        ? missMessage(miss.reason ?? "no_catalog", miss.upc, miss.variants)
         : "Barcode for a UPC. One scan, then we take you to the bottle or to review."}
     />
     {miss

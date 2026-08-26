@@ -38,7 +38,7 @@ export const LOOKUP_SOURCE_LABELS: Record<LookupSource, string> = {
   cola_cloud: "COLA",
   openfoodfacts: "Catalog",
   upcitemdb: "Catalog",
-  label: "label",
+  label: "Label",
   not_found: "Not found"
 };
 

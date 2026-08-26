@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ColaQuotaError, resetColaBurst, searchByBarcode } from "./cola_client.js";
 import { lookupProduct, type LookupCatalogs } from "./lookup.js";
-import { missMessage } from "./lookup-shared.js";
+import { LOOKUP_SOURCE_LABELS, missMessage } from "./lookup-shared.js";
 import { db } from "./db.js";
 
 const silent: LookupCatalogs = {
@@ -12,10 +12,25 @@ const silent: LookupCatalogs = {
   searchUpcItemDb: async () => null
 };
 
-test("invalid barcodes miss with reason invalid and never say not found in quota copy", () => {
-  const copy = missMessage("quota");
-  assert.match(copy, /paused/i);
-  assert.doesNotMatch(copy, /not found/i);
+test("source chips title-case Label and keep catalog short names", () => {
+  assert.equal(LOOKUP_SOURCE_LABELS.label, "Label");
+  assert.equal(LOOKUP_SOURCE_LABELS.fwgs, "FWGS");
+  assert.equal(LOOKUP_SOURCE_LABELS.cola_cloud, "COLA");
+  assert.equal(LOOKUP_SOURCE_LABELS.openfoodfacts, "Catalog");
+  assert.equal(LOOKUP_SOURCE_LABELS.upcitemdb, "Catalog");
+});
+
+test("scan miss copy covers variant, cola gap, invalid, and quota without saying not found", () => {
+  assert.equal(missMessage("invalid"), "Not a barcode. Rescan only.");
+  const quota = missMessage("quota");
+  assert.match(quota, /paused/i);
+  assert.doesNotMatch(quota, /not found/i);
+  assert.match(
+    missMessage("variant", "080686000891", { upcA: "080686000891", ean13: "0080686000891" }),
+    /Code format\. Try UPC-A 080686000891 or EAN-13 0080686000891/
+  );
+  assert.equal(missMessage("cola_gap"), "Not in TTB.");
+  assert.equal(missMessage("no_catalog"), "No catalog match.");
 });
 
 test("garbage input is an invalid barcode miss", async () => {
