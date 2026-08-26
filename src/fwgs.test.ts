@@ -29,6 +29,12 @@ test("parseFwgsHtml reads a product tile when JSON-LD is missing", () => {
   assert.match(hit.image_url ?? "", /^https:\/\/www\.finewineandgoodspirits\.com\//);
 });
 
+test("parseFwgsHtml ignores a product-request form instead of treating it as a hit", () => {
+  const html = readFileSync(join(dir, "fixtures/fwgs-request-form.html"), "utf8");
+  assert.equal(parseFwgsHtml(html), null);
+  assert.equal(parseFwgsHtml('<meta property="og:title" content="Product Request Form">'), null);
+});
+
 test("parseFwgsHtml treats an empty search as a miss, not a throw", () => {
   const html = readFileSync(join(dir, "fixtures/fwgs-empty.html"), "utf8");
   assert.equal(parseFwgsHtml(html), null);

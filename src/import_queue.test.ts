@@ -43,6 +43,20 @@ test("a named overnight hit with no photo is Ready", () => {
   assert.equal(fields.reason, null);
 });
 
+test("an invalid CSV row keeps its declared kind instead of becoming mixers", () => {
+  const fields = lookupToQueueFields({
+    source: "not_found",
+    upc: "not-a-code",
+    kind: "spirits",
+    product: { upc: "not-a-code", name: "", category: "Mixer" },
+    reason: "invalid",
+    message: "Not a barcode. Rescan only."
+  });
+  assert.equal(fields.kind, "spirits");
+  assert.equal(fields.status, "needs_review");
+  assert.equal(fields.reason, "invalid");
+});
+
 test("a catalog miss stays in the queue as needs review", () => {
   const fields = lookupToQueueFields({
     source: "not_found",

@@ -331,7 +331,7 @@ async function processPendingImports() {
     const mapped = mapRow(row);
     const result = await lookupProduct(mapped.upc, {
       mode: "batch",
-      kind: mapped.kind === "spirits" ? undefined : mapped.kind
+      kind: mapped.kind
     });
     queueLookupResult(result, mapped.id);
     if (FWGS_BATCH_DELAY_MS > 0) {

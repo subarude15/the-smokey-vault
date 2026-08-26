@@ -19,9 +19,10 @@ test("invalid barcodes miss with reason invalid and never say not found in quota
 });
 
 test("garbage input is an invalid barcode miss", async () => {
-  const result = await lookupProduct("not a code", { catalogs: silent });
+  const result = await lookupProduct("not a code", { kind: "spirits", catalogs: silent });
   assert.equal(result.reason, "invalid");
   assert.equal(result.source, "not_found");
+  assert.equal(result.kind, "spirits");
   assert.match(result.message ?? "", /Not a barcode/);
 });
 

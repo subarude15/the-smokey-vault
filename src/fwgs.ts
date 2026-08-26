@@ -101,11 +101,21 @@ function jsonLdNodes(raw: unknown, into: Record<string, unknown>[] = []): Record
   return into;
 }
 
+function usableFwgsName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (/product request|request form|sign in|create account|access denied|akamai|pardon our|search results|^search$/i.test(trimmed)) {
+    return false;
+  }
+  if (/fine wine/i.test(trimmed) && /good spirits/i.test(trimmed)) return false;
+  return true;
+}
+
 function productFromJsonLd(node: Record<string, unknown>): FwgsProduct | null {
   const type = String(node["@type"] ?? node.type ?? "");
   if (!/product/i.test(type) && !node.offers && !node.image) return null;
   const name = String(node.name ?? node.product_name ?? "").trim();
-  if (!name) return null;
+  if (!usableFwgsName(name)) return null;
   const offers = asRecord(node.offers) ?? (Array.isArray(node.offers) ? asRecord(node.offers[0]) : null);
   const brandNode = asRecord(node.brand);
   const brand = String(brandNode?.name ?? node.brand ?? "").trim();
@@ -142,7 +152,7 @@ function productFromCard(card: string): FwgsProduct | null {
   const nameMatch = card.match(/<(?:a|h[1-3]|span|p)[^>]*(?:product-name|pdp-link|tile-name|name)[^>]*>([\s\S]*?)<\/(?:a|h[1-3]|span|p)>/i)
     || card.match(/<a[^>]+class=["'][^"']*(?:name|link)[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
   const name = stripTags(nameMatch?.[1] ?? "");
-  if (!name || /sign in|create account|view all/i.test(name)) return null;
+  if (!usableFwgsName(name)) return null;
   const img = card.match(/<(?:img|source)[^>]+(?:src|data-src|srcset)=["']([^"'\s]+)/i);
   const size = card.match(/<(?:span|div|p)[^>]*(?:size|volume|pack-size)[^>]*>([\s\S]*?)<\/(?:span|div|p)>/i);
   const price = card.match(/\$\s*\d+(?:\.\d{1,2})?/)?.[0] ?? "";
@@ -157,7 +167,7 @@ function productFromCard(card: string): FwgsProduct | null {
 }
 
 function emptySearch(html: string) {
-  return /no results|0 results|did not match|nothing matched|couldn['’]t find/i.test(html);
+  return /no results|0 results|did not match|nothing matched|couldn['’]t find|product request form/i.test(html);
 }
 
 /**
@@ -187,7 +197,7 @@ export function parseFwgsHtml(html: string): FwgsProduct | null {
   }
 
   const ogTitle = metaContent(text, "og:title") || metaContent(text, "twitter:title");
-  if (ogTitle && !/search|fine wine/i.test(ogTitle)) {
+  if (ogTitle && usableFwgsName(ogTitle) && !/search/i.test(ogTitle)) {
     return {
       name: ogTitle.replace(/\s*[|\-–].*$/, "").trim(),
       brand: "",

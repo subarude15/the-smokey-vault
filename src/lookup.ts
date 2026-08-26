@@ -327,7 +327,7 @@ function placeholderProduct(upc: string) {
     upc,
     name: "",
     brand: "",
-    category: "Mixer",
+    category: "Spirits",
     abv: 0,
     image_url: "",
     notes: "",
@@ -418,12 +418,12 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
   const waitOnBurst = mode === "batch";
 
   if (!looksLikeBarcode(rawUpc)) {
-    return miss("invalid", rawUpc);
+    return miss("invalid", rawUpc, kindHint);
   }
 
   const upc = primaryCatalogUpc(rawUpc);
   if (!upc) {
-    return miss("invalid", rawUpc);
+    return miss("invalid", rawUpc, kindHint);
   }
 
   const vaultHit = findInVault(upc, rawUpc);
