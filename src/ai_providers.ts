@@ -8,7 +8,7 @@ export type AiProviderConfig = {
 type Env = Record<string, string | undefined>;
 
 /** Tried in this order when the configured provider cannot answer. */
-export const AI_FAILOVER_ORDER = ["gemini", "openai", "openrouter", "anthropic"] as const;
+export const AI_FAILOVER_ORDER = ["gemini", "openrouter", "anthropic", "openai"] as const;
 
 const ENV_KEY_BY_PROVIDER: Record<string, string> = {
   gemini: "GEMINI_API_KEY",

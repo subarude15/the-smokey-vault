@@ -2,25 +2,51 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   barcodeVariants,
+  ean13Form,
+  expandUpcE,
   mapColaToSchema,
   mapToSpiritCategory,
   mapToSpiritType,
   normalizeAbv,
   normalizeUpc,
   parseVolumeMl,
-  productToInventoryFields
+  productToInventoryFields,
+  resetColaBurst,
+  searchByBarcode,
+  upcAForm,
+  upcCheckDigit,
+  ColaQuotaError
 } from "./cola_client.js";
 
-test("normalizeUpc pads UPC-A and keeps EAN-13", () => {
+test("11-digit codes pad to 12 without inventing a check digit", () => {
+  assert.equal(normalizeUpc("80686000891"), "080686000891");
+  assert.equal(upcAForm("80686000891"), "080686000891");
+  assert.equal(ean13Form("80686000891"), "0080686000891");
+});
+
+test("normalizeUpc pads UPC-A, keeps EAN-13, and expands UPC-E", () => {
   assert.equal(normalizeUpc("8066095702"), "008066095702");
   assert.equal(normalizeUpc("0123456789012"), "0123456789012");
   assert.equal(normalizeUpc("0-08066-09570-2"), "008066095702");
+  const expanded = expandUpcE("04252614");
+  assert.equal(expanded.length, 12);
+  assert.equal(normalizeUpc("04252614"), expanded);
+  assert.equal(upcAForm("04252614"), expanded);
+  assert.equal(ean13Form("04252614"), `0${expanded}`);
 });
 
-test("barcodeVariants covers UPC-A and EAN-13 twins", () => {
+test("barcodeVariants covers UPC-A, EAN-13 twins, and expanded UPC-E", () => {
   const variants = barcodeVariants("008066095702");
   assert.ok(variants.includes("008066095702"));
   assert.ok(variants.includes("08066095702") || variants.includes("8066095702"));
+  const upcE = barcodeVariants("04252614");
+  assert.ok(upcE.includes(expandUpcE("04252614")));
+});
+
+test("UPC-E expansion produces a 12-digit code with a valid check digit", () => {
+  const expanded = expandUpcE("04252614");
+  assert.equal(expanded.length, 12);
+  assert.equal(expanded.slice(-1), upcCheckDigit(expanded.slice(0, 11)));
 });
 
 test("normalizeAbv and parseVolumeMl read OCR strings", () => {
@@ -60,4 +86,26 @@ test("mapColaToSchema plus inventory fields keep upc and image", () => {
   assert.equal(fields.image_url, "https://example.com/label.jpg");
   assert.equal(fields.category, "Whiskey");
   assert.equal(fields.sub_category, "Bourbon");
+});
+
+test("a live barcode search that hits the burst cap throws quota without sleeping", async () => {
+  const previous = process.env.COLA_API_KEY;
+  process.env.COLA_API_KEY = "unit-test-key";
+  resetColaBurst();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ data: [] }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  })) as typeof fetch;
+  const started = Date.now();
+  try {
+    for (let i = 0; i < 10; i++) await searchByBarcode("008066095702");
+    await assert.rejects(() => searchByBarcode("008066095702"), (error: unknown) => error instanceof ColaQuotaError);
+    assert.ok(Date.now() - started < 4000, "live scans must not wait out the burst window");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous == null) delete process.env.COLA_API_KEY;
+    else process.env.COLA_API_KEY = previous;
+    resetColaBurst();
+  }
 });

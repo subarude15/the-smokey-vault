@@ -11,10 +11,10 @@ const gemini: AiProviderConfig = {
 
 test("only providers holding an environment key join the chain", () => {
   const chain = buildAiFailoverChain(gemini, { OPENAI_API_KEY: "openai-key", ANTHROPIC_API_KEY: "anthropic-key" });
-  assert.deepEqual(chain.map((config) => config.provider), ["gemini", "openai", "anthropic"]);
+  assert.deepEqual(chain.map((config) => config.provider), ["gemini", "anthropic", "openai"]);
 });
 
-test("the chain follows gemini, openai, openrouter, anthropic", () => {
+test("the chain follows gemini, openrouter, anthropic, then openai if a key is present", () => {
   const openai: AiProviderConfig = { provider: "openai", key: "k", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" };
   const chain = buildAiFailoverChain(openai, {
     ANTHROPIC_API_KEY: "a",
@@ -71,9 +71,13 @@ test("a rejected key or a bad request stops the walk", () => {
   assert.equal(isRetryableAiStatus(422), false);
 });
 
-test("the OpenRouter fallback reads labels as well as text", () => {
-  const chain = buildAiFailoverChain(gemini, { OPENROUTER_API_KEY: "router-key" });
-  assert.equal(chain[1].model, "stealth/ox-alpha");
+test("OpenRouter is the first failover, and OpenAI is last and only with a key", () => {
+  const chain = buildAiFailoverChain(gemini, {
+    OPENROUTER_API_KEY: "router-key",
+    ANTHROPIC_API_KEY: "anthropic-key",
+    OPENAI_API_KEY: "openai-key"
+  });
+  assert.deepEqual(chain.map((config) => config.provider), ["gemini", "openrouter", "anthropic", "openai"]);
 });
 
 test("retired Gemini model names fall back to the current Flash alias", () => {

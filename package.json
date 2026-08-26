@@ -29,6 +29,7 @@
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
+    "sharp": "^0.34.5",
     "zod": "latest"
   },
   "devDependencies": {

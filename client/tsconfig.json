@@ -16,5 +16,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "vite.config.ts", "../src/catalog.ts"]
+  "include": ["src", "vite.config.ts", "../src/catalog.ts", "../src/lookup-shared.ts"]
 }

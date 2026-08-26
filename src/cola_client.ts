@@ -6,6 +6,15 @@ export const COLA_BURST_LIMIT = Number(process.env.COLA_BURST_LIMIT ?? 10);
 
 const lastRequests: number[] = [];
 let lastQuota: ColaQuota | null = null;
+let colaPausedUntil = 0;
+
+export class ColaQuotaError extends Error {
+  readonly code = "quota" as const;
+  constructor(message = "Lookup paused", readonly status = 429) {
+    super(message);
+    this.name = "ColaQuotaError";
+  }
+}
 
 export type ColaQuota = {
   detail_views_remaining: string | null;
@@ -68,6 +77,24 @@ export function getLastQuota() {
   return lastQuota;
 }
 
+export function isColaPaused() {
+  return Date.now() < colaPausedUntil;
+}
+
+export function pauseCola(ms = 60_000) {
+  colaPausedUntil = Math.max(colaPausedUntil, Date.now() + Math.max(0, ms));
+}
+
+export function resetColaBurst() {
+  lastRequests.length = 0;
+  colaPausedUntil = 0;
+  lastQuota = null;
+}
+
+export function isColaQuotaError(error: unknown): error is ColaQuotaError {
+  return error instanceof ColaQuotaError;
+}
+
 function captureQuota(headers: Headers) {
   lastQuota = {
     detail_views_remaining: headers.get("X-Detail-Views-Remaining"),
@@ -79,21 +106,30 @@ function captureQuota(headers: Headers) {
   return lastQuota;
 }
 
-async function rateLimit() {
+async function rateLimit(waitOnBurst: boolean) {
+  if (isColaPaused()) throw new ColaQuotaError();
   const now = Date.now();
   const cutoff = now - 60_000;
   while (lastRequests.length && lastRequests[0]! < cutoff) lastRequests.shift();
   if (lastRequests.length >= COLA_BURST_LIMIT) {
     const sleepMs = 60_000 - (now - lastRequests[0]!) + 1000;
+    if (!waitOnBurst) {
+      pauseCola(Math.max(1_000, sleepMs));
+      throw new ColaQuotaError();
+    }
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, sleepMs)));
   }
   lastRequests.push(Date.now());
 }
 
-async function colaFetch(path: string, params?: Record<string, string>) {
+type ColaFetchOptions = {
+  waitOnBurst?: boolean;
+};
+
+async function colaFetch(path: string, params?: Record<string, string>, options?: ColaFetchOptions) {
   const apiKey = getColaApiKey();
   if (!apiKey) throw new Error("COLA_API_KEY is not configured");
-  await rateLimit();
+  await rateLimit(options?.waitOnBurst === true);
   const url = new URL(`${COLA_API_BASE}${path}`);
   if (params) for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   const response = await fetch(url, {
@@ -101,6 +137,12 @@ async function colaFetch(path: string, params?: Record<string, string>) {
     signal: AbortSignal.timeout(15_000)
   });
   captureQuota(response.headers);
+  const listRemaining = lastQuota?.list_records_remaining;
+  if (listRemaining === "0") pauseCola(60_000);
+  if (response.status === 429) {
+    pauseCola(60_000);
+    throw new ColaQuotaError("Lookup paused", 429);
+  }
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`COLA Cloud ${response.status}: ${body.slice(0, 200) || response.statusText}`);
@@ -108,9 +150,86 @@ async function colaFetch(path: string, params?: Record<string, string>) {
   return response.json();
 }
 
+/** GS1 check digit over the first 11 UPC-A digits (odd positions ×3, 1-based). */
+export function upcCheckDigit(digits: string) {
+  const body = String(digits ?? "").replace(/\D/g, "").slice(0, 11).padStart(11, "0");
+  let sum = 0;
+  for (let i = 0; i < 11; i++) {
+    const n = Number(body[i]);
+    sum += i % 2 === 0 ? n * 3 : n;
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+/**
+ * Expands UPC-E (6–8 digits) to UPC-A. Eight-digit form is NS + 6 compact digits + check.
+ * Six-digit form assumes number system 0.
+ */
+export function expandUpcE(raw: string): string {
+  const cleaned = String(raw ?? "").replace(/\D/g, "");
+  if (cleaned.length < 6 || cleaned.length > 8) return "";
+  const ns = cleaned.length === 8 || cleaned.length === 7 ? cleaned[0]! : "0";
+  const compact = cleaned.length === 8
+    ? cleaned.slice(1, 7)
+    : cleaned.length === 7
+      ? cleaned.slice(1)
+      : cleaned;
+  if (compact.length !== 6 || !/^[01]$/.test(ns)) return "";
+  const last = compact[5]!;
+  let manufacturer: string;
+  let product: string;
+  if (last === "0" || last === "1" || last === "2") {
+    manufacturer = compact.slice(0, 2) + last;
+    product = `0000${compact.slice(2, 5)}`;
+  } else if (last === "3") {
+    manufacturer = compact.slice(0, 3);
+    product = `00000${compact.slice(3, 5)}`;
+  } else if (last === "4") {
+    manufacturer = compact.slice(0, 4);
+    product = `00000${compact[4]!}`;
+  } else {
+    manufacturer = compact.slice(0, 5);
+    product = `0000${last}`;
+  }
+  const eleven = `${ns}${manufacturer}${product}`;
+  if (eleven.length !== 11) return "";
+  return eleven + upcCheckDigit(eleven);
+}
+
+export function looksLikeBarcode(raw: string) {
+  const cleaned = String(raw ?? "").replace(/\D/g, "");
+  return cleaned.length >= 6 && cleaned.length <= 14;
+}
+
+export function upcAForm(raw: string) {
+  const normalized = normalizeUpc(raw);
+  if (!normalized) return "";
+  if (normalized.length === 13 && normalized.startsWith("0")) return normalized.slice(1);
+  if (normalized.length === 12) return normalized;
+  return normalized.padStart(12, "0").slice(-12);
+}
+
+export function ean13Form(raw: string) {
+  const upcA = upcAForm(raw);
+  if (!upcA) return "";
+  if (upcA.length === 13) return upcA;
+  return `0${upcA}`.slice(-13);
+}
+
+/** One catalog key: UPC-A when the EAN-13 is a leading-zero twin, otherwise the normalized code. */
+export function primaryCatalogUpc(raw: string) {
+  const normalized = normalizeUpc(raw);
+  if (!normalized) return "";
+  if (normalized.length === 13 && normalized.startsWith("0")) return normalized.slice(1);
+  return normalized;
+}
+
 export function normalizeUpc(raw: string) {
   const cleaned = String(raw ?? "").replace(/\D/g, "");
   if (!cleaned) return "";
+  if (cleaned.length === 6 || cleaned.length === 7 || cleaned.length === 8) {
+    return expandUpcE(cleaned);
+  }
   if (cleaned.length === 13) return cleaned;
   if (cleaned.length === 14 && cleaned.startsWith("0")) return cleaned.slice(1);
   return cleaned.padStart(12, "0").slice(-12);
@@ -225,39 +344,46 @@ export function barcodeVariants(raw: string): string[] {
   const variants = new Set<string>();
   variants.add(cleaned);
   variants.add(cleaned.replace(/^0+/, "") || cleaned);
+  const normalized = normalizeUpc(cleaned);
+  if (normalized) variants.add(normalized);
+  const upcA = upcAForm(cleaned);
+  const ean13 = ean13Form(cleaned);
+  if (upcA) variants.add(upcA);
+  if (ean13) variants.add(ean13);
   variants.add(cleaned.padStart(12, "0").slice(-12));
   variants.add(cleaned.padStart(13, "0").slice(-13));
   if (cleaned.length === 12) variants.add(`0${cleaned}`);
   if (cleaned.length === 13 && cleaned.startsWith("0")) variants.add(cleaned.slice(1));
-  return [...variants];
+  if (cleaned.length === 6 || cleaned.length === 7 || cleaned.length === 8) {
+    const expanded = expandUpcE(cleaned);
+    if (expanded) variants.add(expanded);
+  }
+  return [...variants].filter(Boolean);
 }
 
-export async function searchByBarcode(upc: string): Promise<ColaSummary | null> {
-  for (const candidate of barcodeVariants(upc)) {
-    const data = await colaFetch("/colas", {
-      barcode_value: candidate,
-      per_page: "1",
-      approval_date_from: "2005-01-01"
-    }) as { data?: ColaSummary[] };
-    if (data.data?.[0]) return data.data[0];
+/**
+ * One network attempt per UPC. Variants are resolved in memory first; the
+ * dedicated barcode endpoint is preferred so a live scan cannot burn Free-tier
+ * burst (10/min) by looping UPC-A/EAN-13 twins.
+ */
+export async function searchByBarcode(
+  upc: string,
+  options?: ColaFetchOptions
+): Promise<ColaSummary | null> {
+  const code = primaryCatalogUpc(upc);
+  if (!code) return null;
+  try {
+    const payload = await colaFetch(`/barcode/${encodeURIComponent(code)}`, undefined, options) as {
+      data?: Array<ColaSummary & { cola?: ColaSummary }>;
+    };
+    const first = payload.data?.[0];
+    if (!first) return null;
+    if (first.ttb_id || first.product_name || first.brand_name) return first;
+    return first.cola ?? null;
+  } catch (error) {
+    if (error instanceof ColaQuotaError) throw error;
+    return null;
   }
-
-  // Dedicated barcode enrichment endpoint across extracted barcode rows.
-  for (const candidate of barcodeVariants(upc).slice(0, 2)) {
-    try {
-      const payload = await colaFetch(`/barcode/${encodeURIComponent(candidate)}`) as {
-        data?: Array<ColaSummary & { cola?: ColaSummary }>;
-      };
-      const rows = payload.data ?? [];
-      const first = rows[0];
-      if (!first) continue;
-      if (first.ttb_id || first.product_name || first.brand_name) return first;
-      if (first.cola) return first.cola;
-    } catch {
-      // Try next variant / fall through.
-    }
-  }
-  return null;
 }
 
 export async function searchColasByQuery(
@@ -273,12 +399,15 @@ export async function searchColasByQuery(
     approval_date_from: "2005-01-01"
   };
   if (options?.productType) params.product_type = options.productType;
-  const data = await colaFetch("/colas", params) as { data?: ColaSummary[] };
+  const data = await colaFetch("/colas", params, { waitOnBurst: true }) as { data?: ColaSummary[] };
   return data.data ?? [];
 }
 
 export async function getColaDetail(ttbId: string): Promise<ColaDetail | null> {
-  const data = await colaFetch(`/colas/${encodeURIComponent(ttbId)}`) as ColaDetail | { data?: ColaDetail };
+  if (lastQuota?.detail_views_remaining === "0") {
+    throw new ColaQuotaError("Lookup paused", 429);
+  }
+  const data = await colaFetch(`/colas/${encodeURIComponent(ttbId)}`, undefined, { waitOnBurst: true }) as ColaDetail | { data?: ColaDetail };
   if (data && typeof data === "object" && "ttb_id" in data) return data as ColaDetail;
   if (data && typeof data === "object" && "data" in data) return (data as { data?: ColaDetail }).data ?? null;
   return null;

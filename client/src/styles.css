@@ -135,6 +135,22 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .scan-miss .upc-chip{font-variant-numeric:tabular-nums;letter-spacing:.03em}
 .scan-miss-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 @media(min-width:700px){.scan-stage .camera-frame{aspect-ratio:4/3}}
+.import-review{max-width:760px}
+.import-upload{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.import-sticky{position:sticky;top:72px;z-index:12;display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 16px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(16px)}
+.import-sticky span{color:var(--muted);font-size:13px}
+.import-sticky strong{color:var(--text);font:600 20px "Playfair Display"}
+.import-sticky .primary{margin-left:auto}
+.import-rows{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.import-row{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.import-row.ready{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.import-row.skipped{opacity:.62}
+.import-row header{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.import-row p{margin:0;line-height:1.5}
+.import-row-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.import-search,.import-label{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.source-chip{letter-spacing:.04em}
+.miss-chip{border-color:color-mix(in srgb,#e9796d 45%,var(--line));color:#e4b86e}
 
 /* ---------------------------- Kiosk & navigation ---------------------------- */
 .topbar-start{display:none;align-items:center;gap:12px;min-width:0;flex:1}

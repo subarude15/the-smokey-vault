@@ -27,7 +27,10 @@ const ALLOWED_HOST_HINTS = [
   "upcitemdb",
   "amazonaws.com",
   "brewfather.app",
-  "googleapis.com"
+  "googleapis.com",
+  "finewineandgoodspirits.com",
+  "demandware.net",
+  "scene7.com"
 ];
 
 function extensionFrom(url: string, contentType?: string | null) {
