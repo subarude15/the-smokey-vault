@@ -109,6 +109,17 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
   assert.doesNotMatch(overviewHeroCopy(snap, true), /ready to mix|on the ticket/);
 });
 
+test("generic Brewfather Batch names fall back to style on Overview", () => {
+  const snap = buildOverview({
+    brews: [
+      { id: 1, batch_name: "Batch", style: "American IPA", status: "Conditioning", calculated_abv: 6.2 },
+      { id: 2, batch_name: "JUICY BARREL", style: "New England IPA", status: "Planned", calculated_abv: 6.6 }
+    ]
+  });
+  assert.equal(snap.brews.list[0].batch_name, "JUICY BARREL");
+  assert.equal(snap.brews.list.find((brew) => brew.id === 1)?.batch_name, "American IPA");
+});
+
 test("overdue wines show on cellar watch even when the rack is otherwise stocked", () => {
   const snap = buildOverview({
     wines: [

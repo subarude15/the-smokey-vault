@@ -76,7 +76,7 @@ const modules: Module[] = [
     {key:"image_url",label:"Photo",type:"image"},
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
-  { id: "brews", label: "Brewery", singular: "Batch", icon: FlaskConical, title: "Brewery Lab", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
+  { id: "brews", label: "Homebrew Log", singular: "Batch", icon: FlaskConical, title: "Homebrew Log", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
     {key:"batch_name",label:"Batch name"},{key:"maker",label:"Brewery / maker"},
     {key:"brew_date",label:"Brew date",type:"date"},{key:"status",label:"Status",type:"brewStatus"},
     {key:"style",label:"Style",options:BEER_STYLES},{key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS},
@@ -183,6 +183,9 @@ function applyTheme(theme: string, tokens?: Record<string,string>) {
   const values = { ...(themePresets[theme] ?? themePresets.dark), ...tokens };
   Object.entries(values).forEach(([key,value]) => document.documentElement.style.setProperty(key, value));
   document.documentElement.dataset.theme = theme;
+  const color = values["--bg"] ?? "#11100e";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", color);
 }
 
 type ScanModuleId = "spirits" | "packaged_beer" | "wines";
@@ -588,7 +591,11 @@ export default function App() {
   }
   const collectionNav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard },
-    ...modules.filter((m) => admin || !GUEST_HIDDEN_PAGES.has(m.id)).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
+    ...modules.filter((m) => {
+      if (!admin && GUEST_HIDDEN_PAGES.has(m.id)) return false;
+      if (!admin && m.id === "brews") return false;
+      return true;
+    }).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"brewery",label:"Brewery Lab",icon:FlaskConical },
     { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },
     { id:"mixologist",label:"AI Mixologist",icon:Sparkles },
@@ -612,7 +619,7 @@ export default function App() {
   const facebookGroupUrl = house.settings.facebook_group_url?.trim() ?? "";
   const quickNav = mobileQuickNav(collectionNav, admin, keeperNav);
   const allNav = [...collectionNav, ...(admin ? keeperNav : [])];
-  const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Vault";
+  const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Barrel";
   function dismissNavHint() {
     localStorage.setItem("smokey-nav-hint-dismissed", "1");
     setNavHint(false);
@@ -778,7 +785,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   const stats = snap ? (admin ? [
     { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: snap.spirits.low ? `${snap.spirits.low} running low` : "Spirits & mixers" },
     { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: `${snap.taps.empty} open handle${snap.taps.empty === 1 ? "" : "s"}` },
-    { id: "brews", icon: FlaskConical, value: snap.brews.active, label: "IN THE LAB", hint: snap.brews.archived ? `${snap.brews.archived} archived` : "Active batches" },
+    { id: "brewery", icon: FlaskConical, value: snap.brews.active, label: "IN THE LAB", hint: snap.brews.archived ? `${snap.brews.archived} archived` : "Active batches" },
     { id: "packaged_beer", icon: Beer, value: snap.packaged.units, label: "COLD ROOM", hint: snap.packaged.out ? `${snap.packaged.out} out of stock` : "Cans & bottles" },
     { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: `${snap.wines.labels} on the rack` },
     { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "READY TO POUR", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Matched to the shelf" }
@@ -787,7 +794,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "OFF THE MENU", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Drinks the shelf can make" },
     { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: "Spirits & mixers" },
     { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: "On the rack" },
-    { id: "brews", icon: FlaskConical, value: snap.brews.active, label: "BREWING", hint: "What’s in the pipeline" },
+    { id: "brewery", icon: FlaskConical, value: snap.brews.active, label: "BREWING", hint: "What’s in the pipeline" },
     { id: "packaged_beer", icon: Beer, value: snap.packaged.units, label: "COLD ROOM", hint: "Cans & bottles on hand" }
   ]) : [];
   return <>
@@ -879,10 +886,10 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       </div>
     </section>}
     {snap && snap.brews.list.length > 0 && <section className="overview-board">
-      <div className="section-heading"><div><span className="eyebrow">BREWERY LAB</span><h2>In the pipeline</h2></div><button type="button" className="secondary" onClick={() => go("brews")}>{admin ? "Open lab" : "What’s brewing"}</button></div>
+      <div className="section-heading"><div><span className="eyebrow">BREWERY LAB</span><h2>In the pipeline</h2></div><button type="button" className="secondary" onClick={() => go(admin ? "brews" : "brewery")}>{admin ? "Open log" : "What’s brewing"}</button></div>
       <div className="overview-brew-row">
         {snap.brews.list.map((brew) => (
-          <button type="button" className="overview-brew" key={brew.id || brew.batch_name} onClick={() => go("brews")}>
+          <button type="button" className="overview-brew" key={brew.id || brew.batch_name} onClick={() => go(admin ? "brews" : "brewery")}>
             <span className="eyebrow">{brew.status.toUpperCase()}</span>
             <strong>{brew.batch_name}</strong>
             <small>{[brew.style, brew.abv ? `${brew.abv}% ABV` : "", brew.on_tap].filter(Boolean).join(" · ")}</small>
@@ -2699,7 +2706,7 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Light, dark, or punk. Patron Mode uses the same toggle in the top bar.</p>
+        <p>Light and Dark keep the speakeasy look. Punk is the poster/sticker skin — same screens, different type and chrome. Patron Mode uses the same toggle in the top bar.</p>
         <div className="theme-grid">{(["light","dark","punk"] as const).map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}

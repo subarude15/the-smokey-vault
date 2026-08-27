@@ -1,6 +1,7 @@
 import {
   TAP_COUNT,
   brewAbv,
+  brewDisplayName,
   compareBrews,
   formatAbv,
   isTapEmpty,
@@ -191,7 +192,7 @@ export function buildOverview(input: {
   const activeBrews = brews.filter((brew) => normalizeBrewStatus(brew.status) !== "Archived").sort(compareBrews);
   const brewList: OverviewBrew[] = activeBrews.slice(0, 8).map((brew) => ({
     id: itemId(brew.id),
-    batch_name: text(brew.batch_name) || "Untitled batch",
+    batch_name: brewDisplayName(brew.batch_name, brew.style),
     style: text(brew.style),
     status: normalizeBrewStatus(brew.status),
     abv: formatAbv(brewAbv(brew) ?? brew.calculated_abv ?? brew.abv),

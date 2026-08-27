@@ -9,7 +9,7 @@ export function GuestFooter({ locationText, onContact }: { locationText: string;
     <footer className="guest-footer">
       <button type="button" onClick={onContact}>
         <MapPin size={16}/>
-        <span>{`\u{1F4CD} ${location} · Message us for full address & party details`}</span>
+        <span>{`${location} · Message us for full address & party details`}</span>
       </button>
     </footer>
   );

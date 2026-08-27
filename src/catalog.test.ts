@@ -7,7 +7,7 @@ import {
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch,
+  onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch, brewDisplayName,
   comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite,
   compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
   prepareSpiritWrite, spiritStock, spiritStockLabel,
@@ -261,6 +261,14 @@ test("prepareBrewWrite normalizes gravity and stores calculated ABV", () => {
 test("parseCommaList keeps multi-word hop names", () => {
   assert.deepEqual(parseCommaList("Citra, Mosaic, Idaho 7"), ["Citra", "Mosaic", "Idaho 7"]);
   assert.deepEqual(parseCommaList('["Nelson Sauvin"]'), ["Nelson Sauvin"]);
+});
+
+test("brewDisplayName replaces generic Batch labels with the style", () => {
+  assert.equal(brewDisplayName("JUICY BARREL", "New England IPA"), "JUICY BARREL");
+  assert.equal(brewDisplayName("Batch", "American IPA"), "American IPA");
+  assert.equal(brewDisplayName("untitled batch", "Stout"), "Stout");
+  assert.equal(brewDisplayName("", ""), "Untitled batch");
+  assert.equal(brewDisplayName("Batch 12", "Pilsner"), "Batch 12");
 });
 
 test("wine body snaps to 1–5 and overdue drink-by is calendar-local", () => {
