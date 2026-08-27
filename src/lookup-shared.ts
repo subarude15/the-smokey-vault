@@ -1,8 +1,10 @@
 export const LOOKUP_SOURCES = [
   "vault",
   "cache",
+  "beer_cache",
   "fwgs",
   "cola_cloud",
+  "catalog_beer",
   "openfoodfacts",
   "upcitemdb",
   "label",
@@ -34,8 +36,10 @@ export const MISS_REASON_LABELS: Record<MissReason, string> = {
 export const LOOKUP_SOURCE_LABELS: Record<LookupSource, string> = {
   vault: "Vault",
   cache: "Cache",
+  beer_cache: "Cache",
   fwgs: "FWGS",
   cola_cloud: "COLA",
+  catalog_beer: "Catalog",
   openfoodfacts: "Catalog",
   upcitemdb: "Catalog",
   label: "Label",
@@ -72,6 +76,13 @@ export type LookupResult = {
   message?: string;
   quota?: LookupQuota;
   variants?: LookupVariants;
+  suggestions?: Array<{
+    source: "catalog_beer" | "beer_cache" | "vault" | "cola_cloud";
+    table: ImportTable | "brews";
+    catalog_beer_id?: string | null;
+    ttb_id?: string | null;
+    product: Record<string, unknown>;
+  }>;
 };
 
 export type ImportQueueRow = {

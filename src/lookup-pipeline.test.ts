@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ColaQuotaError, resetColaBurst, searchByBarcode } from "./cola_client.js";
-import { lookupProduct, type LookupCatalogs } from "./lookup.js";
+import { saveBeerCacheEntry, getBeerCacheEntry } from "./beer_cache.js";
+import { lookupProduct, searchBottles, type LookupCatalogs } from "./lookup.js";
 import { LOOKUP_SOURCE_LABELS, missMessage } from "./lookup-shared.js";
 import { db } from "./db.js";
 
@@ -64,10 +65,11 @@ test("mixers skip catalogs and miss to no_catalog", async () => {
   assert.equal(off, 0);
 });
 
-test("beer never calls FWGS or COLA and uses Open Food Facts", async () => {
+test("beer uses cache before COLA and calls COLA only after OFF miss", async () => {
   const upc = "001200000000";
   db.prepare("DELETE FROM cola_cache WHERE upc=?").run(upc);
   db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
+  db.prepare("DELETE FROM beer_cache WHERE upc=?").run(upc);
   let fwgs = 0;
   let cola = 0;
   const result = await lookupProduct(upc, {
@@ -99,6 +101,55 @@ test("beer never calls FWGS or COLA and uses Open Food Facts", async () => {
   assert.equal(result.product?.name, "Nugget Nectar");
   assert.equal(fwgs, 0);
   assert.equal(cola, 0);
+  assert.ok(getBeerCacheEntry(upc));
+});
+
+test("beer hits beer_cache before external catalogs", async () => {
+  const upc = "009988776655";
+  db.prepare("DELETE FROM beer_cache WHERE upc=?").run(upc);
+  saveBeerCacheEntry({
+    upc,
+    brewery: "Troegs",
+    name: "Perpetual IPA",
+    style: "American IPA",
+    abv: 7.5,
+    source: "catalog_beer"
+  });
+  let off = 0;
+  const result = await lookupProduct(upc, {
+    kind: "beer",
+    catalogs: {
+      searchFwgs: async () => null,
+      searchCola: async () => null,
+      searchOff: async () => { off += 1; return null; },
+      searchUpcItemDb: async () => null
+    }
+  });
+  assert.equal(result.source, "beer_cache");
+  assert.equal(result.product?.name, "Perpetual IPA");
+  assert.equal(off, 0);
+});
+
+test("beer calls COLA only after OFF and upcitemdb miss", async () => {
+  const upc = "008877665544";
+  db.prepare("DELETE FROM cola_cache WHERE upc=?").run(upc);
+  db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
+  db.prepare("DELETE FROM beer_cache WHERE upc=?").run(upc);
+  let cola = 0;
+  const result = await lookupProduct(upc, {
+    kind: "beer",
+    catalogs: {
+      searchFwgs: async () => null,
+      searchCola: async () => {
+        cola += 1;
+        return { product_name: "Local Lager", brand_name: "Neighborhood", product_type: "MALT BEVERAGE" };
+      },
+      searchOff: async () => null,
+      searchUpcItemDb: async () => null
+    }
+  });
+  assert.equal(result.source, "cola_cloud");
+  assert.equal(cola, 1);
 });
 
 test("liquor uses FWGS before COLA and skips COLA when the store hit is complete", async () => {

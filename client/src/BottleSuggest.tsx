@@ -3,20 +3,30 @@ import { BottleWine as Bottle, ChevronRight, LoaderCircle } from "lucide-react";
 import { api } from "./api";
 
 export type BottleSearchHit = {
-  source: "vault" | "cola_cloud" | "cache" | "fwgs" | "openfoodfacts";
+  source: "vault" | "cola_cloud" | "catalog_beer" | "beer_cache" | "cache" | "fwgs" | "openfoodfacts";
   table: "spirits" | "packaged_beer" | "wines" | "brews";
   ttb_id?: string | null;
+  catalog_beer_id?: string | null;
   product: Record<string, unknown>;
 };
 
 function sourceLabel(hit: BottleSearchHit) {
   if (hit.table === "brews") return "BREWERY LAB";
   if (hit.source === "vault") return "IN YOUR VAULT";
+  if (hit.source === "beer_cache") return "BEER CACHE";
+  if (hit.source === "catalog_beer") return "CATALOG.BEER";
   if (hit.source === "cola_cloud") return "COLA CLOUD";
   if (hit.source === "fwgs") return "FWGS CATALOG";
   if (hit.source === "openfoodfacts") return "OPEN FOOD FACTS";
   if (hit.source === "cache") return "PAST SCAN";
   return hit.source.toUpperCase();
+}
+
+function suggestStatus(moduleId: string) {
+  if (moduleId === "packaged_beer" || moduleId === "taps" || moduleId === "keg" || moduleId === "brews" || moduleId === "shelf") {
+    return "Looking in vault, cache, and Catalog.beer…";
+  }
+  return "Looking in the vault and catalogs…";
 }
 
 export function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
@@ -80,7 +90,7 @@ export function BottleSuggest({
   return (
     <div className="suggest-list" role="listbox" aria-label="Bottle suggestions">
       {loading && !results.length ? (
-        <div className="suggest-status"><LoaderCircle size={16} className="spinner"/> Looking in the vault and catalogs…</div>
+        <div className="suggest-status"><LoaderCircle size={16} className="spinner"/> {suggestStatus(moduleId)}</div>
       ) : results.map((hit, index) => {
         const { name, brand, category } = hitLabel(hit);
         return (
@@ -89,7 +99,7 @@ export function BottleSuggest({
             role="option"
             aria-selected={index === active}
             className={`suggest-item${index === active ? " active" : ""}`}
-            key={`${hit.source}-${hit.ttb_id ?? hit.product.id ?? index}`}
+            key={`${hit.source}-${hit.catalog_beer_id ?? hit.ttb_id ?? hit.product.id ?? index}`}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onPick(hit)}
           >

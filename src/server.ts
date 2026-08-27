@@ -16,7 +16,15 @@ import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWante
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
 import { listTonightPours, maybeInventoryPour } from "./pours.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
-import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
+import {
+  enrichColaRecord,
+  fetchColaQuota,
+  lookupProduct,
+  rememberBeerFromHit,
+  searchBottles,
+  searchCatalogBeerSuggestions,
+  type BottleSearchHit
+} from "./lookup.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -569,7 +577,7 @@ app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: st
 );
 
 app.get<{ Querystring: { q?: string; table?: string } }>("/api/search/bottles", {
-  schema: { tags: ["Lookup"], summary: "Search vault + COLA Cloud by bottle name" }
+  schema: { tags: ["Lookup"], summary: "Search vault, beer cache, Catalog.beer, and COLA by bottle name" }
 }, async (request, reply) => {
   const q = request.query.q?.trim() ?? "";
   if (q.length < 2) return { results: [] };
@@ -579,6 +587,17 @@ app.get<{ Querystring: { q?: string; table?: string } }>("/api/search/bottles", 
     app.log.error({ error }, "Bottle search failed");
     return reply.code(502).send({ error: "Bottle search failed" });
   }
+});
+
+app.post<{ Body: { upc?: string; hit?: BottleSearchHit } }>("/api/beer/remember", {
+  schema: { tags: ["Lookup"], summary: "Remember a beer UPC mapping for faster future scans" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const upc = String(request.body?.upc ?? "").trim();
+  const hit = request.body?.hit;
+  if (!upc || !hit?.product) return reply.code(400).send({ error: "UPC and hit required" });
+  await rememberBeerFromHit(upc, hit);
+  return { ok: true };
 });
 
 app.get<{ Params: { ttbId: string }; Querystring: { upc?: string } }>("/api/cola/enrich/:ttbId", {
@@ -942,6 +961,9 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
       imageUrl = "";
     }
     const product = { ...parsed, image_url: imageUrl };
+    const suggestions = parsed.product_type === "beer"
+      ? await searchCatalogBeerSuggestions(`${parsed.brand} ${parsed.name}`.trim(), 5)
+      : [];
     const params = request.params as { id?: string };
     const query = request.query as { row?: string };
     const queueId = Number(params.id ?? query.row ?? "");
@@ -955,13 +977,15 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
         kind: row.kind,
         product: row.product,
         reason: row.reason,
-        message: row.message
+        message: row.message,
+        suggestions
       };
     }
     return {
       source: "label" as const,
       upc: parsed.upc || undefined,
-      product
+      product,
+      suggestions
     };
   } catch (error) {
     app.log.error({ error }, "AI vision-label request failed");
