@@ -3,26 +3,30 @@ import { BottleWine as Bottle, ChevronRight, LoaderCircle } from "lucide-react";
 import { api } from "./api";
 
 export type BottleSearchHit = {
-  source: "vault" | "cola_cloud" | "catalog_beer" | "beer_cache";
+  source: "vault" | "cola_cloud" | "catalog_beer" | "beer_cache" | "cache" | "fwgs" | "openfoodfacts";
   table: "spirits" | "packaged_beer" | "wines" | "brews";
   ttb_id?: string | null;
   catalog_beer_id?: string | null;
   product: Record<string, unknown>;
 };
 
-function suggestEyebrow(hit: BottleSearchHit) {
+function sourceLabel(hit: BottleSearchHit) {
   if (hit.table === "brews") return "BREWERY LAB";
   if (hit.source === "vault") return "IN YOUR VAULT";
   if (hit.source === "beer_cache") return "BEER CACHE";
   if (hit.source === "catalog_beer") return "CATALOG.BEER";
-  return "COLA CLOUD";
+  if (hit.source === "cola_cloud") return "COLA CLOUD";
+  if (hit.source === "fwgs") return "FWGS CATALOG";
+  if (hit.source === "openfoodfacts") return "OPEN FOOD FACTS";
+  if (hit.source === "cache") return "PAST SCAN";
+  return hit.source.toUpperCase();
 }
 
 function suggestStatus(moduleId: string) {
   if (moduleId === "packaged_beer" || moduleId === "taps" || moduleId === "keg" || moduleId === "brews" || moduleId === "shelf") {
     return "Looking in vault, cache, and Catalog.beer…";
   }
-  return "Looking in the vault and COLA…";
+  return "Looking in the vault and catalogs…";
 }
 
 export function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
@@ -101,7 +105,7 @@ export function BottleSuggest({
           >
             <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle size={18}/>}</div>
             <div>
-              <span className="eyebrow">{suggestEyebrow(hit)}</span>
+              <span className="eyebrow">{sourceLabel(hit)}</span>
               <strong>{name}</strong>
               <small>{[brand, category].filter(Boolean).join(" · ")}</small>
             </div>
