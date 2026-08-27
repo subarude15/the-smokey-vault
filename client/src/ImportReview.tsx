@@ -254,7 +254,7 @@ function ImportRow({
         </div>
       )}
       {searching && <NameSearch upc={row.upc} table={row.table} onPick={onSearchPick}/>}
-      {labeling && <MissLabelCapture rowId={row.id} onRead={onLabelRead}/>}
+      {labeling && <MissLabelCapture row={row} onUseLabel={onLabelRead} onPick={onSearchPick}/>}
     </article>
   );
 }
@@ -286,25 +286,42 @@ function NameSearch({
   );
 }
 
-function MissLabelCapture({ rowId, onRead }: { rowId: number; onRead: (result: ScanResult) => Promise<void> }) {
+function MissLabelCapture({
+  row,
+  onUseLabel,
+  onPick
+}: {
+  row: ImportQueueRow;
+  onUseLabel: (result: ScanResult) => Promise<void>;
+  onPick: (hit: BottleSearchHit) => Promise<void>;
+}) {
   const [status, setStatus] = useState("Line up the front label.");
   const [busy, setBusy] = useState(false);
+  const [labelResult, setLabelResult] = useState<ScanResult | null>(null);
+  const [suggestions, setSuggestions] = useState<BottleSearchHit[]>([]);
 
   async function send(file: Blob) {
     setBusy(true);
     setStatus("Reading the label…");
+    setLabelResult(null);
+    setSuggestions([]);
     try {
       const body = new FormData();
       body.append("image", file, "label.jpg");
-      const path = rowId > 0 ? `/inventory/import-queue/${rowId}/label` : "/ai/vision-label";
+      const path = row.id > 0 ? `/inventory/import-queue/${row.id}/label` : "/ai/vision-label";
       const data = await api<ScanResult>(path, { method: "POST", body });
       if (!lookupHasName(data.product)) {
         setStatus("Couldn’t read a name. Try a little closer.");
         setBusy(false);
         return;
       }
-      setStatus("Found on the label.");
-      await onRead({ ...data, source: "label", product: data.product ?? {} });
+      const nextSuggestions = (data.suggestions ?? []) as BottleSearchHit[];
+      const result = { ...data, source: "label" as const, upc: row.upc || data.upc, product: data.product ?? {} };
+      setLabelResult(result);
+      setSuggestions(nextSuggestions);
+      setStatus(nextSuggestions.length
+        ? `Read “${String(data.product?.name ?? "label")}”. Pick a catalog match or use the label read.`
+        : `Read “${String(data.product?.name ?? "label")}”.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not read that label");
     } finally {
@@ -323,6 +340,25 @@ function MissLabelCapture({ rowId, onRead }: { rowId: number; onRead: (result: S
         }}/>
       </label>
       <p className="scanner-status">{status}</p>
+      {labelResult ? (
+        <div className="scan-miss-actions">
+          <button type="button" className="primary" onClick={() => void onUseLabel(labelResult)}>Use label read</button>
+        </div>
+      ) : null}
+      {suggestions.length ? (
+        <div className="scan-miss finder-results">
+          {suggestions.map((hit, index) => {
+            const name = String(hit.product.name ?? "Untitled");
+            const brewery = String(hit.product.brewery ?? hit.product.brand ?? "");
+            const style = String(hit.product.style ?? hit.product.category ?? "");
+            return (
+              <button type="button" key={`${hit.catalog_beer_id ?? index}`} className="secondary wide" onClick={() => void onPick(hit)}>
+                {name}{brewery ? ` · ${brewery}` : ""}{style ? ` · ${style}` : ""}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -23,6 +23,22 @@ import {
 } from "./cola_client.js";
 import { localizeImage } from "./images.js";
 import { barcodeEntryToProduct, getBarcodeCacheEntry } from "./barcode_cache.js";
+import {
+  beerCacheHitKey,
+  beerCacheToInventoryFields,
+  beerCacheToProduct,
+  getBeerCacheEntry,
+  saveBeerCacheEntry,
+  searchBeerCache,
+  type BeerCacheSource
+} from "./beer_cache.js";
+import {
+  catalogBeerToInventoryFields,
+  isCatalogBeerConfigured,
+  isCatalogBeerQuotaExhausted,
+  searchCatalogBeers
+} from "./catalog_beer.js";
+import { enrichFromUntappdPage, isUntappdScrapeEnabled } from "./untappd_scrape.js";
 import { fwgsToSchema, isFwgsThin, searchFwgs, type FwgsProduct } from "./fwgs.js";
 import { spiritFamilyFromLabel } from "./catalog.js";
 import {
@@ -44,9 +60,10 @@ export {
 } from "./lookup-shared.js";
 
 export type BottleSearchHit = {
-  source: "vault" | "cola_cloud";
+  source: "vault" | "cola_cloud" | "catalog_beer" | "beer_cache";
   table: "spirits" | "packaged_beer" | "wines" | "brews";
   ttb_id?: string | null;
+  catalog_beer_id?: string | null;
   product: Record<string, unknown>;
 };
 
@@ -214,6 +231,65 @@ export function saveToCache(
     Math.floor(Date.now() / 1000),
     source
   );
+}
+
+function isBeerSearchModule(moduleId?: string) {
+  return moduleId === "packaged_beer" || moduleId === "shelf" || moduleId === "taps" || moduleId === "keg" || moduleId === "brews";
+}
+
+function persistBeerHit(
+  product: ProductSchema,
+  source: BeerCacheSource | string,
+  extra?: { catalog_beer_id?: string | null; untappd_bid?: string | null }
+) {
+  if (!product.upc || !String(product.name ?? "").trim()) return;
+  saveBeerCacheEntry({
+    upc: product.upc,
+    catalog_beer_id: extra?.catalog_beer_id ?? null,
+    untappd_bid: extra?.untappd_bid ?? null,
+    brewery: product.brand,
+    name: product.name,
+    style: product.category,
+    abv: product.abv,
+    image_url: product.image_url,
+    source
+  });
+}
+
+export async function rememberBeerFromHit(upc: string, hit: BottleSearchHit) {
+  const code = normalizeUpc(upc);
+  if (!code) return;
+  const brewery = String(hit.product.brewery ?? hit.product.brand ?? hit.product.maker ?? "").trim();
+  const name = String(hit.product.name ?? hit.product.batch_name ?? "").trim();
+  if (!name) return;
+  let imageUrl = String(hit.product.image_url ?? "").trim() || null;
+  let untappdBid: string | null = String(hit.product.untappd_bid ?? "") || null;
+  if (!imageUrl && brewery) {
+    const scraped = await enrichFromUntappdPage(brewery, name);
+    if (scraped?.image_url) imageUrl = scraped.image_url;
+    if (scraped?.untappd_bid) untappdBid = scraped.untappd_bid;
+  }
+  saveBeerCacheEntry({
+    upc: code,
+    catalog_beer_id: hit.catalog_beer_id ?? (String(hit.product.catalog_beer_id ?? "") || null),
+    untappd_bid: untappdBid,
+    brewery,
+    name,
+    style: String(hit.product.style ?? hit.product.category ?? "").trim(),
+    abv: Number(hit.product.abv ?? 0) || null,
+    image_url: imageUrl,
+    source: hit.source === "catalog_beer" ? "catalog_beer" : "vault_seed"
+  });
+}
+
+export async function searchCatalogBeerSuggestions(query: string, limit = 5) {
+  const beers = await searchCatalogBeers(query, limit);
+  return beers.map((beer) => ({
+    source: "catalog_beer" as const,
+    table: "packaged_beer" as const,
+    catalog_beer_id: beer.id,
+    product: catalogBeerToInventoryFields(beer)
+  }));
 }
 
 function inferTable(product: ProductSchema | Record<string, unknown>): NonNullable<LookupResult["table"]> {
@@ -390,11 +466,13 @@ async function tryOffThenUpcitemdb(
   catalogs: LookupCatalogs,
   kindHint?: ImportKind
 ): Promise<LookupResult | null> {
+  const beerKind = kindHint === "beer";
   try {
     const off = await (catalogs.searchOff ?? lookupOpenFoodFacts)(upc);
     if (off?.name.trim()) {
       const product = await withLocalImage(off);
       saveToCache(product, null, null, "openfoodfacts");
+      if (beerKind) persistBeerHit(product, "openfoodfacts");
       return await success("openfoodfacts", upc, product, kindHint ?? inferImportKind(product));
     }
   } catch {
@@ -405,6 +483,7 @@ async function tryOffThenUpcitemdb(
     if (item?.name.trim()) {
       const product = await withLocalImage(item);
       saveToCache(product, null, null, "upcitemdb");
+      if (beerKind) persistBeerHit(product, "upcitemdb");
       return await success("upcitemdb", upc, product, kindHint ?? inferImportKind(product));
     }
   } catch {
@@ -445,22 +524,39 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
     if (remembered) return await success("cache", upc, barcodeEntryToProduct(remembered), kindHint);
   }
 
+  const kind = kindHint ?? "spirits";
+  const beerPath = kind === "beer";
+
+  if (beerPath && !forceRefresh) {
+    const beerCached = getBeerCacheEntry(upc) ?? getBeerCacheEntry(rawUpc);
+    if (beerCached) {
+      return await success("beer_cache", upc, beerCacheToProduct(beerCached), kindHint);
+    }
+  }
+
   let staleFallback: ProductSchema | null = null;
   if (!forceRefresh) {
     const cached = getFromCache(upc);
     if (cached) {
-      const cacheMeta = db.prepare("SELECT source FROM cola_cache WHERE upc = ?").get(upc) as { source?: string } | undefined;
+      const cacheMeta = db.prepare("SELECT source, cached_at FROM cola_cache WHERE upc = ?").get(upc) as { source?: string; cached_at?: number } | undefined;
       const cacheSource = String(cacheMeta?.source ?? "");
-      if (cacheSource === "cola_cloud" || cacheSource === "fwgs" || !isColaConfigured()) {
+      const age = Math.floor(Date.now() / 1000) - Number(cacheMeta?.cached_at ?? 0);
+      const fresh = age <= CACHE_TTL_SECONDS;
+      if (beerPath) {
+        if (cacheSource !== "cola_cloud" && fresh) {
+          return await success("cache", upc, cached, kindHint);
+        }
+        if (cacheSource === "cola_cloud" && fresh) {
+          return await success("cache", upc, cached, kindHint);
+        }
+      } else if (cacheSource === "cola_cloud" || cacheSource === "fwgs" || !isColaConfigured()) {
         return await success("cache", upc, cached, kindHint);
       }
       staleFallback = cached;
     }
   }
 
-  const kind = kindHint ?? "spirits";
   const skipCatalogs = kind === "mixers";
-  const beerPath = kind === "beer";
   let quotaHit = isColaPaused();
   let colaQueried = false;
   let colaFound = false;
@@ -532,6 +628,22 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
 
   const webHit = await tryOffThenUpcitemdb(upc, catalogs, beerPath ? "beer" : kindHint);
   if (webHit) return webHit;
+
+  if (beerPath && colaEnabled) {
+    try {
+      colaQueried = true;
+      const summary = await colaClient(upc, waitOnBurst);
+      if (summary && (summary.product_name || summary.brand_name)) {
+        colaFound = true;
+        const product = await withLocalImage(mapColaToSchema(upc, summary));
+        saveToCache(product, summary, null, "cola_cloud");
+        persistBeerHit(product, "cola_cloud");
+        return await success("cola_cloud", upc, product, kindHint);
+      }
+    } catch (error) {
+      if (error instanceof ColaQuotaError) quotaHit = true;
+    }
+  }
 
   rememberUnresolvedUpc(upc);
   if (quotaHit) return miss("quota", upc, kindHint);
@@ -654,11 +766,49 @@ export async function searchBottles(query: string, options?: { table?: string })
   if (q.length < 2) return { results: [] };
   const vaultTables = searchTablesForModule(options?.table);
   const colaTable = searchTableForModule(options?.table);
+  const beerSearch = isBeerSearchModule(options?.table);
 
   const results = searchVault(q, vaultTables);
   const seen = new Set(results.map(hitKey));
 
-  if (isColaConfigured() && !isColaPaused()) {
+  if (beerSearch) {
+    for (const entry of searchBeerCache(q, 8)) {
+      const hit: BottleSearchHit = {
+        source: "beer_cache",
+        table: "packaged_beer",
+        catalog_beer_id: entry.catalog_beer_id,
+        product: beerCacheToInventoryFields(entry)
+      };
+      const key = beerCacheHitKey(entry);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(hit);
+    }
+
+    if (isCatalogBeerConfigured() && !isCatalogBeerQuotaExhausted()) {
+      try {
+        const beers = await searchCatalogBeers(q, 10);
+        for (const beer of beers) {
+          const product = catalogBeerToInventoryFields(beer);
+          const hit: BottleSearchHit = {
+            source: "catalog_beer",
+            table: "packaged_beer",
+            catalog_beer_id: beer.id,
+            product
+          };
+          const key = hitKey(hit);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          results.push(hit);
+        }
+      } catch {
+        // Vault and cache hits are still useful when Catalog.beer is down.
+      }
+    }
+  }
+
+  const needsColaFallback = !beerSearch || results.length < 5;
+  if (needsColaFallback && isColaConfigured() && !isColaPaused()) {
     try {
       const colaQuery = queryTokens(q).join(" ") || q;
       const summaries = await searchColasByQuery(colaQuery, 10, colaTable ? { productType: colaProductTypeForTable(colaTable) } : undefined);

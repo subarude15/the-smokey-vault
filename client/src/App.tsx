@@ -413,14 +413,27 @@ async function resolveSuggestion(module: Module, hit: BottleSearchHit, upc = "")
     const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}${qs}`);
     if (enriched.product) product = enriched.product;
   }
+  const source = hit.source === "vault"
+    ? "vault"
+    : hit.source === "catalog_beer" || hit.source === "beer_cache"
+      ? "catalog_beer"
+      : "cola_cloud";
   const draft = scannedInventoryDraft({
-    source: hit.source === "vault" ? "vault" : "cola_cloud",
+    source,
     table: hit.table,
     upc: upc || String(product.upc ?? ""),
     product
   });
   const mapped = mapDraftToModule(module, draft);
-  return upc ? { ...mapped, upc } : mapped;
+  const values = upc ? { ...mapped, upc } : mapped;
+  if (upc && (hit.source === "catalog_beer" || hit.source === "beer_cache") && module.id === "packaged_beer") {
+    try {
+      await api("/beer/remember", { method: "POST", body: JSON.stringify({ upc, hit }) });
+    } catch {
+      // Still open the form; the UPC can be saved from the form later.
+    }
+  }
+  return values;
 }
 
 export default function App() {

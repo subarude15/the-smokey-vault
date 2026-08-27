@@ -194,7 +194,7 @@ export function Scanner({ onProduct, onMiss }: Props) {
         <video ref={video} muted playsInline autoPlay />
       </div>
       <p className="scanner-hint">
-        One scan opens the bottle. Mixers skip the catalogs. Beer uses Open Food Facts. Label reading lives on a miss.
+        One scan opens the bottle. Mixers skip the catalogs. Beer uses vault, cache, Open Food Facts, then COLA last. Label + Catalog.beer on a miss.
       </p>
       <label className="secondary wide file-button">
         <Camera size={18}/> Snap a barcode photo
