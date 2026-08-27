@@ -3,11 +3,21 @@ import { BottleWine as Bottle, ChevronRight, LoaderCircle } from "lucide-react";
 import { api } from "./api";
 
 export type BottleSearchHit = {
-  source: "vault" | "cola_cloud";
+  source: "vault" | "cola_cloud" | "cache" | "fwgs" | "openfoodfacts";
   table: "spirits" | "packaged_beer" | "wines" | "brews";
   ttb_id?: string | null;
   product: Record<string, unknown>;
 };
+
+function sourceLabel(hit: BottleSearchHit) {
+  if (hit.table === "brews") return "BREWERY LAB";
+  if (hit.source === "vault") return "IN YOUR VAULT";
+  if (hit.source === "cola_cloud") return "COLA CLOUD";
+  if (hit.source === "fwgs") return "FWGS CATALOG";
+  if (hit.source === "openfoodfacts") return "OPEN FOOD FACTS";
+  if (hit.source === "cache") return "PAST SCAN";
+  return hit.source.toUpperCase();
+}
 
 export function hitFitsModule(moduleId: string, hit: BottleSearchHit) {
   if (moduleId === "shelf") return hit.table === "spirits" || hit.table === "packaged_beer" || hit.table === "wines";
@@ -70,7 +80,7 @@ export function BottleSuggest({
   return (
     <div className="suggest-list" role="listbox" aria-label="Bottle suggestions">
       {loading && !results.length ? (
-        <div className="suggest-status"><LoaderCircle size={16} className="spinner"/> Looking in the vault and COLA…</div>
+        <div className="suggest-status"><LoaderCircle size={16} className="spinner"/> Looking in the vault and catalogs…</div>
       ) : results.map((hit, index) => {
         const { name, brand, category } = hitLabel(hit);
         return (
@@ -85,7 +95,7 @@ export function BottleSuggest({
           >
             <div className="card-icon">{hit.product.image_url ? <img src={String(hit.product.image_url)} alt=""/> : <Bottle size={18}/>}</div>
             <div>
-              <span className="eyebrow">{hit.table === "brews" ? "BREWERY LAB" : hit.source === "vault" ? "IN YOUR VAULT" : "COLA CLOUD"}</span>
+              <span className="eyebrow">{sourceLabel(hit)}</span>
               <strong>{name}</strong>
               <small>{[brand, category].filter(Boolean).join(" · ")}</small>
             </div>

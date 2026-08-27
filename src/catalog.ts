@@ -76,6 +76,66 @@ export function spiritFamilyFromLabel(category: string, subCategory = ""): { fam
   return { family: familyRaw, type: typeRaw };
 }
 
+export type ProductTable = "spirits" | "packaged_beer" | "wines";
+
+const SPIRIT_TABLE_FAMILIES = new Set([
+  "Whiskey", "Gin", "Rum", "Tequila", "Mezcal", "Vodka", "Cognac", "Brandy",
+  "Amaro", "Liqueur", "Bitters"
+]);
+
+const WHISKEY_MALT = /\b(single\s+malt|scotch\s+malt|islay\s+malt|malt\s+scotch|malt\s+whisk(?:y|ey))\b/i;
+const BEER_TABLE_WORDS = /\b(beer|ale|ipa|lager|stout|porter|pilsner|saison|cider|seltzer|malt\s+beverage)\b/i;
+const WINE_TABLE_WORDS = /\b(wine|sparkling|champagne|prosecco|vermouth|sake|mead|riesling|cabernet|chardonnay|pinot|merlot|syrah|zinfandel|malbec|sauvignon|nebbiolo)\b/i;
+
+function productHaystack(product: Record<string, unknown>) {
+  const category = String(product.category ?? product.categories ?? product.style ?? "");
+  const subCategory = String(product.sub_category ?? product.subcategory ?? product.type ?? "");
+  const name = String(product.name ?? product.product_name ?? "");
+  const type = String(product.product_type ?? "");
+  return `${type} ${category} ${subCategory} ${name}`;
+}
+
+export function hasExplicitProductType(product: Record<string, unknown>) {
+  const type = String(product.product_type ?? "").trim().toUpperCase();
+  return /DISTILLED\s+SPIRIT|MALT\s+BEVERAGE|\bWINE\b/.test(type);
+}
+
+/** Routes a loose product record to the inventory table it belongs in. */
+export function inferProductTable(product: Record<string, unknown>): ProductTable {
+  const type = String(product.product_type ?? "").trim().toUpperCase();
+  if (/DISTILLED\s+SPIRIT/.test(type)) return "spirits";
+  if (/MALT\s+BEVERAGE/.test(type)) return "packaged_beer";
+  if (/\bWINE\b/.test(type)) return "wines";
+
+  const category = String(product.category ?? product.categories ?? product.style ?? "");
+  const subCategory = String(product.sub_category ?? product.subcategory ?? product.type ?? "");
+  const haystack = productHaystack(product);
+  const family = spiritFamilyFromLabel(category, subCategory).family;
+  if (SPIRIT_TABLE_FAMILIES.has(family)) return "spirits";
+  if (/\bspirit/i.test(category) && !BEER_TABLE_WORDS.test(haystack)) return "spirits";
+
+  if (WINE_TABLE_WORDS.test(haystack)) return "wines";
+  if (!WHISKEY_MALT.test(haystack) && BEER_TABLE_WORDS.test(haystack)) return "packaged_beer";
+  return "spirits";
+}
+
+/** True when a packaged_beer row looks like a spirit misfiling, not actual beer. */
+export function packagedBeerRowLooksLikeSpirit(row: Record<string, unknown>) {
+  const haystack = `${row.name ?? ""} ${row.style ?? ""} ${row.brewery ?? ""} ${row.notes ?? ""}`;
+  const table = inferProductTable({
+    name: row.name,
+    category: row.style,
+    brand: row.brewery,
+    product_type: ""
+  });
+  if (table !== "spirits") return false;
+  return !BEER_TABLE_WORDS.test(haystack);
+}
+
+export function isSpiritInventoryFamily(family: string) {
+  return SPIRIT_TABLE_FAMILIES.has(family);
+}
+
 export const WINE_FAMILIES = [
   "Red", "White", "Rosé", "Orange", "Sparkling", "Dessert", "Fortified"
 ];

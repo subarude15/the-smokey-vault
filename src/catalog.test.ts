@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   parseList, parseTagInput, serializeList, spiritFamilyFromLabel,
-  defaultSweetnessForWine, inferWineFamilyAndStyle, migrateWineSweetnessValue,
+  defaultSweetnessForWine, inferProductTable, inferWineFamilyAndStyle, migrateWineSweetnessValue,
+  packagedBeerRowLooksLikeSpirit,
   wineKindLabel, wineSweetnessStops,
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
@@ -34,6 +35,21 @@ test("spiritFamilyFromLabel lifts whiskey types into Whiskey family", () => {
   assert.deepEqual(spiritFamilyFromLabel("Whiskey", "Rye"), { family: "Whiskey", type: "Rye" });
   assert.equal(spiritFamilyFromLabel("London Dry Gin").family, "Gin");
   assert.equal(spiritFamilyFromLabel("Mixer").family, "Mixer");
+});
+
+test("inferProductTable keeps single malt whiskey out of packaged beer", () => {
+  assert.equal(inferProductTable({ name: "Lagavulin 16 Year Single Malt" }), "spirits");
+  assert.equal(inferProductTable({ category: "Islay Single Malt", name: "Lagavulin 16" }), "spirits");
+  assert.equal(inferProductTable({ name: "Vanilla Porter Bourbon", category: "Bourbon" }), "spirits");
+  assert.equal(inferProductTable({ name: "Troegs Nugget Nectar", category: "Imperial Amber Ale" }), "packaged_beer");
+  assert.equal(inferProductTable({ product_type: "DISTILLED SPIRITS", name: "House IPA" }), "spirits");
+  assert.equal(inferProductTable({ product_type: "MALT BEVERAGE", name: "House Bourbon" }), "packaged_beer");
+  assert.equal(inferProductTable({ name: "Prosecco Brut", category: "Sparkling Wine" }), "wines");
+});
+
+test("packagedBeerRowLooksLikeSpirit flags whiskey styles in the beer table", () => {
+  assert.equal(packagedBeerRowLooksLikeSpirit({ name: "Lagavulin 16", style: "Single Malt Scotch" }), true);
+  assert.equal(packagedBeerRowLooksLikeSpirit({ name: "Troegs Nugget Nectar", style: "Imperial Amber Ale" }), false);
 });
 
 test("wineKindLabel prefers sparkling style over family", () => {
