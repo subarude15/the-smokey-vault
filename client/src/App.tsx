@@ -144,6 +144,20 @@ const MOBILE_SHORT_LABELS: Record<string, string> = {
   settings: "Settings"
 };
 
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  );
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
 function mobileQuickNav(
   collectionNav: { id: string; label: string; icon: typeof Bottle }[],
   admin: boolean,
@@ -166,6 +180,10 @@ function mobileQuickNav(
     items.push(next);
   }
   return items.slice(0, 3);
+}
+
+function notInQuickNav<T extends { id: string }>(items: T[], quickNav: { id: string }[]) {
+  return items.filter((item) => !quickNav.some((quick) => quick.id === item.id));
 }
 
 function cycleTheme(current: string) {
@@ -430,7 +448,9 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [admin, setAdmin] = useState(tokenExists());
   const [mobileNav, setMobileNav] = useState(false);
+  const [moreSheet, setMoreSheet] = useState(false);
   const [navHint, setNavHint] = useState(() => !localStorage.getItem("smokey-nav-hint-dismissed"));
+  const portraitNav = useMediaQuery("(max-width: 1050px) and (orientation: portrait)");
   const [unlock, setUnlock] = useState(false);
   const [theme, setTheme] = useState(storedTheme);
   const [backupDue, setBackupDue] = useState(false);
@@ -459,6 +479,8 @@ export default function App() {
     setScanMiss(null);
     setUnlock(false);
     setUnread(0);
+    setMobileNav(false);
+    setMoreSheet(false);
     setPage((current) => GUEST_HIDDEN_PAGES.has(current) ? guestLandingRef.current : current);
   }, []);
 
@@ -471,14 +493,29 @@ export default function App() {
     setUnlock(false);
     setUnread(0);
     setMobileNav(false);
+    setMoreSheet(false);
     setPage(guestLandingRef.current);
   }, []);
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
   useEffect(() => {
-    document.body.classList.toggle("nav-open", mobileNav);
+    document.body.classList.toggle("nav-open", mobileNav || moreSheet);
     return () => document.body.classList.remove("nav-open");
-  }, [mobileNav]);
+  }, [mobileNav, moreSheet]);
+  useEffect(() => {
+    if (!portraitNav) setMoreSheet(false);
+  }, [portraitNav]);
+  useEffect(() => {
+    if (!moreSheet && !mobileNav) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMoreSheet(false);
+        setMobileNav(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreSheet, mobileNav]);
   useEffect(() => {
     api<Record<string, unknown>>("/house").then((values) => {
       setHouse({
@@ -534,7 +571,12 @@ export default function App() {
     return () => { clearTimeout(timer); events.forEach((event) => window.removeEventListener(event, touch)); };
   }, [admin, handToGuest]);
 
-  const navigate = (next: string) => { setPage(next); setMobileNav(false); if (navHint) dismissNavHint(); };
+  const navigate = (next: string) => {
+    setPage(next);
+    setMobileNav(false);
+    setMoreSheet(false);
+    if (navHint) dismissNavHint();
+  };
   function handleScan(result: ScanResult) {
     if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
     const table = result.table;
@@ -618,6 +660,9 @@ export default function App() {
   ];
   const facebookGroupUrl = house.settings.facebook_group_url?.trim() ?? "";
   const quickNav = mobileQuickNav(collectionNav, admin, keeperNav);
+  const moreCollection = notInQuickNav(collectionNav, quickNav);
+  const moreKeeper = admin ? notInQuickNav(keeperNav, quickNav) : [];
+  const moreTabActive = moreSheet || moreCollection.some((item) => item.id === page) || moreKeeper.some((item) => item.id === page);
   const allNav = [...collectionNav, ...(admin ? keeperNav : [])];
   const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Barrel";
   function dismissNavHint() {
@@ -676,7 +721,9 @@ export default function App() {
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
         {navHint && <div className="nav-hint-banner" role="status">
           <Menu size={16}/>
-          <span>More sections live in <strong>Menu</strong> — or use the tabs below.</span>
+          <span>{portraitNav
+            ? <>The rest of the house lives in <strong>More</strong> — tap the tab below.</>
+            : <>Open <strong>Menu</strong> for About, brewery, and the rest of the house.</>}</span>
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
@@ -746,13 +793,64 @@ export default function App() {
               {item.badge ? <span className="mobile-nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
             </button>
           ))}
-          <button type="button" className={mobileNav ? "active" : ""} onClick={() => { setMobileNav(true); if (navHint) dismissNavHint(); }} aria-label="Open full menu">
-            <Menu size={20}/>
+          <button
+            type="button"
+            className={moreTabActive ? "active" : ""}
+            onClick={() => { setMoreSheet((open) => !open); if (navHint) dismissNavHint(); }}
+            aria-label={moreSheet ? "Close more menu" : "Open more menu"}
+            aria-expanded={moreSheet}
+            aria-controls="more-sheet"
+          >
+            {moreSheet ? <ChevronUp size={20}/> : <Menu size={20}/>}
             <span>More</span>
           </button>
         </nav>
       </main>
       {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
+      <button
+        className={moreSheet ? "more-sheet-overlay open" : "more-sheet-overlay"}
+        onClick={() => setMoreSheet(false)}
+        aria-label="Close more menu"
+        tabIndex={-1}
+        inert={!moreSheet}
+      />
+      <div id="more-sheet" className={moreSheet ? "more-sheet open" : "more-sheet"} role="dialog" aria-modal="true" aria-label="More sections" inert={!moreSheet}>
+        <div className="more-sheet-handle" aria-hidden="true"/>
+        <p className="more-sheet-kicker">More from the house</p>
+        {moreCollection.length > 0 && <>
+          <span className="nav-label">Collection</span>
+          {moreCollection.map((item) => (
+            <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
+              <item.icon size={19}/>{item.label}
+              <ChevronRight size={15}/>
+            </button>
+          ))}
+        </>}
+        {moreKeeper.length > 0 && <>
+          <span className="nav-label">Keeper</span>
+          {moreKeeper.map((item) => (
+            <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
+              <item.icon size={19}/>{item.label}
+              {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
+              <ChevronRight size={15}/>
+            </button>
+          ))}
+        </>}
+        {facebookGroupUrl && <a className="more-sheet-item more-sheet-social" href={facebookGroupUrl} target="_blank" rel="noreferrer">
+          <ExternalLink size={19}/>Private Facebook Group<ChevronRight size={15}/>
+        </a>}
+        <button
+          type="button"
+          className="more-sheet-lock"
+          onClick={() => { setMoreSheet(false); admin ? lock() : setUnlock(true); }}
+        >
+          {admin ? <LockOpen size={19}/> : <Lock size={19}/>}
+          <span>
+            <strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong>
+            <small>{admin ? "Tap to lock" : "Tap for Keeper Mode"}</small>
+          </span>
+        </button>
+      </div>
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
       {contactOpen && <ContactModal keeperName={house.keeperName} close={() => setContactOpen(false)}/>}
     </div>
