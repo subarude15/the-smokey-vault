@@ -527,19 +527,20 @@ html[data-theme="punk"] body::after{
   position:fixed;
   inset:-12%;
   pointer-events:none;
-  z-index:2;
-  opacity:.38;
-  mix-blend-mode:screen;
+  z-index:40;
+  opacity:.55;
+  mix-blend-mode:soft-light;
   background:
-    linear-gradient(101deg, transparent 9%, rgba(255,255,255,.55) 9.12%, transparent 9.35%),
-    linear-gradient(96deg, transparent 31%, rgba(255,255,255,.32) 31.1%, transparent 31.35%),
-    linear-gradient(108deg, transparent 48%, rgba(255,45,106,.7) 48.12%, transparent 48.4%),
-    linear-gradient(93deg, transparent 67%, rgba(255,255,255,.4) 67.15%, transparent 67.4%),
-    linear-gradient(112deg, transparent 84%, rgba(255,225,74,.45) 84.1%, transparent 84.35%),
-    radial-gradient(1.5px 110px at 22% 28%, rgba(255,255,255,.55), transparent 3px),
-    radial-gradient(1px 140px at 78% 62%, rgba(255,255,255,.4), transparent 2px),
-    radial-gradient(2px 90px at 55% 80%, rgba(255,45,106,.55), transparent 3px);
-  animation:punk-scratch-pan 11s linear infinite;
+    linear-gradient(101deg, transparent 8%, rgba(255,255,255,.95) 8.2%, transparent 8.7%),
+    linear-gradient(96deg, transparent 28%, rgba(255,255,255,.7) 28.25%, transparent 28.85%),
+    linear-gradient(108deg, transparent 46%, rgba(255,45,106,.95) 46.2%, transparent 46.9%),
+    linear-gradient(93deg, transparent 64%, rgba(255,255,255,.8) 64.25%, transparent 64.9%),
+    linear-gradient(112deg, transparent 81%, rgba(255,225,74,.85) 81.2%, transparent 81.85%),
+    linear-gradient(14deg, transparent 22%, rgba(255,255,255,.45) 22.3%, transparent 22.9%),
+    radial-gradient(2px 160px at 18% 26%, rgba(255,255,255,.9), transparent 4px),
+    radial-gradient(2px 190px at 74% 58%, rgba(255,255,255,.7), transparent 4px),
+    radial-gradient(3px 130px at 52% 78%, rgba(255,45,106,.85), transparent 5px);
+  animation:punk-scratch-pan 8s linear infinite;
 }
 @keyframes punk-grain-drift{
   0%,100%{transform:translate(0,0)}
@@ -617,21 +618,22 @@ html[data-theme="punk"] .hero-copy::after{
   inset:-16% -8% -10% -12%;
   z-index:2;
   pointer-events:none;
-  opacity:.75;
-  mix-blend-mode:screen;
+  opacity:.95;
+  mix-blend-mode:soft-light;
   background:
-    linear-gradient(100deg, transparent 10%, rgba(255,255,255,.7) 10.15%, transparent 10.45%),
-    linear-gradient(95deg, transparent 29%, rgba(255,255,255,.45) 29.12%, transparent 29.4%),
-    linear-gradient(108deg, transparent 47%, rgba(255,45,106,.75) 47.1%, transparent 47.4%),
-    linear-gradient(92deg, transparent 63%, rgba(255,255,255,.5) 63.12%, transparent 63.4%),
-    linear-gradient(112deg, transparent 81%, rgba(255,225,74,.55) 81.1%, transparent 81.35%),
-    linear-gradient(18deg, transparent 35%, rgba(0,0,0,.45) 35.2%, transparent 35.55%);
+    linear-gradient(100deg, transparent 9%, rgba(255,255,255,.98) 9.35%, transparent 10.1%),
+    linear-gradient(95deg, transparent 27%, rgba(255,255,255,.8) 27.4%, transparent 28.2%),
+    linear-gradient(108deg, transparent 45%, rgba(255,45,106,.98) 45.35%, transparent 46.2%),
+    linear-gradient(92deg, transparent 61%, rgba(255,255,255,.85) 61.4%, transparent 62.2%),
+    linear-gradient(112deg, transparent 78%, rgba(255,225,74,.9) 78.35%, transparent 79.1%),
+    linear-gradient(18deg, transparent 33%, rgba(0,0,0,.55) 33.5%, transparent 34.4%),
+    linear-gradient(102deg, transparent 15%, rgba(255,255,255,.55) 15.5%, transparent 16.2%);
   clip-path:polygon(1% 8%, 22% 2%, 55% 5%, 88% 0%, 99% 12%, 100% 55%, 96% 88%, 70% 100%, 28% 97%, 0% 85%, 2% 40%);
-  animation:punk-scratch-flicker .26s steps(2) infinite;
+  animation:punk-scratch-flicker .22s steps(2) infinite;
 }
 @keyframes punk-scratch-flicker{
-  0%{opacity:.55;transform:translate(0,0)}
-  100%{opacity:.85;transform:translate(.4%,-.3%)}
+  0%{opacity:.7;transform:translate(0,0) scaleX(1)}
+  100%{opacity:1;transform:translate(.6%,-.4%) scaleX(1.01)}
 }
 html[data-theme="punk"] .hero-copy > *{position:relative;z-index:1}
 @keyframes punk-film-jitter{
@@ -730,12 +732,16 @@ html[data-theme="punk"] .mobile-bottom-nav button svg{
   filter:drop-shadow(1px 1px 0 color-mix(in srgb,var(--accent) 55%,transparent));
 }
 /* Stamped / sticker icon badges */
-html[data-theme="punk"] .stat-card > svg:first-child,
-html[data-theme="punk"] .feature-card > svg{
+html[data-theme="punk"] .stat-card > svg:first-of-type,
+html[data-theme="punk"] .feature-card > svg:last-of-type,
+html[data-theme="punk"] .feature-card > svg:first-of-type{
   transform:rotate(-9deg);
-  color:var(--punk-ink);
+  color:var(--punk-ink) !important;
   opacity:1;
   padding:10px;
+  width:1.35em;
+  height:1.35em;
+  box-sizing:content-box;
   background:var(--accent-2);
   border:2px solid var(--punk-ink);
   outline:2px solid var(--accent);
@@ -743,19 +749,19 @@ html[data-theme="punk"] .feature-card > svg{
   box-shadow:4px 4px 0 var(--accent);
   border-radius:3px;
 }
-html[data-theme="punk"] .feature-card:nth-child(even) > svg,
-html[data-theme="punk"] .stat-card:nth-child(odd) > svg:first-child{
+html[data-theme="punk"] .feature-card:nth-child(even) > svg:last-of-type,
+html[data-theme="punk"] .stat-card:nth-child(odd) > svg:first-of-type{
   transform:rotate(7deg);
   background:var(--accent);
-  color:#fff;
+  color:#fff !important;
   outline-color:var(--accent-2);
   box-shadow:4px 4px 0 var(--accent-2);
 }
-html[data-theme="punk"] .feature-card:hover > svg,
-html[data-theme="punk"] .stat-card:hover > svg:first-child{
+html[data-theme="punk"] .feature-card:hover > svg:last-of-type,
+html[data-theme="punk"] .stat-card:hover > svg:first-of-type{
   transform:rotate(12deg) scale(1.12);
   background:var(--accent-2);
-  color:var(--punk-ink);
+  color:var(--punk-ink) !important;
   box-shadow:5px 5px 0 var(--accent);
 }
 html[data-theme="punk"] .primary{
@@ -814,23 +820,22 @@ html[data-theme="punk"] .feature-card:nth-child(even){
 }
 html[data-theme="punk"] .stat-card::before,
 html[data-theme="punk"] .feature-card::before,
-html[data-theme="punk"] .overview-tap::before,
-html[data-theme="punk"] .section-heading::before{
+html[data-theme="punk"] .overview-tap::before{
   content:"";
   position:absolute;
   inset:0;
   pointer-events:none;
   z-index:0;
-  opacity:.85;
-  mix-blend-mode:screen;
+  opacity:1;
+  mix-blend-mode:soft-light;
   background:
-    linear-gradient(102deg, transparent 7%, rgba(255,255,255,.65) 7.12%, transparent 7.4%),
-    linear-gradient(97deg, transparent 24%, rgba(255,255,255,.4) 24.15%, transparent 24.45%),
-    linear-gradient(110deg, transparent 51%, rgba(255,45,106,.7) 51.12%, transparent 51.45%),
-    linear-gradient(93deg, transparent 71%, rgba(255,255,255,.45) 71.15%, transparent 71.45%),
-    linear-gradient(16deg, transparent 40%, rgba(0,0,0,.5) 40.2%, transparent 40.55%),
-    repeating-linear-gradient(-22deg, transparent 0 10px, rgba(255,225,74,.12) 10px 11px, transparent 11px 22px);
-  animation:punk-card-scratch 4.8s steps(3) infinite;
+    linear-gradient(102deg, transparent 6%, rgba(255,255,255,.95) 6.4%, transparent 7.2%),
+    linear-gradient(97deg, transparent 22%, rgba(255,255,255,.7) 22.45%, transparent 23.3%),
+    linear-gradient(110deg, transparent 48%, rgba(255,45,106,.95) 48.4%, transparent 49.3%),
+    linear-gradient(93deg, transparent 68%, rgba(255,255,255,.75) 68.4%, transparent 69.3%),
+    linear-gradient(16deg, transparent 38%, rgba(0,0,0,.55) 38.5%, transparent 39.5%),
+    repeating-linear-gradient(-22deg, transparent 0 9px, rgba(255,225,74,.18) 9px 11px, transparent 11px 20px);
+  animation:punk-card-scratch 3.6s steps(3) infinite;
 }
 html[data-theme="punk"] .stat-card::after,
 html[data-theme="punk"] .feature-card::after{
@@ -887,9 +892,9 @@ html[data-theme="punk"] .section-heading::before{
   mix-blend-mode:normal;
 }
 @keyframes punk-card-scratch{
-  0%,100%{transform:translate(0,0);opacity:.7}
-  33%{transform:translate(-1.2%,.8%);opacity:.9}
-  66%{transform:translate(1%,-.6%);opacity:.65}
+  0%,100%{transform:translate(0,0);opacity:.85}
+  33%{transform:translate(-1.8%,1.1%);opacity:1}
+  66%{transform:translate(1.4%,-.9%);opacity:.75}
 }
 html[data-theme="punk"] .stat-card:nth-child(even),
 html[data-theme="punk"] .overview-tap:nth-child(odd){
