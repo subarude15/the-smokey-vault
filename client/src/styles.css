@@ -878,6 +878,9 @@ html[data-theme="punk"] .section-heading{
 }
 /* Hazard / flyer strip behind section titles — not a CRT box */
 html[data-theme="punk"] .section-heading::before{
+  content:"";
+  position:absolute;
+  pointer-events:none;
   border:none;
   box-shadow:4px 4px 0 #000;
   opacity:.7;
