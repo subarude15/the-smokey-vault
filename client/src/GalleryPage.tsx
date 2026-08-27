@@ -62,7 +62,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
   return <>
     <div className="page-title">
       <span className="eyebrow">THE BAR GALLERY</span>
-      <h1>Nights at the vault.</h1>
+      <h1>Nights at The Smokey Barrel.</h1>
       <p>{admin
         ? "Everything patrons have snapped or filmed at the bar. Delete anything that should not be here."
         : `Add your own shot from tonight. ${keeperName} keeps the good ones.`}</p>

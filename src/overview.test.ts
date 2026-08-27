@@ -10,11 +10,11 @@ test("overviewGreeting follows the clock", () => {
   assert.equal(overviewGreeting(new Date(2026, 7, 21, 2, 0, 0)).eyebrow, "AFTER HOURS");
 });
 
-test("patron greeting is tonight at the vault", () => {
+test("patron greeting is tonight at The Smokey Barrel", () => {
   const guest = overviewGreeting(new Date(2026, 7, 21, 19, 0, 0), true);
   assert.equal(guest.eyebrow, "GOOD EVENING · PATRON LOUNGE");
   assert.equal(guest.line, "Tonight at");
-  assert.equal(guest.emphasize, "the vault.");
+  assert.equal(guest.emphasize, "The Smokey Barrel.");
 });
 
 test("empty vault snapshot is zeros and a stock-the-shelf line", () => {

@@ -920,7 +920,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     </div>
     <section>
       <div className="section-heading">
-        <div><span className="eyebrow">AT A GLANCE</span><h2>Inside the vault</h2></div>
+        <div><span className="eyebrow">AT A GLANCE</span><h2>Inside The Smokey Barrel</h2></div>
         {!admin && <span className="guest-badge"><Lock size={13}/> PATRON MODE</span>}
       </div>
       <div className={`stat-grid${!admin ? " guest-stats" : ""}`}>
@@ -1150,7 +1150,7 @@ function RestockPage({ go }:{ go: (page: string) => void }) {
     <PageTitle
       eyebrow="STORE RUN"
       title="What to pick up."
-      subtitle={data ? `${data.open} still needed · ${data.total} on the list. ${restockRuleHint(data.thresholds)}.` : "Empty bottles, low cans, last wines, mixers that unlock a favorite, and bottles you want for the vault."}
+      subtitle={data ? `${data.open} still needed · ${data.total} on the list. ${restockRuleHint(data.thresholds)}.` : "Empty bottles, low cans, last wines, mixers that unlock a favorite, and bottles you want for The Smokey Barrel."}
     />
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load restock</strong><span>{error}</span></div></div>}
     <section className="wanted-card">
@@ -1336,7 +1336,7 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
     <PageTitle
       eyebrow="GUEST PICKS"
       title="Give us your 2 cents."
-      subtitle={`Ask for liquor and wine you want in the vault. ${keeperName} puts kegs and brew ideas on the board — tap up or down for what you’d actually drink.`}
+      subtitle={`Ask for liquor and wine you want at The Smokey Barrel. ${keeperName} puts kegs and brew ideas on the board — tap up or down for what you’d actually drink.`}
     />
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not update the board</strong><span>{error}</span></div></div>}
 
@@ -1549,7 +1549,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
   </> : undefined;
   const emptyText = brewfatherReady
     ? "Sync batches from Brewfather, or add one by hand."
-    : admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "The vault keeper has not stocked this section yet.";
+    : admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "Nothing on the shelf in this section yet.";
 
   if (viewing) {
     return <BottleDetail
@@ -2510,7 +2510,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
           </div>
         </div>
         {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
-        {drink.missing.length > 0 && <p className="recipe-warning">Missing from your vault: {drink.missing.join(", ")}</p>}
+        {drink.missing.length > 0 && <p className="recipe-warning">Missing from the shelf: {drink.missing.join(", ")}</p>}
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
           {admin && <button type="button" className={fav ? "primary" : "secondary"} onClick={toggleFav}><Star size={16}/> {fav ? "Bartender favorite" : "Mark favorite"}</button>}
@@ -2651,7 +2651,7 @@ function Mixologist({admin}:{admin:boolean}) {
   }
   async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
   return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples. Walk the drink over to the bar when you want it made."/>
-    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from my vault</button></div>
+    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from the shelf</button></div>
     {loading&&<div className="ai-loading"><LoaderCircle className="spinner"/><div><strong>The mixologist is measuring…</strong><span>Balancing your inventory, flavors, and request.</span></div></div>}
     {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
     {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}</div>
