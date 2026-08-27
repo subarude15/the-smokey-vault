@@ -503,7 +503,8 @@ export default function App() {
     return () => document.body.classList.remove("nav-open");
   }, [mobileNav, moreSheet]);
   useEffect(() => {
-    if (!portraitNav) setMoreSheet(false);
+    if (portraitNav) setMobileNav(false);
+    else setMoreSheet(false);
   }, [portraitNav]);
   useEffect(() => {
     if (!moreSheet && !mobileNav) return;
@@ -723,7 +724,7 @@ export default function App() {
           <Menu size={16}/>
           <span>{portraitNav
             ? <>The rest of the house lives in <strong>More</strong> — tap the tab below.</>
-            : <>Open <strong>Menu</strong> for About, brewery, and the rest of the house.</>}</span>
+            : <>Open <strong>Menu</strong> for brewery, the drink list, and the rest of the house.</>}</span>
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
@@ -812,9 +813,16 @@ export default function App() {
         onClick={() => setMoreSheet(false)}
         aria-label="Close more menu"
         tabIndex={-1}
-        inert={!moreSheet}
+        {...(moreSheet ? {} : { inert: true })}
       />
-      <div id="more-sheet" className={moreSheet ? "more-sheet open" : "more-sheet"} role="dialog" aria-modal="true" aria-label="More sections" inert={!moreSheet}>
+      <div
+        id="more-sheet"
+        className={moreSheet ? "more-sheet open" : "more-sheet"}
+        role="dialog"
+        aria-modal="true"
+        aria-label="More sections"
+        {...(moreSheet ? {} : { inert: true })}
+      >
         <div className="more-sheet-handle" aria-hidden="true"/>
         <p className="more-sheet-kicker">More from the house</p>
         {moreCollection.length > 0 && <>
