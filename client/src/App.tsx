@@ -516,8 +516,13 @@ export default function App() {
     return () => document.body.classList.remove("nav-open");
   }, [mobileNav, moreSheet]);
   useEffect(() => {
-    setMobileNav(false);
-    setMoreSheet(false);
+    if (!compactNav) {
+      setMobileNav(false);
+      setMoreSheet(false);
+      return;
+    }
+    if (portraitNav) setMobileNav(false);
+    else setMoreSheet(false);
   }, [compactNav, portraitNav]);
   useEffect(() => {
     if (!moreSheet && !mobileNav) return;
@@ -690,8 +695,13 @@ export default function App() {
   function toggleMore() {
     if (navHint) dismissNavHint();
     if (!compactNav) return;
-    setMobileNav(false);
-    setMoreSheet((open) => !open);
+    if (portraitNav) {
+      setMobileNav(false);
+      setMoreSheet((open) => !open);
+      return;
+    }
+    setMoreSheet(false);
+    setMobileNav((open) => !open);
   }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
     return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
@@ -727,13 +737,13 @@ export default function App() {
           <div className="topbar-start">
             <button
               type="button"
-              className={moreSheet ? "more-topbar open" : "more-topbar"}
+              className={mobileNav ? "more-topbar open" : "more-topbar"}
               onClick={toggleMore}
-              aria-label={moreSheet ? "Close more menu" : "Open more menu"}
-              aria-expanded={moreSheet}
-              aria-controls="more-sheet"
+              aria-label={mobileNav ? "Close more menu" : "Open more menu"}
+              aria-expanded={mobileNav}
+              aria-controls="nav-drawer"
             >
-              {moreSheet ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+              {mobileNav ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
               <span>More</span>
             </button>
             <span className="topbar-title">{pageTitle}</span>
