@@ -516,13 +516,8 @@ export default function App() {
     return () => document.body.classList.remove("nav-open");
   }, [mobileNav, moreSheet]);
   useEffect(() => {
-    if (!compactNav) {
-      setMobileNav(false);
-      setMoreSheet(false);
-      return;
-    }
-    if (portraitNav) setMobileNav(false);
-    else setMoreSheet(false);
+    setMobileNav(false);
+    setMoreSheet(false);
   }, [compactNav, portraitNav]);
   useEffect(() => {
     if (!moreSheet && !mobileNav) return;
@@ -681,8 +676,7 @@ export default function App() {
   const quickNav = mobileQuickNav(collectionNav, admin, keeperNav);
   const moreCollection = notInQuickNav(collectionNav, quickNav);
   const moreKeeper = admin ? notInQuickNav(keeperNav, quickNav) : [];
-  const moreOpen = moreSheet || mobileNav;
-  const moreTabActive = moreOpen || moreCollection.some((item) => item.id === page) || moreKeeper.some((item) => item.id === page);
+  const moreTabActive = moreSheet || moreCollection.some((item) => item.id === page) || moreKeeper.some((item) => item.id === page);
   const allNav = [...collectionNav, ...(admin ? keeperNav : [])];
   const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Barrel";
   function dismissNavHint() {
@@ -696,13 +690,8 @@ export default function App() {
   function toggleMore() {
     if (navHint) dismissNavHint();
     if (!compactNav) return;
-    if (portraitNav) {
-      setMobileNav(false);
-      setMoreSheet((open) => !open);
-      return;
-    }
-    setMoreSheet(false);
-    setMobileNav((open) => !open);
+    setMobileNav(false);
+    setMoreSheet((open) => !open);
   }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
     return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
@@ -736,6 +725,17 @@ export default function App() {
       <main className="has-mobile-nav">
         <header className="topbar">
           <div className="topbar-start">
+            <button
+              type="button"
+              className={moreSheet ? "more-topbar open" : "more-topbar"}
+              onClick={toggleMore}
+              aria-label={moreSheet ? "Close more menu" : "Open more menu"}
+              aria-expanded={moreSheet}
+              aria-controls="more-sheet"
+            >
+              {moreSheet ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+              <span>More</span>
+            </button>
             <span className="topbar-title">{pageTitle}</span>
           </div>
           <div className="top-actions">
@@ -753,7 +753,9 @@ export default function App() {
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
         {navHint && <div className="nav-hint-banner" role="status">
           <Menu size={16}/>
-          <span>The rest of the house lives in <strong>More</strong> — tap the tab below.</span>
+          <span>{portraitNav
+            ? <>The rest of the house lives in <strong>More</strong> — tap the tab below.</>
+            : <>The rest of the house lives in <strong>More</strong> — tap the control in the top bar.</>}</span>
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
@@ -827,11 +829,11 @@ export default function App() {
             type="button"
             className={moreTabActive ? "active" : ""}
             onClick={toggleMore}
-            aria-label={moreOpen ? "Close more menu" : "Open more menu"}
-            aria-expanded={moreOpen}
-            aria-controls={portraitNav ? "more-sheet" : "nav-drawer"}
+            aria-label={moreSheet ? "Close more menu" : "Open more menu"}
+            aria-expanded={moreSheet}
+            aria-controls="more-sheet"
           >
-            {moreOpen ? <ChevronUp size={20}/> : <Menu size={20}/>}
+            {moreSheet ? <ChevronUp size={20}/> : <Menu size={20}/>}
             <span>More</span>
           </button>
         </nav>
