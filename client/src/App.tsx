@@ -462,6 +462,7 @@ export default function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [moreSheet, setMoreSheet] = useState(false);
   const [navHint, setNavHint] = useState(() => !localStorage.getItem("smokey-nav-hint-dismissed"));
+  const compactNav = useMediaQuery("(max-width: 1050px)");
   const portraitNav = useMediaQuery("(max-width: 1050px) and (orientation: portrait)");
   const [unlock, setUnlock] = useState(false);
   const [theme, setTheme] = useState(storedTheme);
@@ -515,9 +516,14 @@ export default function App() {
     return () => document.body.classList.remove("nav-open");
   }, [mobileNav, moreSheet]);
   useEffect(() => {
+    if (!compactNav) {
+      setMobileNav(false);
+      setMoreSheet(false);
+      return;
+    }
     if (portraitNav) setMobileNav(false);
     else setMoreSheet(false);
-  }, [portraitNav]);
+  }, [compactNav, portraitNav]);
   useEffect(() => {
     if (!moreSheet && !mobileNav) return;
     const onKey = (event: KeyboardEvent) => {
@@ -682,6 +688,21 @@ export default function App() {
     localStorage.setItem("smokey-nav-hint-dismissed", "1");
     setNavHint(false);
   }
+  function closeOverlays() {
+    setMobileNav(false);
+    setMoreSheet(false);
+  }
+  function toggleMore() {
+    if (navHint) dismissNavHint();
+    if (!compactNav) return;
+    if (portraitNav) {
+      setMobileNav(false);
+      setMoreSheet((open) => !open);
+      return;
+    }
+    setMoreSheet(false);
+    setMobileNav((open) => !open);
+  }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
     return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
       <item.icon size={19}/>{item.label}
@@ -693,8 +714,8 @@ export default function App() {
   return (
     <HouseContext.Provider value={house}>
     <div className="app-shell">
-      <aside className={`sidebar ${mobileNav ? "open" : ""}`}>
-        <button className="mobile-close icon-button" onClick={() => setMobileNav(false)}><X/></button>
+      <aside id="nav-drawer" className={`sidebar ${mobileNav ? "open" : ""}`}>
+        <button className="mobile-close icon-button" onClick={closeOverlays}><X/></button>
         <div className="brand"><div className="brand-mark"><Wine/></div><div><strong>The Smokey Barrel Bar &amp; Brewing</strong><span>PRIVATE CELLAR</span></div></div>
         <nav>
           <span className="nav-label">COLLECTION</span>
@@ -714,8 +735,16 @@ export default function App() {
       <main className="has-mobile-nav">
         <header className="topbar">
           <div className="topbar-start">
-            <button className="menu-button" onClick={() => { setMobileNav(true); if (navHint) dismissNavHint(); }} aria-label="Open navigation menu">
-              <Menu size={18}/><span>Menu</span>
+            <button
+              type="button"
+              className={mobileNav ? "more-topbar open" : "more-topbar"}
+              onClick={toggleMore}
+              aria-label={mobileNav ? "Close more menu" : "Open more menu"}
+              aria-expanded={mobileNav}
+              aria-controls="nav-drawer"
+            >
+              {mobileNav ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+              <span>More</span>
             </button>
             <span className="topbar-title">{pageTitle}</span>
           </div>
@@ -736,7 +765,7 @@ export default function App() {
           <Menu size={16}/>
           <span>{portraitNav
             ? <>The rest of the house lives in <strong>More</strong> — tap the tab below.</>
-            : <>Open <strong>Menu</strong> for brewery, the drink list, and the rest of the house.</>}</span>
+            : <>The rest of the house lives in <strong>More</strong> — tap the control in the top bar.</>}</span>
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
@@ -809,7 +838,7 @@ export default function App() {
           <button
             type="button"
             className={moreTabActive ? "active" : ""}
-            onClick={() => { setMoreSheet((open) => !open); if (navHint) dismissNavHint(); }}
+            onClick={toggleMore}
             aria-label={moreSheet ? "Close more menu" : "Open more menu"}
             aria-expanded={moreSheet}
             aria-controls="more-sheet"
@@ -819,10 +848,10 @@ export default function App() {
           </button>
         </nav>
       </main>
-      {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
+      {mobileNav && <button className="nav-backdrop" onClick={closeOverlays} aria-label="Close navigation"/>}
       <button
         className={moreSheet ? "more-sheet-overlay open" : "more-sheet-overlay"}
-        onClick={() => setMoreSheet(false)}
+        onClick={closeOverlays}
         aria-label="Close more menu"
         tabIndex={-1}
         {...(moreSheet ? {} : { inert: true })}
@@ -864,7 +893,7 @@ export default function App() {
         <button
           type="button"
           className="more-sheet-lock"
-          onClick={() => { setMoreSheet(false); admin ? lock() : setUnlock(true); }}
+          onClick={() => { closeOverlays(); admin ? lock() : setUnlock(true); }}
         >
           {admin ? <LockOpen size={19}/> : <Lock size={19}/>}
           <span>
