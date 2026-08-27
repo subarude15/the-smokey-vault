@@ -111,8 +111,9 @@ const modules: Module[] = [
 ];
 
 const themePresets: Record<string, Record<string,string>> = {
-  light: { "--bg":"#f4f0e8","--surface":"#fffdf8","--surface-2":"#ebe5d9","--text":"#252018","--muted":"#70675b","--line":"#d8d0c2","--accent":"#8f4d2e","--accent-2":"#dba95f" },
-  dark: { "--bg":"#11100e","--surface":"#1a1815","--surface-2":"#24211c","--text":"#f4ecdf","--muted":"#a69b8b","--line":"#39342c","--accent":"#c77647","--accent-2":"#e1b46e" },
+  /* Light: cool stone + smoked copper — avoids cream/terracotta AI cluster */
+  light: { "--bg":"#e9e7e2","--surface":"#f6f5f2","--surface-2":"#dedad3","--text":"#1c1b19","--muted":"#6a6660","--line":"#c9c4bb","--accent":"#8f5a38","--accent-2":"#b8894a" },
+  dark: { "--bg":"#0e0d0b","--surface":"#171511","--surface-2":"#221f1a","--text":"#f3ebe0","--muted":"#a09484","--line":"#353028","--accent":"#c27040","--accent-2":"#d9ae6a" },
   punk: { "--bg":"#0b0709","--surface":"#1a0e14","--surface-2":"#2a1420","--text":"#f7efe6","--muted":"#c49aaa","--line":"#5c2438","--accent":"#ff2d6a","--accent-2":"#ffe14a" }
 };
 
@@ -951,7 +952,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     <div className="hero">
       <div className="hero-copy">
         <span className="eyebrow">{greeting.eyebrow}</span>
-        <h1>{greeting.line}<br/><em>{greeting.emphasize}</em></h1>
+        <p className="hero-wordmark">The Smokey Barrel</p>
+        <h1>{greeting.line} <em>{greeting.emphasize}</em></h1>
       </div>
       <div className="hero-orbit" aria-label={`${orbitValue} bottles on the shelf`}>
         <Wine/>
@@ -1080,7 +1082,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       </div>
     </section>}
     <section className="feature-grid">
-      <button className="feature-card warm" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes and random picks from what’s actually on the shelf.</p></div><Shuffle size={56}/></button>
+      <button className="feature-card warm feature-card-lead" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes and random picks from what’s actually on the shelf.</p></div><Shuffle size={56}/></button>
       <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. We’ll mix from what’s on the shelf, then show {keeperName} the drink.</p></div><Sparkles size={56}/></button>
       <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>Give us your 2 cents</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
     </section>
