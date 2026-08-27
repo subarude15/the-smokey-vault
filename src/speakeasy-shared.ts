@@ -56,8 +56,55 @@ export function serializeTabOrder(order: TabKey[]): string {
 export const DEFAULT_BAR_LOCATION_TEXT = "Located in 19605";
 export const DEFAULT_HOUSE_TIP_BLURB = "Drinks are always on the house at The Smoky Barrel Bar! Tips go directly toward party supplies, fresh kegs, and our annual holiday bashes.";
 export const AI_UNAVAILABLE_NOTICE = "Sorry. Due to Roo's vet bills, We can't afford all of the AI needed for this feature right now.";
-/** Client-side budget for a mixologist round-trip. LLM + failover often exceeds 5s. */
-export const AI_MIXOLOGIST_TIMEOUT_MS = 15_000;
+
+/**
+ * Server per-provider LLM fetch timeout for vision, import, and a hung upstream.
+ * Mixologist uses a shorter per-try budget so failover can happen before the kiosk gives up.
+ */
+export const AI_TIMEOUT_MS = 45_000;
+
+/**
+ * Mixologist-only per-provider timeout. A hung Flash call fails over instead of
+ * burning the full 45s × 3 chain while the guest spinner is up.
+ */
+export const AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS = 20_000;
+
+/**
+ * Client-side mixologist round-trip budget.
+ * Derived from AI_TIMEOUT_MS so the kiosk cannot abort earlier than one full
+ * server provider attempt (45s + buffer). Also covers two mixologist provider
+ * tries (AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS × 2) plus slack.
+ */
+export const AI_MIXOLOGIST_TIMEOUT_MS = AI_TIMEOUT_MS + 5_000;
+
+/**
+ * Mixologist error copy: a completed HTTP error (502/504 body) wins over the
+ * vet-bills notice, even if the AbortController also fired in a race.
+ * The notice is only for a true client abort/timeout with no server body.
+ */
+export function mixologistFailureMessage(error: unknown, clientTimedOut: boolean): string {
+  if (error instanceof Error && error.name !== "AbortError" && error.message.trim()) {
+    return error.message;
+  }
+  if (clientTimedOut) return AI_UNAVAILABLE_NOTICE;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "The AI service could not generate a recipe.";
+}
+
+/** Copy that cycles while the mixologist request is in flight, so a 50s wait is not a frozen button. */
+export const MIXOLOGIST_LOADING_STEPS = [
+  { title: "Checking the shelf…", detail: "Seeing which bottles are actually on hand." },
+  { title: "The mixologist is measuring…", detail: "Balancing your inventory, flavors, and request." }
+] as const;
+
+export const MIXOLOGIST_LOADING_STEP_MS = 8_000;
+
+export function mixologistLoadingStep(elapsedMs: number): { title: string; detail: string } {
+  const safe = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
+  const index = Math.floor(safe / MIXOLOGIST_LOADING_STEP_MS) % MIXOLOGIST_LOADING_STEPS.length;
+  return MIXOLOGIST_LOADING_STEPS[index] ?? MIXOLOGIST_LOADING_STEPS[0];
+}
+
 export const BLOCKED_RIBBON_LABEL = "Not for bar patrons";
 export const TOP_PATRON_BANNER = "\u{1F451} #1 Bar Legend & Top Supporter";
 

@@ -292,7 +292,12 @@ https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent
 ```
 
 Config resolves from env first, then SQLite settings, falling back to keyless Ollama.
-The AI mixologist has a 15-second client-side timeout that shows `AI_UNAVAILABLE_NOTICE`.
+Default chain stays Gemini `gemini-3.6-flash`, then OpenRouter, then Anthropic.
+The mixologist client waits `AI_MIXOLOGIST_TIMEOUT_MS` (`AI_TIMEOUT_MS + 5s`, currently 50s)
+so a slow Flash call can finish. Mixologist-only provider tries use
+`AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS` (20s) to fail over without waiting 45s × 3.
+`AI_UNAVAILABLE_NOTICE` is shown only on a true client abort/timeout; 502/504 bodies
+surface as-is. The `.ai-loading` block stays up for the whole wait.
 
 ---
 

@@ -317,8 +317,24 @@ export function currentSeason(date = new Date()): Exclude<Season, "All"> {
   return "Fall";
 }
 
+/** Caps the mixologist prompt so Flash is not asked to read the entire cellar. */
+export const MIXOLOGIST_SHELF_LIMIT = 80;
+
+function mixologistKindRank(kind: ShelfBottle["kind"]): number {
+  if (kind === "spirit") return 0;
+  if (kind === "wine") return 1;
+  return 2;
+}
+
+/**
+ * Names the mixologist can cite, spirits/liqueurs first. Empties are already
+ * dropped by buildShelf; this only ranks and caps the list that goes in the prompt.
+ */
 export function mixologistShelfSummary(shelf: ShelfBottle[]): Array<{ name: string; kind: string }> {
-  return shelf.map((bottle) => ({ name: bottle.label, kind: bottle.kind }));
+  return [...shelf]
+    .sort((a, b) => mixologistKindRank(a.kind) - mixologistKindRank(b.kind))
+    .slice(0, MIXOLOGIST_SHELF_LIMIT)
+    .map((bottle) => ({ name: bottle.label, kind: bottle.kind }));
 }
 
 export function collectionGroup(collection: unknown): "Custom" | "Seasonal" | "Classics" {
