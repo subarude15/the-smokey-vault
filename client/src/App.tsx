@@ -825,28 +825,30 @@ export default function App() {
       >
         <div className="more-sheet-handle" aria-hidden="true"/>
         <p className="more-sheet-kicker">More from the house</p>
-        {moreCollection.length > 0 && <>
-          <span className="nav-label">Collection</span>
-          {moreCollection.map((item) => (
-            <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
-              <item.icon size={19}/>{item.label}
-              <ChevronRight size={15}/>
-            </button>
-          ))}
-        </>}
-        {moreKeeper.length > 0 && <>
-          <span className="nav-label">Keeper</span>
-          {moreKeeper.map((item) => (
-            <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
-              <item.icon size={19}/>{item.label}
-              {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
-              <ChevronRight size={15}/>
-            </button>
-          ))}
-        </>}
-        {facebookGroupUrl && <a className="more-sheet-item more-sheet-social" href={facebookGroupUrl} target="_blank" rel="noreferrer">
-          <ExternalLink size={19}/>Private Facebook Group<ChevronRight size={15}/>
-        </a>}
+        <div className="more-sheet-body">
+          {moreCollection.length > 0 && <>
+            <span className="nav-label">Collection</span>
+            {moreCollection.map((item) => (
+              <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
+                <item.icon size={19}/>{item.label}
+                <ChevronRight size={15}/>
+              </button>
+            ))}
+          </>}
+          {moreKeeper.length > 0 && <>
+            <span className="nav-label">Keeper</span>
+            {moreKeeper.map((item) => (
+              <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
+                <item.icon size={19}/>{item.label}
+                {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
+                <ChevronRight size={15}/>
+              </button>
+            ))}
+          </>}
+          {facebookGroupUrl && <a className="more-sheet-item more-sheet-social" href={facebookGroupUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={19}/>Private Facebook Group<ChevronRight size={15}/>
+          </a>}
+        </div>
         <button
           type="button"
           className="more-sheet-lock"
