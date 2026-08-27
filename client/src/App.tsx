@@ -952,8 +952,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     <div className="hero">
       <div className="hero-copy">
         <span className="eyebrow">{greeting.eyebrow}</span>
-        <p className="hero-wordmark">The Smokey Barrel</p>
-        <h1>{greeting.line} <em>{greeting.emphasize}</em></h1>
+        <p className="hero-wordmark" role="heading" aria-level={1}>The Smokey Barrel</p>
+        <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
       </div>
       <div className="hero-orbit" aria-label={`${orbitValue} bottles on the shelf`}>
         <Wine/>
