@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DEFAULT_ENABLED_TABS, DEFAULT_TAB_ORDER, TAB_KEYS, appleCashLink, parseEnabledTabs, parseTabOrder,
-  patronRank, serializeEnabledTabs, tipHandles, vaultDayDate
+  AI_MIXOLOGIST_TIMEOUT_MS, DEFAULT_ENABLED_TABS, DEFAULT_TAB_ORDER, TAB_KEYS, appleCashLink,
+  parseEnabledTabs, parseTabOrder, patronRank, serializeEnabledTabs, tipHandles, vaultDayDate
 } from "./speakeasy-shared.js";
 import { db, setSetting } from "./db.js";
 import { flushDiscordAlerts, messageEmbed } from "./discord.js";
@@ -10,6 +10,10 @@ import {
   castDailyVote, createMessage, createPatron, dailyVoteTallies, deleteDailyVotesForItem,
   deletePatron, listLeaderboard, markMessageRead, pendingDiscordAlerts, SpeakeasyError, unreadMessageCount
 } from "./speakeasy.js";
+
+test("the mixologist client timeout leaves room for a slow LLM and one failover", () => {
+  assert.equal(AI_MIXOLOGIST_TIMEOUT_MS, 15_000);
+});
 
 test("the vault day rolls at 4:00 AM so late-night votes stay on one date", () => {
   assert.equal(vaultDayDate(new Date(2026, 7, 22, 23, 30)), "2026-08-22");

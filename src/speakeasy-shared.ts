@@ -56,7 +56,8 @@ export function serializeTabOrder(order: TabKey[]): string {
 export const DEFAULT_BAR_LOCATION_TEXT = "Located in 19605";
 export const DEFAULT_HOUSE_TIP_BLURB = "Drinks are always on the house at The Smoky Barrel Bar! Tips go directly toward party supplies, fresh kegs, and our annual holiday bashes.";
 export const AI_UNAVAILABLE_NOTICE = "Sorry. Due to Roo's vet bills, We can't afford all of the AI needed for this feature right now.";
-export const AI_MIXOLOGIST_TIMEOUT_MS = 5000;
+/** Client-side budget for a mixologist round-trip. LLM + failover often exceeds 5s. */
+export const AI_MIXOLOGIST_TIMEOUT_MS = 15_000;
 export const BLOCKED_RIBBON_LABEL = "Not for bar patrons";
 export const TOP_PATRON_BANNER = "\u{1F451} #1 Bar Legend & Top Supporter";
 

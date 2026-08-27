@@ -2531,7 +2531,7 @@ function Mixologist({admin}:{admin:boolean}) {
   const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
   async function ask(request=prompt){
     setLoading(true);setRecipe(undefined);setError("");setSaved(false);
-    // The kiosk gives up after five seconds rather than leaving a guest staring at a spinner.
+    // Fifteen seconds covers a slow primary model and one failover hop without a stuck spinner.
     const abort = new AbortController();
     const timeout = window.setTimeout(() => abort.abort(), AI_MIXOLOGIST_TIMEOUT_MS);
     try {
