@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  DEFAULT_ENABLED_TABS, DEFAULT_TAB_ORDER, TAB_KEYS, appleCashLink, parseEnabledTabs, parseTabOrder,
-  patronRank, serializeEnabledTabs, tipHandles, vaultDayDate
+  AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_MIXOLOGIST_TIMEOUT_MS, AI_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE,
+  DEFAULT_ENABLED_TABS, DEFAULT_TAB_ORDER, MIXOLOGIST_LOADING_STEP_MS, TAB_KEYS, appleCashLink,
+  mixologistFailureMessage, mixologistLoadingStep, parseEnabledTabs, parseTabOrder, patronRank,
+  serializeEnabledTabs, tipHandles, vaultDayDate
 } from "./speakeasy-shared.js";
 import { db, setSetting } from "./db.js";
 import { flushDiscordAlerts, messageEmbed } from "./discord.js";
@@ -10,6 +12,35 @@ import {
   castDailyVote, createMessage, createPatron, dailyVoteTallies, deleteDailyVotesForItem,
   deletePatron, listLeaderboard, markMessageRead, pendingDiscordAlerts, SpeakeasyError, unreadMessageCount
 } from "./speakeasy.js";
+
+test("the mixologist client timeout covers one full server provider attempt", () => {
+  assert.equal(AI_TIMEOUT_MS, 45_000);
+  assert.equal(AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, 20_000);
+  assert.ok(AI_MIXOLOGIST_TIMEOUT_MS >= AI_TIMEOUT_MS);
+  assert.ok(AI_MIXOLOGIST_TIMEOUT_MS >= 50_000);
+  assert.equal(AI_MIXOLOGIST_TIMEOUT_MS, AI_TIMEOUT_MS + 5_000);
+});
+
+test("vet-bills copy is only for a client abort, not a 502/504 body", () => {
+  const abort = new Error("The operation was aborted.");
+  abort.name = "AbortError";
+  assert.equal(mixologistFailureMessage(abort, true), AI_UNAVAILABLE_NOTICE);
+  assert.equal(
+    mixologistFailureMessage(new Error("gemini timed out after 20s."), true),
+    "gemini timed out after 20s."
+  );
+  assert.equal(
+    mixologistFailureMessage(new Error("The AI returned an incomplete recipe. Please try again."), false),
+    "The AI returned an incomplete recipe. Please try again."
+  );
+  assert.equal(mixologistFailureMessage("nope", false), "The AI service could not generate a recipe.");
+});
+
+test("mixologist loading copy starts on the shelf and then measures", () => {
+  assert.equal(mixologistLoadingStep(0).title, "Checking the shelf…");
+  assert.equal(mixologistLoadingStep(MIXOLOGIST_LOADING_STEP_MS).title, "The mixologist is measuring…");
+  assert.equal(mixologistLoadingStep(MIXOLOGIST_LOADING_STEP_MS * 2).title, "Checking the shelf…");
+});
 
 test("the vault day rolls at 4:00 AM so late-night votes stay on one date", () => {
   assert.equal(vaultDayDate(new Date(2026, 7, 22, 23, 30)), "2026-08-22");

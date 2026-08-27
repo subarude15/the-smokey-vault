@@ -35,7 +35,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         ...options.headers
       }
     });
-  } catch {
+  } catch (error) {
+    // Preserve aborts so callers (mixologist timeout) can tell cancel from downtime.
+    if (options.signal?.aborted) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError("Cannot reach the vault server", UNREACHABLE_STATUS);
   }
   if (!response.ok) {

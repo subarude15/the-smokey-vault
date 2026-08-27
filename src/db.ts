@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { DEFAULT_KEG_L, TAP_COUNT, migrateWineSweetnessValue, spiritFamilyFromLabel } from "./catalog.js";
+import { DEFAULT_KEG_L, TAP_COUNT, migrateWineSweetnessValue, packagedBeerRowLooksLikeSpirit, spiritFamilyFromLabel } from "./catalog.js";
 import { isPlaceholderIngredients } from "./cocktails.js";
 import { COCKTAIL_RECIPES } from "./cocktail-recipes.js";
 import {
@@ -248,6 +248,51 @@ const wineRows = db.prepare("SELECT id, type, style, sweetness FROM wines").all(
 for (const row of wineRows) {
   const next = migrateWineSweetnessValue(row.sweetness, row.type, row.style);
   if (String(row.sweetness ?? "") !== next) migrateWineSweetness.run(next, row.id);
+}
+
+const moveSpiritFromBeer = db.transaction((row: {
+  id: number; name: string; brewery?: string; style?: string; abv?: number; upc?: string;
+  image_url?: string; notes?: string; count?: number; tags?: string; flavors?: string;
+  tasting_notes?: string; base_ingredient?: string;
+}) => {
+  const mapped = spiritFamilyFromLabel(String(row.style ?? ""), "");
+  db.prepare(`
+    INSERT INTO spirits(
+      name, brand, category, sub_category, abv, upc, image_url, notes, stock_count,
+      tags, flavors, tasting_notes, base_ingredient
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.name,
+    row.brewery ?? "",
+    mapped.family,
+    mapped.type,
+    row.abv ?? 0,
+    row.upc ?? "",
+    row.image_url ?? "",
+    row.notes ?? "",
+    row.count ?? 1,
+    row.tags ?? "[]",
+    row.flavors ?? "[]",
+    row.tasting_notes ?? "",
+    row.base_ingredient ?? ""
+  );
+  db.prepare("DELETE FROM packaged_beer WHERE id=?").run(row.id);
+});
+
+const misfiledBeerRows = db.prepare("SELECT * FROM packaged_beer").all() as Array<{
+  id: number; name: string; brewery?: string; style?: string; abv?: number; upc?: string;
+  image_url?: string; notes?: string; count?: number; tags?: string; flavors?: string;
+  tasting_notes?: string; base_ingredient?: string;
+}>;
+let movedSpirits = 0;
+for (const row of misfiledBeerRows) {
+  if (packagedBeerRowLooksLikeSpirit(row)) {
+    moveSpiritFromBeer(row);
+    movedSpirits += 1;
+  }
+}
+if (movedSpirits > 0) {
+  console.log(`Migrated ${movedSpirits} misfiled spirit(s) from packaged_beer to spirits`);
 }
 
 const insertEmptyTap = db.prepare(

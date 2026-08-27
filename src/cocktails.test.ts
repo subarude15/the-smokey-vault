@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildShelf, compareCocktails, hasWord, isPlaceholderIngredients, matchCocktail,
-  matchIngredient, spiritOnShelf, stripMeasure, wineOnShelf
+  matchIngredient, MIXOLOGIST_SHELF_LIMIT, mixologistShelfSummary, spiritOnShelf, stripMeasure,
+  wineOnShelf
 } from "./cocktails.js";
 import { COCKTAIL_RECIPES } from "./cocktail-recipes.js";
 
@@ -177,4 +178,45 @@ test("keg fill level is reported as a percentage of the keg", () => {
   ]);
   assert.equal(shelf[0].fill_level, 50);
   assert.equal(shelf[0].brand, "Vault");
+});
+
+test("mixologist shelf summary ranks spirits first, skips empties, and caps the list", () => {
+  const spirits = Array.from({ length: 40 }, (_, index) => ({
+    name: index < 6 ? `Amaro ${index}` : `Bourbon ${index}`,
+    brand: "House",
+    category: index < 6 ? "Liqueur" : "Whiskey",
+    fill_level: 80,
+    stock_count: 1
+  }));
+  const empty = { name: "Empty Rye", category: "Whiskey", fill_level: 0, stock_count: 1 };
+  const wines = Array.from({ length: 25 }, (_, index) => ({
+    name: `Rouge ${index}`,
+    producer: "Cellar",
+    type: "Red",
+    bottle_count: 2
+  }));
+  const beers = Array.from({ length: 50 }, (_, index) => ({
+    name: `IPA ${index}`,
+    brewery: "Vault",
+    style: "IPA",
+    count: 6
+  }));
+  const summary = mixologistShelfSummary(buildShelf([...spirits, empty], wines, beers));
+  assert.equal(summary.length, MIXOLOGIST_SHELF_LIMIT);
+  assert.equal(summary.some((row) => /Empty Rye/.test(row.name)), false);
+  const ranks = summary.map((row) => row.kind === "spirit" ? 0 : row.kind === "wine" ? 1 : 2);
+  for (let index = 1; index < ranks.length; index++) {
+    assert.ok(ranks[index] >= ranks[index - 1]);
+  }
+  assert.equal(summary[0].kind, "spirit");
+  assert.ok(summary.some((row) => /Amaro/.test(row.name)));
+  assert.ok(summary.every((row) => typeof row.name === "string" && row.name.length > 0));
+  assert.ok(summary.every((row) => row.kind === "spirit" || row.kind === "wine" || row.kind === "beer"));
+});
+
+test("a short shelf is sent in full with citeable bottle names", () => {
+  const summary = mixologistShelfSummary(buildShelf([
+    { name: "Eagle Rare", brand: "Buffalo Trace", category: "Whiskey", sub_category: "Bourbon", fill_level: 75, stock_count: 1 }
+  ]));
+  assert.deepEqual(summary, [{ name: "Buffalo Trace Eagle Rare", kind: "spirit" }]);
 });

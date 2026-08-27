@@ -735,3 +735,9 @@ html[data-theme="punk"] .overview-tap-fill>span{
   html[data-theme="punk"] .feature-card:hover{transform:none}
   .more-sheet,.more-sheet-overlay{transition:none}
 }
+.ai-loading .spinner{flex:none}
+.ai-loading{animation:mixologist-wait 2.4s ease-in-out infinite}
+@keyframes mixologist-wait{
+  0%,100%{border-color:var(--line)}
+  50%{border-color:color-mix(in srgb,var(--accent-2) 55%,var(--line))}
+}

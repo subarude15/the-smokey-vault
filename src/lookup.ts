@@ -22,9 +22,25 @@ import {
   upcAForm
 } from "./cola_client.js";
 import { localizeImage } from "./images.js";
-import { barcodeEntryToProduct, getBarcodeCacheEntry } from "./barcode_cache.js";
-import { fwgsToSchema, isFwgsThin, searchFwgs, type FwgsProduct } from "./fwgs.js";
-import { spiritFamilyFromLabel } from "./catalog.js";
+import { barcodeEntryToProduct, getBarcodeCacheEntry, searchBarcodeCache } from "./barcode_cache.js";
+import {
+  beerCacheHitKey,
+  beerCacheToInventoryFields,
+  beerCacheToProduct,
+  getBeerCacheEntry,
+  saveBeerCacheEntry,
+  searchBeerCache,
+  type BeerCacheSource
+} from "./beer_cache.js";
+import {
+  catalogBeerToInventoryFields,
+  isCatalogBeerConfigured,
+  isCatalogBeerQuotaExhausted,
+  searchCatalogBeers
+} from "./catalog_beer.js";
+import { enrichFromUntappdPage } from "./untappd_scrape.js";
+import { fwgsToSchema, isFwgsThin, searchFwgs, searchFwgsByQuery, type FwgsProduct } from "./fwgs.js";
+import { hasExplicitProductType, inferProductTable, isSpiritInventoryFamily, spiritFamilyFromLabel } from "./catalog.js";
 import {
   missMessage,
   type ImportKind,
@@ -44,9 +60,10 @@ export {
 } from "./lookup-shared.js";
 
 export type BottleSearchHit = {
-  source: "vault" | "cola_cloud";
+  source: "vault" | "cola_cloud" | "catalog_beer" | "beer_cache" | "cache" | "fwgs" | "openfoodfacts";
   table: "spirits" | "packaged_beer" | "wines" | "brews";
   ttb_id?: string | null;
+  catalog_beer_id?: string | null;
   product: Record<string, unknown>;
 };
 
@@ -216,28 +233,91 @@ export function saveToCache(
   );
 }
 
+function isBeerSearchModule(moduleId?: string) {
+  return moduleId === "packaged_beer" || moduleId === "shelf" || moduleId === "taps" || moduleId === "keg" || moduleId === "brews";
+}
+
+function persistBeerHit(
+  product: ProductSchema,
+  source: BeerCacheSource | string,
+  extra?: { catalog_beer_id?: string | null; untappd_bid?: string | null }
+) {
+  if (!product.upc || !String(product.name ?? "").trim()) return;
+  saveBeerCacheEntry({
+    upc: product.upc,
+    catalog_beer_id: extra?.catalog_beer_id ?? null,
+    untappd_bid: extra?.untappd_bid ?? null,
+    brewery: product.brand,
+    name: product.name,
+    style: product.category,
+    abv: product.abv,
+    image_url: product.image_url,
+    source
+  });
+}
+
+export async function rememberBeerFromHit(upc: string, hit: BottleSearchHit) {
+  const code = normalizeUpc(upc);
+  if (!code) return;
+  const brewery = String(hit.product.brewery ?? hit.product.brand ?? hit.product.maker ?? "").trim();
+  const name = String(hit.product.name ?? hit.product.batch_name ?? "").trim();
+  if (!name) return;
+  let imageUrl = String(hit.product.image_url ?? "").trim() || null;
+  let untappdBid: string | null = String(hit.product.untappd_bid ?? "") || null;
+  if (!imageUrl && brewery) {
+    const scraped = await enrichFromUntappdPage(brewery, name);
+    if (scraped?.image_url) imageUrl = scraped.image_url;
+    if (scraped?.untappd_bid) untappdBid = scraped.untappd_bid;
+  }
+  saveBeerCacheEntry({
+    upc: code,
+    catalog_beer_id: hit.catalog_beer_id ?? (String(hit.product.catalog_beer_id ?? "") || null),
+    untappd_bid: untappdBid,
+    brewery,
+    name,
+    style: String(hit.product.style ?? hit.product.category ?? "").trim(),
+    abv: Number(hit.product.abv ?? 0) || null,
+    image_url: imageUrl,
+    source: hit.source === "catalog_beer" ? "catalog_beer" : "vault_seed"
+  });
+}
+
+export async function searchCatalogBeerSuggestions(query: string, limit = 5) {
+  const beers = await searchCatalogBeers(query, limit);
+  return beers.map((beer) => ({
+    source: "catalog_beer" as const,
+    table: "packaged_beer" as const,
+    catalog_beer_id: beer.id,
+    product: catalogBeerToInventoryFields(beer)
+  }));
+}
+
 function inferTable(product: ProductSchema | Record<string, unknown>): NonNullable<LookupResult["table"]> {
-  const record = product as Record<string, unknown>;
-  const type = String(record.product_type ?? "").toUpperCase();
-  const category = String(record.category ?? record.categories ?? "");
-  const name = String(record.name ?? record.product_name ?? "");
-  const haystack = `${type} ${category} ${name}`;
-  if (/MALT|BEER|ALE|LAGER|STOUT|PORTER|IPA|CIDER|SELTZER/i.test(haystack)) return "packaged_beer";
-  if (/WINE|SPARKLING|VERMOUTH|SAKE|MEAD/i.test(haystack)) return "wines";
-  return "spirits";
+  return inferProductTable(product as Record<string, unknown>);
 }
 
 export function inferImportKind(
   product: ProductSchema | Record<string, unknown> | null | undefined,
   hint?: ImportKind
 ): ImportKind {
+  if (!product) return hint ?? "spirits";
+  const record = product as Record<string, unknown>;
+  const table = inferProductTable(record);
+  const category = String(record.category ?? record.categories ?? "");
+  const subCategory = String(record.sub_category ?? record.subcategory ?? "");
+  const family = spiritFamilyFromLabel(category, subCategory).family;
+
+  if (hasExplicitProductType(record) || isSpiritInventoryFamily(family)) {
+    if (table === "packaged_beer") return "beer";
+    if (table === "wines") return "wines";
+    if (family === "Mixer" || family === "Bitters" || /mixer|bitter/i.test(category)) return "mixers";
+    return "spirits";
+  }
+
   if (hint) return hint;
-  if (!product) return "spirits";
-  const table = inferTable(product);
+
   if (table === "packaged_beer") return "beer";
   if (table === "wines") return "wines";
-  const category = String((product as Record<string, unknown>).category ?? (product as Record<string, unknown>).categories ?? "");
-  const family = spiritFamilyFromLabel(category).family;
   if (family === "Mixer" || family === "Bitters" || /mixer|bitter/i.test(category)) return "mixers";
   return "spirits";
 }
@@ -287,6 +367,37 @@ async function lookupOpenFoodFacts(upc: string): Promise<ProductSchema | null> {
   const data = await response.json() as { status: number; product?: Record<string, unknown> };
   if (!data.status || !data.product) return null;
   return mapOffToSchema(upc, data.product);
+}
+
+async function searchOpenFoodFactsByQuery(query: string, limit = 8): Promise<ProductSchema[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  try {
+    const params = new URLSearchParams({
+      search_terms: q,
+      search_simple: "1",
+      action: "process",
+      json: "1",
+      page_size: String(Math.min(limit, 20)),
+      fields: "code,product_name,brands,categories,image_front_url,abv,alcohol_100g,nutriments"
+    });
+    const response = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?${params}`, {
+      signal: AbortSignal.timeout(12_000)
+    });
+    if (!response.ok) return [];
+    const data = await response.json() as { products?: Array<Record<string, unknown>> };
+    return (data.products ?? [])
+      .filter((product) => {
+        const cats = String(product.categories ?? "").toLowerCase();
+        const name = String(product.product_name ?? "").toLowerCase();
+        return /beer|ale|lager|cider|beverage|seltzer/.test(cats)
+          || /beer|ale|lager|ipa|stout|porter|cider|seltzer/.test(name);
+      })
+      .slice(0, limit)
+      .map((product) => mapOffToSchema(String(product.code ?? ""), product));
+  } catch {
+    return [];
+  }
 }
 
 async function lookupUpcItemDb(upc: string): Promise<ProductSchema | null> {
@@ -390,11 +501,13 @@ async function tryOffThenUpcitemdb(
   catalogs: LookupCatalogs,
   kindHint?: ImportKind
 ): Promise<LookupResult | null> {
+  const beerKind = kindHint === "beer";
   try {
     const off = await (catalogs.searchOff ?? lookupOpenFoodFacts)(upc);
     if (off?.name.trim()) {
       const product = await withLocalImage(off);
       saveToCache(product, null, null, "openfoodfacts");
+      if (beerKind) persistBeerHit(product, "openfoodfacts");
       return await success("openfoodfacts", upc, product, kindHint ?? inferImportKind(product));
     }
   } catch {
@@ -405,6 +518,7 @@ async function tryOffThenUpcitemdb(
     if (item?.name.trim()) {
       const product = await withLocalImage(item);
       saveToCache(product, null, null, "upcitemdb");
+      if (beerKind) persistBeerHit(product, "upcitemdb");
       return await success("upcitemdb", upc, product, kindHint ?? inferImportKind(product));
     }
   } catch {
@@ -445,22 +559,39 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
     if (remembered) return await success("cache", upc, barcodeEntryToProduct(remembered), kindHint);
   }
 
+  const kind = kindHint ?? "spirits";
+  const beerPath = kind === "beer";
+
+  if (beerPath && !forceRefresh) {
+    const beerCached = getBeerCacheEntry(upc) ?? getBeerCacheEntry(rawUpc);
+    if (beerCached) {
+      return await success("beer_cache", upc, beerCacheToProduct(beerCached), kindHint);
+    }
+  }
+
   let staleFallback: ProductSchema | null = null;
   if (!forceRefresh) {
     const cached = getFromCache(upc);
     if (cached) {
-      const cacheMeta = db.prepare("SELECT source FROM cola_cache WHERE upc = ?").get(upc) as { source?: string } | undefined;
+      const cacheMeta = db.prepare("SELECT source, cached_at FROM cola_cache WHERE upc = ?").get(upc) as { source?: string; cached_at?: number } | undefined;
       const cacheSource = String(cacheMeta?.source ?? "");
-      if (cacheSource === "cola_cloud" || cacheSource === "fwgs" || !isColaConfigured()) {
+      const age = Math.floor(Date.now() / 1000) - Number(cacheMeta?.cached_at ?? 0);
+      const fresh = age <= CACHE_TTL_SECONDS;
+      if (beerPath) {
+        if (cacheSource !== "cola_cloud" && fresh) {
+          return await success("cache", upc, cached, kindHint);
+        }
+        if (cacheSource === "cola_cloud" && fresh) {
+          return await success("cache", upc, cached, kindHint);
+        }
+      } else if (cacheSource === "cola_cloud" || cacheSource === "fwgs" || !isColaConfigured()) {
         return await success("cache", upc, cached, kindHint);
       }
       staleFallback = cached;
     }
   }
 
-  const kind = kindHint ?? "spirits";
   const skipCatalogs = kind === "mixers";
-  const beerPath = kind === "beer";
   let quotaHit = isColaPaused();
   let colaQueried = false;
   let colaFound = false;
@@ -532,6 +663,22 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
 
   const webHit = await tryOffThenUpcitemdb(upc, catalogs, beerPath ? "beer" : kindHint);
   if (webHit) return webHit;
+
+  if (beerPath && colaEnabled) {
+    try {
+      colaQueried = true;
+      const summary = await colaClient(upc, waitOnBurst);
+      if (summary && (summary.product_name || summary.brand_name)) {
+        colaFound = true;
+        const product = await withLocalImage(mapColaToSchema(upc, summary));
+        saveToCache(product, summary, null, "cola_cloud");
+        persistBeerHit(product, "cola_cloud");
+        return await success("cola_cloud", upc, product, kindHint);
+      }
+    } catch (error) {
+      if (error instanceof ColaQuotaError) quotaHit = true;
+    }
+  }
 
   rememberUnresolvedUpc(upc);
   if (quotaHit) return miss("quota", upc, kindHint);
@@ -653,28 +800,110 @@ export async function searchBottles(query: string, options?: { table?: string })
   const q = query.trim();
   if (q.length < 2) return { results: [] };
   const vaultTables = searchTablesForModule(options?.table);
-  const colaTable = searchTableForModule(options?.table);
+  const moduleTable = searchTableForModule(options?.table);
+  const beerSearch = isBeerSearchModule(options?.table);
 
-  const results = searchVault(q, vaultTables);
+  const results: BottleSearchHit[] = searchVault(q, vaultTables);
   const seen = new Set(results.map(hitKey));
 
-  if (isColaConfigured() && !isColaPaused()) {
+  const addHit = (hit: BottleSearchHit) => {
+    if (moduleTable && hit.table !== moduleTable) return;
+    const key = hitKey(hit);
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(hit);
+  };
+
+  if (beerSearch) {
+    for (const entry of searchBeerCache(q, 8)) {
+      const hit: BottleSearchHit = {
+        source: "beer_cache",
+        table: "packaged_beer",
+        catalog_beer_id: entry.catalog_beer_id,
+        product: beerCacheToInventoryFields(entry)
+      };
+      const key = beerCacheHitKey(entry);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(hit);
+    }
+
+    if (isCatalogBeerConfigured() && !isCatalogBeerQuotaExhausted()) {
+      try {
+        const beers = await searchCatalogBeers(q, 10);
+        for (const beer of beers) {
+          const product = catalogBeerToInventoryFields(beer);
+          addHit({
+            source: "catalog_beer",
+            table: "packaged_beer",
+            catalog_beer_id: beer.id,
+            product
+          });
+        }
+      } catch {
+        // Vault and cache hits are still useful when Catalog.beer is down.
+      }
+    }
+  }
+
+  for (const entry of searchBarcodeCache(q, 8)) {
+    const product = barcodeEntryToProduct(entry);
+    addHit({
+      source: "cache",
+      table: inferProductTable({ ...product, product_type: entry.category }),
+      product: productToInventoryFields(product)
+    });
+  }
+
+  const runFwgs = !moduleTable || moduleTable === "spirits" || moduleTable === "wines";
+  const runOff = !moduleTable || moduleTable === "packaged_beer";
+
+  if (runFwgs) {
+    try {
+      for (const fwgsHit of await searchFwgsByQuery(q, 6)) {
+        const product = fwgsToSchema("", fwgsHit);
+        addHit({
+          source: "fwgs",
+          table: inferProductTable(product),
+          product: productToInventoryFields(product)
+        });
+      }
+    } catch {
+      // FWGS markup drift should not block other catalogs.
+    }
+  }
+
+  if (runOff) {
+    try {
+      for (const off of await searchOpenFoodFactsByQuery(q, 8)) {
+        addHit({
+          source: "openfoodfacts",
+          table: inferProductTable(off),
+          product: productToInventoryFields(off)
+        });
+      }
+    } catch {
+      // Open Food Facts timeouts should not block local results.
+    }
+  }
+
+  const needsColaFallback = !beerSearch || results.length < 5;
+  if (needsColaFallback && isColaConfigured() && !isColaPaused()) {
     try {
       const colaQuery = queryTokens(q).join(" ") || q;
-      const summaries = await searchColasByQuery(colaQuery, 10, colaTable ? { productType: colaProductTypeForTable(colaTable) } : undefined);
+      const summaries = await searchColasByQuery(
+        colaQuery,
+        10,
+        moduleTable ? { productType: colaProductTypeForTable(moduleTable) } : undefined
+      );
       for (const summary of summaries) {
         const product = productToInventoryFields(mapColaToSchema(summary.ttb_id || "", summary));
-        const hit: BottleSearchHit = {
+        addHit({
           source: "cola_cloud",
           table: inferTable({ ...product, product_type: summary.product_type }),
           ttb_id: summary.ttb_id ?? null,
           product
-        };
-        if (colaTable && hit.table !== colaTable) continue;
-        const key = hitKey(hit);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        results.push(hit);
+        });
       }
     } catch {
       // Local vault results are still useful when COLA is down.

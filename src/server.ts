@@ -10,13 +10,22 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
+import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
 import { listTonightPours, maybeInventoryPour } from "./pours.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
-import { enrichColaRecord, fetchColaQuota, lookupProduct, searchBottles } from "./lookup.js";
+import {
+  enrichColaRecord,
+  fetchColaQuota,
+  lookupProduct,
+  rememberBeerFromHit,
+  searchBottles,
+  searchCatalogBeerSuggestions,
+  type BottleSearchHit
+} from "./lookup.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -42,7 +51,10 @@ import { downscaleVisionImage } from "./vision_image.js";
 import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
 import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
 import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
-import { MAX_GALLERY_BYTES, parseEnabledTabs, parseTabOrder, serializeEnabledTabs } from "./speakeasy-shared.js";
+import {
+  AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_TIMEOUT_MS, MAX_GALLERY_BYTES,
+  parseEnabledTabs, parseTabOrder, serializeEnabledTabs
+} from "./speakeasy-shared.js";
 import {
   deleteGalleryMedia, galleryFilePath, GALLERY_CONTENT_TYPES, GalleryError, listGallery, saveGalleryUpload
 } from "./gallery.js";
@@ -569,7 +581,7 @@ app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: st
 );
 
 app.get<{ Querystring: { q?: string; table?: string } }>("/api/search/bottles", {
-  schema: { tags: ["Lookup"], summary: "Search vault + COLA Cloud by bottle name" }
+  schema: { tags: ["Lookup"], summary: "Search vault, beer cache, Catalog.beer, and COLA by bottle name" }
 }, async (request, reply) => {
   const q = request.query.q?.trim() ?? "";
   if (q.length < 2) return { results: [] };
@@ -579,6 +591,17 @@ app.get<{ Querystring: { q?: string; table?: string } }>("/api/search/bottles", 
     app.log.error({ error }, "Bottle search failed");
     return reply.code(502).send({ error: "Bottle search failed" });
   }
+});
+
+app.post<{ Body: { upc?: string; hit?: BottleSearchHit } }>("/api/beer/remember", {
+  schema: { tags: ["Lookup"], summary: "Remember a beer UPC mapping for faster future scans" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const upc = String(request.body?.upc ?? "").trim();
+  const hit = request.body?.hit;
+  if (!upc || !hit?.product) return reply.code(400).send({ error: "UPC and hit required" });
+  await rememberBeerFromHit(upc, hit);
+  return { ok: true };
 });
 
 app.get<{ Params: { ttbId: string }; Querystring: { upc?: string } }>("/api/cola/enrich/:ttbId", {
@@ -652,9 +675,6 @@ class AiRequestError extends Error {
   }
 }
 
-/** Long enough for a slow vision call, short enough that a hung provider fails over. */
-const AI_TIMEOUT_MS = 45_000;
-
 function resolveAiConfig() {
   const providerFromKey = process.env.GEMINI_API_KEY ? "gemini" : process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.ANTHROPIC_API_KEY ? "anthropic" : process.env.OPENAI_API_KEY ? "openai" : "";
   const environmentProvider = process.env.AI_PROVIDER?.trim().toLowerCase() || providerFromKey || (process.env.AI_API_KEY ? "openai" : "");
@@ -692,9 +712,9 @@ function endpointForLog(url: string) {
 }
 
 /** Network faults and timeouts arrive as thrown errors, not statuses; both are retryable. */
-async function aiFetch(provider: string, url: string, init: RequestInit) {
+async function aiFetch(provider: string, url: string, init: RequestInit, timeoutMs = AI_TIMEOUT_MS) {
   try {
-    return await fetch(url, { ...init, signal: AbortSignal.timeout(AI_TIMEOUT_MS) });
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
     const timedOut = name === "TimeoutError" || name === "AbortError";
@@ -708,7 +728,7 @@ async function aiFetch(provider: string, url: string, init: RequestInit) {
     );
     throw new AiRequestError(
       timedOut
-        ? `${provider} timed out after ${AI_TIMEOUT_MS / 1000}s.`
+        ? `${provider} timed out after ${timeoutMs / 1000}s.`
         : `${provider} could not be reached at ${endpoint}${cause ? ` (${cause})` : ""}.`,
       timedOut ? 504 : 503,
       true
@@ -716,11 +736,11 @@ async function aiFetch(provider: string, url: string, init: RequestInit) {
   }
 }
 
-async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, prompt: string, image?: string): Promise<string> {
+async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS): Promise<string> {
   if (provider === "anthropic") {
     const content: unknown[] = [{ type: "text", text: prompt }];
     if (image) content.unshift({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } });
-    const response = await aiFetch(provider, `${baseUrl}/v1/messages`, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: "user", content }] }) });
+    const response = await aiFetch(provider, `${baseUrl}/v1/messages`, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: "user", content }] }) }, timeoutMs);
     const data = await response.json() as { content?: Array<{ text: string }>; error?: { message?: string } };
     if (!response.ok) {
       app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
@@ -736,7 +756,7 @@ async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, pr
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts }] })
-    });
+    }, timeoutMs);
     const data = await response.json() as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       error?: { message?: string };
@@ -757,7 +777,7 @@ async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, pr
     body: JSON.stringify(isOllama
       ? { model, stream: false, messages: [{ role: "user", content: prompt, ...(image ? { images: [image] } : {}) }] }
       : { model, messages: [{ role: "user", content: image ? [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image}` } }] : prompt }] })
-  });
+  }, timeoutMs);
   const data = await response.json() as { message?: { content: string }; choices?: Array<{ message: { content: string } }>; error?: unknown };
   if (!response.ok) {
     app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
@@ -773,7 +793,7 @@ async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, pr
  * rate limit, a timeout, or an upstream fault. A rejected key stops the walk, since
  * every provider would reject it the same way.
  */
-async function callLlm(prompt: string, image?: string) {
+async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS) {
   const primary = resolveAiConfig();
   if (primary.provider !== "ollama" && !primary.key) {
     throw new AiRequestError("Set AI_API_KEY in the server .env to read labels and mix drinks.", 400);
@@ -782,7 +802,7 @@ async function callLlm(prompt: string, image?: string) {
   let lastError: unknown = new AiRequestError("No AI provider is configured.", 400);
   for (const [index, config] of chain.entries()) {
     try {
-      return await requestAi(config, prompt, image);
+      return await requestAi(config, prompt, image, timeoutMs);
     } catch (error) {
       lastError = error;
       const retryable = error instanceof AiRequestError ? error.retryable : true;
@@ -800,53 +820,16 @@ async function callLlm(prompt: string, image?: string) {
   throw lastError;
 }
 
-type GeneratedRecipe = {
-  name: string;
-  ingredients: string[];
-  method: string;
-  glassware: string;
-  garnish: string;
-  season: string;
-  notes: string;
-  image_url?: string;
-  source_url?: string;
-  bartender_fav?: boolean | number;
-};
-
-function parseGeneratedRecipe(result: string): GeneratedRecipe {
-  const cleaned = result.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new AiRequestError("The AI returned an incomplete recipe. Please try again.");
-  let value: Partial<GeneratedRecipe>;
-  try {
-    value = JSON.parse(cleaned.slice(start, end + 1)) as Partial<GeneratedRecipe>;
-  } catch {
-    throw new AiRequestError("The AI returned a recipe in an unexpected format. Please try again.");
-  }
-  if (!value.name || !Array.isArray(value.ingredients) || !value.ingredients.every((ingredient) => typeof ingredient === "string") || !value.method) {
-    throw new AiRequestError("The AI recipe was missing required details. Please try again.");
-  }
-  return {
-    name: value.name,
-    ingredients: value.ingredients,
-    method: value.method,
-    glassware: value.glassware || "Rocks",
-    garnish: value.garnish || "None",
-    season: ["Spring","Summer","Fall","Winter","Holiday"].includes(value.season ?? "") ? value.season! : "All",
-    notes: value.notes || "",
-    image_url: typeof value.image_url === "string" ? value.image_url : "",
-    source_url: typeof value.source_url === "string" ? value.source_url : ""
-  };
-}
-
 app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, reply) => {
   const shelf = mixologistShelfSummary(currentShelf());
   try {
-    const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`);
+    const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`, undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
     return { recipe: parseGeneratedRecipe(result) };
   } catch (error) {
     app.log.error({ error }, "AI mixologist request failed");
+    if (error instanceof AiRecipeParseError) {
+      return reply.code(502).send({ error: error.message });
+    }
     const status = error instanceof AiRequestError ? error.statusCode : 502;
     const message = error instanceof AiRequestError ? error.message : "The AI service could not be reached. Check your provider settings and network connection.";
     return reply.code(status).send({ error: message });
@@ -942,6 +925,9 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
       imageUrl = "";
     }
     const product = { ...parsed, image_url: imageUrl };
+    const suggestions = parsed.product_type === "beer"
+      ? await searchCatalogBeerSuggestions(`${parsed.brand} ${parsed.name}`.trim(), 5)
+      : [];
     const params = request.params as { id?: string };
     const query = request.query as { row?: string };
     const queueId = Number(params.id ?? query.row ?? "");
@@ -955,13 +941,15 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
         kind: row.kind,
         product: row.product,
         reason: row.reason,
-        message: row.message
+        message: row.message,
+        suggestions
       };
     }
     return {
       source: "label" as const,
       upc: parsed.upc || undefined,
-      product
+      product,
+      suggestions
     };
   } catch (error) {
     app.log.error({ error }, "AI vision-label request failed");

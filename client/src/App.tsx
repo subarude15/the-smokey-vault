@@ -11,7 +11,7 @@ import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
   KEG_REMAINING_STOPS, KEG_SIZES, PACK_COUNT_STOPS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
-  BREW_STATUSES, defaultSweetnessForWine, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
+  BREW_STATUSES, defaultSweetnessForWine, inferProductTable, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
   migrateWineSweetnessValue, nearestKegStop, parseList, parseTagInput, pintsRemaining, pourPint,
   remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap,
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
@@ -25,8 +25,9 @@ import {
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
   type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME,
   DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME, clipKeeperName, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS,
-  AI_MIXOLOGIST_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
+  AI_MIXOLOGIST_TIMEOUT_MS, BLOCKED_RIBBON_LABEL, DEFAULT_ENABLED_TABS, KIOSK_IDLE_MS,
   TAB_KEYS, parseEnabledTabs, parseTabOrder, serializeEnabledTabs, serializeTabOrder,
+  mixologistFailureMessage, mixologistLoadingStep, MIXOLOGIST_LOADING_STEP_MS,
   type EnabledTabs, type SubstituteOption, type TabKey,
   LOOKUP_SOURCE_LABELS, missMessage, type LookupSource
 } from "./catalog";
@@ -225,8 +226,6 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const text = (...keys:string[]) => keys.map((key)=>product[key]).find((value)=>typeof value==="string"&&value.trim()) as string|undefined;
   const categories = text("categories","category") ?? "";
   const productType = text("product_type") ?? "";
-  const isBeer = /beer|ale|lager|stout|porter|ipa|cider|seltzer|malt/i.test(`${categories} ${productType}`);
-  const isWine = /wine|sparkling|vermouth|sake|mead/i.test(`${categories} ${productType}`);
   const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string,unknown>|undefined)?.alcohol_100g;
   const abv = typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")) || 0;
   const name = text("product_name","product_name_en","name") ?? "";
@@ -237,7 +236,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const volume = typeof product.volume_ml === "number" ? product.volume_ml : Number.parseFloat(String(product.volume_ml ?? "")) || 750;
   const moduleId = result.table === "packaged_beer" || result.table === "wines" || result.table === "spirits"
     ? result.table
-    : isBeer ? "packaged_beer" : isWine ? "wines" : "spirits";
+    : inferProductTable({ name, category: categories, product_type: productType, brand });
   if (moduleId === "packaged_beer") {
     return {
       moduleId: "packaged_beer",
@@ -434,14 +433,27 @@ async function resolveSuggestion(module: Module, hit: BottleSearchHit, upc = "")
     const enriched = await api<ScanResult>(`/cola/enrich/${encodeURIComponent(hit.ttb_id)}${qs}`);
     if (enriched.product) product = enriched.product;
   }
+  const source = hit.source === "vault"
+    ? "vault"
+    : hit.source === "catalog_beer" || hit.source === "beer_cache"
+      ? "catalog_beer"
+      : "cola_cloud";
   const draft = scannedInventoryDraft({
-    source: hit.source === "vault" ? "vault" : "cola_cloud",
+    source,
     table: hit.table,
     upc: upc || String(product.upc ?? ""),
     product
   });
   const mapped = mapDraftToModule(module, draft);
-  return upc ? { ...mapped, upc } : mapped;
+  const values = upc ? { ...mapped, upc } : mapped;
+  if (upc && (hit.source === "catalog_beer" || hit.source === "beer_cache") && module.id === "packaged_beer") {
+    try {
+      await api("/beer/remember", { method: "POST", body: JSON.stringify({ upc, hit }) });
+    } catch {
+      // Still open the form; the UPC can be saved from the form later.
+    }
+  }
+  return values;
 }
 
 export default function App() {
@@ -2632,29 +2644,57 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
 type GeneratedRecipe = { name:string; ingredients:string[]; method:string; glassware:string; garnish:string; season:string; notes:string };
 
 function Mixologist({admin}:{admin:boolean}) {
-  const [prompt,setPrompt] = useState(""); const [recipe,setRecipe] = useState<GeneratedRecipe>(); const [loading,setLoading] = useState(false); const [error,setError] = useState(""); const [saved,setSaved] = useState(false);
+  const [prompt,setPrompt] = useState("");
+  const [recipe,setRecipe] = useState<GeneratedRecipe>();
+  const [loading,setLoading] = useState(false);
+  const [error,setError] = useState("");
+  const [saved,setSaved] = useState(false);
+  const [waitMs,setWaitMs] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      setWaitMs(0);
+      return;
+    }
+    setWaitMs(0);
+    const started = Date.now();
+    const tick = window.setInterval(() => setWaitMs(Date.now() - started), MIXOLOGIST_LOADING_STEP_MS);
+    return () => window.clearInterval(tick);
+  }, [loading]);
+
   async function ask(request=prompt){
     setLoading(true);setRecipe(undefined);setError("");setSaved(false);
-    // The kiosk gives up after five seconds rather than leaving a guest staring at a spinner.
+    let timedOut = false;
     const abort = new AbortController();
-    const timeout = window.setTimeout(() => abort.abort(), AI_MIXOLOGIST_TIMEOUT_MS);
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      abort.abort();
+    }, AI_MIXOLOGIST_TIMEOUT_MS);
     try {
       const data = await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request}),signal:abort.signal});
       setRecipe(data.recipe);
     } catch(e) {
-      const timedOut = abort.signal.aborted || (e instanceof DOMException && e.name === "AbortError");
-      setError(timedOut ? AI_UNAVAILABLE_NOTICE : e instanceof Error ? e.message : "The AI service could not generate a recipe.");
+      setError(mixologistFailureMessage(e, timedOut));
     } finally {
       clearTimeout(timeout);
       setLoading(false);
     }
   }
   async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
+  const loadingCopy = mixologistLoadingStep(waitMs);
   return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples. Walk the drink over to the bar when you want it made."/>
-    <div className="mixologist"><Sparkles size={44}/><div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} onClick={()=>setPrompt(p)}>{p}</button>)}</div><textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…"/><div className="mixologist-actions"><button className="primary" disabled={loading||!prompt} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button><button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from the shelf</button></div>
-    {loading&&<div className="ai-loading"><LoaderCircle className="spinner"/><div><strong>The mixologist is measuring…</strong><span>Balancing your inventory, flavors, and request.</span></div></div>}
-    {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
-    {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}</div>
+    <div className="mixologist" aria-busy={loading}>
+      <Sparkles size={44}/>
+      <div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} disabled={loading} onClick={()=>setPrompt(p)}>{p}</button>)}</div>
+      <textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…" disabled={loading}/>
+      <div className="mixologist-actions">
+        <button className="primary" disabled={loading||!prompt} aria-busy={loading} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button>
+        <button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from the shelf</button>
+      </div>
+      {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
+      {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
+      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}
+    </div>
   </>;
 }
 

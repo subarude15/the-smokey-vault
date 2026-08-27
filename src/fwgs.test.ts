@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { fwgsToSchema, isFwgsThin, parseFwgsHtml } from "./fwgs.js";
+import { fwgsToSchema, isFwgsThin, parseFwgsHtml, parseFwgsHtmlAll } from "./fwgs.js";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +40,25 @@ test("parseFwgsHtml treats an empty search as a miss, not a throw", () => {
   assert.equal(parseFwgsHtml(html), null);
   assert.equal(parseFwgsHtml(""), null);
   assert.equal(parseFwgsHtml("<html><body>Akamai denied</body></html>"), null);
+});
+
+test("parseFwgsHtmlAll returns multiple product tiles", () => {
+  const html = `
+    <div class="product-tile">
+      <span class="product-name">Buffalo Trace Bourbon</span>
+      <span class="size">750 ml</span>
+      <span>$27.99</span>
+    </div>
+    <div class="product-tile">
+      <span class="product-name">Eagle Rare 10 Year</span>
+      <span class="size">750 ml</span>
+      <span>$42.99</span>
+    </div>
+  `;
+  const hits = parseFwgsHtmlAll(html, 6);
+  assert.equal(hits.length, 2);
+  assert.equal(hits[0]?.name, "Buffalo Trace Bourbon");
+  assert.equal(hits[1]?.name, "Eagle Rare 10 Year");
 });
 
 test("a named FWGS hit without a photo is still usable, but missing volume is thin", () => {

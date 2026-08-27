@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { db } from "./db.js";
-import { colaProductTypeForTable, foldSearch, getFromCache, matchesQuery, queryTokens, rememberUnresolvedUpc, saveToCache, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
+import { saveBarcodeCacheEntry, searchBarcodeCache } from "./barcode_cache.js";
+import { importTableFor } from "./import_batch.js";
+import { colaProductTypeForTable, foldSearch, getFromCache, inferImportKind, matchesQuery, queryTokens, rememberUnresolvedUpc, saveToCache, searchBottles, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
 
 test("foldSearch strips diacritics so troegs matches Tröegs", () => {
   assert.equal(foldSearch("Tröegs"), "troegs");
@@ -92,5 +94,70 @@ test("searchVault includes brewery lab batches when filling a tap", () => {
     assert.ok(hits.some((hit) => hit.table === "brews" && String(hit.product.batch_name) === "Vault IPA"));
   } finally {
     db.prepare("DELETE FROM brews WHERE id=?").run(brew.lastInsertRowid);
+  }
+});
+
+test("inferImportKind trusts explicit TTB type over a beer scanner hint", () => {
+  const kind = inferImportKind({
+    name: "Buffalo Trace",
+    category: "Bourbon",
+    product_type: "DISTILLED SPIRITS"
+  }, "beer");
+  assert.equal(kind, "spirits");
+});
+
+test("inferImportKind still honors a beer hint for ambiguous products", () => {
+  const kind = inferImportKind({ name: "Mystery Can", category: "Beverages" }, "beer");
+  assert.equal(kind, "beer");
+});
+
+test("importTableFor keeps single malt whiskey out of packaged beer", () => {
+  assert.equal(importTableFor({ name: "Lagavulin 16", category: "Single Malt Scotch" }), "spirits");
+  assert.equal(importTableFor({ name: "Troegs Nugget Nectar", style: "Imperial Amber Ale" }), "packaged_beer");
+});
+
+test("searchBarcodeCache finds prior scans by name", () => {
+  const upc = "080244009365";
+  try {
+    saveBarcodeCacheEntry({
+      upc,
+      name: "Eagle Rare 10 Year",
+      brand: "Buffalo Trace",
+      category: "Spirit",
+      subcategory: "Bourbon",
+      abv: 45,
+      proof: 90,
+      volume_ml: 750,
+      description: "",
+      image_url: "",
+      source: "fwgs"
+    });
+    const hits = searchBarcodeCache("eagle rare", 8);
+    assert.ok(hits.some((hit) => hit.name === "Eagle Rare 10 Year"));
+  } finally {
+    db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
+  }
+});
+
+test("searchBottles merges barcode cache hits for spirits", async () => {
+  const upc = "080686000123";
+  try {
+    saveBarcodeCacheEntry({
+      upc,
+      name: "Catalog Search Bourbon",
+      brand: "Test Distillery",
+      category: "Spirit",
+      subcategory: "Bourbon",
+      abv: 40,
+      proof: 80,
+      volume_ml: 750,
+      description: "",
+      image_url: "",
+      source: "imported"
+    });
+    const { results } = await searchBottles("catalog search bourbon", { table: "spirits" });
+    assert.ok(results.some((hit) => hit.source === "cache" && String(hit.product.name) === "Catalog Search Bourbon"));
+  } finally {
+    db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
   }
 });
