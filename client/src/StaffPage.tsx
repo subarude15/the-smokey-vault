@@ -105,7 +105,7 @@ export function StaffPage({ admin, keeperName }: { admin: boolean; keeperName: s
       <span className="eyebrow">BEHIND THE BAR</span>
       <h1>Meet the crew.</h1>
       <p>{admin
-        ? "The people and pets who keep the vault running. Reorder with the arrows — the top card leads the page."
+        ? "The people and pets who keep The Smokey Barrel running. Reorder with the arrows — the top card leads the page."
         : `The regulars behind the bar at ${keeperName}'s place. Pets included, because they earned it.`}</p>
     </div>
 

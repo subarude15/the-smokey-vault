@@ -129,7 +129,7 @@ export const MAX_GALLERY_BYTES = 150 * 1024 * 1024;
 
 export const STAFF_ROLE_SUGGESTIONS = [
   "Head Mixologist", "Chief Welcome Officer", "Cellar Security", "Brewmaster",
-  "Keeper of the Vault", "Resident Taster", "Head of Snacks"
+  "Keeper of the House", "Resident Taster", "Head of Snacks"
 ] as const;
 
 export type Patron = {

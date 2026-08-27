@@ -1,6 +1,7 @@
 import {
   TAP_COUNT,
   brewAbv,
+  brewDisplayName,
   compareBrews,
   formatAbv,
   isTapEmpty,
@@ -96,7 +97,7 @@ export function overviewGreeting(date = new Date(), guest = false): { eyebrow: s
         ? "GOOD EVENING"
         : "AFTER HOURS";
   if (guest) {
-    return { eyebrow: `${eyebrow} · PATRON LOUNGE`, line: "Tonight at", emphasize: "the vault." };
+    return { eyebrow: `${eyebrow} · PATRON LOUNGE`, line: "Tonight at", emphasize: "The Smokey Barrel." };
   }
   if (hour >= 5 && hour < 12) {
     return { eyebrow, line: "The cellar is", emphasize: "waking up." };
@@ -107,7 +108,7 @@ export function overviewGreeting(date = new Date(), guest = false): { eyebrow: s
   if (hour >= 17 && hour < 21) {
     return { eyebrow, line: "Your private bar,", emphasize: "beautifully organized." };
   }
-  return { eyebrow, line: "The vault is", emphasize: "still pouring." };
+  return { eyebrow, line: "The Smokey Barrel is", emphasize: "still pouring." };
 }
 
 export function overviewHeroCopy(snapshot: OverviewSnapshot, guest = false): string {
@@ -191,7 +192,7 @@ export function buildOverview(input: {
   const activeBrews = brews.filter((brew) => normalizeBrewStatus(brew.status) !== "Archived").sort(compareBrews);
   const brewList: OverviewBrew[] = activeBrews.slice(0, 8).map((brew) => ({
     id: itemId(brew.id),
-    batch_name: text(brew.batch_name) || "Untitled batch",
+    batch_name: brewDisplayName(brew.batch_name, brew.style),
     style: text(brew.style),
     status: normalizeBrewStatus(brew.status),
     abv: formatAbv(brewAbv(brew) ?? brew.calculated_abv ?? brew.abv),

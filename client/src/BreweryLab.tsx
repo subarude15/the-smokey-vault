@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Beer, CircleAlert, FlaskConical, Hop, Thermometer } from "lucide-react";
 import { api, type Item } from "./api";
 import {
-  DEFAULT_KEG_L, formatGravity, isTapEmpty, kegFillPercent, normalizeBrewStatus,
+  DEFAULT_KEG_L, brewDisplayName, formatGravity, isTapEmpty, kegFillPercent, normalizeBrewStatus,
   parseList, pintsRemaining, tapsForBatch
 } from "./catalog";
 
@@ -98,7 +98,7 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
             <div className="lab-thumb">{brew.image_url ? <img src={String(brew.image_url)} alt=""/> : <Beer size={26}/>}</div>
             <div className="lab-body">
               <div className="tap-badges">{tapNumbers.map((number) => <span className="tap-badge" key={number}>TAP {number}</span>)}</div>
-              <h3>{String(brew.batch_name ?? "Untitled batch")}</h3>
+              <h3>{brewDisplayName(brew.batch_name, brew.style)}</h3>
               <BrewStats brew={brew}/>
               {tapNumbers.map((number) => {
                 const detail = tapDetail(number);
@@ -123,7 +123,7 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
             <div className="lab-thumb">{brew.image_url ? <img src={String(brew.image_url)} alt=""/> : <FlaskConical size={26}/>}</div>
             <div className="lab-body">
               <span className={`lab-stage ${normalizeBrewStatus(brew.status).toLowerCase()}`}>{normalizeBrewStatus(brew.status)}</span>
-              <h3>{String(brew.batch_name ?? "Untitled batch")}</h3>
+              <h3>{brewDisplayName(brew.batch_name, brew.style)}</h3>
               <BrewStats brew={brew}/>
               {stageDaysLabel(brew) ? <small className="lab-stage-days">{stageDaysLabel(brew)}</small> : null}
             </div>
@@ -135,15 +135,15 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
       <summary>Planned &amp; archived logs ({planned.length + archived.length + readyToKeg.length})</summary>
       {readyToKeg.length > 0 && <>
         <span className="eyebrow">READY TO KEG</span>
-        <ul className="lab-log">{readyToKeg.map((brew) => <li key={brew.id}><strong>{String(brew.batch_name)}</strong><span>{gravityText(brew) || String(brew.style ?? "")}</span></li>)}</ul>
+        <ul className="lab-log">{readyToKeg.map((brew) => <li key={brew.id}><strong>{brewDisplayName(brew.batch_name, brew.style)}</strong><span>{gravityText(brew) || String(brew.style ?? "")}</span></li>)}</ul>
       </>}
       {planned.length > 0 && <>
         <span className="eyebrow">PLANNED</span>
-        <ul className="lab-log">{planned.map((brew) => <li key={brew.id}><strong>{String(brew.batch_name)}</strong><span>{String(brew.style ?? "")}</span></li>)}</ul>
+        <ul className="lab-log">{planned.map((brew) => <li key={brew.id}><strong>{brewDisplayName(brew.batch_name, brew.style)}</strong><span>{String(brew.style ?? "")}</span></li>)}</ul>
       </>}
       {archived.length > 0 && <>
         <span className="eyebrow">ARCHIVE</span>
-        <ul className="lab-log">{archived.map((brew) => <li key={brew.id}><strong>{String(brew.batch_name)}</strong><span>{abvText(brew) || String(brew.style ?? "")}</span></li>)}</ul>
+        <ul className="lab-log">{archived.map((brew) => <li key={brew.id}><strong>{brewDisplayName(brew.batch_name, brew.style)}</strong><span>{abvText(brew) || String(brew.style ?? "")}</span></li>)}</ul>
       </>}
       {!planned.length && !archived.length && !readyToKeg.length && <p className="lab-empty">The log is empty.</p>}
     </details>

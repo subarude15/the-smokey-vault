@@ -10,11 +10,11 @@ test("overviewGreeting follows the clock", () => {
   assert.equal(overviewGreeting(new Date(2026, 7, 21, 2, 0, 0)).eyebrow, "AFTER HOURS");
 });
 
-test("patron greeting is tonight at the vault", () => {
+test("patron greeting is tonight at The Smokey Barrel", () => {
   const guest = overviewGreeting(new Date(2026, 7, 21, 19, 0, 0), true);
   assert.equal(guest.eyebrow, "GOOD EVENING · PATRON LOUNGE");
   assert.equal(guest.line, "Tonight at");
-  assert.equal(guest.emphasize, "the vault.");
+  assert.equal(guest.emphasize, "The Smokey Barrel.");
 });
 
 test("empty vault snapshot is zeros and a stock-the-shelf line", () => {
@@ -107,6 +107,17 @@ test("overview counts pouring taps, shelf bottles, and ready drinks — not empt
   assert.match(overviewHeroCopy(snap, true), /in the lab/);
   assert.match(overviewHeroCopy(snap, true), /cold room/);
   assert.doesNotMatch(overviewHeroCopy(snap, true), /ready to mix|on the ticket/);
+});
+
+test("generic Brewfather Batch names fall back to style on Overview", () => {
+  const snap = buildOverview({
+    brews: [
+      { id: 1, batch_name: "Batch", style: "American IPA", status: "Conditioning", calculated_abv: 6.2 },
+      { id: 2, batch_name: "JUICY BARREL", style: "New England IPA", status: "Planned", calculated_abv: 6.6 }
+    ]
+  });
+  assert.equal(snap.brews.list[0].batch_name, "JUICY BARREL");
+  assert.equal(snap.brews.list.find((brew) => brew.id === 1)?.batch_name, "American IPA");
 });
 
 test("overdue wines show on cellar watch even when the rack is otherwise stocked", () => {

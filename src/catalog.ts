@@ -577,3 +577,11 @@ export function onTapLabel(tapNumbers: number[]): string {
   if (tapNumbers.length === 1) return `On tap ${tapNumbers[0]}`;
   return `On taps ${tapNumbers.join(", ")}`;
 }
+
+/** Brewfather often syncs untitled rows as "Batch". Prefer the style so the board is readable. */
+export function brewDisplayName(batchName: unknown, style: unknown = ""): string {
+  const name = String(batchName ?? "").trim();
+  const kind = String(style ?? "").trim();
+  if (!name || /^(batch|untitled(?:\s+batch)?)$/i.test(name)) return kind || "Untitled batch";
+  return name;
+}
