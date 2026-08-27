@@ -114,7 +114,7 @@ const themePresets: Record<string, Record<string,string>> = {
   /* Light: cool stone + smoked copper — avoids cream/terracotta AI cluster */
   light: { "--bg":"#e9e7e2","--surface":"#f6f5f2","--surface-2":"#dedad3","--text":"#1c1b19","--muted":"#6a6660","--line":"#c9c4bb","--accent":"#8f5a38","--accent-2":"#b8894a" },
   dark: { "--bg":"#0e0d0b","--surface":"#171511","--surface-2":"#221f1a","--text":"#f3ebe0","--muted":"#a09484","--line":"#353028","--accent":"#c27040","--accent-2":"#d9ae6a" },
-  punk: { "--bg":"#0b0709","--surface":"#1a0e14","--surface-2":"#2a1420","--text":"#f7efe6","--muted":"#c49aaa","--line":"#5c2438","--accent":"#ff2d6a","--accent-2":"#ffe14a" }
+  punk: { "--bg":"#0a0a0a","--surface":"#121212","--surface-2":"#1a1a1a","--text":"#eaeaea","--muted":"#9a9a9a","--line":"#3a3a3a","--accent":"#ff2d6a","--accent-2":"#ffe14a" }
 };
 
 function storedTheme() {
