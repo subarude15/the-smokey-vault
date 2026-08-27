@@ -169,7 +169,7 @@ body.nav-open{overflow:hidden}
 .nav-external{display:flex;align-items:center;gap:11px;padding:11px 13px;margin-top:6px;border-radius:11px;color:var(--muted);text-decoration:none;font-size:14px}
 .nav-external:hover{background:var(--surface-2);color:var(--text)}
 .nav-external svg:last-child{margin-left:auto}
-.guest-footer{position:sticky;bottom:0;margin-top:34px;padding:12px 0 0;border-top:1px solid var(--line);background:var(--bg)}
+.guest-footer{margin-top:34px;padding:12px 0 0;border-top:1px solid var(--line);background:var(--bg)}
 .guest-footer button{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;min-height:52px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:13px;font-size:14px;cursor:pointer;text-align:center}
 .guest-footer button:hover{border-color:var(--accent);color:var(--accent)}
 @media(max-width:700px){.kiosk-lock span{display:none}.kiosk-lock{padding:0 14px}.guest-footer button{font-size:13px;padding:0 12px}}
@@ -473,7 +473,16 @@ html[data-theme="punk"] .generated-heading h2,
 html[data-theme="punk"] .legend-banner h2,
 html[data-theme="punk"] .bartender-body h2,
 html[data-theme="punk"] .crew-body h3,
-html[data-theme="punk"] .unlock-modal h2{
+html[data-theme="punk"] .unlock-modal h2,
+html[data-theme="punk"] .favorite-card strong,
+html[data-theme="punk"] .ticket-card h3,
+html[data-theme="punk"] .overview-tap strong,
+html[data-theme="punk"] .overview-brew strong,
+html[data-theme="punk"] .wanted-card h2,
+html[data-theme="punk"] .lab-body h3,
+html[data-theme="punk"] .event-card h3,
+html[data-theme="punk"] .merch-card h3,
+html[data-theme="punk"] .next-main strong{
   font-family:"Archivo Black","Arial Black",sans-serif;
   letter-spacing:-.02em;
   font-weight:400;
