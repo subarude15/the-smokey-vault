@@ -21,13 +21,15 @@ import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeI
 import {
   enrichColaRecord,
   fetchColaQuota,
-  labelProductWithLocalOllama,
-  lookupProduct,
   rememberBeerFromHit,
   searchBottles,
-  searchCatalogBeerSuggestions,
   type BottleSearchHit
 } from "./lookup.js";
+import {
+  assembleVisionLabelResult,
+  identifyByBarcode,
+  identifyByLocalLabelImage
+} from "./ingestion/bottle-orchestrator.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -576,7 +578,7 @@ async function handleBarcodeLookup(
     ? request.query.kind
     : undefined;
   try {
-    const result = await lookupProduct(request.params.code, { forceRefresh, kind, mode: "live" });
+    const result = await identifyByBarcode(request.params.code, { forceRefresh, kind, mode: "live" });
     if (!isReadyLookup(result)) queueLookupResult(result);
     return result;
   } catch (error) {
@@ -614,16 +616,7 @@ app.post<{ Body: { image?: string; imageBase64?: string; base64Image?: string } 
   const image = String(request.body?.image ?? request.body?.imageBase64 ?? request.body?.base64Image ?? "").trim();
   if (!image) return reply.code(400).send({ error: "Base64 image required" });
   try {
-    const product = await labelProductWithLocalOllama(image);
-    const suggestions = product.product_type === "beer"
-      ? await searchCatalogBeerSuggestions(`${product.brand} ${product.name}`.trim(), 5)
-      : [];
-    return {
-      source: "label" as const,
-      upc: product.upc || undefined,
-      product,
-      suggestions
-    };
+    return await identifyByLocalLabelImage(image);
   } catch (error) {
     app.log.error({ error }, "Local Ollama vision-label request failed");
     return reply.code(502).send({ error: error instanceof Error ? error.message : "Could not read that label" });
@@ -974,15 +967,12 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
     } catch {
       imageUrl = "";
     }
-    const product = { ...parsed, image_url: imageUrl };
-    const suggestions = parsed.product_type === "beer"
-      ? await searchCatalogBeerSuggestions(`${parsed.brand} ${parsed.name}`.trim(), 5)
-      : [];
+    const labeled = await assembleVisionLabelResult(parsed, imageUrl);
     const params = request.params as { id?: string };
     const query = request.query as { row?: string };
     const queueId = Number(params.id ?? query.row ?? "");
     if (Number.isInteger(queueId) && queueId > 0) {
-      const row = applyLabelToImportRow(queueId, product, parsed.upc);
+      const row = applyLabelToImportRow(queueId, labeled.product, parsed.upc);
       if (!row) return reply.code(404).send({ error: "Import row not found" });
       return {
         source: "label" as const,
@@ -992,15 +982,10 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
         product: row.product,
         reason: row.reason,
         message: row.message,
-        suggestions
+        suggestions: labeled.suggestions
       };
     }
-    return {
-      source: "label" as const,
-      upc: parsed.upc || undefined,
-      product,
-      suggestions
-    };
+    return labeled;
   } catch (error) {
     app.log.error({ error }, "AI vision-label request failed");
     const status = error instanceof AiRequestError ? error.statusCode : 502;

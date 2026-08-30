@@ -10,6 +10,9 @@ on:
   pull_request:
     types:
       - 'opened'
+      # Re-run review when the PR head moves so workflow fixes on the branch take effect
+      # (issue_comment /review uses the default-branch workflow copy).
+      - 'synchronize'
   issues:
     types:
       - 'opened'
@@ -90,7 +93,7 @@ jobs:
             const request = process.env.REQUEST;
             core.setOutput('request', request);
 
-            if (eventType === 'pull_request.opened') {
+            if (eventType === 'pull_request.opened' || eventType === 'pull_request.synchronize') {
               core.setOutput('command', 'review');
             } else if (['issues.opened', 'issues.reopened'].includes(eventType)) {
               core.setOutput('command', 'triage');

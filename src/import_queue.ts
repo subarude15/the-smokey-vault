@@ -1,7 +1,8 @@
 import { db } from "./db.js";
 import { saveBarcodeCacheEntry } from "./barcode_cache.js";
 import { localizeImage } from "./images.js";
-import { inferImportKind, lookupProduct } from "./lookup.js";
+import { inferImportKind } from "./lookup.js";
+import { identifyByBarcode } from "./ingestion/bottle-orchestrator.js";
 import {
   isImportKind,
   isLookupSource,
@@ -329,7 +330,7 @@ async function processPendingImports() {
   const pending = db.prepare("SELECT * FROM import_queue WHERE status='pending' ORDER BY id").all() as QueueDbRow[];
   for (const row of pending) {
     const mapped = mapRow(row);
-    const result = await lookupProduct(mapped.upc, {
+    const result = await identifyByBarcode(mapped.upc, {
       mode: "batch",
       kind: mapped.kind
     });
