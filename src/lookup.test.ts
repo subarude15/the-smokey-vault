@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { db } from "./db.js";
 import { saveBarcodeCacheEntry, searchBarcodeCache } from "./barcode_cache.js";
 import { importTableFor } from "./import_batch.js";
-import { colaProductTypeForTable, foldSearch, getFromCache, inferImportKind, matchesQuery, queryTokens, rememberUnresolvedUpc, saveToCache, searchBottles, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
+import { colaProductTypeForTable, foldSearch, getFromCache, inferImportKind, lookupProductWithSmartFallback, matchesQuery, parseProductSchema, queryTokens, rememberUnresolvedUpc, saveToCache, searchBottles, searchTableForModule, searchTablesForModule, searchVault, searchWebSnippets } from "./lookup.js";
 
 test("foldSearch strips diacritics so troegs matches Tröegs", () => {
   assert.equal(foldSearch("Tröegs"), "troegs");
@@ -16,6 +16,149 @@ test("matchesQuery requires every token across name and maker", () => {
   assert.equal(matchesQuery(beer, "nugget"), true);
   assert.equal(matchesQuery(beer, "lagavulin"), false);
   assert.equal(matchesQuery({ name: "Eagle Rare 10 Year", brand: "Buffalo Trace" }, "eag rar"), true);
+});
+
+test("parseProductSchema normalizes Ollama JSON product output", () => {
+  const product = parseProductSchema(`\`\`\`json
+{
+  "upc": "082184090452",
+  "name": "Nugget Nectar",
+  "brand": "Troegs Independent Brewing",
+  "category": "Imperial Amber Ale",
+  "abv": "7.5%",
+  "image_url": "",
+  "fill_level_percent": 100,
+  "bottle_count": 1,
+  "notes": "Seasonal beer",
+  "volume_ml": "12 fl oz",
+  "product_type": "beer",
+  "ttb_id": "",
+  "origin": "",
+  "approval_date": ""
+}
+\`\`\``);
+  assert.equal(product.upc, "082184090452");
+  assert.equal(product.abv, 7.5);
+  assert.equal(product.volume_ml, 355);
+  assert.equal(product.image_url, null);
+  assert.equal(product.product_type, "beer");
+});
+
+test("searchWebSnippets formats SearXNG title/content and returns empty on failure", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    assert.match(url, /192\.168\.1\.184:8888\/search/);
+    assert.match(url, /format=json/);
+    assert.match(url, /q=/);
+    return new Response(JSON.stringify({
+      results: [
+        { title: "Nugget Nectar", content: "7.5% ABV Imperial Amber Ale from Troegs" },
+        { title: "Other", content: "" }
+      ]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const snippets = await searchWebSnippets("Nugget Nectar beer abv style description", 5);
+    assert.match(snippets, /1\. Nugget Nectar — 7\.5% ABV Imperial Amber Ale from Troegs/);
+    assert.match(snippets, /2\. Other/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = (async () => {
+    throw new Error("offline");
+  }) as typeof fetch;
+  try {
+    assert.equal(await searchWebSnippets("anything"), "");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("lookupProductWithSmartFallback uses catalog hits before SearXNG", async () => {
+  const product = await lookupProductWithSmartFallback(
+    { upc: "082184090452" },
+    {
+      lookupByUpc: async () => ({
+        source: "fwgs",
+        upc: "082184090452",
+        product: {
+          upc: "082184090452",
+          name: "Nugget Nectar",
+          brand: "Troegs",
+          category: "Beer",
+          abv: 7.5,
+          fill_level: 100,
+          stock_count: 1,
+          volume_ml: 355
+        }
+      }),
+      searchWeb: async () => {
+        throw new Error("should not search the web");
+      },
+      extractFromText: async () => {
+        throw new Error("should not call Ollama");
+      }
+    }
+  );
+  assert.equal(product?.name, "Nugget Nectar");
+  assert.equal(product?.upc, "082184090452");
+  assert.equal(product?.abv, 7.5);
+});
+
+test("lookupProductWithSmartFallback parses SearXNG text through Ollama when catalogs miss", async () => {
+  let searched = "";
+  const product = await lookupProductWithSmartFallback(
+    { upc: "099988877766", name: "Local Lager" },
+    {
+      lookupByUpc: async () => ({
+        source: "not_found",
+        upc: "099988877766",
+        product: { name: "" },
+        reason: "no_catalog"
+      }),
+      searchByName: async () => ({ results: [] }),
+      searchWeb: async (query) => {
+        searched = query;
+        return "1. Local Lager — Neighborhood Brewing 5.2% ABV lager";
+      },
+      extractFromText: async (raw) => parseProductSchema({
+        upc: "",
+        name: "Local Lager",
+        brand: "Neighborhood Brewing",
+        category: "Lager",
+        abv: 5.2,
+        image_url: null,
+        fill_level_percent: 100,
+        bottle_count: 1,
+        notes: raw,
+        volume_ml: 355,
+        product_type: "beer",
+        ttb_id: null,
+        origin: null,
+        approval_date: null
+      })
+    }
+  );
+  assert.match(searched, /Local Lager 099988877766 beer abv style description/);
+  assert.equal(product?.name, "Local Lager");
+  assert.equal(product?.brand, "Neighborhood Brewing");
+  assert.equal(product?.upc, "099988877766");
+});
+
+test("lookupProductWithSmartFallback returns null when no catalog or web data exists", async () => {
+  const product = await lookupProductWithSmartFallback(
+    { name: "Unknown Bottle" },
+    {
+      searchByName: async () => ({ results: [] }),
+      searchWeb: async () => "",
+      extractFromText: async () => {
+        throw new Error("should not call Ollama");
+      }
+    }
+  );
+  assert.equal(product, null);
 });
 
 test("searchVault can stay inside packaged beer and ignore liquor", () => {
