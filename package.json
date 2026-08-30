@@ -11,7 +11,7 @@
     "build": "npm run build:client && tsc -p tsconfig.server.json",
     "build:client": "vite build --config client/vite.config.ts",
     "start": "node dist/server.js",
-    "test": "tsx --import ./src/test-setup.ts --test src/*.test.ts src/ingestion/*.test.ts"
+    "test": "tsx --import ./src/test-setup.ts --test src/*.test.ts src/ingestion/*.test.ts src/ingestion/catalogs/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "latest",

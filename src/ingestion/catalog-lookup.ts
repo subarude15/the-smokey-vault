@@ -1,6 +1,6 @@
 /**
  * Existing-inventory and barcode/catalog lookup facades.
- * Implementations remain in lookup.ts; this module names the responsibility boundary.
+ * Stage implementations live under src/ingestion/catalogs/; lookupProduct remains the public entrypoint.
  */
 export {
   lookupProduct,
@@ -12,3 +12,16 @@ export {
   type BottleSearchHit,
   type SearchTable
 } from "../lookup.js";
+
+export {
+  findInVault,
+  tryBarcodeCache,
+  tryBeerCache,
+  resolveColaCache,
+  tryFwgsStage,
+  trySpiritsColaStage,
+  tryBeerColaStage,
+  tryOffThenUpcitemdb,
+  lookupOpenFoodFacts,
+  lookupUpcItemDb
+} from "./catalogs/index.js";

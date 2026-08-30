@@ -8,6 +8,7 @@
  *    Order inside lookupProduct: invalid → vault → barcode_cache → beer_cache
  *    → cola_cache → (mixers miss) → FWGS → COLA → OFF → upcitemdb → (beer: COLA last)
  *    → miss reason
+ *    Stage modules: src/ingestion/catalogs/{vault,barcode-cache,beer-cache,cola-cache,fwgs,cola,open-food-facts,upcitemdb}
  *
  * 2. Overnight import — import_queue job → identifyByBarcode (mode: batch)
  *
