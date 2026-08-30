@@ -44,6 +44,7 @@ import { enrichFromUntappdPage } from "./untappd_scrape.js";
 import { fwgsToSchema, isFwgsThin, searchFwgs, searchFwgsByQuery, type FwgsProduct } from "./fwgs.js";
 import { hasExplicitProductType, inferProductTable, isSpiritInventoryFamily, spiritFamilyFromLabel } from "./catalog.js";
 import {
+  isReadyLookup,
   missMessage,
   type ImportKind,
   type LookupResult,
@@ -246,6 +247,124 @@ export async function lookupProductFromRawText(rawText: string): Promise<Product
     model: "llama3.1",
     prompt: `Extract the best beverage product record from this raw web scrape text.\n\n${PRODUCT_SCHEMA_PROMPT}\n\nRaw text:\n${text.slice(0, 24_000)}`
   });
+}
+
+const LOCAL_SEARXNG_SEARCH_URL = "http://192.168.1.184:8888/search";
+
+type SearxResult = {
+  title?: string;
+  content?: string;
+};
+
+type SearxSearchResponse = {
+  results?: SearxResult[];
+};
+
+export type SmartFallbackQuery = {
+  upc?: string;
+  name?: string;
+};
+
+export type SmartFallbackDeps = {
+  lookupByUpc?: (upc: string) => Promise<LookupResult>;
+  searchByName?: (name: string) => Promise<{ results: BottleSearchHit[] }>;
+  searchWeb?: (query: string, limit?: number) => Promise<string>;
+  extractFromText?: (rawText: string) => Promise<ProductSchema>;
+};
+
+/** Local SearXNG JSON search used when catalogs miss a bottle. */
+export async function searchWebSnippets(query: string, limit = 5): Promise<string> {
+  const q = query.trim();
+  if (!q) return "";
+  try {
+    const params = new URLSearchParams({ q, format: "json" });
+    const response = await fetch(`${LOCAL_SEARXNG_SEARCH_URL}?${params}`, {
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok) return "";
+    const data = await response.json() as SearxSearchResponse;
+    const results = (data.results ?? []).slice(0, Math.max(0, limit));
+    if (!results.length) return "";
+    return results
+      .map((result, index) => {
+        const title = String(result.title ?? "").trim();
+        const content = String(result.content ?? "").trim();
+        if (!title && !content) return "";
+        return `${index + 1}. ${title}${title && content ? " — " : ""}${content}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function inventoryRecordToProduct(product: Record<string, unknown>, upcHint = ""): ProductSchema {
+  return parseProductSchema({
+    ...product,
+    upc: product.upc || upcHint,
+    fill_level_percent: product.fill_level_percent ?? product.fill_level ?? 100,
+    bottle_count: product.bottle_count ?? product.stock_count ?? 1
+  });
+}
+
+function smartWebQuery(query: SmartFallbackQuery) {
+  const parts = [query.name?.trim(), query.upc?.trim()].filter(Boolean);
+  if (!parts.length) return "";
+  return `${parts.join(" ")} beer abv style description`;
+}
+
+/**
+ * Catalog-first product lookup with a SearXNG + local llama3.1 fallback when
+ * vault/cache/FWGS/COLA/OFF miss. Returns null when nothing usable is found.
+ */
+export async function lookupProductWithSmartFallback(
+  query: SmartFallbackQuery,
+  deps: SmartFallbackDeps = {}
+): Promise<ProductSchema | null> {
+  const upc = String(query.upc ?? "").trim();
+  const name = String(query.name ?? "").trim();
+  if (!upc && !name) return null;
+
+  const lookupByUpc = deps.lookupByUpc ?? ((code: string) => lookupProduct(code, { mode: "live" }));
+  const searchByName = deps.searchByName ?? ((q: string) => searchBottles(q));
+  const searchWeb = deps.searchWeb ?? searchWebSnippets;
+  const extractFromText = deps.extractFromText ?? lookupProductFromRawText;
+
+  if (upc && looksLikeBarcode(upc)) {
+    try {
+      const result = await lookupByUpc(upc);
+      if (isReadyLookup(result) && result.product) {
+        return inventoryRecordToProduct(result.product as Record<string, unknown>, result.upc || upc);
+      }
+    } catch {
+      // Fall through to name search / web scrape.
+    }
+  }
+
+  if (name) {
+    try {
+      const { results } = await searchByName(name);
+      const hit = results.find((row) => String(row.product?.name ?? "").trim());
+      if (hit?.product) return inventoryRecordToProduct(hit.product as Record<string, unknown>, upc);
+    } catch {
+      // Fall through to web scrape.
+    }
+  }
+
+  const snippets = await searchWeb(smartWebQuery({ upc, name }));
+  if (!snippets.trim()) return null;
+
+  try {
+    const product = await extractFromText(snippets);
+    if (!String(product.name ?? "").trim()) return null;
+    if (upc && !product.upc) {
+      product.upc = normalizeUpc(upc) || product.upc;
+    }
+    return product;
+  } catch {
+    return null;
+  }
 }
 
 export function searchTablesForModule(moduleId?: string): SearchTable[] | undefined {
