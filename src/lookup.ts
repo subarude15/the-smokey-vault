@@ -13,9 +13,7 @@ import {
   isColaPaused,
   looksLikeBarcode,
   mapColaToSchema,
-  normalizeAbv,
   normalizeUpc,
-  parseVolumeMl,
   primaryCatalogUpc,
   ProductSchema,
   productToInventoryFields,
@@ -44,15 +42,16 @@ import { enrichFromUntappdPage } from "./untappd_scrape.js";
 import { fwgsToSchema, isFwgsThin, searchFwgs, searchFwgsByQuery, type FwgsProduct } from "./fwgs.js";
 import { hasExplicitProductType, inferProductTable, isSpiritInventoryFamily, spiritFamilyFromLabel } from "./catalog.js";
 import {
-  isReadyLookup,
   missMessage,
   type ImportKind,
   type LookupResult,
   type LookupSource,
   type MissReason
 } from "./lookup-shared.js";
+import type { SmartFallbackDeps, SmartFallbackQuery } from "./ingestion/smart-fallback.js";
 
 export type { LookupResult, LookupSource } from "./lookup-shared.js";
+export type { SmartFallbackDeps, SmartFallbackQuery };
 export {
   isReadyLookup,
   LOOKUP_SOURCE_LABELS,
@@ -62,6 +61,19 @@ export {
   missMessage
 } from "./lookup-shared.js";
 
+/** Re-exports: implementations live under src/ingestion/ (behavior unchanged). */
+export { parseProductSchema } from "./ingestion/normalize.js";
+export { searchWebSnippets } from "./ingestion/web-search.js";
+export { labelProductWithLocalOllama, lookupProductFromRawText } from "./ingestion/llm-enrichment.js";
+
+export async function lookupProductWithSmartFallback(
+  query: SmartFallbackQuery,
+  deps: SmartFallbackDeps = {}
+) {
+  // Dynamic import avoids a static cycle: smart-fallback → lookupProduct → this module.
+  const { runSmartFallback } = await import("./ingestion/smart-fallback.js");
+  return runSmartFallback(query, deps);
+}
 export type BottleSearchHit = {
   source: "vault" | "cola_cloud" | "catalog_beer" | "beer_cache" | "cache" | "fwgs" | "openfoodfacts";
   table: "spirits" | "packaged_beer" | "wines" | "brews";
@@ -90,281 +102,6 @@ export function searchTableForModule(moduleId?: string): SearchTable | undefined
   if (moduleId === "taps" || moduleId === "brews" || moduleId === "packaged_beer") return "packaged_beer";
   if (moduleId === "wines" || moduleId === "spirits") return moduleId;
   return undefined;
-}
-
-const LOCAL_OLLAMA_BASE_URL = "http://192.168.1.184:11434";
-const LOCAL_OLLAMA_CHAT_URL = `${LOCAL_OLLAMA_BASE_URL}/api/chat`;
-
-const PRODUCT_JSON_FORMAT = {
-  type: "object",
-  properties: {
-    upc: { type: "string" },
-    name: { type: "string" },
-    brand: { type: "string" },
-    category: { type: "string" },
-    abv: { type: ["number", "null"] },
-    image_url: { type: ["string", "null"] },
-    fill_level_percent: { type: "number" },
-    bottle_count: { type: "number" },
-    notes: { type: ["string", "null"] },
-    volume_ml: { type: ["number", "null"] },
-    product_type: { type: ["string", "null"] },
-    ttb_id: { type: ["string", "null"] },
-    origin: { type: ["string", "null"] },
-    approval_date: { type: ["string", "null"] }
-  },
-  required: [
-    "upc",
-    "name",
-    "brand",
-    "category",
-    "abv",
-    "image_url",
-    "fill_level_percent",
-    "bottle_count",
-    "notes",
-    "volume_ml",
-    "product_type",
-    "ttb_id",
-    "origin",
-    "approval_date"
-  ],
-  additionalProperties: false
-} as const;
-
-const PRODUCT_SCHEMA_PROMPT = `Return ONLY valid JSON matching this product schema:
-{
-  "upc": "digits only or empty string",
-  "name": "product name or empty string",
-  "brand": "brand, brewery, or producer or empty string",
-  "category": "specific style/category such as Bourbon, IPA, Cabernet Sauvignon, Mixer",
-  "abv": number or null,
-  "image_url": null,
-  "fill_level_percent": 100,
-  "bottle_count": 1,
-  "notes": "short useful lookup note or null",
-  "volume_ml": milliliters as a number or null,
-  "product_type": "spirit, wine, beer, mixer, or null",
-  "ttb_id": null,
-  "origin": "origin/region if known or null",
-  "approval_date": null
-}
-Do not include markdown, prose, or keys outside the schema.`;
-
-type OllamaChatResponse = {
-  message?: { content?: string };
-  error?: unknown;
-};
-
-function parseJsonObject(raw: string): Record<string, unknown> {
-  const cleaned = String(raw ?? "").replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("Ollama did not return JSON product data");
-  return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
-}
-
-function nullableString(value: unknown): string | null {
-  const text = String(value ?? "").trim();
-  return text || null;
-}
-
-function numberOrDefault(value: unknown, fallback: number) {
-  const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
-  return Number.isFinite(n) ? n : fallback;
-}
-
-export function parseProductSchema(raw: string | Record<string, unknown>): ProductSchema {
-  const value = typeof raw === "string" ? parseJsonObject(raw) : raw;
-  return {
-    upc: normalizeUpc(String(value.upc ?? value.code ?? value.barcode ?? "")),
-    name: String(value.name ?? value.product_name ?? "").trim(),
-    brand: String(value.brand ?? value.brands ?? value.brewery ?? value.producer ?? "").trim(),
-    category: String(value.category ?? value.categories ?? "").trim() || "Spirits",
-    abv: normalizeAbv(value.abv),
-    image_url: nullableString(value.image_url),
-    fill_level_percent: numberOrDefault(value.fill_level_percent, 100),
-    bottle_count: numberOrDefault(value.bottle_count, 1),
-    notes: nullableString(value.notes),
-    volume_ml: typeof value.volume_ml === "number" ? value.volume_ml : parseVolumeMl(value.volume_ml ?? value.volume ?? value.net_contents),
-    product_type: nullableString(value.product_type),
-    ttb_id: nullableString(value.ttb_id),
-    origin: nullableString(value.origin),
-    approval_date: nullableString(value.approval_date)
-  };
-}
-
-async function fetchLocalOllamaProduct(options: {
-  model: "llama3.1" | "llama3.2-vision";
-  prompt: string;
-  imageBase64?: string;
-  timeoutMs?: number;
-}): Promise<ProductSchema> {
-  const response = await fetch(LOCAL_OLLAMA_CHAT_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),
-    body: JSON.stringify({
-      model: options.model,
-      stream: false,
-      keep_alive: -1,
-      format: PRODUCT_JSON_FORMAT,
-      messages: [
-        {
-          role: "user",
-          content: options.prompt,
-          ...(options.imageBase64 ? { images: [options.imageBase64] } : {})
-        }
-      ]
-    })
-  });
-  const data = await response.json().catch(() => ({})) as OllamaChatResponse;
-  if (!response.ok) {
-    const message = typeof data.error === "string"
-      ? data.error
-      : data.error && typeof data.error === "object" && "message" in data.error
-        ? String((data.error as { message: unknown }).message)
-        : `Ollama returned ${response.status}`;
-    throw new Error(message);
-  }
-  return parseProductSchema(data.message?.content ?? "");
-}
-
-export async function labelProductWithLocalOllama(imageBase64: string): Promise<ProductSchema> {
-  const image = imageBase64.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "").trim();
-  if (!image) throw new Error("Image required");
-  return fetchLocalOllamaProduct({
-    model: "llama3.2-vision",
-    imageBase64: image,
-    prompt: `Read this bottle, can, wine label, or product image and identify the beverage product. ${PRODUCT_SCHEMA_PROMPT}`
-  });
-}
-
-export async function lookupProductFromRawText(rawText: string): Promise<ProductSchema> {
-  const text = rawText.trim();
-  if (!text) throw new Error("Raw lookup text is required");
-  return fetchLocalOllamaProduct({
-    model: "llama3.1",
-    prompt: `Extract the best beverage product record from this raw web scrape text.\n\n${PRODUCT_SCHEMA_PROMPT}\n\nRaw text:\n${text.slice(0, 24_000)}`
-  });
-}
-
-const LOCAL_SEARXNG_SEARCH_URL = "http://192.168.1.184:8888/search";
-
-type SearxResult = {
-  title?: string;
-  content?: string;
-};
-
-type SearxSearchResponse = {
-  results?: SearxResult[];
-};
-
-export type SmartFallbackQuery = {
-  upc?: string;
-  name?: string;
-};
-
-export type SmartFallbackDeps = {
-  lookupByUpc?: (upc: string) => Promise<LookupResult>;
-  searchByName?: (name: string) => Promise<{ results: BottleSearchHit[] }>;
-  searchWeb?: (query: string, limit?: number) => Promise<string>;
-  extractFromText?: (rawText: string) => Promise<ProductSchema>;
-};
-
-/** Local SearXNG JSON search used when catalogs miss a bottle. */
-export async function searchWebSnippets(query: string, limit = 5): Promise<string> {
-  const q = query.trim();
-  if (!q) return "";
-  try {
-    const params = new URLSearchParams({ q, format: "json" });
-    const response = await fetch(`${LOCAL_SEARXNG_SEARCH_URL}?${params}`, {
-      signal: AbortSignal.timeout(10_000)
-    });
-    if (!response.ok) return "";
-    const data = await response.json() as SearxSearchResponse;
-    const results = (data.results ?? []).slice(0, Math.max(0, limit));
-    if (!results.length) return "";
-    return results
-      .map((result, index) => {
-        const title = String(result.title ?? "").trim();
-        const content = String(result.content ?? "").trim();
-        if (!title && !content) return "";
-        return `${index + 1}. ${title}${title && content ? " — " : ""}${content}`;
-      })
-      .filter(Boolean)
-      .join("\n");
-  } catch {
-    return "";
-  }
-}
-
-function inventoryRecordToProduct(product: Record<string, unknown>, upcHint = ""): ProductSchema {
-  return parseProductSchema({
-    ...product,
-    upc: product.upc || upcHint,
-    fill_level_percent: product.fill_level_percent ?? product.fill_level ?? 100,
-    bottle_count: product.bottle_count ?? product.stock_count ?? 1
-  });
-}
-
-function smartWebQuery(query: SmartFallbackQuery) {
-  const parts = [query.name?.trim(), query.upc?.trim()].filter(Boolean);
-  if (!parts.length) return "";
-  return `${parts.join(" ")} beer abv style description`;
-}
-
-/**
- * Catalog-first product lookup with a SearXNG + local llama3.1 fallback when
- * vault/cache/FWGS/COLA/OFF miss. Returns null when nothing usable is found.
- */
-export async function lookupProductWithSmartFallback(
-  query: SmartFallbackQuery,
-  deps: SmartFallbackDeps = {}
-): Promise<ProductSchema | null> {
-  const upc = String(query.upc ?? "").trim();
-  const name = String(query.name ?? "").trim();
-  if (!upc && !name) return null;
-
-  const lookupByUpc = deps.lookupByUpc ?? ((code: string) => lookupProduct(code, { mode: "live" }));
-  const searchByName = deps.searchByName ?? ((q: string) => searchBottles(q));
-  const searchWeb = deps.searchWeb ?? searchWebSnippets;
-  const extractFromText = deps.extractFromText ?? lookupProductFromRawText;
-
-  if (upc && looksLikeBarcode(upc)) {
-    try {
-      const result = await lookupByUpc(upc);
-      if (isReadyLookup(result) && result.product) {
-        return inventoryRecordToProduct(result.product as Record<string, unknown>, result.upc || upc);
-      }
-    } catch {
-      // Fall through to name search / web scrape.
-    }
-  }
-
-  if (name) {
-    try {
-      const { results } = await searchByName(name);
-      const hit = results.find((row) => String(row.product?.name ?? "").trim());
-      if (hit?.product) return inventoryRecordToProduct(hit.product as Record<string, unknown>, upc);
-    } catch {
-      // Fall through to web scrape.
-    }
-  }
-
-  const snippets = await searchWeb(smartWebQuery({ upc, name }));
-  if (!snippets.trim()) return null;
-
-  try {
-    const product = await extractFromText(snippets);
-    if (!String(product.name ?? "").trim()) return null;
-    if (upc && !product.upc) {
-      product.upc = normalizeUpc(upc) || product.upc;
-    }
-    return product;
-  } catch {
-    return null;
-  }
 }
 
 export function searchTablesForModule(moduleId?: string): SearchTable[] | undefined {
