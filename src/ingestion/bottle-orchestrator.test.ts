@@ -5,9 +5,11 @@ import type { LookupResult } from "../lookup-shared.js";
 import {
   assembleVisionLabelResult,
   identifyByBarcode,
+  identifyByBarcodeWithCandidate,
   identifyByLocalLabelImage,
   identifyWithSmartFallback
 } from "./bottle-orchestrator.js";
+import { CONFIDENCE } from "./candidate/index.js";
 
 const sampleProduct: ProductSchema = {
   upc: "082184090452",
@@ -50,6 +52,28 @@ test("identifyByBarcode forwards code and options to the barcode lookup", async 
   }]);
   assert.equal(result.source, "vault");
   assert.equal(result.upc, "080686000891");
+});
+
+test("identifyByBarcodeWithCandidate keeps LookupResult and attaches provenance", async () => {
+  const { result, candidate } = await identifyByBarcodeWithCandidate(
+    "080686000891",
+    { kind: "spirits" },
+    {
+      lookupByBarcode: async (code) => ({
+        source: "fwgs",
+        upc: code,
+        table: "spirits",
+        kind: "spirits",
+        product: { name: "Eagle Rare", brand: "Buffalo Trace", upc: code, abv: 45 }
+      })
+    }
+  );
+  assert.equal(result.source, "fwgs");
+  assert.equal(result.product?.name, "Eagle Rare");
+  assert.equal(candidate.primarySource, "fwgs");
+  assert.equal(candidate.name.value, "Eagle Rare");
+  assert.equal(candidate.name.confidence, CONFIDENCE.HIGH);
+  assert.equal(candidate.brand.value, "Buffalo Trace");
 });
 
 test("identifyByLocalLabelImage asks Catalog.beer only for beer product_type", async () => {

@@ -4,6 +4,7 @@ export { parseProductSchema, inventoryRecordToProduct, smartWebQuery } from "./n
 export { runSmartFallback, type SmartFallbackDeps, type SmartFallbackQuery } from "./smart-fallback.js";
 export {
   identifyByBarcode,
+  identifyByBarcodeWithCandidate,
   identifyByLocalLabelImage,
   identifyWithSmartFallback,
   assembleVisionLabelResult,
@@ -15,3 +16,18 @@ export {
   type LookupResult,
   type VisionLabel
 } from "./bottle-orchestrator.js";
+
+export {
+  CONFIDENCE,
+  SOURCE_CONFIDENCE,
+  candidateFromLookup,
+  candidateFromProduct,
+  mergeCandidates,
+  unresolvedFields,
+  confidenceForSource,
+  field,
+  mergeField,
+  type BottleCandidate,
+  type ProductField,
+  type ProductFieldSource
+} from "./candidate/index.js";

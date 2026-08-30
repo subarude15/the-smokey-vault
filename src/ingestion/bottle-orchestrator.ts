@@ -21,6 +21,9 @@
  * 5. Smart fallback — identifyWithSmartFallback
  *    → barcode/catalog lookup → name search → SearXNG → local llama3.1 text extract
  *
+ * Internal (not HTTP): identifyByBarcodeWithCandidate wraps (1) with BottleCandidate
+ * field provenance for later enrichment. See src/ingestion/candidate/.
+ *
  * Individual responsibilities stay in their modules (lookup, vision_label, cola_client,
  * barcode_cache, fwgs, catalog_beer, ai_providers). This file only sequences them.
  */
@@ -35,6 +38,7 @@ import {
 import { parseVisionLabel, type VisionLabel } from "../vision_label.js";
 import { labelProductWithLocalOllama } from "./llm-enrichment.js";
 import { runSmartFallback, type SmartFallbackDeps, type SmartFallbackQuery } from "./smart-fallback.js";
+import { candidateFromLookup, type BottleCandidate } from "./candidate/index.js";
 
 export type LabelIngestionResult = {
   source: "label";
@@ -68,6 +72,19 @@ export async function identifyByBarcode(
   deps: BottleOrchestratorDeps = {}
 ): Promise<LookupResult> {
   return resolveDeps(deps).lookupByBarcode(code, options);
+}
+
+/**
+ * Same as identifyByBarcode, plus an internal BottleCandidate for provenance.
+ * Public LookupResult is unchanged; candidate is not persisted or returned by HTTP routes yet.
+ */
+export async function identifyByBarcodeWithCandidate(
+  code: string,
+  options: LookupOptions = {},
+  deps: BottleOrchestratorDeps = {}
+): Promise<{ result: LookupResult; candidate: BottleCandidate }> {
+  const result = await identifyByBarcode(code, options, deps);
+  return { result, candidate: candidateFromLookup(result) };
 }
 
 /**
