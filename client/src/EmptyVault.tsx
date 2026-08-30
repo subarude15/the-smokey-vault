@@ -22,7 +22,7 @@ const CONFIRM_WORD = "DELETE";
 
 export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [window, setWindow] = useState<PurgeWindow>("1h");
+  const [purgeWindow, setPurgeWindow] = useState<PurgeWindow>("1h");
   const [confirm, setConfirm] = useState("");
   const [preview, setPreview] = useState<PurgeCounts | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,7 +34,7 @@ export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }
     let cancelled = false;
     setLoading(true);
     setError("");
-    api<PurgeCounts>(`/inventory/purge?window=${window}`)
+    api<PurgeCounts>(`/inventory/purge?window=${purgeWindow}`)
       .then((counts) => { if (!cancelled) setPreview(counts); })
       .catch((err) => {
         if (!cancelled) {
@@ -44,7 +44,7 @@ export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [open, window]);
+  }, [open, purgeWindow]);
 
   async function runPurge() {
     if (confirm !== CONFIRM_WORD || busy) return;
@@ -53,7 +53,7 @@ export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }
     try {
       const result = await api<PurgeCounts>("/inventory/purge", {
         method: "POST",
-        body: JSON.stringify({ window, confirm: CONFIRM_WORD })
+        body: JSON.stringify({ window: purgeWindow, confirm: CONFIRM_WORD })
       });
       setConfirm("");
       setPreview(result);
@@ -62,7 +62,7 @@ export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }
           ? `Removed ${result.total} bottle${result.total === 1 ? "" : "s"} from the vault.`
           : "Nothing matched that window."
       );
-      const next = await api<PurgeCounts>(`/inventory/purge?window=${window}`);
+      const next = await api<PurgeCounts>(`/inventory/purge?window=${purgeWindow}`);
       setPreview(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not empty the vault");
@@ -100,8 +100,8 @@ export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }
               <button
                 type="button"
                 key={item.id}
-                className={`chip${window === item.id ? " active" : ""}${item.id === "all" ? " vault-purge-all" : ""}`}
-                onClick={() => { setWindow(item.id); setConfirm(""); }}
+                className={`chip${purgeWindow === item.id ? " active" : ""}${item.id === "all" ? " vault-purge-all" : ""}`}
+                onClick={() => { setPurgeWindow(item.id); setConfirm(""); }}
               >
                 {item.label}
               </button>
@@ -136,7 +136,7 @@ export function EmptyVault({ onMessage }: { onMessage: (value: string) => void }
             onClick={() => void runPurge()}
           >
             <Trash2 size={17} />
-            {busy ? "Deleting…" : window === "all" ? "Delete all shelf bottles" : `Delete last ${window === "1h" ? "1 hour" : window === "6h" ? "6 hours" : "24 hours"}`}
+            {busy ? "Deleting…" : purgeWindow === "all" ? "Delete all shelf bottles" : `Delete last ${purgeWindow === "1h" ? "1 hour" : purgeWindow === "6h" ? "6 hours" : "24 hours"}`}
           </button>
         </div>
       )}
