@@ -129,8 +129,6 @@ jobs:
     needs: 'dispatch'
     if: |-
       ${{ needs.dispatch.outputs.command == 'review' }}
-    # Nested reusable job still reports its own check; soft-fail here so dispatch stays green.
-    continue-on-error: true
     uses: './.github/workflows/gemini-review.yml'
     permissions:
       contents: 'read'
