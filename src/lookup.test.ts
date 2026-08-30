@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { db } from "./db.js";
 import { saveBarcodeCacheEntry, searchBarcodeCache } from "./barcode_cache.js";
 import { importTableFor } from "./import_batch.js";
-import { colaProductTypeForTable, foldSearch, getFromCache, inferImportKind, matchesQuery, queryTokens, rememberUnresolvedUpc, saveToCache, searchBottles, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
+import { colaProductTypeForTable, foldSearch, getFromCache, inferImportKind, matchesQuery, parseProductSchema, queryTokens, rememberUnresolvedUpc, saveToCache, searchBottles, searchTableForModule, searchTablesForModule, searchVault } from "./lookup.js";
 
 test("foldSearch strips diacritics so troegs matches Tröegs", () => {
   assert.equal(foldSearch("Tröegs"), "troegs");
@@ -16,6 +16,32 @@ test("matchesQuery requires every token across name and maker", () => {
   assert.equal(matchesQuery(beer, "nugget"), true);
   assert.equal(matchesQuery(beer, "lagavulin"), false);
   assert.equal(matchesQuery({ name: "Eagle Rare 10 Year", brand: "Buffalo Trace" }, "eag rar"), true);
+});
+
+test("parseProductSchema normalizes Ollama JSON product output", () => {
+  const product = parseProductSchema(`\`\`\`json
+{
+  "upc": "082184090452",
+  "name": "Nugget Nectar",
+  "brand": "Troegs Independent Brewing",
+  "category": "Imperial Amber Ale",
+  "abv": "7.5%",
+  "image_url": "",
+  "fill_level_percent": 100,
+  "bottle_count": 1,
+  "notes": "Seasonal beer",
+  "volume_ml": "12 fl oz",
+  "product_type": "beer",
+  "ttb_id": "",
+  "origin": "",
+  "approval_date": ""
+}
+\`\`\``);
+  assert.equal(product.upc, "082184090452");
+  assert.equal(product.abv, 7.5);
+  assert.equal(product.volume_ml, 355);
+  assert.equal(product.image_url, null);
+  assert.equal(product.product_type, "beer");
 });
 
 test("searchVault can stay inside packaged beer and ignore liquor", () => {

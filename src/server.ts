@@ -20,6 +20,7 @@ import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeI
 import {
   enrichColaRecord,
   fetchColaQuota,
+  labelProductWithLocalOllama,
   lookupProduct,
   rememberBeerFromHit,
   searchBottles,
@@ -579,6 +580,29 @@ app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: st
   { schema: { tags: ["Lookup"], summary: "Barcode lookup pipeline" } },
   handleBarcodeLookup
 );
+
+app.post<{ Body: { image?: string; imageBase64?: string; base64Image?: string } }>("/api/scan/label", {
+  schema: { tags: ["Lookup"], summary: "Read a base64 product label image with local Ollama vision" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const image = String(request.body?.image ?? request.body?.imageBase64 ?? request.body?.base64Image ?? "").trim();
+  if (!image) return reply.code(400).send({ error: "Base64 image required" });
+  try {
+    const product = await labelProductWithLocalOllama(image);
+    const suggestions = product.product_type === "beer"
+      ? await searchCatalogBeerSuggestions(`${product.brand} ${product.name}`.trim(), 5)
+      : [];
+    return {
+      source: "label" as const,
+      upc: product.upc || undefined,
+      product,
+      suggestions
+    };
+  } catch (error) {
+    app.log.error({ error }, "Local Ollama vision-label request failed");
+    return reply.code(502).send({ error: error instanceof Error ? error.message : "Could not read that label" });
+  }
+});
 
 app.get<{ Querystring: { q?: string; table?: string } }>("/api/search/bottles", {
   schema: { tags: ["Lookup"], summary: "Search vault, beer cache, Catalog.beer, and COLA by bottle name" }
