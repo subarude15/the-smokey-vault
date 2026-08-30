@@ -46,6 +46,9 @@ jobs:
       - name: 'Run Gemini pull request review'
         uses: 'google-github-actions/run-gemini-cli@v0'
         id: 'gemini_pr_review'
+        # Soft-fail: free-tier quota (429), timeouts, and MCP policy denials must not red the PR.
+        # Job-level continue-on-error alone still leaves the nested check conclusion as failure.
+        continue-on-error: true
         env:
           GITHUB_TOKEN: '${{ steps.mint_identity_token.outputs.token || secrets.GITHUB_TOKEN || github.token }}'
           ISSUE_TITLE: '${{ github.event.pull_request.title || github.event.issue.title }}'
@@ -76,7 +79,7 @@ jobs:
           settings: |-
             {
               "model": {
-                "maxSessionTurns": 25
+                "maxSessionTurns": 15
               },
               "telemetry": {
                 "enabled": true,
@@ -119,3 +122,12 @@ jobs:
               "https://github.com/gemini-cli-extensions/code-review"
             ]
           prompt: '/pr-code-review'
+
+      - name: 'Treat Gemini review as advisory'
+        if: always()
+        env:
+          REVIEW_OUTCOME: '${{ steps.gemini_pr_review.outcome }}'
+          REVIEW_CONCLUSION: '${{ steps.gemini_pr_review.conclusion }}'
+        run: |-
+          echo "Gemini PR review outcome=${REVIEW_OUTCOME} conclusion=${REVIEW_CONCLUSION}"
+          echo "This check is advisory (quota/timeouts/MCP errors do not fail CI)."
