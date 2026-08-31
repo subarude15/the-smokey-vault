@@ -46,3 +46,14 @@ export {
   type EnrichmentField,
   type EnrichmentExecutionResult
 } from "./enrichment/index.js";
+
+export {
+  ensureEnrichmentJobsTable,
+  enqueueMetadataJob,
+  maybeEnqueueMetadataEnrichment,
+  startEnrichmentWorker,
+  stopEnrichmentWorker,
+  enrichmentJobCounts,
+  type EnrichmentJob,
+  type EnrichmentJobCounts
+} from "./jobs/index.js";
