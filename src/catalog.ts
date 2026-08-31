@@ -1,5 +1,6 @@
 import {
   CANONICAL_WHISKEY_TYPES,
+  isCompatibleClassificationSpecialization,
   normalizeCanonicalAbv,
   normalizeCanonicalTaxonomy,
   normalizeCanonicalVolumeMl,
@@ -76,6 +77,64 @@ export function spiritFamilyFromLabel(category: string, subCategory = ""): { fam
     return { family: familyRaw, type: typeRaw };
   }
   return { family: "", type: "" };
+}
+
+/**
+ * Merge an incoming classification label with an existing spirits row family/type.
+ * Specificity is monotonic: Whiskey + Scotch Whisky cannot collapse to Whiskey / "".
+ */
+export function resolveMonotonicSpiritClassification(options: {
+  incomingLabel: string;
+  existingFamily?: string | null;
+  existingType?: string | null;
+}): { family: string; type: string } {
+  const incoming = spiritFamilyFromLabel(String(options.incomingLabel ?? ""), "");
+  const existing = spiritFamilyFromLabel(
+    String(options.existingFamily ?? ""),
+    String(options.existingType ?? "")
+  );
+
+  const incomingLabel = incoming.type || incoming.family;
+  const existingLabel = existing.type || existing.family;
+
+  // Incoming specializes existing → take incoming split.
+  if (
+    incomingLabel
+    && existingLabel
+    && isCompatibleClassificationSpecialization(existingLabel, incomingLabel)
+  ) {
+    return {
+      family: incoming.family || existing.family,
+      type: incoming.type || existing.type
+    };
+  }
+
+  // Existing is already more specific than a generic incoming family → keep existing type.
+  if (
+    incomingLabel
+    && existingLabel
+    && isCompatibleClassificationSpecialization(incomingLabel, existingLabel)
+  ) {
+    return {
+      family: existing.family || incoming.family,
+      type: existing.type
+    };
+  }
+
+  // Same family, incoming has no type, existing has type → preserve type.
+  if (incoming.family && existing.family === incoming.family && existing.type && !incoming.type) {
+    return { family: existing.family, type: existing.type };
+  }
+
+  // Incoming family with type (or first fill).
+  if (incoming.family) {
+    return {
+      family: incoming.family,
+      type: incoming.type || (existing.family === incoming.family ? existing.type : "")
+    };
+  }
+
+  return { family: existing.family, type: existing.type };
 }
 
 export type ProductTable = "spirits" | "packaged_beer" | "wines";

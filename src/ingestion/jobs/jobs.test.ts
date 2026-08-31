@@ -346,9 +346,23 @@ test("lower-confidence enrichment cannot overwrite stronger stored data", () => 
     before,
     after
   });
-  assert.deepEqual(persisted.inventoryUpdated, []);
-  const row = db.prepare("SELECT abv FROM spirits WHERE id=?").get(spirit.id) as { abv: number };
+  assert.deepEqual(
+    persisted.inventoryUpdated.filter((c) => c === "abv"),
+    []
+  );
+  assert.ok(
+    persisted.inventoryUpdated.every((c) => c === "category" || c === "sub_category"),
+    "only hierarchy normalization may write; weaker ABV must not"
+  );
+  const row = db.prepare("SELECT abv, category, sub_category FROM spirits WHERE id=?").get(spirit.id) as {
+    abv: number;
+    category: string;
+    sub_category: string;
+  };
   assert.equal(row.abv, 45);
+  // Bourbon-as-category may normalize to Whiskey / Bourbon without weakening ABV.
+  assert.ok(row.category === "Bourbon" || row.category === "Whiskey");
+  if (row.category === "Whiskey") assert.equal(row.sub_category, "Bourbon");
   cleanup();
 });
 

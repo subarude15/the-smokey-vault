@@ -83,11 +83,22 @@ export function metadataOutcomeFromState(options: {
     return gaps.length ? "missing" : "complete";
   }
 
-  // Completed job — inspect stored progress when present.
+  // Completed job — inspect bottle gaps and stored progress.
   const stored = parseMetadataJobResult(
     getLatestCompletedJobResult(entityType, entityId, "metadata")
   );
   if (!gaps.length) return "complete";
+
+  // Bottle completeness is independent of the latest run's update count.
+  // A bottle with meaningful metadata (beyond shelf-default volume) and remaining
+  // gaps stays Partial even when a rerun finds nothing new (updated=[]).
+  // Empty bottles with empty reruns stay No result.
+  const meaningfulPopulated = METADATA_ENRICHMENT_FIELDS.filter((name) => {
+    if (name === "volume_ml") return false;
+    return !fieldNeedsWork(candidate[name] as ProductField<unknown>);
+  }).length;
+  if (meaningfulPopulated > 0) return "partial";
+
   if (stored && stored.updated.length > 0) return "partial";
   if (stored && stored.updated.length === 0) return "no_result";
   // Legacy completed jobs without result payload: gaps remain ⇒ not Complete.
@@ -114,6 +125,29 @@ export function metadataOutcomeToJobStatusLabel(
     default:
       return "not_started";
   }
+}
+
+/**
+ * Wording for the most recent completed metadata *run*, distinct from bottle completeness.
+ * A search that found nothing new is not an overall metadata failure when the bottle is Partial.
+ */
+export function metadataLastRunLabel(options: {
+  bottleOutcome: MetadataOutcomeLabel;
+  stored: MetadataJobResultPayload | null;
+  jobFailed?: boolean;
+}): string | null {
+  if (options.jobFailed) return "Failed";
+  const stored = options.stored;
+  if (!stored) return null;
+  if (stored.updated.length > 0) {
+    const n = stored.updated.length;
+    return `Updated ${n} field${n === 1 ? "" : "s"}`;
+  }
+  // Successful completion with zero new fields.
+  if (options.bottleOutcome === "partial" || options.bottleOutcome === "complete") {
+    return "No new data found";
+  }
+  return "No result";
 }
 
 export function buildMetadataJobResultPayload(options: {

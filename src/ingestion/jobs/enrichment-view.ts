@@ -28,7 +28,10 @@ import { TRUSTED_MIN } from "../enrichment/rules.js";
 import { candidateFromInventoryRow, loadInventoryRow } from "./inventory.js";
 import {
   metadataOutcomeFromState,
-  metadataOutcomeToJobStatusLabel
+  metadataOutcomeToJobStatusLabel,
+  metadataLastRunLabel,
+  parseMetadataJobResult,
+  unresolvedMetadataFields
 } from "./metadata-outcome.js";
 import { getProductContent, readPersonalNotes } from "./product-content.js";
 import { getProductImage, inventoryHasUserImage } from "./product-images.js";
@@ -81,6 +84,9 @@ export type JobView = {
   /** Keeper/admin only — stripped for patrons. */
   diagnostics?: JobDiagnosticsPayload | null;
   diagnosticSummary?: string | null;
+  /** Bottle metadata completeness (Partial / Complete). Distinct from last-run wording. */
+  lastRunLabel?: string | null;
+  stillMissing?: string[];
 };
 
 export type BottleEnrichmentView = {
@@ -427,6 +433,8 @@ function buildJobViews(
 
     let diagnostics: JobDiagnosticsPayload | null = null;
     let diagnosticSummary: string | null = null;
+    let lastRunLabel: string | null = null;
+    let stillMissing: string[] | undefined;
     if (includeDiagnostics && job && (job.status === "completed" || job.status === "failed")) {
       const raw = job.result_json ?? getLatestCompletedJobResult(entityType, entityId, type);
       diagnostics = parseJobDiagnostics(raw);
@@ -443,6 +451,34 @@ function buildJobViews(
       if (!diagnosticSummary && job.status === "failed" && job.last_error) {
         diagnosticSummary = String(job.last_error).slice(0, 200);
       }
+      if (type === "metadata") {
+        const stored = parseMetadataJobResult(raw);
+        const bottleOutcome = metadataOutcomeFromState({ candidate, entityType, entityId });
+        lastRunLabel = metadataLastRunLabel({
+          bottleOutcome,
+          stored,
+          jobFailed: job.status === "failed"
+        });
+        const fieldLabels: Record<string, string> = {
+          category: "Category",
+          abv: "ABV",
+          proof: "Proof",
+          volume_ml: "Volume",
+          origin: "Origin",
+          ttb_id: "TTB ID"
+        };
+        const labelize = (names: string[]) =>
+          names.map((n) => fieldLabels[n] ?? n);
+        stillMissing = labelize(unresolvedMetadataFields(candidate).map(String));
+        // Prefer stored unresolved when present (final-state payload).
+        if (stored?.unresolved?.length) stillMissing = labelize(stored.unresolved.map(String));
+        // Prefer a clearer summary for partial bottles with empty reruns.
+        if (lastRunLabel === "No new data found" && stillMissing.length) {
+          diagnosticSummary = `Last run: No new data found. Still missing: ${stillMissing.join(", ")}`;
+        } else if (lastRunLabel?.startsWith("Updated") && stillMissing.length) {
+          diagnosticSummary = `${lastRunLabel}. Still missing: ${stillMissing.join(", ")}`;
+        }
+      }
     }
 
     const view: JobView = {
@@ -455,6 +491,8 @@ function buildJobViews(
     if (includeDiagnostics) {
       view.diagnostics = diagnostics;
       view.diagnosticSummary = diagnosticSummary;
+      if (lastRunLabel) view.lastRunLabel = lastRunLabel;
+      if (stillMissing?.length) view.stillMissing = stillMissing;
     }
     return view;
   });

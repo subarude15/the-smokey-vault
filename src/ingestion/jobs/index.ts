@@ -130,6 +130,7 @@ export {
 export {
   metadataOutcomeFromState,
   metadataOutcomeToJobStatusLabel,
+  metadataLastRunLabel,
   buildMetadataJobResultPayload,
   rebuildMetadataDiagnosticSummary,
   parseMetadataJobResult,

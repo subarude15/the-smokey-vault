@@ -3,7 +3,7 @@
  * (plus barcode_cache / cola_cache when a UPC is present for fields the shelf table lacks).
  */
 import { getBarcodeCacheEntry, saveBarcodeCacheEntry } from "../../barcode_cache.js";
-import { spiritFamilyFromLabel } from "../../catalog.js";
+import { resolveMonotonicSpiritClassification } from "../../catalog.js";
 import {
   isUsableCanonicalFamily,
   normalizeCanonicalAbv,
@@ -202,6 +202,7 @@ function shouldPersistField(
 /**
  * Persist safely improved metadata onto the inventory row (+ barcode/cola cache when UPC exists).
  * Never writes weaker values over stronger stored data.
+ * Spirit classification specificity is monotonic (Scotch Whisky cannot collapse to Whiskey).
  */
 export function persistMetadataImprovements(options: {
   entityType: EnrichmentEntityType;
@@ -214,6 +215,7 @@ export function persistMetadataImprovements(options: {
   const sets: string[] = [];
   const values: unknown[] = [];
   const inventoryUpdated: string[] = [];
+  const currentRow = loadInventoryRow(entityType, entityId);
 
   for (const name of METADATA_ENRICHMENT_FIELDS) {
     const column = columnMap[name];
@@ -221,9 +223,14 @@ export function persistMetadataImprovements(options: {
     if (!shouldPersistField(before[name] as ProductField<unknown>, after[name] as ProductField<unknown>)) continue;
 
     if (name === "category" && entityType === "spirits") {
-      const mapped = spiritFamilyFromLabel(String(after.category.value ?? ""), "");
+      const desired = resolveMonotonicSpiritClassification({
+        incomingLabel: String(after.category.value ?? ""),
+        existingFamily: String(currentRow?.category ?? ""),
+        existingType: String(currentRow?.sub_category ?? "")
+      });
+      if (!desired.family) continue;
       sets.push("category = ?", "sub_category = ?");
-      values.push(mapped.family, mapped.type);
+      values.push(desired.family, desired.type);
       inventoryUpdated.push("category", "sub_category");
       continue;
     }
@@ -231,6 +238,28 @@ export function persistMetadataImprovements(options: {
     sets.push(`${column} = ?`);
     values.push(after[name].value);
     inventoryUpdated.push(column);
+  }
+
+  // Sync spirit hierarchy when the candidate is more specific than the inventory row,
+  // even if the overlaid candidate field did not "improve" vs before (cache already had Scotch).
+  if (entityType === "spirits" && !isUnresolvedField(after.category)) {
+    const row = currentRow ?? loadInventoryRow(entityType, entityId);
+    const desired = resolveMonotonicSpiritClassification({
+      incomingLabel: String(after.category.value ?? ""),
+      existingFamily: String(row?.category ?? ""),
+      existingType: String(row?.sub_category ?? "")
+    });
+    const rowFamily = String(row?.category ?? "");
+    const rowType = String(row?.sub_category ?? "");
+    if (
+      desired.family
+      && (desired.family !== rowFamily || desired.type !== rowType)
+      && !inventoryUpdated.includes("category")
+    ) {
+      sets.push("category = ?", "sub_category = ?");
+      values.push(desired.family, desired.type);
+      inventoryUpdated.push("category", "sub_category");
+    }
   }
 
   if (sets.length) {
@@ -244,16 +273,28 @@ export function persistMetadataImprovements(options: {
   let cacheUpdated = false;
   const upc = after.upc.value?.trim();
   if (upc && after.name.value) {
+    const desiredClass =
+      entityType === "spirits" && !isUnresolvedField(after.category)
+        ? resolveMonotonicSpiritClassification({
+            incomingLabel: String(after.category.value ?? ""),
+            existingFamily: String(currentRow?.category ?? ""),
+            existingType: String(currentRow?.sub_category ?? "")
+          })
+        : null;
     const cachePatch: Record<string, unknown> = {
       upc,
       name: after.name.value,
       brand: after.brand.value ?? "",
-      category: after.category.value ?? "Other",
+      category: desiredClass?.family || after.category.value || "Other",
+      subcategory: desiredClass?.type || "",
       source: "enrichment"
     };
     let touchCache = false;
     for (const name of METADATA_ENRICHMENT_FIELDS) {
-      if (!shouldPersistField(before[name] as ProductField<unknown>, after[name] as ProductField<unknown>)) continue;
+      if (!shouldPersistField(before[name] as ProductField<unknown>, after[name] as ProductField<unknown>)) {
+        // Still allow classification cache sync when inventory hierarchy was repaired above.
+        if (!(name === "category" && inventoryUpdated.includes("category"))) continue;
+      }
       if (name === "abv") {
         cachePatch.abv = after.abv.value;
         touchCache = true;
@@ -267,21 +308,26 @@ export function persistMetadataImprovements(options: {
         touchCache = true;
       }
       if (name === "category") {
-        const mapped = spiritFamilyFromLabel(String(after.category.value ?? ""), "");
-        cachePatch.category = mapped.family || after.category.value;
+        if (desiredClass?.family) {
+          cachePatch.category = desiredClass.family;
+          cachePatch.subcategory = desiredClass.type;
+        }
         touchCache = true;
       }
       if (name === "origin" || name === "ttb_id") touchCache = true;
     }
+    if (inventoryUpdated.includes("category")) touchCache = true;
     if (touchCache) {
       saveBarcodeCacheEntry(cachePatch as Parameters<typeof saveBarcodeCacheEntry>[0]);
-      if (after.abv.value != null || after.origin.value || after.ttb_id.value || after.volume_ml.value != null) {
+      if (after.abv.value != null || after.origin.value || after.ttb_id.value || after.volume_ml.value != null || inventoryUpdated.includes("category")) {
         saveToCache(
           {
             upc,
             name: String(after.name.value),
             brand: String(after.brand.value ?? ""),
-            category: String(after.category.value ?? "Spirits"),
+            category: String(
+              desiredClass?.type || desiredClass?.family || after.category.value || "Spirits"
+            ),
             abv: after.abv.value,
             image_url: null,
             fill_level_percent: 100,
