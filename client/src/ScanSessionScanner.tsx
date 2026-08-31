@@ -54,7 +54,14 @@ export function ScanSessionScanner({
       cameraGen.current += 1;
       stopCamera();
     };
-  }, [kind, paused, busy, statusHint]);
+    // statusHint is display-only; including it restarts the camera and can loop throws
+    // when the parent flips busy ↔ hint during processUpc.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: kind/paused/busy only
+  }, [kind, paused, busy]);
+
+  useEffect(() => {
+    if (statusHint) setStatus(statusHint);
+  }, [statusHint]);
 
   function stopCamera() {
     controls.current?.stop();
@@ -88,12 +95,23 @@ export function ScanSessionScanner({
       setStatus("Live camera needs HTTPS or localhost. Enter the UPC manually below.");
       return;
     }
+    if (!video.current) {
+      setStatus("Camera view is not ready yet. Enter the UPC manually below.");
+      return;
+    }
     setCameraBlocked(false);
     try {
       const reader = new BrowserMultiFormatReader();
-      const next = await reader.decodeFromVideoDevice(undefined, video.current!, async (result) => {
+      const target = video.current;
+      const next = await reader.decodeFromVideoDevice(undefined, target, async (result) => {
         if (!result || cameraGen.current !== gen || isProcessing.current) return;
-        await processUpc(result.getText());
+        try {
+          await processUpc(result.getText());
+        } catch {
+          // Keep the session alive if a single decode callback rejects.
+          isProcessing.current = false;
+          if (isMounted.current) setStatus("Could not save that scan. Try again.");
+        }
       });
       if (cameraGen.current !== gen) {
         next.stop();

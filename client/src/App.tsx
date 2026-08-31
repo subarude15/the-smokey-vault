@@ -1992,7 +1992,14 @@ function BottleFinder({ module, onClose, onPick }:{
 function ItemForm({ module,item,review,source,close,saved }:{module:Module;item:Item|null;review?:boolean;source?: LookupSource;close:()=>void;saved:()=>void}) {
   const { keeperName } = useHouse();
   const [form,setForm] = useState<Record<string,unknown>>(() => {
-    const defaults = (item ?? (module.id === "spirits"
+    // Inventory list rows include ephemeral vote_* tallies — never seed the editor with them.
+    const raw = { ...(item ?? {}) } as Record<string, unknown>;
+    for (const key of Object.keys(raw)) {
+      if (key.startsWith("vote_")) delete raw[key];
+    }
+    const defaults = (item
+      ? raw
+      : (module.id === "spirits"
       ? { category: "Whiskey", fill_level: 100, stock_count: 1 }
       : module.id === "wines"
         ? { type: "Red", sweetness: defaultSweetnessForWine("Red"), bottle_count: 1, body: 3 }
@@ -2046,6 +2053,11 @@ function ItemForm({ module,item,review,source,close,saved }:{module:Module;item:
       hops: serializeList(hopDraft.trim() ? [...hops, hopDraft.trim()] : hops),
       tags: serializeList(parseTagInput([...tags, tagDraft].join(" ")))
     };
+    for (const key of Object.keys(payload)) {
+      if (key.startsWith("vote_") || key === "id" || key === "created_at" || key === "updated_at") {
+        delete payload[key];
+      }
+    }
     if (module.id === "brews") {
       payload.status = normalizeBrewStatus(payload.status);
       for (const key of ["target_og", "target_fg", "measured_og", "measured_fg"] as const) {
@@ -2108,7 +2120,7 @@ function ItemForm({ module,item,review,source,close,saved }:{module:Module;item:
       return abv != null ? { ...next, calculated_abv: abv } : next;
     });
   }
-  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2>{review && source && source !== "not_found" ? <span className="chip static source-chip">{LOOKUP_SOURCE_LABELS[source]}</span> : null}</div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2>{review && source && source !== "not_found" ? <span className="chip static source-chip">{LOOKUP_SOURCE_LABELS[source] ?? source}</span> : null}</div><button type="button" className="icon-button" onClick={close}><X/></button></header>
     {recovered && <div className="draft-restore">
       <div><strong>Unsaved draft found</strong><span>You left this form part-way through. Restore what you had typed?</span></div>
       <div className="draft-restore-actions">

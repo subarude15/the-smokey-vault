@@ -111,28 +111,53 @@ export function jobTypeDisplay(type: string): string {
   }
 }
 
-function FieldRow({ label, field }: { label: string; field: FieldView }) {
+/** Coerce API / storage values that must never be rendered as raw objects (white-screen). */
+export function textChild(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function FieldRow({ label, field }: { label: string; field: FieldView | null | undefined }) {
+  if (!field) {
+    return (
+      <div className="enrichment-field enrichment-field-missing">
+        <span className="enrichment-field-label">{label}</span>
+        <strong className="enrichment-field-value">—</strong>
+        <div className="enrichment-field-meta">
+          <span className="chip static miss-chip">Missing</span>
+        </div>
+      </div>
+    );
+  }
   const value =
     field.value == null || field.value === ""
       ? "—"
       : typeof field.value === "number"
         ? String(field.value)
-        : String(field.value);
+        : textChild(field.value);
   const title =
     field.confidence != null
-      ? `${field.sourceLabel ?? "Unknown"} · ${field.confidenceLabel} (${field.confidence})`
+      ? `${field.sourceLabel ?? "Unknown"} · ${field.confidenceLabel ?? "Unknown"} (${field.confidence})`
       : undefined;
   return (
-    <div className={`enrichment-field enrichment-field-${field.status}`} title={title}>
+    <div className={`enrichment-field enrichment-field-${field.status ?? "missing"}`} title={title}>
       <span className="enrichment-field-label">{label}</span>
       <strong className="enrichment-field-value">{value}</strong>
       <div className="enrichment-field-meta">
-        {field.status === "missing" ? (
+        {field.status === "missing" || !field.status ? (
           <span className="chip static miss-chip">Missing</span>
         ) : (
           <>
             {field.sourceLabel ? <span className="chip static">{field.sourceLabel}</span> : null}
-            <span className={`chip static enrichment-band-${field.confidenceBand}`}>{field.confidenceLabel}</span>
+            <span className={`chip static enrichment-band-${field.confidenceBand ?? "none"}`}>
+              {field.confidenceLabel ?? "Unknown"}
+            </span>
             {field.status === "review" ? <span className="chip static miss-chip">Review</span> : null}
             {field.status === "low_confidence" ? <span className="chip static miss-chip">Low confidence</span> : null}
           </>
@@ -167,7 +192,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           clearInterval(timer);
           timer = null;
         }
-        if (shouldPollEnrichment(next.enrichment.jobs)) {
+        if (shouldPollEnrichment(next.enrichment?.jobs)) {
           timer = setInterval(() => {
             void load();
           }, ENRICHMENT_POLL_MS);
@@ -208,7 +233,32 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
 
   if (!view) return null;
 
-  const polling = shouldPollEnrichment(view.enrichment.jobs);
+  const enrichment = view.enrichment ?? { identified: false, needsReview: false, missing: [], jobs: [], conflicts: [] };
+  const jobs = Array.isArray(enrichment.jobs) ? enrichment.jobs : [];
+  const missing = Array.isArray(enrichment.missing) ? enrichment.missing : [];
+  const conflicts = Array.isArray(enrichment.conflicts) ? enrichment.conflicts : [];
+  const identity = view.identity ?? ({} as BottleEnrichmentView["identity"]);
+  const metadata = view.metadata ?? ({} as BottleEnrichmentView["metadata"]);
+  const tastingNotes = view.tastingNotes ?? {
+    official: null,
+    sourceUrl: null,
+    sourceType: null,
+    houseProfile: null,
+    personal: null
+  };
+  const image = view.image ?? {
+    displayUrl: null,
+    enrichedUrl: null,
+    sourceType: null,
+    sourceUrl: null,
+    score: null,
+    verified: null,
+    userPreferred: false
+  };
+  const houseProfileText = textChild(tastingNotes.houseProfile).trim();
+  const officialText = textChild(tastingNotes.official).trim();
+  const personalText = textChild(tastingNotes.personal).trim();
+  const polling = shouldPollEnrichment(jobs);
 
   return (
     <section className="enrichment-panel">
@@ -220,7 +270,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         {polling ? <span className="guest-badge">Updating…</span> : null}
       </div>
 
-      {view.enrichment.needsReview ? (
+      {enrichment.needsReview ? (
         <div className="enrichment-review-banner" role="status">
           <strong>Needs review</strong>
           <p>Trusted sources disagree on identity. Kept values are shown; competing values are listed below. Editing is not available here yet.</p>
@@ -228,7 +278,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       ) : null}
 
       <div className="enrichment-jobs">
-        {view.enrichment.jobs.map((job) => (
+        {jobs.map((job) => (
           <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
             <span>{jobTypeDisplay(job.type)}</span>
             <strong>{jobStatusDisplay(job.statusLabel)}</strong>
@@ -239,45 +289,45 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         ))}
       </div>
 
-      {view.enrichment.missing.length ? (
+      {missing.length ? (
         <p className="enrichment-missing">
           <span className="eyebrow">Still missing</span>
-          {view.enrichment.missing.join(", ")}
+          {missing.join(", ")}
         </p>
       ) : null}
 
       <div className="enrichment-section">
         <span className="eyebrow">Identity</span>
         <div className="enrichment-field-grid">
-          <FieldRow label="Name" field={view.identity.name} />
-          <FieldRow label="Brand" field={view.identity.brand} />
-          <FieldRow label="Product type" field={view.identity.productType} />
-          <FieldRow label="UPC" field={view.identity.upc} />
+          <FieldRow label="Name" field={identity.name} />
+          <FieldRow label="Brand" field={identity.brand} />
+          <FieldRow label="Product type" field={identity.productType} />
+          <FieldRow label="UPC" field={identity.upc} />
         </div>
       </div>
 
       <div className="enrichment-section">
         <span className="eyebrow">Product facts</span>
         <div className="enrichment-field-grid">
-          <FieldRow label="Category" field={view.metadata.category} />
-          <FieldRow label="ABV" field={view.metadata.abv} />
-          <FieldRow label="Proof" field={view.metadata.proof} />
-          <FieldRow label="Volume (ml)" field={view.metadata.volumeMl} />
-          <FieldRow label="Origin" field={view.metadata.origin} />
-          <FieldRow label="TTB ID" field={view.metadata.ttbId} />
+          <FieldRow label="Category" field={metadata.category} />
+          <FieldRow label="ABV" field={metadata.abv} />
+          <FieldRow label="Proof" field={metadata.proof} />
+          <FieldRow label="Volume (ml)" field={metadata.volumeMl} />
+          <FieldRow label="Origin" field={metadata.origin} />
+          <FieldRow label="TTB ID" field={metadata.ttbId} />
         </div>
       </div>
 
-      {view.enrichment.conflicts.length ? (
+      {conflicts.length ? (
         <div className="enrichment-section">
           <span className="eyebrow">Conflicts</span>
           <div className="enrichment-conflicts">
-            {view.enrichment.conflicts.map((c) => (
+            {conflicts.map((c) => (
               <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
                 <strong>{c.field}</strong>
                 <p>
-                  Kept <em>{String(c.keptValue ?? "—")}</em> ({c.keptSourceLabel}) vs{" "}
-                  <em>{String(c.competingValue ?? "—")}</em> ({c.competingSourceLabel})
+                  Kept <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
+                  <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
                 </p>
               </div>
             ))}
@@ -289,15 +339,15 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         <span className="eyebrow">Tasting notes</span>
         <div className="enrichment-note-card">
           <h3>Official notes</h3>
-          {view.tastingNotes.official ? (
+          {officialText ? (
             <>
-              <p>{view.tastingNotes.official}</p>
+              <p>{officialText}</p>
               <div className="enrichment-field-meta">
-                {view.tastingNotes.sourceType ? (
-                  <span className="chip static">{view.tastingNotes.sourceType}</span>
+                {tastingNotes.sourceType ? (
+                  <span className="chip static">{textChild(tastingNotes.sourceType)}</span>
                 ) : null}
-                {view.tastingNotes.sourceUrl ? (
-                  <a className="enrichment-link" href={view.tastingNotes.sourceUrl} target="_blank" rel="noreferrer">
+                {tastingNotes.sourceUrl ? (
+                  <a className="enrichment-link" href={String(tastingNotes.sourceUrl)} target="_blank" rel="noreferrer">
                     Source
                   </a>
                 ) : null}
@@ -310,16 +360,16 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         <div className="enrichment-note-card enrichment-note-house">
           <h3>AI house profile</h3>
           <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
-          {view.tastingNotes.houseProfile ? (
-            <p className="enrichment-house-body">{view.tastingNotes.houseProfile}</p>
+          {houseProfileText ? (
+            <p className="enrichment-house-body">{houseProfileText}</p>
           ) : (
             <p className="muted">No house profile yet.</p>
           )}
         </div>
-        {view.tastingNotes.personal ? (
+        {personalText ? (
           <div className="enrichment-note-card">
             <h3>Personal notes</h3>
-            <p>{view.tastingNotes.personal}</p>
+            <p>{personalText}</p>
           </div>
         ) : null}
       </div>
@@ -328,33 +378,33 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         <span className="eyebrow">Product image</span>
         <div className="enrichment-image-row">
           <div className="enrichment-image-frame">
-            {view.image.displayUrl ? (
-              <img src={view.image.displayUrl} alt="" />
+            {image.displayUrl ? (
+              <img src={String(image.displayUrl)} alt="" />
             ) : (
               <span className="muted">No image</span>
             )}
           </div>
           <div className="enrichment-image-meta">
-            {view.image.userPreferred ? (
+            {image.userPreferred ? (
               <span className="chip static">User / shelf image preferred</span>
             ) : null}
-            {view.image.sourceType ? (
-              <span className="chip static">{view.image.sourceType}</span>
+            {image.sourceType ? (
+              <span className="chip static">{textChild(image.sourceType)}</span>
             ) : null}
-            {view.image.verified != null ? (
-              <span className="chip static">{view.image.verified ? "Verified" : "Unverified"}</span>
+            {image.verified != null ? (
+              <span className="chip static">{image.verified ? "Verified" : "Unverified"}</span>
             ) : null}
-            {view.image.score != null ? (
+            {image.score != null ? (
               <span className="chip static" title="Deterministic acceptance score">
-                Score {Math.round(view.image.score)}
+                Score {Math.round(Number(image.score))}
               </span>
             ) : null}
-            {view.image.sourceUrl ? (
-              <a className="enrichment-link" href={view.image.sourceUrl} target="_blank" rel="noreferrer">
+            {image.sourceUrl ? (
+              <a className="enrichment-link" href={String(image.sourceUrl)} target="_blank" rel="noreferrer">
                 Image source
               </a>
             ) : null}
-            {!view.image.displayUrl && !view.image.enrichedUrl ? (
+            {!image.displayUrl && !image.enrichedUrl ? (
               <p className="muted">No enriched image selected.</p>
             ) : null}
           </div>

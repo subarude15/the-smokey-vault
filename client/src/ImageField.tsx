@@ -17,10 +17,11 @@ function firstImageFile(list?: FileList | null) {
 }
 
 export function ImageField({ value, onChange }: { value: string; onChange: (url: string) => void }) {
+  const safeValue = typeof value === "string" ? value : value == null ? "" : String(value);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [showUrl, setShowUrl] = useState(Boolean(value) && !value.startsWith("/api/media/images/"));
+  const [showUrl, setShowUrl] = useState(Boolean(safeValue) && !safeValue.startsWith("/api/media/images/"));
   const wellRef = useRef<HTMLDivElement>(null);
 
   async function uploadFile(file: File) {
@@ -92,11 +93,11 @@ export function ImageField({ value, onChange }: { value: string; onChange: (url:
 
   return (
     <div className="image-field">
-      {value ? (
+      {safeValue ? (
         <div className="image-field-preview">
           {/* Tapping the photo itself is the fastest way to retake it behind the bar. */}
           <label className="image-field-retake">
-            <img src={value} alt="Bottle photo"/>
+            <img src={safeValue} alt="Bottle photo"/>
             <span className="image-field-retake-hint"><Camera size={15}/> Tap the photo to retake</span>
             <input type="file" accept="image/*" capture="environment" aria-label="Retake bottle photo" onChange={(event) => {
               const file = event.target.files?.[0];
@@ -157,7 +158,7 @@ export function ImageField({ value, onChange }: { value: string; onChange: (url:
       {showUrl ? (
         <input
           type="url"
-          value={value}
+          value={safeValue}
           placeholder="https://…"
           onChange={(event) => onChange(event.target.value)}
         />
