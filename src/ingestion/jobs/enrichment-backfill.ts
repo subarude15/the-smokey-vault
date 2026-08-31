@@ -29,12 +29,13 @@ import {
 export type EnrichmentBackfillPreview = {
   scanned: number;
   eligible: number;
-  /** Schedulable missing metadata. */
+  /** Schedulable missing metadata (includes completed-with-gaps for admin rerun). */
   metadata: number;
   /** Schedulable missing tasting notes. */
   tastingNotes: number;
   /** Schedulable missing product images. */
   images: number;
+  noResultMetadata: number;
   noResultTastingNotes: number;
   noResultImages: number;
   failedEnrichment: number;
@@ -67,6 +68,7 @@ type BottleEligibility = {
   metadata: boolean;
   tastingNotes: boolean;
   images: boolean;
+  noResultMetadata: boolean;
   noResultTastingNotes: boolean;
   noResultImages: boolean;
   failed: boolean;
@@ -93,6 +95,7 @@ function evaluateBottleEligibility(
       metadata: false,
       tastingNotes: false,
       images: false,
+      noResultMetadata: false,
       noResultTastingNotes: false,
       noResultImages: false,
       failed: false,
@@ -104,6 +107,7 @@ function evaluateBottleEligibility(
       metadata: false,
       tastingNotes: false,
       images: false,
+      noResultMetadata: false,
       noResultTastingNotes: false,
       noResultImages: false,
       failed: false,
@@ -115,8 +119,10 @@ function evaluateBottleEligibility(
   const tasteAvail = tastingNotesEnrichmentAvailability({ entityType, entityId });
   const imageAvail = imageEnrichmentAvailability({ entityType, entityId, row });
 
+  // Admin backfill uses force so completed-with-gaps metadata is requeue-eligible.
+  // Ordinary save/ensure keeps one-shot (force=false) to avoid endless auto-retries.
   const metadata =
-    shouldScheduleMetadataEnrichment({ candidate, entityType, entityId }) &&
+    shouldScheduleMetadataEnrichment({ candidate, entityType, entityId, force: true }) &&
     !hasActiveEnrichmentJob(entityType, entityId, "metadata");
   const tastingNotes =
     shouldScheduleTastingNotesEnrichment({ entityType, entityId }) &&
@@ -139,10 +145,13 @@ function evaluateBottleEligibility(
       images: false,
       noResultTastingNotes: false,
       noResultImages: false,
+      noResultMetadata: false,
       failed: false,
       skipReason: "complete"
     };
   }
+
+  const noResultMetadata = metaAvail === "no_result" || metaAvail === "partial";
 
   if (!metadata && !tastingNotes && !images) {
     return {
@@ -151,6 +160,7 @@ function evaluateBottleEligibility(
       images: false,
       noResultTastingNotes: tasteAvail === "no_result",
       noResultImages: imageAvail === "no_result",
+      noResultMetadata,
       failed:
         metaAvail === "failed" || tasteAvail === "failed" || imageAvail === "failed",
       skipReason: "not_schedulable"
@@ -163,6 +173,7 @@ function evaluateBottleEligibility(
     images,
     noResultTastingNotes: tasteAvail === "no_result",
     noResultImages: imageAvail === "no_result",
+    noResultMetadata,
     failed: metaAvail === "failed" || tasteAvail === "failed" || imageAvail === "failed",
     skipReason: "none"
   };
@@ -186,6 +197,7 @@ export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
     metadata: 0,
     tastingNotes: 0,
     images: 0,
+    noResultMetadata: 0,
     noResultTastingNotes: 0,
     noResultImages: 0,
     failedEnrichment: 0,
@@ -213,6 +225,7 @@ export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
     preview.metadata += eligibility.metadata ? 1 : 0;
     preview.tastingNotes += eligibility.tastingNotes ? 1 : 0;
     preview.images += eligibility.images ? 1 : 0;
+    preview.noResultMetadata += eligibility.noResultMetadata ? 1 : 0;
     preview.noResultTastingNotes += eligibility.noResultTastingNotes ? 1 : 0;
     preview.noResultImages += eligibility.noResultImages ? 1 : 0;
     preview.failedEnrichment += eligibility.failed ? 1 : 0;
@@ -261,7 +274,8 @@ export function queueEnrichmentBackfill(options?: {
           entityType,
           entityId,
           row,
-          planOptions
+          planOptions,
+          force: true
         });
         if (enqueue.enqueued && enqueue.created) {
           result.queued.metadata += 1;

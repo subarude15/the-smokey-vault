@@ -3,7 +3,16 @@
  * Identity context is immutable; the model must not return identity keys.
  */
 import type { BottleCandidate } from "../candidate/types.js";
-import type { MetadataEnrichmentField } from "./metadata-fields.js";
+import {
+  METADATA_STRING_FIELDS,
+  type MetadataEnrichmentField
+} from "./metadata-fields.js";
+import {
+  normalizeCanonicalAbv,
+  normalizeCanonicalProof,
+  normalizeCanonicalTaxonomy,
+  normalizeCanonicalVolumeMl
+} from "../../canonical-normalize.js";
 
 const LOCAL_OLLAMA_CHAT_URL = "http://192.168.1.184:11434/api/chat";
 
@@ -32,7 +41,7 @@ function identityContext(candidate: BottleCandidate): Record<string, string | nu
 function buildFormat(fields: MetadataEnrichmentField[]) {
   const properties: Record<string, unknown> = {};
   for (const name of fields) {
-    if (name === "origin" || name === "ttb_id") {
+    if (METADATA_STRING_FIELDS.has(name)) {
       properties[name] = { type: ["string", "null"] };
     } else {
       properties[name] = { type: ["number", "null"] };
@@ -55,8 +64,14 @@ Known identity (immutable — do NOT change, invent, or return these keys):
 ${JSON.stringify(known, null, 2)}
 
 Return ONLY JSON with these keys (null if unknown/unverifiable): ${missing.join(", ")}
-Do not include name, brand, upc, product_type, category, or any other keys.
-Do not guess. Prefer null over invented values.
+Rules:
+- Do not include name, brand, upc, product_type, or any other keys.
+- Do not guess. Prefer null over invented values.
+- category: alcohol family/type label when evidence supports it (e.g. Whiskey, Scotch Whisky, Bourbon, Gin). Never use grocery taxonomy like Food or Beverages.
+- Do not invent Scotch from brand fame alone — only when snippets explicitly say Scotch / Scotch Whisky.
+- abv: percent alcohol by volume as a number; never invent.
+- proof: US proof if stated; otherwise null (caller may derive from ABV).
+- Prefer producer/distillery official, regulatory/government, or importer sources over retailer blogs.
 
 Web snippets:
 ${request.webSnippets.slice(0, 24_000)}`;
@@ -79,9 +94,31 @@ function parseExtracted(
       out[name] = null;
       continue;
     }
+    if (name === "category") {
+      const text = String(value).trim();
+      if (!text) {
+        out[name] = null;
+        continue;
+      }
+      const tax = normalizeCanonicalTaxonomy(text, "");
+      out[name] = tax.type || tax.family || null;
+      continue;
+    }
     if (name === "origin" || name === "ttb_id") {
       const text = String(value).trim();
       out[name] = text || null;
+      continue;
+    }
+    if (name === "abv") {
+      out[name] = normalizeCanonicalAbv(value);
+      continue;
+    }
+    if (name === "proof") {
+      out[name] = normalizeCanonicalProof(value);
+      continue;
+    }
+    if (name === "volume_ml") {
+      out[name] = normalizeCanonicalVolumeMl(value);
       continue;
     }
     const n = typeof value === "number" ? value : Number.parseFloat(String(value));

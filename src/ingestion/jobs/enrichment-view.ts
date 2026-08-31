@@ -26,6 +26,10 @@ import { planEnrichment } from "../enrichment/index.js";
 import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import { candidateFromInventoryRow, loadInventoryRow } from "./inventory.js";
+import {
+  metadataOutcomeFromState,
+  metadataOutcomeToJobStatusLabel
+} from "./metadata-outcome.js";
 import { getProductContent, readPersonalNotes } from "./product-content.js";
 import { getProductImage, inventoryHasUserImage } from "./product-images.js";
 import { listJobsForEntity } from "./store.js";
@@ -62,7 +66,7 @@ export type ConflictView = {
   competingSourceLabel: string;
 };
 
-export type JobStatusLabel = "complete" | "in_progress" | "waiting" | "no_result" | "failed" | "not_started";
+export type JobStatusLabel = "complete" | "partial" | "in_progress" | "waiting" | "no_result" | "failed" | "not_started";
 
 export type JobView = {
   type: EnrichmentJobType | string;
@@ -209,16 +213,18 @@ export function fieldViewFromProductField<T>(
 /**
  * Map job row → user-facing status.
  * Completed with no useful result is "no_result", not failure.
+ * Metadata may also be "partial" when some fields updated but gaps remain.
  */
 export function jobStatusLabel(
   job: EnrichmentJob | null,
-  options: { hasResult?: boolean } = {}
+  options: { hasResult?: boolean; partial?: boolean } = {}
 ): JobStatusLabel {
   if (!job) return "not_started";
   if (job.status === "pending") return "waiting";
   if (job.status === "running") return "in_progress";
   if (job.status === "failed") return "failed";
   if (job.status === "completed") {
+    if (options.partial) return "partial";
     if (options.hasResult === false) return "no_result";
     return "complete";
   }
@@ -342,6 +348,7 @@ function missingRecommendedLabels(candidate: BottleCandidate): string[] {
 function buildJobViews(
   entityType: EnrichmentEntityType,
   entityId: number,
+  candidate: BottleCandidate,
   content: ReturnType<typeof getProductContent>,
   image: ReturnType<typeof getProductImage>
 ): JobView[] {
@@ -350,19 +357,35 @@ function buildJobViews(
 
   return ENRICHMENT_JOB_TYPES.map((type) => {
     const job = byType.get(type) ?? null;
-    let hasResult: boolean | undefined;
-    if (type === "tasting_notes") {
-      hasResult = Boolean(content?.official_tasting_notes || content?.house_tasting_profile);
-    } else if (type === "image") {
-      hasResult = Boolean(image?.url && image.verified);
-    } else if (type === "metadata") {
-      // Metadata "result" = completed job; gaps may remain without counting as no_result.
-      hasResult = job?.status === "completed" ? true : undefined;
+    let statusLabel: JobStatusLabel;
+    if (type === "metadata") {
+      const outcome = metadataOutcomeFromState({ candidate, entityType, entityId });
+      if (!job) {
+        statusLabel = outcome === "missing" ? "not_started" : metadataOutcomeToJobStatusLabel(outcome);
+      } else if (job.status === "pending") {
+        statusLabel = "waiting";
+      } else if (job.status === "running") {
+        statusLabel = "in_progress";
+      } else if (job.status === "failed") {
+        statusLabel = "failed";
+      } else {
+        // completed — use outcome derived from actual gaps / progress, never assume success.
+        statusLabel = metadataOutcomeToJobStatusLabel(outcome);
+        if (statusLabel === "not_started") statusLabel = "no_result";
+      }
+    } else {
+      let hasResult: boolean | undefined;
+      if (type === "tasting_notes") {
+        hasResult = Boolean(content?.official_tasting_notes || content?.house_tasting_profile);
+      } else if (type === "image") {
+        hasResult = Boolean(image?.url && image.verified);
+      }
+      statusLabel = jobStatusLabel(job, { hasResult });
     }
     return {
       type,
       status: job?.status ?? "absent",
-      statusLabel: jobStatusLabel(job, { hasResult }),
+      statusLabel,
       attempts: job?.attempts ?? 0,
       lastError: job?.last_error ?? null
     };
@@ -417,7 +440,7 @@ export function buildBottleEnrichmentView(options: {
       identified: plan.identified,
       needsReview: plan.needsReview,
       missing: missingRecommendedLabels(candidate),
-      jobs: buildJobViews(entityType, options.entityId, content, image),
+      jobs: buildJobViews(entityType, options.entityId, candidate, content, image),
       conflicts: conflictViews(plan.reviewConflicts)
     },
     tastingNotes: {

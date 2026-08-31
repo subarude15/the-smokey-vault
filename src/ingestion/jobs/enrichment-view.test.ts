@@ -135,6 +135,7 @@ test("jobStatusLabel maps job + content state to friendly labels", () => {
   assert.equal(jobStatusLabel(null), "not_started");
   assert.equal(jobStatusLabel(jobStub("completed"), { hasResult: false }), "no_result");
   assert.equal(jobStatusLabel(jobStub("completed"), { hasResult: true }), "complete");
+  assert.equal(jobStatusLabel(jobStub("completed"), { partial: true }), "partial");
   assert.equal(jobStatusLabel(jobStub("completed")), "complete");
 });
 
@@ -207,7 +208,10 @@ test("buildBottleEnrichmentView returns combined inventory and enrichment state"
   assert.equal(view!.image.verified, true);
   assert.equal(view!.image.userPreferred, false);
   assert.equal(view!.enrichment.jobs.length, 3);
-  assert.ok(view!.enrichment.jobs.every((j) => j.statusLabel === "complete"));
+  assert.equal(view!.enrichment.jobs.find((j) => j.type === "tasting_notes")?.statusLabel, "complete");
+  assert.equal(view!.enrichment.jobs.find((j) => j.type === "image")?.statusLabel, "complete");
+  // Completed metadata job alone is not Complete when recommended gaps (origin/ttb/proof) remain.
+  assert.notEqual(view!.enrichment.jobs.find((j) => j.type === "metadata")?.statusLabel, "complete");
   cleanup();
 });
 

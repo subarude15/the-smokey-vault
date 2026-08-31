@@ -1,8 +1,12 @@
 /**
  * Recommended metadata fields handled by the first enrichment executor.
  * Identity + optional content (tasting_notes, image) are intentionally excluded.
+ *
+ * category is the alcohol classification label (Whiskey, Scotch Whisky, Bourbon, …).
+ * On spirits persist it splits into inventory category (family) + sub_category (type).
  */
 export const METADATA_ENRICHMENT_FIELDS = [
+  "category",
   "abv",
   "proof",
   "volume_ml",
@@ -24,3 +28,10 @@ export function proofFromAbv(abv: number): number {
 export function abvFromProof(proof: number): number {
   return Math.round((proof / 2) * 10) / 10;
 }
+
+/** String-valued metadata fields (classification + text facts). */
+export const METADATA_STRING_FIELDS = new Set<MetadataEnrichmentField>([
+  "category",
+  "origin",
+  "ttb_id"
+]);
