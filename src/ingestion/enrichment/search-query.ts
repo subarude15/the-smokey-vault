@@ -131,11 +131,22 @@ export function extractSearchTokens(input: SearchIdentityInput): {
     .map((t) => t.trim())
     .filter(Boolean)
     .filter((t) => !RETRIEVAL_NOISE.has(t.toLowerCase()))
-    .filter((t) => !/^\d+(?:\.\d+)?(?:ml|l|oz)?$/i.test(t));
+    // Drop package sizes (750ml, 1L) but KEEP age numerals (12, 14, 18).
+    .filter((t) => !/^\d+(?:\.\d+)?(?:ml|l|oz)$/i.test(t))
+    .filter((t) => {
+      if (!/^\d+$/.test(t)) return true;
+      const n = Number(t);
+      // Age / expression numbers typically 1–100; larger bare ints are noise.
+      return n >= 1 && n <= 100;
+    });
 
   const productTokens: string[] = [];
   const productTokensWithAliases: string[] = [];
+  let sawAgeNumeral: string | null = null;
   for (const tok of rawTokens) {
+    if (/^\d+$/.test(tok) && Number(tok) >= 1 && Number(tok) <= 100) {
+      sawAgeNumeral = tok;
+    }
     const aliases = searchAliasesForToken(tok);
     // Prefer aliased expansion for primary tokens when Yr → Year etc.
     const preferred =
@@ -153,6 +164,14 @@ export function extractSearchTokens(input: SearchIdentityInput): {
       if (!productTokensWithAliases.some((p) => normalizeCompare(p) === normalizeCompare(a))) {
         productTokensWithAliases.push(a);
       }
+    }
+  }
+
+  // Search-only age variants: "14 Year" ↔ "14 Year Old" (never mutates storage).
+  if (sawAgeNumeral) {
+    const yearOld = `${sawAgeNumeral} Year Old`;
+    if (!productTokensWithAliases.some((p) => normalizeCompare(p) === normalizeCompare(yearOld))) {
+      productTokensWithAliases.push("Year", "Old");
     }
   }
 

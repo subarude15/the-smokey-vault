@@ -53,8 +53,11 @@ import {
   summarizeImageCandidateDiagnostics
 } from "./image-candidate-diagnostics.js";
 import {
+  buildOfficialProductPageBroadQueries,
   buildOfficialProductPageQueries,
+  discoverOfficialProductUrlsFromSite,
   extractExpressionTokensFromHits,
+  filterHitsByOfficialRegisteredDomain,
   hasOfficialProductDetailHit,
   hostIsUnderOfficialDomain,
   safeOfficialPageDisplay,
@@ -511,18 +514,30 @@ export async function executeImageEnrichment(
       }
     }
 
-    // Step B: site-scoped product-page search within discovered official domains.
+    // Step B: official product-page discovery.
+    // site: queries are optional — many SearXNG configs return zero for them.
+    // Always follow with broad search + code-side registered-domain filtering.
+    let expansionTokens = extractExpressionTokensFromHits(allHits, identity);
+    if (expansionTokens.length) {
+      stages.push({
+        stage: "official_product_search_learned",
+        status: "ok",
+        reason: `learned token: ${expansionTokens.join(", ")}`.slice(0, 160),
+        candidateCount: expansionTokens.length
+      });
+    }
+
+    // Optional site:-scoped tier (kept for engines that support it).
     if (discoveredDomains.length) {
-      const expansionTokens = extractExpressionTokensFromHits(allHits, identity);
-      const productQueries = buildOfficialProductPageQueries(
+      const siteQueries = buildOfficialProductPageQueries(
         identity,
         discoveredDomains,
         expansionTokens
       );
-      let productSearchHits = 0;
-      for (const pq of productQueries) {
+      let siteHitCount = 0;
+      for (const pq of siteQueries) {
         const hits = await searchWeb(pq.query, 5);
-        productSearchHits += hits.length;
+        siteHitCount += hits.length;
         for (const hit of hits) {
           if (!hit.url || seenHit.has(hit.url)) continue;
           seenHit.add(hit.url);
@@ -534,18 +549,114 @@ export async function executeImageEnrichment(
           query: pq.query,
           provider: "searxng",
           candidateCount: hits.length,
-          reason: `domain:${pq.domain};${pq.label}${expansionTokens.length ? `;expand:${expansionTokens.join("+")}` : ""}`.slice(0, 160)
+          reason: `domain:${pq.domain};${pq.label}`.slice(0, 160)
         });
       }
-      if (!productQueries.length) {
+      if (!siteQueries.length) {
         stages.push({
           stage: "official_product_search",
           status: "skipped",
           reason: "no_product_queries",
           candidateCount: 0
         });
-      } else if (productSearchHits === 0) {
-        // Keep a summary row when all queries were empty (already logged per query).
+      } else if (siteHitCount === 0) {
+        stages.push({
+          stage: "official_product_search",
+          status: "no_result",
+          reason: "site_queries_empty_continuing_broad",
+          candidateCount: 0
+        });
+      }
+    }
+
+    // Broad fallback (does not use site:). Filter results by registered domain in code.
+    const needBroad =
+      !discoveredDomains.length
+      || !hasOfficialProductDetailHit(allHits, discoveredDomains, identity);
+    if (needBroad) {
+      const broadQueries = buildOfficialProductPageBroadQueries(identity, expansionTokens);
+      let broadRawCount = 0;
+      for (const bq of broadQueries) {
+        const hits = await searchWeb(bq.query, 8);
+        broadRawCount += hits.length;
+        stages.push({
+          stage: "official_product_search_broad",
+          status: hits.length ? "ok" : "no_result",
+          query: bq.query,
+          provider: "searxng",
+          candidateCount: hits.length,
+          reason: bq.label
+        });
+        for (const hit of hits) {
+          if (!hit.url || seenHit.has(hit.url)) continue;
+          seenHit.add(hit.url);
+          allHits.push(hit);
+        }
+      }
+
+      // Discover domains from broad hits when still unknown.
+      if (!discoveredDomains.length) {
+        const discovery = discoverOfficialDomains(allHits, {
+          brand: candidate.brand.value,
+          name: candidate.name.value
+        });
+        if (discovery.domains.length) {
+          discoveredDomains = discovery.domains;
+          stages.push({
+            stage: "official_domain_discovered",
+            status: "ok",
+            reason: discovery.domains.join(",").slice(0, 160),
+            sourceUrls: discovery.sourceUrls
+          });
+        }
+      }
+
+      // Re-learn expression tokens from richer SERP (e.g. Cask), then one expanded broad query.
+      const learnedMore = extractExpressionTokensFromHits(allHits, identity);
+      const newLearned = learnedMore.filter(
+        (t) => !expansionTokens.some((e) => e.toLowerCase() === t.toLowerCase())
+      );
+      if (newLearned.length) {
+        expansionTokens = [...expansionTokens, ...newLearned].slice(0, 3);
+        stages.push({
+          stage: "official_product_search_learned",
+          status: "ok",
+          reason: `learned token: ${expansionTokens.join(", ")}`.slice(0, 160),
+          candidateCount: expansionTokens.length
+        });
+        const followUps = buildOfficialProductPageBroadQueries(identity, expansionTokens).filter(
+          (q) => q.label.includes("expanded")
+        );
+        for (const fq of followUps.slice(0, 1)) {
+          const hits = await searchWeb(fq.query, 8);
+          broadRawCount += hits.length;
+          stages.push({
+            stage: "official_product_search_broad",
+            status: hits.length ? "ok" : "no_result",
+            query: fq.query,
+            provider: "searxng",
+            candidateCount: hits.length,
+            reason: `${fq.label};followup`
+          });
+          for (const hit of hits) {
+            if (!hit.url || seenHit.has(hit.url)) continue;
+            seenHit.add(hit.url);
+            allHits.push(hit);
+          }
+        }
+      }
+
+      if (discoveredDomains.length) {
+        const filtered = filterHitsByOfficialRegisteredDomain(allHits, discoveredDomains);
+        stages.push({
+          stage: "official_domain_filter",
+          status: filtered.length ? "ok" : "no_result",
+          candidateCount: Math.max(broadRawCount, allHits.length),
+          acceptedCount: filtered.length,
+          reason: filtered.length
+            ? `${filtered.length} official-domain results`
+            : "0 domain-filtered results"
+        });
       }
     }
 
@@ -558,10 +669,51 @@ export async function executeImageEnrichment(
       selectedOfficialProductPageUrl = null;
     }
 
-    const ranked = selectBestOfficialProductPage(allHits, identity, {
+    let ranked = selectBestOfficialProductPage(allHits, identity, {
       discoveredOfficialDomains: discoveredDomains,
       minScore: 40
     });
+
+    // Bounded sitemap / homepage-link discovery when search still lacks a product page.
+    if (!ranked && discoveredDomains.length) {
+      const knownHosts: string[] = [];
+      for (const hit of allHits) {
+        try {
+          const h = new URL(hit.url).hostname.toLowerCase();
+          if (hostIsUnderOfficialDomain(h, discoveredDomains)) knownHosts.push(h);
+        } catch {
+          /* skip */
+        }
+      }
+      const sitemap = await discoverOfficialProductUrlsFromSite({
+        trustedDomains: discoveredDomains,
+        knownHosts,
+        identity,
+        fetchText: fetchHtml
+      });
+      stages.push({
+        stage: "official_sitemap_discovery",
+        status: sitemap.urls.length ? "ok" : "no_result",
+        candidateCount: sitemap.urls.length,
+        acceptedCount: sitemap.urls.length ? 1 : 0,
+        reason: `${sitemap.reason};hosts:${sitemap.hostsTried.join(",")}`.slice(0, 160),
+        sourceUrls: sitemap.urls.slice(0, 4).map((u) => u.url)
+      });
+      for (const hit of sitemap.urls) {
+        if (!hit.url || seenHit.has(hit.url)) continue;
+        seenHit.add(hit.url);
+        allHits.push({
+          url: hit.url,
+          title: hit.title ?? "",
+          content: hit.content ?? ""
+        });
+      }
+      ranked = selectBestOfficialProductPage(allHits, identity, {
+        discoveredOfficialDomains: discoveredDomains,
+        minScore: 40
+      });
+    }
+
     if (ranked) {
       selectedOfficialProductPageUrl = ranked.hit.url;
       stages.push({
@@ -584,7 +736,7 @@ export async function executeImageEnrichment(
         stage: "official_product_page_selected",
         status: "no_result",
         reason: discoveredDomains.length
-          ? "no_product_detail_page_ranked"
+          ? "official_domain_known_but_no_product_page"
           : "no_official_domain",
         candidateCount: allHits.length
       });
