@@ -168,9 +168,9 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
 }
 
 /**
- * Read-only enrichment / review panel for patrons and keepers.
+ * Read-only enrichment / review panel for keepers only.
+ * Patrons see BottlePublicContent instead — useful notes without plumbing.
  * Does not offer conflict resolution, re-runs, or content edits.
- * Patron reviews and gallery uploads remain separate community flows.
  */
 export function EnrichmentPanel({ table, itemId }: { table: string; itemId: number }) {
   const [view, setView] = useState<BottleEnrichmentView | null>(null);
