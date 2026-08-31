@@ -2,7 +2,12 @@
  * Image source classification for product-image enrichment.
  * Reuses retailer/UGC denylists aligned with tasting-note sourcing.
  */
-import { classifySourceUrl, type SourceClass } from "./tasting-notes-sources.js";
+/**
+ * Image source classification for product-image enrichment.
+ * Reuses retailer/UGC denylists aligned with tasting-note sourcing.
+ */
+import { classifySourceUrlWithDiscovery } from "./official-domain.js";
+import type { SourceClass } from "./tasting-notes-sources.js";
 
 export type ImageSourceType = "user" | "official" | "licensed" | "approved" | "unknown";
 
@@ -45,7 +50,12 @@ function hostMatches(host: string, fragments: readonly string[]): boolean {
  */
 export function classifyImageSource(
   imageUrl: string,
-  options: { brand?: string | null; name?: string | null; pageUrl?: string | null } = {}
+  options: {
+    brand?: string | null;
+    name?: string | null;
+    pageUrl?: string | null;
+    discoveredOfficialDomains?: string[];
+  } = {}
 ): ImageSourceType {
   const host = hostOf(imageUrl);
   if (!host) return "unknown";
@@ -53,15 +63,20 @@ export function classifyImageSource(
   if (hostMatches(host, LICENSED_HOST_FRAGMENTS)) return "licensed";
   if (hostMatches(host, APPROVED_HOST_FRAGMENTS)) return "approved";
 
-  const pageClass: SourceClass = classifySourceUrl(options.pageUrl || imageUrl, {
+  const pageClass: SourceClass = classifySourceUrlWithDiscovery(options.pageUrl || imageUrl, {
     brand: options.brand,
-    name: options.name
+    name: options.name,
+    discoveredOfficialDomains: options.discoveredOfficialDomains
   });
   if (pageClass === "official") return "official";
   if (pageClass === "retailer" || pageClass === "ugc") return "unknown";
 
   // Brand token in image host itself.
-  const brandClass = classifySourceUrl(imageUrl, { brand: options.brand, name: options.name });
+  const brandClass = classifySourceUrlWithDiscovery(imageUrl, {
+    brand: options.brand,
+    name: options.name,
+    discoveredOfficialDomains: options.discoveredOfficialDomains
+  });
   if (brandClass === "official") return "official";
 
   return "unknown";
