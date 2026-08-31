@@ -63,6 +63,15 @@ export { runTastingNotesJob, type TastingNotesJobResult } from "./tasting-notes-
 export { runImageJob, type ImageJobResult } from "./image-job.js";
 
 export {
+  ensureEnrichmentSourcesTable,
+  getEnrichmentSource,
+  upsertEnrichmentSource,
+  clearEnrichmentSourcesForTests,
+  type EnrichmentSourceRecord,
+  type EnrichmentSourceType
+} from "./enrichment-sources.js";
+
+export {
   ensureProductImagesTable,
   getProductImage,
   upsertProductImage,

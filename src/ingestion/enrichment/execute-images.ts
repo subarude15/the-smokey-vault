@@ -53,6 +53,14 @@ import {
   summarizeImageCandidateDiagnostics
 } from "./image-candidate-diagnostics.js";
 import {
+  buildOfficialProductPageQueries,
+  extractExpressionTokensFromHits,
+  hasOfficialProductDetailHit,
+  hostIsUnderOfficialDomain,
+  safeOfficialPageDisplay,
+  selectBestOfficialProductPage
+} from "./official-product-page.js";
+import {
   sanitizeJobDiagnostics,
   type EnrichmentDiagnosticStage,
   type JobDiagnosticsPayload,
@@ -61,6 +69,7 @@ import {
 
 const MAX_PROBE_SEEDS = 20;
 const MAX_OFFICIAL_PAGE_ASSET_STAGES = 8;
+const MAX_OFFICIAL_PAGES_TO_FETCH = 4;
 
 export type ImageMeta = {
   width: number | null;
@@ -79,6 +88,8 @@ export type ImageEnrichmentDeps = {
     candidate: BottleCandidate;
     imageUrl: string;
   }) => Promise<VisionVerification | null>;
+  /** Previously persisted official product page (reuse; do not rediscover blindly). */
+  knownOfficialProductPageUrl?: string | null;
 };
 
 export type ImageCandidateSeed = {
@@ -94,6 +105,8 @@ export type ImageEnrichmentResult = {
   evaluated: ScoredImageCandidate[];
   errors: string[];
   diagnostics: JobDiagnosticsPayload;
+  /** Best official product-detail page selected this run (if any). */
+  selectedOfficialProductPageUrl?: string | null;
 };
 
 function imageSearchQuery(candidate: BottleCandidate): string {
@@ -183,6 +196,161 @@ function emptyImageDiagnostics(): JobDiagnosticsPayload {
   };
 }
 
+type OfficialPageIngestStats = {
+  imagesFromMeta: number;
+  pagesWithoutImageMeta: number;
+  prefilteredCount: number;
+};
+
+/** Fetch one official page and push page-scoped image seeds + diagnostics. */
+async function ingestOfficialPageForImages(options: {
+  pageUrl: string;
+  brand: string | null;
+  name: string | null;
+  fetchHtml: (url: string) => Promise<string | null>;
+  seeds: ImageCandidateSeed[];
+  stages: EnrichmentDiagnosticStage[];
+}): Promise<OfficialPageIngestStats> {
+  const stats: OfficialPageIngestStats = {
+    imagesFromMeta: 0,
+    pagesWithoutImageMeta: 0,
+    prefilteredCount: 0
+  };
+  const html = await options.fetchHtml(options.pageUrl);
+  if (!html) {
+    options.stages.push({
+      stage: "official_image_meta",
+      status: "error",
+      reason: "official_page_fetch_failed",
+      sourceUrls: [options.pageUrl]
+    });
+    return stats;
+  }
+
+  const facts = extractStructuredProductFacts(html, options.pageUrl);
+  const imageUrls = facts.imageUrls.length
+    ? facts.imageUrls
+    : extractProductImageUrlsFromHtml(html, options.pageUrl);
+
+  if (imageUrls.length) {
+    stats.imagesFromMeta = imageUrls.length;
+    for (const imageUrl of imageUrls) {
+      if (isNonImageAssetUrl(imageUrl)) continue;
+      const safe = safeImageUrlParts(imageUrl);
+      if (
+        options.stages.filter((s) => s.stage === "official_page_asset").length
+        < MAX_OFFICIAL_PAGE_ASSET_STAGES
+      ) {
+        options.stages.push({
+          stage: "official_page_asset",
+          status: "ok",
+          reason: `${safe.host}${safe.path}`.slice(0, 160),
+          sourceUrls: [options.pageUrl]
+        });
+      }
+      options.seeds.push({ url: imageUrl, sourceUrl: options.pageUrl });
+    }
+    options.stages.push({
+      stage: "official_image_meta",
+      status: "ok",
+      acceptedCount: imageUrls.length,
+      reason: [
+        facts.usedOpenGraph ? "og:image" : null,
+        facts.usedJsonLd ? "json_ld_image" : null,
+        facts.hasJsonLdProduct ? "json_ld_product" : null,
+        facts.ogTypeProduct ? "og_type_product" : null
+      ]
+        .filter(Boolean)
+        .join(",") || "image_metadata",
+      sourceUrls: [options.pageUrl]
+    });
+    return stats;
+  }
+
+  stats.pagesWithoutImageMeta = 1;
+  options.stages.push({
+    stage: "official_image_meta",
+    status: "no_result",
+    reason: "official_page_no_image_metadata",
+    sourceUrls: [options.pageUrl]
+  });
+
+  const imgScan = await extractOfficialPageImgCandidatesAsync(html, options.pageUrl, {
+    brand: options.brand,
+    name: options.name
+  });
+  options.stages.push({
+    stage: "official_page_img_scan",
+    status: imgScan.scanned ? "ok" : "no_result",
+    candidateCount: imgScan.scanned,
+    reason: imgScan.clientRenderedShell
+      ? "official_page_client_rendered: static HTML contained no product image assets"
+      : `${imgScan.scanned} image refs found`,
+    sourceUrls: [options.pageUrl]
+  });
+  if (imgScan.diagnostic === "official_page_client_rendered") {
+    options.stages.push({
+      stage: "official_page_client_rendered",
+      status: "no_result",
+      reason: "static HTML contained no product image assets",
+      sourceUrls: [options.pageUrl]
+    });
+  }
+  const rejectBlob = Object.entries(imgScan.rejectedReasons)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(",")
+    .slice(0, 160);
+  const emptyReason =
+    imgScan.diagnostic === "official_page_client_rendered"
+      ? "official_page_client_rendered"
+      : rejectBlob || imgScan.diagnostic || "logos_or_small_assets_only";
+  options.stages.push({
+    stage: "official_page_img_prefilter",
+    status: imgScan.prefiltered.length ? "ok" : "no_result",
+    candidateCount: imgScan.scanned,
+    acceptedCount: imgScan.prefiltered.length,
+    reason: imgScan.prefiltered.length
+      ? `${imgScan.prefiltered.length} candidates`
+      : emptyReason,
+    sourceUrls: [options.pageUrl]
+  });
+  for (const img of imgScan.prefiltered) {
+    if (isNonImageAssetUrl(img.url)) continue;
+    const safe = safeImageUrlParts(img.url);
+    if (
+      options.stages.filter((s) => s.stage === "official_page_asset").length
+      < MAX_OFFICIAL_PAGE_ASSET_STAGES
+    ) {
+      options.stages.push({
+        stage: "official_page_asset",
+        status: "ok",
+        reason: `${safe.host}${safe.path}`.slice(0, 160),
+        sourceUrls: [options.pageUrl]
+      });
+    }
+    options.seeds.push({
+      url: img.url,
+      sourceUrl: options.pageUrl,
+      width: img.width,
+      height: img.height
+    });
+  }
+  stats.prefilteredCount = imgScan.prefiltered.filter((i) => !isNonImageAssetUrl(i.url)).length;
+  if (stats.prefilteredCount) {
+    options.stages.push({
+      stage: "official_page_img_candidate",
+      status: "ok",
+      acceptedCount: stats.prefilteredCount,
+      reason: "accepted for verification",
+      sourceUrls: imgScan.prefiltered
+        .filter((i) => !isNonImageAssetUrl(i.url))
+        .slice(0, 6)
+        .map((i) => i.url)
+    });
+  }
+  return stats;
+}
+
 /**
  * Run image enrichment for an identified candidate.
  * Returns selected=null when nothing meets the acceptance threshold (success, not failure).
@@ -260,7 +428,8 @@ export async function executeImageEnrichment(
         selected: null,
         evaluated: [],
         errors,
-        diagnostics: sanitizeJobDiagnostics(diagnostics)
+        diagnostics: sanitizeJobDiagnostics(diagnostics),
+        selectedOfficialProductPageUrl: null
       };
     }
   }
@@ -274,12 +443,15 @@ export async function executeImageEnrichment(
     reason: imageSearchHadResults ? undefined : "no_search_results"
   });
 
-  // Progressive web search for official pages; pull og:image / JSON-LD when authoritative.
+  // Progressive web search for official pages; prefer product-detail pages for images.
   let officialPagesScanned = 0;
   let officialPagesFound = 0;
   let officialImagesFromMeta = 0;
   let officialPagesWithoutImageMeta = 0;
+  let selectedOfficialProductPageUrl: string | null =
+    String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
   try {
+    const identity = identityFromCandidate(candidate);
     const webTiers = queryTiers.slice(0, 4);
     let allHits: WebSearchHit[] = [];
     for (const tier of webTiers) {
@@ -306,15 +478,13 @@ export async function executeImageEnrichment(
           sourceUrls: discovery.sourceUrls
         });
       }
-      const authNow = allHits.filter((hit) => {
-        const pageClass = classifySourceUrlWithDiscovery(hit.url, {
-          brand: candidate.brand.value,
-          name: candidate.name.value,
-          discoveredOfficialDomains: discoveredDomains
-        });
-        return isAuthoritativeSource(pageClass);
-      });
-      if (authNow.length) break;
+      // IMAGE discovery: do not stop on a generic official homepage alone.
+      if (
+        discoveredDomains.length
+        && hasOfficialProductDetailHit(allHits, discoveredDomains, identity)
+      ) {
+        break;
+      }
     }
 
     // Dedup hits
@@ -341,6 +511,95 @@ export async function executeImageEnrichment(
       }
     }
 
+    // Step B: site-scoped product-page search within discovered official domains.
+    if (discoveredDomains.length) {
+      const expansionTokens = extractExpressionTokensFromHits(allHits, identity);
+      const productQueries = buildOfficialProductPageQueries(
+        identity,
+        discoveredDomains,
+        expansionTokens
+      );
+      let productSearchHits = 0;
+      for (const pq of productQueries) {
+        const hits = await searchWeb(pq.query, 5);
+        productSearchHits += hits.length;
+        for (const hit of hits) {
+          if (!hit.url || seenHit.has(hit.url)) continue;
+          seenHit.add(hit.url);
+          allHits.push(hit);
+        }
+        stages.push({
+          stage: "official_product_search",
+          status: hits.length ? "ok" : "no_result",
+          query: pq.query,
+          provider: "searxng",
+          candidateCount: hits.length,
+          reason: `domain:${pq.domain};${pq.label}${expansionTokens.length ? `;expand:${expansionTokens.join("+")}` : ""}`.slice(0, 160)
+        });
+      }
+      if (!productQueries.length) {
+        stages.push({
+          stage: "official_product_search",
+          status: "skipped",
+          reason: "no_product_queries",
+          candidateCount: 0
+        });
+      } else if (productSearchHits === 0) {
+        // Keep a summary row when all queries were empty (already logged per query).
+      }
+    }
+
+    // Prefer a previously persisted product page when still on an official domain.
+    if (
+      selectedOfficialProductPageUrl
+      && discoveredDomains.length
+      && !hostIsUnderOfficialDomain(selectedOfficialProductPageUrl, discoveredDomains)
+    ) {
+      selectedOfficialProductPageUrl = null;
+    }
+
+    const ranked = selectBestOfficialProductPage(allHits, identity, {
+      discoveredOfficialDomains: discoveredDomains,
+      minScore: 40
+    });
+    if (ranked) {
+      selectedOfficialProductPageUrl = ranked.hit.url;
+      stages.push({
+        stage: "official_product_page_selected",
+        status: "ok",
+        reason: `${safeOfficialPageDisplay(ranked.hit.url)} · score:${ranked.score.total}`.slice(0, 160),
+        sourceUrls: [ranked.hit.url],
+        acceptedCount: 1,
+        candidateCount: allHits.length
+      });
+    } else if (selectedOfficialProductPageUrl) {
+      stages.push({
+        stage: "official_product_page_selected",
+        status: "ok",
+        reason: `${safeOfficialPageDisplay(selectedOfficialProductPageUrl)} · reused`.slice(0, 160),
+        sourceUrls: [selectedOfficialProductPageUrl]
+      });
+    } else {
+      stages.push({
+        stage: "official_product_page_selected",
+        status: "no_result",
+        reason: discoveredDomains.length
+          ? "no_product_detail_page_ranked"
+          : "no_official_domain",
+        candidateCount: allHits.length
+      });
+    }
+
+    // Build ordered official page fetch list: selected product page first.
+    const officialPageUrls: string[] = [];
+    const pushPage = (url: string | null | undefined) => {
+      const u = String(url ?? "").trim();
+      if (!u || officialPageUrls.includes(u)) return;
+      if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u)) return;
+      officialPageUrls.push(u);
+    };
+    pushPage(selectedOfficialProductPageUrl);
+
     for (const hit of allHits) {
       if (!hit.url) continue;
       const pageClass = classifySourceUrlWithDiscovery(hit.url, {
@@ -352,9 +611,9 @@ export async function executeImageEnrichment(
       const sourceType = classifyImageSource(hit.url, {
         brand: candidate.brand.value,
         name: candidate.name.value,
-        pageUrl: hit.url
+        pageUrl: hit.url,
+        discoveredOfficialDomains: discoveredDomains
       });
-      // Re-check with discovered domains for official classification of page hosts.
       const pageLooksOfficial =
         pageClass === "official"
         || sourceType === "official"
@@ -365,148 +624,55 @@ export async function executeImageEnrichment(
             discoveredOfficialDomains: discoveredDomains
           }) === "official");
 
+      if (pageLooksOfficial && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(hit.url)) {
+        seeds.push({ url: hit.url, sourceUrl: hit.url });
+        officialImagesFromMeta += 1;
+        officialPagesFound += 1;
+        continue;
+      }
       if (pageLooksOfficial || sourceType === "licensed" || sourceType === "approved") {
-        if (pageLooksOfficial) officialPagesFound += 1;
-        if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(hit.url)) {
-          seeds.push({ url: hit.url, sourceUrl: hit.url });
-          if (pageLooksOfficial) officialImagesFromMeta += 1;
-        } else if (pageLooksOfficial || isAuthoritativeSource(pageClass)) {
-          officialPagesScanned += 1;
-          const html = await fetchHtml(hit.url);
-          if (html) {
-            const facts = extractStructuredProductFacts(html, hit.url);
-            const imageUrls = facts.imageUrls.length
-              ? facts.imageUrls
-              : extractProductImageUrlsFromHtml(html, hit.url);
-            if (imageUrls.length) {
-              officialImagesFromMeta += imageUrls.length;
-              for (const imageUrl of imageUrls) {
-                if (isNonImageAssetUrl(imageUrl)) continue;
-                const safe = safeImageUrlParts(imageUrl);
-                if (stages.filter((s) => s.stage === "official_page_asset").length
-                  < MAX_OFFICIAL_PAGE_ASSET_STAGES) {
-                  stages.push({
-                    stage: "official_page_asset",
-                    status: "ok",
-                    reason: `${safe.host}${safe.path}`.slice(0, 160),
-                    sourceUrls: [hit.url]
-                  });
-                }
-                seeds.push({ url: imageUrl, sourceUrl: hit.url });
-              }
-              stages.push({
-                stage: "official_image_meta",
-                status: "ok",
-                acceptedCount: imageUrls.length,
-                reason: [
-                  facts.usedOpenGraph ? "og:image" : null,
-                  facts.usedJsonLd ? "json_ld_image" : null
-                ]
-                  .filter(Boolean)
-                  .join(",") || "image_metadata",
-                sourceUrls: [hit.url]
-              });
-            } else {
-              officialPagesWithoutImageMeta += 1;
-              stages.push({
-                stage: "official_image_meta",
-                status: "no_result",
-                reason: "official_page_no_image_metadata",
-                sourceUrls: [hit.url]
-              });
-              // Bounded static HTML fallback (img/picture/preload/CSS) — no JS render.
-              const imgScan = await extractOfficialPageImgCandidatesAsync(html, hit.url, {
-                brand: candidate.brand.value,
-                name: candidate.name.value
-              });
-              stages.push({
-                stage: "official_page_img_scan",
-                status: imgScan.scanned ? "ok" : "no_result",
-                candidateCount: imgScan.scanned,
-                reason: imgScan.clientRenderedShell
-                  ? "official_page_client_rendered: static HTML contained no product image assets"
-                  : `${imgScan.scanned} image refs found`,
-                sourceUrls: [hit.url]
-              });
-              if (imgScan.diagnostic === "official_page_client_rendered") {
-                stages.push({
-                  stage: "official_page_client_rendered",
-                  status: "no_result",
-                  reason: "static HTML contained no product image assets",
-                  sourceUrls: [hit.url]
-                });
-              }
-              const rejectBlob = Object.entries(imgScan.rejectedReasons)
-                .map(([k, v]) => `${k}:${v}`)
-                .join(",")
-                .slice(0, 160);
-              const emptyReason =
-                imgScan.diagnostic === "official_page_client_rendered"
-                  ? "official_page_client_rendered"
-                  : rejectBlob || imgScan.diagnostic || "logos_or_small_assets_only";
-              stages.push({
-                stage: "official_page_img_prefilter",
-                status: imgScan.prefiltered.length ? "ok" : "no_result",
-                candidateCount: imgScan.scanned,
-                acceptedCount: imgScan.prefiltered.length,
-                reason: imgScan.prefiltered.length
-                  ? `${imgScan.prefiltered.length} candidates`
-                  : emptyReason,
-                sourceUrls: [hit.url]
-              });
-              for (const img of imgScan.prefiltered) {
-                if (isNonImageAssetUrl(img.url)) continue;
-                const safe = safeImageUrlParts(img.url);
-                if (stages.filter((s) => s.stage === "official_page_asset").length
-                  < MAX_OFFICIAL_PAGE_ASSET_STAGES) {
-                  stages.push({
-                    stage: "official_page_asset",
-                    status: "ok",
-                    reason: `${safe.host}${safe.path}`.slice(0, 160),
-                    sourceUrls: [hit.url]
-                  });
-                }
-                seeds.push({
-                  url: img.url,
-                  sourceUrl: hit.url,
-                  width: img.width,
-                  height: img.height
-                });
-              }
-              if (imgScan.prefiltered.length) {
-                stages.push({
-                  stage: "official_page_img_candidate",
-                  status: "ok",
-                  acceptedCount: imgScan.prefiltered.filter((i) => !isNonImageAssetUrl(i.url)).length,
-                  reason: "accepted for verification",
-                  sourceUrls: imgScan.prefiltered
-                    .filter((i) => !isNonImageAssetUrl(i.url))
-                    .slice(0, 6)
-                    .map((i) => i.url)
-                });
-              }
-            }
-          } else {
-            stages.push({
-              stage: "official_image_meta",
-              status: "error",
-              reason: "official_page_fetch_failed",
-              sourceUrls: [hit.url]
-            });
-          }
-        }
+        if (pageLooksOfficial) pushPage(hit.url);
       }
     }
+
+    for (const pageUrl of officialPageUrls.slice(0, MAX_OFFICIAL_PAGES_TO_FETCH)) {
+      const pageClass = classifySourceUrlWithDiscovery(pageUrl, {
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        discoveredOfficialDomains: discoveredDomains
+      });
+      const pageLooksOfficial =
+        pageClass === "official"
+        || (discoveredDomains.length > 0
+          && hostIsUnderOfficialDomain(pageUrl, discoveredDomains));
+      if (!pageLooksOfficial && !isAuthoritativeSource(pageClass)) continue;
+
+      if (pageLooksOfficial) officialPagesFound += 1;
+      officialPagesScanned += 1;
+      const ingest = await ingestOfficialPageForImages({
+        pageUrl,
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        fetchHtml,
+        seeds,
+        stages
+      });
+      officialImagesFromMeta += ingest.imagesFromMeta;
+      officialPagesWithoutImageMeta += ingest.pagesWithoutImageMeta;
+    }
+
     stages.push({
       stage: "page_discovery",
       status: officialPagesFound ? "ok" : "skipped",
       candidateCount: allHits.length,
       acceptedCount: officialPagesFound,
-      reason: officialPagesFound
-        ? "official_pages_scanned"
-        : discoveredDomains.length
-          ? "official_domain_but_no_pages"
-          : "no_official_pages"
+      reason: selectedOfficialProductPageUrl
+        ? "official_product_page_preferred"
+        : officialPagesFound
+          ? "official_pages_scanned"
+          : discoveredDomains.length
+            ? "official_domain_but_no_pages"
+            : "no_official_pages"
     });
   } catch (error) {
     const message = isWebSearchError(error)
@@ -532,6 +698,14 @@ export async function executeImageEnrichment(
       stage: "official_page_outcome",
       status: "no_result",
       reason: "no_official_page_discovered"
+    });
+  } else if (selectedOfficialProductPageUrl && officialImagesFromMeta) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "ok",
+      acceptedCount: officialImagesFromMeta,
+      reason: "official_product_page_image_metadata",
+      sourceUrls: [selectedOfficialProductPageUrl]
     });
   } else if (officialImagesFromMeta) {
     stages.push({
@@ -664,7 +838,8 @@ export async function executeImageEnrichment(
       selected: null,
       evaluated: [],
       errors,
-      diagnostics: sanitizeJobDiagnostics(diagnostics)
+      diagnostics: sanitizeJobDiagnostics(diagnostics),
+      selectedOfficialProductPageUrl
     };
   }
 
@@ -937,6 +1112,7 @@ export async function executeImageEnrichment(
     selected,
     evaluated: scored.slice(0, 20),
     errors,
-    diagnostics: sanitizeJobDiagnostics(diagnostics)
+    diagnostics: sanitizeJobDiagnostics(diagnostics),
+    selectedOfficialProductPageUrl
   };
 }

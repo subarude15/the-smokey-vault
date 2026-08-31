@@ -9,9 +9,19 @@ export type StructuredProductFacts = {
   categoryHint: string | null;
   originHint: string | null;
   description: string | null;
+  /** Product name from JSON-LD / OG when present. */
+  productName: string | null;
   imageUrls: string[];
   usedJsonLd: boolean;
   usedOpenGraph: boolean;
+  /** True when og:type is product (or similar). */
+  ogTypeProduct: boolean;
+  /** True when JSON-LD @type includes Product. */
+  hasJsonLdProduct: boolean;
+  /** GTIN / gtin13 / sku / productID raw values found (bounded). */
+  gtinHints: string[];
+  /** Price / offers / volume variant signals present. */
+  hasPriceOrVariant: boolean;
 };
 
 function pushUnique(out: string[], raw: string, baseUrl: string) {
@@ -68,6 +78,10 @@ export function extractStructuredProductFacts(
   let name: string | null = null;
   let usedJsonLd = false;
   let usedOpenGraph = false;
+  let ogTypeProduct = false;
+  let hasJsonLdProduct = false;
+  const gtinHints: string[] = [];
+  let hasPriceOrVariant = false;
 
   const ogImage = metaContent(html, "og:image");
   if (ogImage) {
@@ -76,8 +90,11 @@ export function extractStructuredProductFacts(
   }
   const ogTitle = metaContent(html, "og:title");
   const ogDesc = metaContent(html, "og:description");
-  if (ogTitle || ogDesc) usedOpenGraph = true;
+  const ogType = metaContent(html, "og:type");
+  if (ogTitle || ogDesc || ogType) usedOpenGraph = true;
   if (ogDesc) description = ogDesc.slice(0, 400);
+  if (ogType && /product/i.test(ogType)) ogTypeProduct = true;
+  if (ogTitle && !name) name = ogTitle.slice(0, 160);
 
   const jsonLdBlocks = html.matchAll(
     /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
@@ -93,6 +110,7 @@ export function extractStructuredProductFacts(
         const record = node as Record<string, unknown>;
         const type = String(record["@type"] ?? "");
         const isProduct = /product/i.test(type);
+        if (isProduct) hasJsonLdProduct = true;
         if (!isProduct && !record.image && !record.alcoholByVolume && !record.description) {
           continue;
         }
@@ -108,6 +126,14 @@ export function extractStructuredProductFacts(
           ?? record.abv
           ?? (record.additionalProperty as unknown);
         if (abv == null) abv = parseAbv(abvRaw);
+        for (const key of ["gtin", "gtin13", "gtin14", "gtin8", "sku", "productID", "mpn"] as const) {
+          const v = record[key];
+          if (v != null && gtinHints.length < 4) {
+            const s = String(v).trim();
+            if (s && !gtinHints.includes(s)) gtinHints.push(s.slice(0, 32));
+          }
+        }
+        if (record.offers != null || record.price != null) hasPriceOrVariant = true;
         if (Array.isArray(record.additionalProperty)) {
           for (const prop of record.additionalProperty) {
             if (!prop || typeof prop !== "object") continue;
@@ -120,6 +146,7 @@ export function extractStructuredProductFacts(
             if (/type|category|class/.test(propName) && !categoryHint) {
               categoryHint = String(p.value ?? "").slice(0, 80) || null;
             }
+            if (/volume|size|variant/.test(propName)) hasPriceOrVariant = true;
           }
         }
         const image = record.image;
@@ -152,6 +179,9 @@ export function extractStructuredProductFacts(
     const originMatch = description.match(/\b(Scotland|Ireland|Kentucky|Tennessee|Japan|Canada)\b/i);
     if (originMatch) originHint = originMatch[1];
   }
+  if (/\b(?:750\s*mL|1\.75\s*L|price|buy now|add to cart)\b/i.test(html.slice(0, 40_000))) {
+    hasPriceOrVariant = true;
+  }
 
   const parts = [
     name ? `Name: ${name}` : null,
@@ -168,9 +198,14 @@ export function extractStructuredProductFacts(
     categoryHint,
     originHint,
     description,
+    productName: name,
     imageUrls: imageUrls.slice(0, 5),
     usedJsonLd,
-    usedOpenGraph
+    usedOpenGraph,
+    ogTypeProduct,
+    hasJsonLdProduct,
+    gtinHints: gtinHints.slice(0, 4),
+    hasPriceOrVariant
   };
 }
 
