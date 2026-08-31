@@ -1192,6 +1192,9 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .enrichment-image-candidates li{margin:6px 0}
 .enrichment-image-candidates code{font-size:11px;word-break:break-all}
 .enrichment-image-candidates details p{margin:4px 0 0}
+.enrichment-vision-details{margin:6px 0 0}
+.enrichment-vision-details strong{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.enrichment-vision-details ul{margin:4px 0 0;padding-left:16px}
 .enrichment-missing{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
 .enrichment-missing .eyebrow{display:block;margin-bottom:4px}
 .enrichment-section{display:flex;flex-direction:column;gap:12px}

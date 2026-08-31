@@ -40,6 +40,13 @@ export type ImageCandidateVisionDiagnostic = {
   error?: string | null;
 };
 
+export type ImageCandidateStageReached =
+  | "discovered"
+  | "hard_filter"
+  | "verification"
+  | "scoring"
+  | "accepted";
+
 export type ImageCandidateDiagnostic = {
   urlHost: string;
   urlPath?: string;
@@ -51,6 +58,8 @@ export type ImageCandidateDiagnostic = {
   mimeType?: string | null;
   dimensionsSource?: "seed" | "image_header" | "unknown" | null;
   fetchStatus?: "ok" | "failed";
+  /** Highest pipeline stage this candidate reached. */
+  stageReached?: ImageCandidateStageReached;
   hardFilter?: {
     passed: boolean;
     reasons: string[];
@@ -63,7 +72,14 @@ export type ImageCandidateDiagnostic = {
   rejectionReasons: string[];
 };
 
-const MAX_IMAGE_CANDIDATE_DIAGNOSTICS = 12;
+/** Public diagnostic cap — prioritization decides which rows survive. */
+export const MAX_IMAGE_CANDIDATE_DIAGNOSTICS = 12;
+
+const TRACKING_QUERY_RE =
+  /^(utm_|fbclid|gclid|_ga|mc_|ref|referrer|source|campaign)/i;
+const CACHE_BUSTER_RE = /^(v|ver|version|cb|cache|t|ts|timestamp)$/i;
+const SIGNED_QUERY_RE =
+  /^(x-amz-|x-goog-|signature|sig|token|expires|expire|policy|key-pair-id)/i;
 
 /** Safe host + short path for UI (strips query/hash/tokens). */
 export function safeImageUrlParts(url: string | null | undefined): {
@@ -88,6 +104,201 @@ export function safeImageUrlParts(url: string | null | undefined): {
   } catch {
     return { host: "", path: raw.slice(0, 64), display: raw.slice(0, 80) };
   }
+}
+
+/**
+ * Normalize image URLs for duplicate detection only.
+ * Strips tracking/cache-buster/signed query params; keeps path identity.
+ * Does not mutate the fetch URL — callers keep the preferred original.
+ */
+export function normalizeImageUrlForDedupe(url: string): string {
+  const raw = String(url ?? "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    u.hash = "";
+    u.hostname = u.hostname.toLowerCase();
+    const kept = new URLSearchParams();
+    for (const [key, value] of u.searchParams.entries()) {
+      if (TRACKING_QUERY_RE.test(key)) continue;
+      if (SIGNED_QUERY_RE.test(key)) continue;
+      if (CACHE_BUSTER_RE.test(key) && /^\d+$/.test(value)) continue;
+      kept.append(key, value);
+    }
+    const qs = kept.toString();
+    return `${u.protocol}//${u.host}${u.pathname}${qs ? `?${qs}` : ""}`;
+  } catch {
+    return raw;
+  }
+}
+
+export type ImageSeedLike = {
+  url: string;
+  sourceUrl?: string | null;
+  width?: number | null;
+  height?: number | null;
+  mimeType?: string | null;
+};
+
+function seedHasPageProvenance(seed: ImageSeedLike): boolean {
+  return Boolean(String(seed.sourceUrl ?? "").trim());
+}
+
+/**
+ * Prefer the stronger page-scoped provenance when merging duplicate assets.
+ * Official-page direct reference outranks bare search discovery.
+ */
+export function preferStrongerImageSeed(a: ImageSeedLike, b: ImageSeedLike): ImageSeedLike {
+  const aPage = seedHasPageProvenance(a);
+  const bPage = seedHasPageProvenance(b);
+  const primary = bPage && !aPage ? b : aPage && !bPage ? a : a;
+  const secondary = primary === a ? b : a;
+  return {
+    url: primary.url,
+    sourceUrl: primary.sourceUrl ?? secondary.sourceUrl ?? null,
+    width: primary.width ?? secondary.width ?? null,
+    height: primary.height ?? secondary.height ?? null,
+    mimeType: primary.mimeType ?? secondary.mimeType ?? null
+  };
+}
+
+/** Dedupe seeds by normalized URL; merge provenance monotonically. */
+export function mergeImageSeedsByNormalizedUrl(seeds: ImageSeedLike[]): ImageSeedLike[] {
+  const map = new Map<string, ImageSeedLike>();
+  const order: string[] = [];
+  for (const seed of seeds) {
+    const key = normalizeImageUrlForDedupe(seed.url);
+    if (!key) continue;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...seed });
+      order.push(key);
+      continue;
+    }
+    map.set(key, preferStrongerImageSeed(existing, seed));
+  }
+  return order.map((k) => map.get(k)!);
+}
+
+function stageRank(stage: ImageCandidateStageReached | undefined): number {
+  switch (stage) {
+    case "accepted":
+      return 5;
+    case "scoring":
+      return 4;
+    case "verification":
+      return 3;
+    case "hard_filter":
+      return 2;
+    case "discovered":
+    default:
+      return 1;
+  }
+}
+
+function sourceRank(sourceType: ImageSourceType | undefined): number {
+  switch (sourceType) {
+    case "official":
+    case "user":
+      return 4;
+    case "licensed":
+      return 3;
+    case "approved":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+/** Higher = more important to retain in bounded diagnostics. */
+export function imageCandidateDiagnosticPriority(d: ImageCandidateDiagnostic): number {
+  let score = stageRank(d.stageReached) * 100;
+  score += sourceRank(d.sourceType) * 10;
+  if (d.accepted) score += 50;
+  if (d.vision?.ran) score += 20;
+  if (d.fetchStatus === "failed") score -= 5;
+  if (d.sourceType === "unknown" && d.stageReached === "discovered") score -= 10;
+  return score;
+}
+
+function isVerificationStage(d: ImageCandidateDiagnostic): boolean {
+  return (
+    d.stageReached === "verification"
+    || d.stageReached === "scoring"
+    || d.stageReached === "accepted"
+    || Boolean(d.vision?.ran)
+  );
+}
+
+/**
+ * Bound diagnostics while preferring verification-stage / official candidates.
+ * Invariant: verification-stage candidates are never all displaced by search junk.
+ */
+export function prioritizeImageCandidateDiagnostics(
+  list: ImageCandidateDiagnostic[],
+  limit = MAX_IMAGE_CANDIDATE_DIAGNOSTICS
+): ImageCandidateDiagnostic[] {
+  if (list.length <= limit) {
+    return [...list].sort(
+      (a, b) => imageCandidateDiagnosticPriority(b) - imageCandidateDiagnosticPriority(a)
+    );
+  }
+
+  const verification = list.filter(isVerificationStage);
+  const rest = list.filter((d) => !isVerificationStage(d));
+
+  verification.sort(
+    (a, b) => imageCandidateDiagnosticPriority(b) - imageCandidateDiagnosticPriority(a)
+  );
+  rest.sort(
+    (a, b) => imageCandidateDiagnosticPriority(b) - imageCandidateDiagnosticPriority(a)
+  );
+
+  // Always reserve slots for verification-stage candidates first.
+  const keptVerification = verification.slice(0, limit);
+  const remaining = Math.max(0, limit - keptVerification.length);
+  return [...keptVerification, ...rest.slice(0, remaining)];
+}
+
+/** Keeper-facing summary emphasizing verification-stage outcomes. */
+export function summarizeImageCandidateDiagnostics(
+  list: ImageCandidateDiagnostic[],
+  options: { selectedScore?: number | null; noResultReason?: string | null } = {}
+): string {
+  const total = list.length;
+  const verification = list.filter(isVerificationStage);
+  const officialVerification = verification.filter(
+    (d) => d.sourceType === "official" || d.sourceType === "user"
+  );
+  const accepted = list.filter((d) => d.accepted);
+  if (accepted.length && options.selectedScore != null) {
+    return `Accepted image score ${options.selectedScore}`;
+  }
+  if (verification.length) {
+    const rejected = verification.filter((d) => !d.accepted);
+    const officialBit = officialVerification.length
+      ? `${officialVerification.length} official candidate${officialVerification.length === 1 ? "" : "s"} reached verification`
+      : `${verification.length} candidate${verification.length === 1 ? "" : "s"} reached verification`;
+    const rejectBit = rejected.length
+      ? `${rejected.length} rejected by verification/scoring`
+      : "none accepted";
+    const topReason = rejected[0]?.rejectionReasons?.[0];
+    return [
+      `${total} candidates checked`,
+      officialBit,
+      rejectBit,
+      topReason ? `top reason: ${formatImageRejectionReason(topReason)}` : null
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (options.noResultReason === "score_below_threshold") {
+    return "Verified candidates scored below acceptance threshold";
+  }
+  if (options.noResultReason === "verification_rejected") {
+    return "Image verification rejected candidates";
+  }
+  return total ? `${total} candidates checked; none accepted` : "No image candidates found";
 }
 
 /** Deterministic score breakdown matching image-score.ts weights (no new weights). */
@@ -229,6 +440,7 @@ export function buildImageCandidateDiagnostic(options: {
   score?: number | null;
   accepted: boolean;
   rejectionReasons: string[];
+  stageReached?: ImageCandidateStageReached;
 }): ImageCandidateDiagnostic {
   const urlParts = safeImageUrlParts(options.candidate.url);
   const pageParts = safeImageUrlParts(options.candidate.sourceUrl);
@@ -243,6 +455,14 @@ export function buildImageCandidateDiagnostic(options: {
       ? buildImageScoreComponents(options.candidate, vision)
       : null;
 
+  let stageReached = options.stageReached;
+  if (!stageReached) {
+    if (options.accepted) stageReached = "accepted";
+    else if (options.vision || options.visionError) stageReached = "verification";
+    else if (!options.hardPassed || options.fetchStatus === "failed") stageReached = "hard_filter";
+    else stageReached = "discovered";
+  }
+
   const diag: ImageCandidateDiagnostic = {
     urlHost: urlParts.host,
     urlPath: urlParts.path || undefined,
@@ -252,6 +472,7 @@ export function buildImageCandidateDiagnostic(options: {
     mimeType: options.candidate.mimeType,
     dimensionsSource: options.dimensionsSource ?? (options.candidate.width != null ? "seed" : "unknown"),
     fetchStatus: options.fetchStatus ?? "ok",
+    stageReached,
     hardFilter: {
       passed: options.hardPassed,
       reasons: options.hardReasons ?? []
@@ -305,6 +526,7 @@ export function sanitizeImageCandidateDiagnostic(
     mimeType: d.mimeType != null ? String(d.mimeType).slice(0, 64) : null,
     dimensionsSource: d.dimensionsSource ?? null,
     fetchStatus: d.fetchStatus,
+    stageReached: d.stageReached,
     hardFilter: d.hardFilter
       ? {
           passed: Boolean(d.hardFilter.passed),
@@ -334,7 +556,9 @@ export function sanitizeImageCandidateDiagnostic(
 export function boundImageCandidateDiagnostics(
   list: ImageCandidateDiagnostic[]
 ): ImageCandidateDiagnostic[] {
-  return list.slice(0, MAX_IMAGE_CANDIDATE_DIAGNOSTICS).map(sanitizeImageCandidateDiagnostic);
+  return prioritizeImageCandidateDiagnostics(list, MAX_IMAGE_CANDIDATE_DIAGNOSTICS).map(
+    sanitizeImageCandidateDiagnostic
+  );
 }
 
 /** Human-friendly rejection label for keeper UI. */

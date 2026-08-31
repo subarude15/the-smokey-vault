@@ -176,7 +176,14 @@ export {
   safeImageUrlParts,
   sumScoreComponents,
   formatImageRejectionReason,
+  normalizeImageUrlForDedupe,
+  mergeImageSeedsByNormalizedUrl,
+  preferStrongerImageSeed,
+  prioritizeImageCandidateDiagnostics,
+  summarizeImageCandidateDiagnostics,
+  MAX_IMAGE_CANDIDATE_DIAGNOSTICS,
   type ImageCandidateDiagnostic,
+  type ImageCandidateStageReached,
   type ImageScoreComponents
 } from "./image-candidate-diagnostics.js";
 
