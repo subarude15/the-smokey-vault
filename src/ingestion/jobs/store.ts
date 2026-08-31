@@ -8,6 +8,7 @@ import {
   type EnrichmentJobCounts,
   type EnrichmentJobStatus,
   type EnrichmentJobType,
+  type EnqueueJobInput,
   type EnqueueMetadataInput
 } from "./types.js";
 
@@ -78,7 +79,11 @@ function sqliteNowPlusSeconds(seconds: number): string {
   return db.prepare(`SELECT datetime('now', ?)`).pluck().get(`+${Math.max(0, Math.floor(seconds))} seconds`) as string;
 }
 
-function findActiveJob(entityType: EnrichmentEntityType, entityId: number, jobType: EnrichmentJobType): EnrichmentJob | null {
+function findActiveJob(
+  entityType: EnrichmentEntityType,
+  entityId: number,
+  jobType: EnrichmentJobType
+): EnrichmentJob | null {
   const row = db.prepare(`
     SELECT * FROM enrichment_jobs
     WHERE entity_type = ? AND entity_id = ? AND job_type = ?
@@ -89,23 +94,28 @@ function findActiveJob(entityType: EnrichmentEntityType, entityId: number, jobTy
   return row ? mapJob(row) : null;
 }
 
-/**
- * Enqueue a metadata job. Returns existing active job if one already exists
- * for the same entity (no duplicate pending/running rows).
- */
-export function enqueueMetadataJob(input: EnqueueMetadataInput): { job: EnrichmentJob; created: boolean } {
-  const existing = findActiveJob(input.entityType, input.entityId, "metadata");
+/** Enqueue any job type; dedupes active rows for the same entity + job type. */
+export function enqueueEnrichmentJob(input: EnqueueJobInput): { job: EnrichmentJob; created: boolean } {
+  const existing = findActiveJob(input.entityType, input.entityId, input.jobType);
   if (existing) return { job: existing, created: false };
 
   const upc = String(input.upc ?? "").trim();
   const result = db.prepare(`
     INSERT INTO enrichment_jobs (
       entity_type, entity_id, upc, job_type, status, attempts, max_attempts, available_at
-    ) VALUES (?, ?, ?, 'metadata', 'pending', 0, ?, CURRENT_TIMESTAMP)
-  `).run(input.entityType, input.entityId, upc, DEFAULT_MAX_ATTEMPTS);
+    ) VALUES (?, ?, ?, ?, 'pending', 0, ?, CURRENT_TIMESTAMP)
+  `).run(input.entityType, input.entityId, upc, input.jobType, DEFAULT_MAX_ATTEMPTS);
 
   const row = db.prepare("SELECT * FROM enrichment_jobs WHERE id=?").get(result.lastInsertRowid) as JobRow;
   return { job: mapJob(row), created: true };
+}
+
+export function enqueueMetadataJob(input: EnqueueMetadataInput): { job: EnrichmentJob; created: boolean } {
+  return enqueueEnrichmentJob({ ...input, jobType: "metadata" });
+}
+
+export function enqueueTastingNotesJob(input: EnqueueMetadataInput): { job: EnrichmentJob; created: boolean } {
+  return enqueueEnrichmentJob({ ...input, jobType: "tasting_notes" });
 }
 
 export function getEnrichmentJob(id: number): EnrichmentJob | null {
@@ -113,10 +123,20 @@ export function getEnrichmentJob(id: number): EnrichmentJob | null {
   return row ? mapJob(row) : null;
 }
 
-/**
- * Atomically claim the next available pending job.
- * Uses BEGIN IMMEDIATE so two callers cannot claim the same row.
- */
+export function hasCompletedJob(
+  entityType: EnrichmentEntityType,
+  entityId: number,
+  jobType: EnrichmentJobType
+): boolean {
+  const row = db.prepare(`
+    SELECT 1 AS ok FROM enrichment_jobs
+    WHERE entity_type = ? AND entity_id = ? AND job_type = ? AND status = 'completed'
+    LIMIT 1
+  `).get(entityType, entityId, jobType) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+/** Atomically claim the next available pending job. */
 export function claimNextPendingJob(): EnrichmentJob | null {
   const claim = db.transaction(() => {
     const row = db.prepare(`
@@ -157,9 +177,6 @@ export function markJobCompleted(id: number): EnrichmentJob | null {
   return getEnrichmentJob(id);
 }
 
-/**
- * Transient failure: retry later if attempts remain, otherwise mark failed.
- */
 export function markJobFailedOrRetry(id: number, errorMessage: string): EnrichmentJob | null {
   const job = getEnrichmentJob(id);
   if (!job) return null;
@@ -190,7 +207,6 @@ export function markJobFailedOrRetry(id: number, errorMessage: string): Enrichme
   return getEnrichmentJob(id);
 }
 
-/** Requeue stale running jobs after crash/restart (or fail if attempts exhausted). */
 export function recoverStaleRunningJobs(staleSeconds = STALE_RUNNING_SECONDS): number {
   const cutoff = sqliteNowPlusSeconds(-staleSeconds);
   const stale = db.prepare(`
@@ -242,7 +258,6 @@ export function enrichmentJobCounts(): EnrichmentJobCounts {
   return counts;
 }
 
-/** Test helper: wipe queue table. */
 export function clearEnrichmentJobsForTests() {
   db.exec("DELETE FROM enrichment_jobs");
 }

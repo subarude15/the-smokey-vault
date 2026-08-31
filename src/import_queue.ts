@@ -18,7 +18,10 @@ import {
   type MissReason
 } from "./lookup-shared.js";
 import { importRowHasName, importTableFor, normalizeImportItem, normalizeImportUpc } from "./import_batch.js";
-import { maybeEnqueueMetadataEnrichment } from "./ingestion/jobs/index.js";
+import {
+  maybeEnqueueMetadataEnrichment,
+  maybeEnqueueTastingNotesEnrichment
+} from "./ingestion/jobs/index.js";
 
 export const MAX_IMPORT_ROWS = 1500;
 const FWGS_BATCH_DELAY_MS = Number(process.env.FWGS_DELAY_MS ?? 400);
@@ -410,6 +413,7 @@ export async function commitReadyImportRows(ids?: number[]): Promise<CommitResul
       try {
         const saved = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id) as Record<string, unknown>;
         maybeEnqueueMetadataEnrichment({ entityType: table, entityId: id, row: saved });
+        maybeEnqueueTastingNotesEnrichment({ entityType: table, entityId: id, row: saved });
       } catch {
         // Bottle is saved; queue failure must not roll back the import commit.
       }

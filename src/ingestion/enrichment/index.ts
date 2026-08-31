@@ -44,3 +44,28 @@ export {
   type MetadataExtractRequest,
   type MetadataExtractResult
 } from "./metadata-extract.js";
+
+export {
+  classifySourceUrl,
+  classifyHit,
+  isAuthoritativeSource,
+  formatAuthoritativeSnippets,
+  type SourceClass,
+  type ClassifiedHit
+} from "./tasting-notes-sources.js";
+
+export {
+  extractOfficialTastingNotes,
+  generateHouseTastingProfile,
+  formatHouseProfile,
+  parseOfficialNotesExtract,
+  parseHouseProfile,
+  type OfficialNotesExtractResult,
+  type HouseProfileResult
+} from "./tasting-notes-extract.js";
+
+export {
+  executeTastingNotesEnrichment,
+  type TastingNotesEnrichmentDeps,
+  type TastingNotesExecutionResult
+} from "./execute-tasting-notes.js";

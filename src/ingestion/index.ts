@@ -1,4 +1,4 @@
-export { searchWebSnippets } from "./web-search.js";
+export { searchWebSnippets, searchWebHits, type WebSearchHit } from "./web-search.js";
 export { labelProductWithLocalOllama, lookupProductFromRawText } from "./llm-enrichment.js";
 export { parseProductSchema, inventoryRecordToProduct, smartWebQuery } from "./normalize.js";
 export { runSmartFallback, type SmartFallbackDeps, type SmartFallbackQuery } from "./smart-fallback.js";
@@ -50,10 +50,20 @@ export {
 export {
   ensureEnrichmentJobsTable,
   enqueueMetadataJob,
+  enqueueTastingNotesJob,
   maybeEnqueueMetadataEnrichment,
+  maybeEnqueueTastingNotesEnrichment,
   startEnrichmentWorker,
   stopEnrichmentWorker,
   enrichmentJobCounts,
+  getProductContent,
   type EnrichmentJob,
-  type EnrichmentJobCounts
+  type EnrichmentJobCounts,
+  type ProductContent
 } from "./jobs/index.js";
+
+export {
+  executeTastingNotesEnrichment,
+  classifySourceUrl,
+  type TastingNotesEnrichmentDeps
+} from "./enrichment/index.js";

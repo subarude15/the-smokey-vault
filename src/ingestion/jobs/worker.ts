@@ -1,5 +1,6 @@
 /**
  * In-process enrichment worker: concurrency 1, backoff when idle, recovers stale jobs.
+ * Handles metadata and tasting_notes job types sequentially.
  */
 import {
   claimNextPendingJob,
@@ -9,7 +10,9 @@ import {
   recoverStaleRunningJobs
 } from "./store.js";
 import { runMetadataJob } from "./metadata-job.js";
+import { runTastingNotesJob } from "./tasting-notes-job.js";
 import type { MetadataEnrichmentDeps } from "../enrichment/index.js";
+import type { TastingNotesEnrichmentDeps } from "../enrichment/execute-tasting-notes.js";
 
 export type EnrichmentLogger = {
   info: (obj: Record<string, unknown>, msg: string) => void;
@@ -24,12 +27,10 @@ const defaultLogger: EnrichmentLogger = {
 };
 
 export type EnrichmentWorkerOptions = {
-  /** Idle sleep when no jobs (ms). */
   idleMs?: number;
-  /** Injected metadata execution deps (tests / offline). */
   metadataDeps?: MetadataEnrichmentDeps;
+  tastingNotesDeps?: TastingNotesEnrichmentDeps;
   logger?: EnrichmentLogger;
-  /** Optional hook after each job cycle (tests). */
   onCycle?: () => void;
 };
 
@@ -86,6 +87,41 @@ function scheduleNext(delayMs: number) {
   workerTimer.unref?.();
 }
 
+async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPendingJob>>) {
+  const log = workerOptions.logger ?? defaultLogger;
+  if (job.job_type === "metadata") {
+    const result = await runMetadataJob(job, workerOptions.metadataDeps);
+    markJobCompleted(job.id);
+    log.info({
+      jobId: job.id,
+      jobType: job.job_type,
+      entityType: job.entity_type,
+      entityId: job.entity_id,
+      skipped: result.skipped,
+      reason: result.reason,
+      inventoryUpdated: result.inventoryUpdated,
+      cacheUpdated: result.cacheUpdated
+    }, "enrichment job completed");
+    return;
+  }
+  if (job.job_type === "tasting_notes") {
+    const result = await runTastingNotesJob(job, workerOptions.tastingNotesDeps);
+    markJobCompleted(job.id);
+    log.info({
+      jobId: job.id,
+      jobType: job.job_type,
+      entityType: job.entity_type,
+      entityId: job.entity_id,
+      skipped: result.skipped,
+      reason: result.reason,
+      officialSaved: result.officialSaved,
+      houseSaved: result.houseSaved
+    }, "enrichment job completed");
+    return;
+  }
+  throw new Error(`Unsupported job type: ${(job as { job_type: string }).job_type}`);
+}
+
 async function tick() {
   if (stopping) return;
   const log = workerOptions.logger ?? defaultLogger;
@@ -102,34 +138,21 @@ async function tick() {
   activeJobId = job.id;
   log.info({
     jobId: job.id,
+    jobType: job.job_type,
     entityType: job.entity_type,
     entityId: job.entity_id,
     attempt: job.attempts
   }, "enrichment job started");
 
   try {
-    if (job.job_type !== "metadata") {
-      throw new Error(`Unsupported job type: ${job.job_type}`);
-    }
-    const result = await runMetadataJob(job, workerOptions.metadataDeps);
-    markJobCompleted(job.id);
-    log.info({
-      jobId: job.id,
-      entityType: job.entity_type,
-      entityId: job.entity_id,
-      skipped: result.skipped,
-      reason: result.reason,
-      inventoryUpdated: result.inventoryUpdated,
-      cacheUpdated: result.cacheUpdated,
-      completedFields: result.execution?.completed ?? [],
-      unresolvedFields: result.execution?.unresolved ?? []
-    }, "enrichment job completed");
+    await processClaimedJob(job);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const updated = markJobFailedOrRetry(job.id, message);
     if (updated?.status === "failed") {
       log.error({
         jobId: job.id,
+        jobType: job.job_type,
         entityType: job.entity_type,
         entityId: job.entity_id,
         attempts: updated.attempts,
@@ -138,6 +161,7 @@ async function tick() {
     } else {
       log.warn({
         jobId: job.id,
+        jobType: job.job_type,
         entityType: job.entity_type,
         entityId: job.entity_id,
         attempts: updated?.attempts,
@@ -149,11 +173,10 @@ async function tick() {
     activeJobId = null;
   }
 
-  // Process next job immediately when work likely remains.
   scheduleNext(0);
 }
 
-/** Test helper: process at most one claimed job synchronously-ish. */
+/** Test helper: process at most one claimed job. */
 export async function runEnrichmentWorkerOnce(options: EnrichmentWorkerOptions = {}): Promise<boolean> {
   const previous = workerOptions;
   workerOptions = { ...previous, ...options };
@@ -166,11 +189,13 @@ export async function runEnrichmentWorkerOnce(options: EnrichmentWorkerOptions =
   }
   activeJobId = job.id;
   try {
-    const result = await runMetadataJob(job, workerOptions.metadataDeps);
-    markJobCompleted(job.id);
-    log.info({ jobId: job.id, skipped: result.skipped }, "enrichment job completed");
+    await processClaimedJob(job);
   } catch (error) {
     markJobFailedOrRetry(job.id, error instanceof Error ? error.message : String(error));
+    log.warn({
+      jobId: job.id,
+      error: error instanceof Error ? error.message : String(error)
+    }, "enrichment job retry scheduled");
   } finally {
     activeJobId = null;
     workerOptions = previous;
