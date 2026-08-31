@@ -189,7 +189,17 @@ function productScore(options: {
   return { score, reason: reasons.join(",") || "weak_signal" };
 }
 
-/** Extract url(...) references from a CSS fragment. */
+/** True when a URL is clearly not a raster product image (stylesheet, font, etc.). */
+function isNonImageCssAssetUrl(url: string): boolean {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return /\.(css|js|mjs|cjs|map|json|html?|xml|woff2?|ttf|otf|eot|svg)(\?|$)/i.test(path);
+  } catch {
+    return /\.(css|js|mjs|svg|woff2?|ttf)(\?|$)/i.test(url);
+  }
+}
+
+/** Extract url(...) references from a CSS fragment. Never returns the stylesheet URL itself. */
 export function extractCssBackgroundUrls(cssText: string, baseUrl: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -198,7 +208,7 @@ export function extractCssBackgroundUrls(cssText: string, baseUrl: string): stri
   while ((m = re.exec(cssText)) !== null) {
     const abs = absolutize(m[1], baseUrl);
     if (!abs) continue;
-    if (/\.(woff2?|ttf|otf|eot)(\?|$)/i.test(abs)) continue;
+    if (isNonImageCssAssetUrl(abs)) continue;
     if (seen.has(abs)) continue;
     seen.add(abs);
     out.push(abs);
@@ -271,6 +281,12 @@ function scoreAndCollect(
   for (const ref of refs) {
     if (!ref.url || seen.has(ref.url)) continue;
     seen.add(ref.url);
+
+    // Stylesheet / script / font URLs are not image candidates.
+    if (isNonImageCssAssetUrl(ref.url)) {
+      bump("non_image_asset");
+      continue;
+    }
 
     const decoration = isLikelyPageDecoration({
       url: ref.url,

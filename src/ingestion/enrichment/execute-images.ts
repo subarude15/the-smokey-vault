@@ -41,11 +41,16 @@ import {
 import { verifyProductImage } from "./image-verify.js";
 import { readImageDimensionsFromHeader } from "./image-dimensions.js";
 import {
-  buildImageCandidateDiagnostic,
+  buildImageScoreComponents,
+  checkVerificationDiagnosticConsistency,
   collectImageRejectionReasons,
+  ImageCandidateDiagnosticStore,
+  imageCandidateIdFromUrl,
+  isNonImageAssetUrl,
   mergeImageSeedsByNormalizedUrl,
-  summarizeImageCandidateDiagnostics,
-  type ImageCandidateDiagnostic
+  orderSeedsForProbe,
+  safeImageUrlParts,
+  summarizeImageCandidateDiagnostics
 } from "./image-candidate-diagnostics.js";
 import {
   sanitizeJobDiagnostics,
@@ -53,6 +58,9 @@ import {
   type JobDiagnosticsPayload,
   type NoResultReason
 } from "./diagnostics.js";
+
+const MAX_PROBE_SEEDS = 20;
+const MAX_OFFICIAL_PAGE_ASSET_STAGES = 8;
 
 export type ImageMeta = {
   width: number | null;
@@ -373,6 +381,17 @@ export async function executeImageEnrichment(
             if (imageUrls.length) {
               officialImagesFromMeta += imageUrls.length;
               for (const imageUrl of imageUrls) {
+                if (isNonImageAssetUrl(imageUrl)) continue;
+                const safe = safeImageUrlParts(imageUrl);
+                if (stages.filter((s) => s.stage === "official_page_asset").length
+                  < MAX_OFFICIAL_PAGE_ASSET_STAGES) {
+                  stages.push({
+                    stage: "official_page_asset",
+                    status: "ok",
+                    reason: `${safe.host}${safe.path}`.slice(0, 160),
+                    sourceUrls: [hit.url]
+                  });
+                }
                 seeds.push({ url: imageUrl, sourceUrl: hit.url });
               }
               stages.push({
@@ -436,6 +455,17 @@ export async function executeImageEnrichment(
                 sourceUrls: [hit.url]
               });
               for (const img of imgScan.prefiltered) {
+                if (isNonImageAssetUrl(img.url)) continue;
+                const safe = safeImageUrlParts(img.url);
+                if (stages.filter((s) => s.stage === "official_page_asset").length
+                  < MAX_OFFICIAL_PAGE_ASSET_STAGES) {
+                  stages.push({
+                    stage: "official_page_asset",
+                    status: "ok",
+                    reason: `${safe.host}${safe.path}`.slice(0, 160),
+                    sourceUrls: [hit.url]
+                  });
+                }
                 seeds.push({
                   url: img.url,
                   sourceUrl: hit.url,
@@ -447,9 +477,12 @@ export async function executeImageEnrichment(
                 stages.push({
                   stage: "official_page_img_candidate",
                   status: "ok",
-                  acceptedCount: imgScan.prefiltered.length,
+                  acceptedCount: imgScan.prefiltered.filter((i) => !isNonImageAssetUrl(i.url)).length,
                   reason: "accepted for verification",
-                  sourceUrls: imgScan.prefiltered.slice(0, 6).map((i) => i.url)
+                  sourceUrls: imgScan.prefiltered
+                    .filter((i) => !isNonImageAssetUrl(i.url))
+                    .slice(0, 6)
+                    .map((i) => i.url)
                 });
               }
             }
@@ -521,17 +554,35 @@ export async function executeImageEnrichment(
     });
   }
 
-  const seenSeeds = mergeImageSeedsByNormalizedUrl(seeds);
+  const seenSeeds = mergeImageSeedsByNormalizedUrl(
+    seeds.filter((s) => {
+      const url = String(s.url ?? "").trim();
+      return Boolean(url) && !isNonImageAssetUrl(url);
+    })
+  );
   const uniqueSeeds = seenSeeds.filter((s) => Boolean(String(s.url ?? "").trim()));
+  // Prefer official page-scoped seeds in the probe window so verification
+  // candidates are not starved by search junk / decorative insertion order.
+  const probeSeeds = orderSeedsForProbe(uniqueSeeds).slice(0, MAX_PROBE_SEEDS);
 
   const brand = candidate.brand.value;
   const name = candidate.name.value;
   const probed: ImageCandidate[] = [];
   const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
   let fetchFailed = 0;
-  const imageCandidateDiags: ImageCandidateDiagnostic[] = [];
+  const diagStore = new ImageCandidateDiagnosticStore();
 
-  for (const seed of uniqueSeeds.slice(0, 20)) {
+  for (const seed of probeSeeds) {
+    const preview = toCandidate(seed, brand, name, discoveredDomains);
+    diagStore.ensureDiscovered({
+      url: seed.url,
+      sourceType: preview.sourceType,
+      sourceUrl: seed.sourceUrl,
+      width: seed.width,
+      height: seed.height,
+      mimeType: seed.mimeType
+    });
+
     let meta: ImageMeta = {
       width: seed.width ?? null,
       height: seed.height ?? null,
@@ -564,18 +615,17 @@ export async function executeImageEnrichment(
     if (!meta.reachable) {
       fetchFailed += 1;
       const failedCandidate = toCandidate(seed, brand, name, discoveredDomains);
-      imageCandidateDiags.push(
-        buildImageCandidateDiagnostic({
-          candidate: failedCandidate,
-          fetchStatus: "failed",
-          dimensionsSource: null,
-          hardPassed: false,
-          hardReasons: ["fetch_failed"],
-          accepted: false,
-          rejectionReasons: ["fetch_failed"],
-          stageReached: "discovered"
-        })
-      );
+      diagStore.markHardFilter({
+        url: failedCandidate.url,
+        sourceType: failedCandidate.sourceType,
+        sourceUrl: failedCandidate.sourceUrl,
+        width: failedCandidate.width,
+        height: failedCandidate.height,
+        mimeType: failedCandidate.mimeType,
+        dimensionsSource: null,
+        fetchStatus: "failed",
+        reasons: ["fetch_failed"]
+      });
       continue;
     }
     const item = toCandidate(
@@ -589,7 +639,7 @@ export async function executeImageEnrichment(
       name,
       discoveredDomains
     );
-    dimensionSources.set(item.url, dimsSource);
+    dimensionSources.set(imageCandidateIdFromUrl(item.url), dimsSource);
     probed.push(item);
   }
 
@@ -609,7 +659,7 @@ export async function executeImageEnrichment(
       ? "Image candidates could not be fetched"
       : "No image candidates found";
     diagnostics.stages = stages;
-    diagnostics.imageCandidates = imageCandidateDiags;
+    diagnostics.imageCandidates = diagStore.toArray();
     return {
       selected: null,
       evaluated: [],
@@ -634,18 +684,17 @@ export async function executeImageEnrichment(
         rejectionReason: reason,
         verified: false
       });
-      imageCandidateDiags.push(
-        buildImageCandidateDiagnostic({
-          candidate: item,
-          fetchStatus: "ok",
-          dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
-          hardPassed: false,
-          hardReasons: [reason],
-          accepted: false,
-          rejectionReasons: [reason],
-          stageReached: "hard_filter"
-        })
-      );
+      diagStore.markHardFilter({
+        url: item.url,
+        sourceType: item.sourceType,
+        sourceUrl: item.sourceUrl,
+        width: item.width,
+        height: item.height,
+        mimeType: item.mimeType,
+        dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
+        fetchStatus: "ok",
+        reasons: [reason]
+      });
       continue;
     }
     if (item.sourceType === "unknown") {
@@ -663,19 +712,18 @@ export async function executeImageEnrichment(
         rejectionReason: "below_vision_floor",
         verified: false
       });
-      imageCandidateDiags.push(
-        buildImageCandidateDiagnostic({
-          candidate: item,
-          fetchStatus: "ok",
-          dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
-          hardPassed: true,
-          hardReasons: [],
-          score: base,
-          accepted: false,
-          rejectionReasons: ["below_vision_floor"],
-          stageReached: "hard_filter"
-        })
-      );
+      diagStore.markHardFilter({
+        url: item.url,
+        sourceType: item.sourceType,
+        sourceUrl: item.sourceUrl,
+        width: item.width,
+        height: item.height,
+        mimeType: item.mimeType,
+        dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
+        fetchStatus: "ok",
+        reasons: ["below_vision_floor"],
+        score: base
+      });
     }
   }
 
@@ -695,8 +743,22 @@ export async function executeImageEnrichment(
   let selected: ScoredImageCandidate | null = null;
   let verificationRejected = 0;
   let scoreRejected = 0;
+  const sentToVision = visionQueue.slice(0, IMAGE_MAX_VISION_CHECKS);
+  let visionCallsStarted = 0;
 
-  for (const item of visionQueue.slice(0, IMAGE_MAX_VISION_CHECKS)) {
+  for (const item of sentToVision) {
+    visionCallsStarted += 1;
+    const dimsSource = dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown";
+    diagStore.markVerificationStarted({
+      url: item.url,
+      sourceType: item.sourceType,
+      sourceUrl: item.sourceUrl,
+      width: item.width,
+      height: item.height,
+      mimeType: item.mimeType,
+      dimensionsSource: dimsSource
+    });
+
     let vision: VisionVerification | null = null;
     let visionError: string | null = null;
     try {
@@ -719,20 +781,22 @@ export async function executeImageEnrichment(
         rejectionReason: reason,
         verified: false
       });
-      imageCandidateDiags.push(
-        buildImageCandidateDiagnostic({
-          candidate: item,
-          fetchStatus: reason === "fetch_failed" ? "failed" : "ok",
-          dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
-          hardPassed: true,
-          hardReasons: [],
-          visionError: reason,
-          score: scoreImageCandidateBase(item),
-          accepted: false,
-          rejectionReasons: [reason],
-          stageReached: "verification"
-        })
-      );
+      diagStore.markVerificationResult({
+        url: item.url,
+        sourceType: item.sourceType,
+        sourceUrl: item.sourceUrl,
+        width: item.width,
+        height: item.height,
+        mimeType: item.mimeType,
+        dimensionsSource: dimsSource,
+        fetchStatus: reason === "fetch_failed" ? "failed" : "ok",
+        vision: null,
+        visionError: reason,
+        score: scoreImageCandidateBase(item),
+        accepted: false,
+        rejectionReasons: [reason],
+        stageReached: "verification"
+      });
       verificationRejected += 1;
       continue;
     }
@@ -757,7 +821,6 @@ export async function executeImageEnrichment(
       accepted: Boolean(selected && selected.url === evaluated.url),
       verified: evaluated.verified
     });
-    // Prefer primary reason from evaluateCandidate when present.
     if (evaluated.rejected && evaluated.rejectionReason) {
       if (!rejectionReasons.includes(evaluated.rejectionReason)) {
         rejectionReasons.unshift(evaluated.rejectionReason);
@@ -771,25 +834,29 @@ export async function executeImageEnrichment(
         ? "scoring"
         : "verification";
 
-    imageCandidateDiags.push(
-      buildImageCandidateDiagnostic({
-        candidate: item,
-        fetchStatus: "ok",
-        dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
-        hardPassed: true,
-        hardReasons: [],
-        vision,
-        score: evaluated.score,
-        accepted: isAccepted,
-        rejectionReasons: evaluated.rejected ? rejectionReasons : [],
-        stageReached
-      })
-    );
+    diagStore.markVerificationResult({
+      url: item.url,
+      sourceType: item.sourceType,
+      sourceUrl: item.sourceUrl,
+      width: item.width,
+      height: item.height,
+      mimeType: item.mimeType,
+      dimensionsSource: dimsSource,
+      vision,
+      visionError: null,
+      score: evaluated.score,
+      scoreComponents: buildImageScoreComponents(item, vision),
+      accepted: isAccepted,
+      rejectionReasons: evaluated.rejected ? rejectionReasons : [],
+      stageReached
+    });
 
     if (selected) break;
   }
 
+  let notCheckedCount = 0;
   for (const item of visionQueue.slice(IMAGE_MAX_VISION_CHECKS)) {
+    notCheckedCount += 1;
     scored.push({
       ...item,
       score: scoreImageCandidateBase(item),
@@ -797,25 +864,45 @@ export async function executeImageEnrichment(
       rejectionReason: "not_checked",
       verified: false
     });
-    imageCandidateDiags.push(
-      buildImageCandidateDiagnostic({
-        candidate: item,
-        fetchStatus: "ok",
-        dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
-        hardPassed: true,
-        hardReasons: [],
-        score: scoreImageCandidateBase(item),
-        accepted: false,
-        rejectionReasons: ["not_checked"],
-        stageReached: "verification"
-      })
-    );
+    diagStore.markVerificationResult({
+      url: item.url,
+      sourceType: item.sourceType,
+      sourceUrl: item.sourceUrl,
+      width: item.width,
+      height: item.height,
+      mimeType: item.mimeType,
+      dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
+      vision: null,
+      visionError: "not_checked",
+      score: scoreImageCandidateBase(item),
+      accepted: false,
+      rejectionReasons: ["not_checked"],
+      stageReached: "verification"
+    });
+  }
+
+  // Actual candidates that reached verification stage (calls started + overflow not_checked).
+  const verificationCountFromStages = visionCallsStarted + notCheckedCount;
+  // Cap applied only AFTER verification updates on the full working map.
+  const workingDiags = diagStore.toArray();
+  const consistency = checkVerificationDiagnosticConsistency({
+    verificationCountFromStages,
+    diagnostics: workingDiags
+  });
+  if (!consistency.ok && consistency.reason) {
+    stages.push({
+      stage: "verification_diagnostic_mismatch",
+      status: "error",
+      candidateCount: verificationCountFromStages,
+      acceptedCount: consistency.diagnosticCount,
+      reason: consistency.reason
+    });
   }
 
   stages.push({
     stage: "verify",
     status: selected ? "ok" : "no_result",
-    candidateCount: Math.min(visionQueue.length, IMAGE_MAX_VISION_CHECKS),
+    candidateCount: verificationCountFromStages,
     acceptedCount: selected ? 1 : 0,
     rejectedCount: verificationRejected + scoreRejected,
     reason: selected
@@ -835,14 +922,16 @@ export async function executeImageEnrichment(
     else noResultReason = "all_image_candidates_rejected";
   }
 
+  const boundedDiags = diagStore.toBoundedList();
   diagnostics.noResultReason = noResultReason;
-  diagnostics.summary = summarizeImageCandidateDiagnostics(imageCandidateDiags, {
+  diagnostics.summary = summarizeImageCandidateDiagnostics(boundedDiags, {
     selectedScore: selected?.score ?? null,
     noResultReason
   });
   diagnostics.stages = stages;
   diagnostics.accepted = selected ? ["image"] : [];
-  diagnostics.imageCandidates = imageCandidateDiags;
+  // Assign unbounded working set; sanitizeJobDiagnostics applies final cap.
+  diagnostics.imageCandidates = workingDiags;
 
   return {
     selected,
