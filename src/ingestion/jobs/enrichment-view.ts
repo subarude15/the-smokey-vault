@@ -4,6 +4,12 @@
  */
 import { getBarcodeCacheEntry } from "../../barcode_cache.js";
 import {
+  isUsableCanonicalFamily,
+  normalizeCanonicalAbv,
+  normalizeCanonicalTaxonomy,
+  normalizeCanonicalVolumeMl
+} from "../../canonical-normalize.js";
+import {
   candidateFromProduct,
   CONFIDENCE,
   isUnresolvedField,
@@ -244,11 +250,15 @@ export function collectCacheConflicts(
   const normalized: Record<string, unknown> = {
     ...row,
     brand: row.brand ?? row.brewery ?? row.producer ?? "",
-    category: row.category ?? row.style ?? row.varietal ?? row.type ?? "",
+    category: (() => {
+      const raw = String(row.category ?? row.style ?? row.varietal ?? row.type ?? "");
+      const tax = normalizeCanonicalTaxonomy(raw, String(row.sub_category ?? ""));
+      return tax.family || (isUsableCanonicalFamily(raw) ? raw : "");
+    })(),
     product_type: row.product_type || inferredType,
     origin: row.origin ?? row.region ?? null,
-    volume_ml: row.volume_ml === 0 || row.volume_ml === "0" ? null : row.volume_ml,
-    abv: row.abv === 0 || row.abv === "0" ? null : row.abv
+    volume_ml: normalizeCanonicalVolumeMl(row.volume_ml),
+    abv: normalizeCanonicalAbv(row.abv, { productType: inferredType })
   };
   const vault = candidateFromProduct(normalized, "vault");
   if (isUnresolvedField(vault.product_type)) {

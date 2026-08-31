@@ -24,6 +24,7 @@ export {
   enqueueImageJob,
   getEnrichmentJob,
   hasCompletedJob,
+  hasFailedJob,
   hasActiveEnrichmentJob,
   listJobsForEntity,
   claimNextPendingJob,
@@ -115,6 +116,14 @@ export {
   type EnrichmentBackfillQueueResult,
   type EnrichmentBackfillJobType
 } from "./enrichment-backfill.js";
+
+export {
+  metadataEnrichmentAvailability,
+  tastingNotesEnrichmentAvailability,
+  imageEnrichmentAvailability,
+  bottleEnrichmentActuallyComplete,
+  type EnrichmentAvailability
+} from "./enrichment-availability.js";
 
 export {
   clearAdminAuditForTests,

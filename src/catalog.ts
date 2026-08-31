@@ -1,7 +1,12 @@
-export const WHISKEY_TYPES = [
-  "Bourbon", "Rye", "Scotch", "Irish", "Corn whiskey", "Tennessee",
-  "Canadian", "Japanese", "Blended", "Wheat whiskey"
-];
+import {
+  CANONICAL_WHISKEY_TYPES,
+  normalizeCanonicalAbv,
+  normalizeCanonicalTaxonomy,
+  normalizeCanonicalVolumeMl,
+  stripPackageTokensFromName
+} from "./canonical-normalize.js";
+
+export const WHISKEY_TYPES = [...CANONICAL_WHISKEY_TYPES];
 
 export function parseList(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -54,26 +59,23 @@ function uniqueList(values: string[]): string[] {
 export function spiritFamilyFromLabel(category: string, subCategory = ""): { family: string; type: string } {
   const familyRaw = category.trim();
   const typeRaw = subCategory.trim();
-  const haystack = `${familyRaw} ${typeRaw}`.toLowerCase();
-  if (!familyRaw) return { family: "Mixer", type: typeRaw };
-  if (familyRaw.toLowerCase() === "whiskey" || familyRaw.toLowerCase() === "whisky") {
-    return { family: "Whiskey", type: typeRaw };
+  if (!familyRaw && !typeRaw) return { family: "Mixer", type: "" };
+
+  const tax = normalizeCanonicalTaxonomy(familyRaw, typeRaw);
+  if (tax.family) {
+    return { family: tax.family, type: tax.type };
   }
-  const whiskeyType = WHISKEY_TYPES.find((value) => haystack.includes(value.toLowerCase()));
-  if (whiskeyType || /whisky|whiskey/.test(haystack)) {
-    return { family: "Whiskey", type: typeRaw || whiskeyType || familyRaw };
+
+  // Preserve empty / junk as unresolved — never return Food / Beverages as family.
+  if (tax.discardedJunk || tax.wasCommerceTaxonomy) {
+    return { family: "", type: "" };
   }
-  if (/gin/.test(haystack)) return { family: "Gin", type: typeRaw };
-  if (/tequila/.test(haystack)) return { family: "Tequila", type: typeRaw };
-  if (/mezcal/.test(haystack)) return { family: "Mezcal", type: typeRaw };
-  if (/\brum\b/.test(haystack)) return { family: "Rum", type: typeRaw };
-  if (/amaro/.test(haystack)) return { family: "Amaro", type: typeRaw };
-  if (/liqueur|cordial/.test(haystack)) return { family: "Liqueur", type: typeRaw };
-  if (/bitter/.test(haystack)) return { family: "Bitters", type: typeRaw };
-  if (/vodka/.test(haystack)) return { family: "Vodka", type: typeRaw };
-  if (/cognac/.test(haystack)) return { family: "Cognac", type: typeRaw };
-  if (/brandy|armagnac|pisco/.test(haystack)) return { family: "Brandy", type: typeRaw };
-  return { family: familyRaw, type: typeRaw };
+
+  // Non-junk unknown labels (rare custom families) pass through when usable length.
+  if (familyRaw && familyRaw.length <= 40 && !familyRaw.includes(">")) {
+    return { family: familyRaw, type: typeRaw };
+  }
+  return { family: "", type: "" };
 }
 
 export type ProductTable = "spirits" | "packaged_beer" | "wines";
@@ -360,6 +362,26 @@ export function prepareSpiritWrite(body: Record<string, unknown>): Record<string
   const next = { ...body };
   if (next.fill_level !== undefined) next.fill_level = nearestFillStop(next.fill_level);
   if (next.stock_count !== undefined) next.stock_count = spiritStock(next.stock_count);
+
+  const category = String(next.category ?? "");
+  const subCategory = String(next.sub_category ?? "");
+  if (category || subCategory) {
+    const mapped = spiritFamilyFromLabel(category, subCategory);
+    next.category = mapped.family;
+    if (next.sub_category !== undefined || subCategory) next.sub_category = mapped.type;
+  }
+  if (typeof next.name === "string" && next.name.trim()) {
+    next.name = stripPackageTokensFromName(next.name);
+  }
+  if (next.abv !== undefined) {
+    next.abv = normalizeCanonicalAbv(next.abv, {
+      productType: String(next.product_type ?? "spirit")
+    });
+  }
+  if (next.volume_ml !== undefined) {
+    const volume = normalizeCanonicalVolumeMl(next.volume_ml);
+    next.volume_ml = volume;
+  }
   return next;
 }
 

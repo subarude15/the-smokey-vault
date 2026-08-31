@@ -22,6 +22,7 @@ import {
   onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
   packagedCount, packagedStockLabel, FILL_STOPS, compareSpirits, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
+  spiritFamilyFromLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
@@ -32,7 +33,9 @@ import {
   TAB_KEYS, parseEnabledTabs, parseTabOrder, serializeEnabledTabs, serializeTabOrder,
   mixologistFailureMessage, mixologistLoadingStep, MIXOLOGIST_LOADING_STEP_MS,
   type EnabledTabs, type SubstituteOption, type TabKey,
-  LOOKUP_SOURCE_LABELS, missMessage, type LookupSource
+  LOOKUP_SOURCE_LABELS, missMessage, type LookupSource,
+  displayCanonicalFamily, displayCanonicalType, stripPackageTokensFromName,
+  normalizeCanonicalAbv, normalizeCanonicalVolumeMl
 } from "./catalog";
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 import { ImportReview } from "./ImportReview";
@@ -235,13 +238,19 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
   const categories = text("categories","category") ?? "";
   const productType = text("product_type") ?? "";
   const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string,unknown>|undefined)?.alcohol_100g;
-  const abv = typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")) || 0;
-  const name = text("product_name","product_name_en","name") ?? "";
+  const abv = normalizeCanonicalAbv(
+    typeof rawAbv==="number" ? rawAbv : Number.parseFloat(String(rawAbv??"")),
+    { productType: productType || undefined }
+  );
+  const nameRaw = text("product_name","product_name_en","name") ?? "";
+  const name = stripPackageTokensFromName(nameRaw) || nameRaw;
   const brand = text("brands","brand","producer","brewery") ?? "";
   const upc = result.upc ?? text("code","upc") ?? "";
   const image = text("image_front_url","image_url") ?? "";
   const notes = text("notes") ?? "";
-  const volume = typeof product.volume_ml === "number" ? product.volume_ml : Number.parseFloat(String(product.volume_ml ?? "")) || 750;
+  const volume = normalizeCanonicalVolumeMl(
+    typeof product.volume_ml === "number" ? product.volume_ml : Number.parseFloat(String(product.volume_ml ?? ""))
+  ) ?? 750;
   const moduleId = result.table === "packaged_beer" || result.table === "wines" || result.table === "spirits"
     ? result.table
     : inferProductTable({ name, category: categories, product_type: productType, brand });
@@ -251,7 +260,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
       key: Date.now(),
       mode: "create",
       source: result.source,
-      values: { name, brewery: brand, style: categories.split(",")[0] ?? "", abv, count: 1, vessel: /bottle/i.test(`${categories} ${productType} ${name}`) ? "Bottle" : "Can", upc, image_url: image }
+      values: { name, brewery: brand, style: categories.split(",")[0] ?? "", abv: abv ?? 0, count: 1, vessel: /bottle/i.test(`${categories} ${productType} ${name}`) ? "Bottle" : "Can", upc, image_url: image }
     };
   }
   if (moduleId === "wines") {
@@ -276,6 +285,7 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
       }
     };
   }
+  const mapped = spiritFamilyFromLabel(categories, text("sub_category","derived_subcategory") ?? "");
   return {
     moduleId: "spirits",
     key: Date.now(),
@@ -284,8 +294,8 @@ function scannedInventoryDraft(result: ScanResult): ScanDraft {
     values: {
       name,
       brand,
-      category: categories.split(",")[0] || "Mixer",
-      sub_category: text("sub_category","derived_subcategory") ?? "",
+      category: mapped.family,
+      sub_category: mapped.type,
       abv,
       upc,
       image_url: image,
@@ -1797,8 +1807,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
             {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
-            {item.category ? <span>{String(item.category)}</span> : null}
-            {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
+            {displayCanonicalFamily(String(item.category ?? "")) ? <span>{displayCanonicalFamily(String(item.category ?? ""))}</span> : null}
+            {displayCanonicalType(String(item.sub_category ?? "")) ? <span>{displayCanonicalType(String(item.sub_category ?? ""))}</span> : null}
             {module.id === "wines"
               ? (wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) ? <span>{wineKindLabel(String(item.type ?? ""), String(item.style ?? ""))}</span> : null)
               : module.id !== "taps" && item.style ? <span>{String(item.style)}</span> : null}
@@ -1930,8 +1940,8 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           <h1>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h1>
           <div className="meta">
             {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
-            {item.category ? <span>{String(item.category)}</span> : null}
-            {item.sub_category ? <span>{String(item.sub_category)}</span> : null}
+            {displayCanonicalFamily(String(item.category ?? "")) ? <span>{displayCanonicalFamily(String(item.category ?? ""))}</span> : null}
+            {displayCanonicalType(String(item.sub_category ?? "")) ? <span>{displayCanonicalType(String(item.sub_category ?? ""))}</span> : null}
             {module.id === "wines"
               ? (wineKind ? <span>{wineKind}</span> : null)
               : module.id === "taps" && isTapEmpty(item) ? null

@@ -1,24 +1,27 @@
 import type { ProductSchema } from "../../cola_client.js";
+import { normalizeCanonicalAbv, normalizeCanonicalTaxonomy, stripPackageTokensFromName } from "../../canonical-normalize.js";
 
 export function mapOffToSchema(upc: string, offProduct: Record<string, unknown>): ProductSchema {
   const nutriments = (offProduct.nutriments as Record<string, unknown> | undefined) ?? {};
   const abvRaw = offProduct.abv ?? offProduct.alcohol_100g ?? nutriments.alcohol_100g;
-  const abv = typeof abvRaw === "number" ? Math.round(abvRaw * 10) / 10 : Number.parseFloat(String(abvRaw ?? "")) || null;
-  const name = String(offProduct.product_name || offProduct.product_name_en || offProduct.generic_name || "Unknown");
+  const parsedAbv = typeof abvRaw === "number" ? Math.round(abvRaw * 10) / 10 : Number.parseFloat(String(abvRaw ?? ""));
+  const abv = normalizeCanonicalAbv(Number.isFinite(parsedAbv) ? parsedAbv : null);
+  const nameRaw = String(offProduct.product_name || offProduct.product_name_en || offProduct.generic_name || "Unknown");
   const brand = String(offProduct.brands || offProduct.brand || "");
-  const category = String(offProduct.categories || offProduct.category || "Mixer").split(",")[0]?.trim() || "Mixer";
+  const categoryRaw = String(offProduct.categories || offProduct.category || "").split(",")[0]?.trim() || "";
+  const tax = normalizeCanonicalTaxonomy(categoryRaw, "");
   return {
     upc,
-    name,
+    name: stripPackageTokensFromName(nameRaw) || nameRaw,
     brand,
-    category,
-    abv: Number.isFinite(abv as number) ? abv : null,
+    category: tax.family || (tax.discardedJunk ? "" : categoryRaw) || "Mixer",
+    abv,
     image_url: String(offProduct.image_front_url || offProduct.image_url || "") || null,
     fill_level_percent: 100,
     bottle_count: 1,
     notes: null,
     volume_ml: null,
-    product_type: null,
+    product_type: tax.productType,
     ttb_id: null,
     origin: null,
     approval_date: null

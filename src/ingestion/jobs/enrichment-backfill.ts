@@ -5,6 +5,12 @@ import { db } from "../../db.js";
 import { recordAdminAuditEvent } from "./admin-audit.js";
 import { collectCacheConflicts } from "./enrichment-view.js";
 import {
+  bottleEnrichmentActuallyComplete,
+  imageEnrichmentAvailability,
+  metadataEnrichmentAvailability,
+  tastingNotesEnrichmentAvailability
+} from "./enrichment-availability.js";
+import {
   maybeEnqueueImageEnrichment,
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
@@ -23,11 +29,18 @@ import {
 export type EnrichmentBackfillPreview = {
   scanned: number;
   eligible: number;
+  /** Schedulable missing metadata. */
   metadata: number;
+  /** Schedulable missing tasting notes. */
   tastingNotes: number;
+  /** Schedulable missing product images. */
   images: number;
+  noResultTastingNotes: number;
+  noResultImages: number;
+  failedEnrichment: number;
   needsReview: number;
   unidentified: number;
+  /** Actually satisfied enrichment — not merely “nothing to schedule”. */
   alreadyComplete: number;
 };
 
@@ -54,7 +67,10 @@ type BottleEligibility = {
   metadata: boolean;
   tastingNotes: boolean;
   images: boolean;
-  skipReason: "none" | "unidentified" | "needs_review" | "complete";
+  noResultTastingNotes: boolean;
+  noResultImages: boolean;
+  failed: boolean;
+  skipReason: "none" | "unidentified" | "needs_review" | "complete" | "not_schedulable";
 };
 
 function normalizeJobTypes(types?: EnrichmentBackfillJobType[]): EnrichmentBackfillJobType[] {
@@ -73,11 +89,31 @@ function evaluateBottleEligibility(
   const plan = planEnrichment(candidate, { conflicts });
 
   if (!plan.identified) {
-    return { metadata: false, tastingNotes: false, images: false, skipReason: "unidentified" };
+    return {
+      metadata: false,
+      tastingNotes: false,
+      images: false,
+      noResultTastingNotes: false,
+      noResultImages: false,
+      failed: false,
+      skipReason: "unidentified"
+    };
   }
   if (plan.needsReview) {
-    return { metadata: false, tastingNotes: false, images: false, skipReason: "needs_review" };
+    return {
+      metadata: false,
+      tastingNotes: false,
+      images: false,
+      noResultTastingNotes: false,
+      noResultImages: false,
+      failed: false,
+      skipReason: "needs_review"
+    };
   }
+
+  const metaAvail = metadataEnrichmentAvailability({ candidate, entityType, entityId });
+  const tasteAvail = tastingNotesEnrichmentAvailability({ entityType, entityId });
+  const imageAvail = imageEnrichmentAvailability({ entityType, entityId, row });
 
   const metadata =
     shouldScheduleMetadataEnrichment({ candidate, entityType, entityId }) &&
@@ -89,10 +125,47 @@ function evaluateBottleEligibility(
     shouldScheduleImageEnrichment({ entityType, entityId, row }) &&
     !hasActiveEnrichmentJob(entityType, entityId, "image");
 
-  if (!metadata && !tastingNotes && !images) {
-    return { metadata: false, tastingNotes: false, images: false, skipReason: "complete" };
+  const actuallyComplete = bottleEnrichmentActuallyComplete({
+    candidate,
+    entityType,
+    entityId,
+    row
+  });
+
+  if (actuallyComplete) {
+    return {
+      metadata: false,
+      tastingNotes: false,
+      images: false,
+      noResultTastingNotes: false,
+      noResultImages: false,
+      failed: false,
+      skipReason: "complete"
+    };
   }
-  return { metadata, tastingNotes, images, skipReason: "none" };
+
+  if (!metadata && !tastingNotes && !images) {
+    return {
+      metadata: false,
+      tastingNotes: false,
+      images: false,
+      noResultTastingNotes: tasteAvail === "no_result",
+      noResultImages: imageAvail === "no_result",
+      failed:
+        metaAvail === "failed" || tasteAvail === "failed" || imageAvail === "failed",
+      skipReason: "not_schedulable"
+    };
+  }
+
+  return {
+    metadata,
+    tastingNotes,
+    images,
+    noResultTastingNotes: tasteAvail === "no_result",
+    noResultImages: imageAvail === "no_result",
+    failed: metaAvail === "failed" || tasteAvail === "failed" || imageAvail === "failed",
+    skipReason: "none"
+  };
 }
 
 function scanInventory(): Array<{ entityType: EnrichmentEntityType; row: Record<string, unknown> }> {
@@ -113,6 +186,9 @@ export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
     metadata: 0,
     tastingNotes: 0,
     images: 0,
+    noResultTastingNotes: 0,
+    noResultImages: 0,
+    failedEnrichment: 0,
     needsReview: 0,
     unidentified: 0,
     alreadyComplete: 0
@@ -137,6 +213,9 @@ export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
     preview.metadata += eligibility.metadata ? 1 : 0;
     preview.tastingNotes += eligibility.tastingNotes ? 1 : 0;
     preview.images += eligibility.images ? 1 : 0;
+    preview.noResultTastingNotes += eligibility.noResultTastingNotes ? 1 : 0;
+    preview.noResultImages += eligibility.noResultImages ? 1 : 0;
+    preview.failedEnrichment += eligibility.failed ? 1 : 0;
     if (eligibility.metadata || eligibility.tastingNotes || eligibility.images) {
       preview.eligible += 1;
     }
@@ -168,7 +247,7 @@ export function queueEnrichmentBackfill(options?: {
         result.skipped.needs_review += 1;
         continue;
       }
-      if (eligibility.skipReason === "complete") {
+      if (eligibility.skipReason === "complete" || eligibility.skipReason === "not_schedulable") {
         result.skipped.complete += 1;
         continue;
       }

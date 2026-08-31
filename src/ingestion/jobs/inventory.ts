@@ -3,10 +3,18 @@
  * (plus barcode_cache / cola_cache when a UPC is present for fields the shelf table lacks).
  */
 import { getBarcodeCacheEntry, saveBarcodeCacheEntry } from "../../barcode_cache.js";
+import {
+  isUsableCanonicalFamily,
+  normalizeCanonicalAbv,
+  normalizeCanonicalProof,
+  normalizeCanonicalTaxonomy,
+  normalizeCanonicalVolumeMl
+} from "../../canonical-normalize.js";
 import { db } from "../../db.js";
 import { getFromCache, saveToCache } from "../catalogs/cola-cache-store.js";
 import {
   candidateFromProduct,
+  emptyField,
   field,
   isUnresolvedField,
   mergeField,
@@ -95,7 +103,8 @@ function overlayUpcCaches(candidate: BottleCandidate): BottleCandidate {
 /**
  * Convert a saved shelf row into a BottleCandidate.
  * Source is vault (trusted). product_type is inferred from the table when absent.
- * Default numeric zeros (common SQLite defaults) are treated as unresolved for enrichment.
+ * Default numeric zeros (common SQLite defaults) and junk commerce taxonomy are
+ * treated as unresolved for enrichment planning.
  * When a UPC is present, barcode_cache / cola_cache fill metadata gaps without weakening vault values.
  */
 export function candidateFromInventoryRow(
@@ -105,25 +114,31 @@ export function candidateFromInventoryRow(
   const inferredType =
     entityType === "packaged_beer" ? "beer" : entityType === "wines" ? "wine" : "spirit";
 
+  const categoryRaw = String(row.category ?? row.style ?? row.varietal ?? row.type ?? "");
+  const subRaw = String(row.sub_category ?? "");
+  const tax = normalizeCanonicalTaxonomy(categoryRaw, subRaw);
+  const usableFamily = tax.family || (isUsableCanonicalFamily(categoryRaw) ? categoryRaw : "");
+
   const normalized: Record<string, unknown> = {
     ...row,
     brand: row.brand ?? row.brewery ?? row.producer ?? "",
-    category: row.category ?? row.style ?? row.varietal ?? row.type ?? "",
-    product_type: row.product_type || inferredType,
+    category: usableFamily,
+    product_type: row.product_type || tax.productType || inferredType,
     origin: row.origin ?? row.region ?? null,
-    volume_ml: row.volume_ml,
-    abv: row.abv,
-    proof: row.proof,
+    volume_ml: normalizeCanonicalVolumeMl(row.volume_ml),
+    abv: normalizeCanonicalAbv(row.abv, {
+      productType: String(row.product_type || tax.productType || inferredType)
+    }),
+    proof: normalizeCanonicalProof(row.proof),
     ttb_id: row.ttb_id
   };
-
-  // Treat default 0 abv / volume as unknown for enrichment planning.
-  if (normalized.abv === 0 || normalized.abv === "0") normalized.abv = null;
-  if (normalized.volume_ml === 0 || normalized.volume_ml === "0") normalized.volume_ml = null;
 
   const candidate = candidateFromProduct(normalized, "vault");
   if (isUnresolvedField(candidate.product_type)) {
     candidate.product_type = field(inferredType, "vault");
+  }
+  if (!usableFamily) {
+    candidate.category = emptyField();
   }
   return overlayUpcCaches(candidate);
 }
