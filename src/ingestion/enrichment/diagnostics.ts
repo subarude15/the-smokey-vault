@@ -2,6 +2,11 @@
  * Lightweight enrichment diagnostics for keeper/admin observability.
  * Never stores secrets, full prompts, or large page bodies.
  */
+import {
+  boundImageCandidateDiagnostics,
+  type ImageCandidateDiagnostic
+} from "./image-candidate-diagnostics.js";
+
 export type EnrichmentJobKind = "metadata" | "tasting_notes" | "image";
 
 export type DiagnosticStageStatus = "ok" | "skipped" | "no_result" | "error";
@@ -55,6 +60,8 @@ export type JobDiagnosticsPayload = {
   accepted?: string[];
   unresolved?: string[];
   rejectReasons?: FieldRejectReason[];
+  /** Bounded per-candidate image verification diagnostics (keeper/admin). */
+  imageCandidates?: ImageCandidateDiagnostic[];
 };
 
 const MAX_URLS = 12;
@@ -111,7 +118,10 @@ export function sanitizeJobDiagnostics(payload: JobDiagnosticsPayload): JobDiagn
     rejectReasons: payload.rejectReasons?.slice(0, MAX_REJECTS).map((r) => ({
       field: String(r.field).slice(0, 40),
       reason: String(r.reason).slice(0, 80)
-    }))
+    })),
+    imageCandidates: payload.imageCandidates
+      ? boundImageCandidateDiagnostics(payload.imageCandidates)
+      : undefined
   };
 }
 

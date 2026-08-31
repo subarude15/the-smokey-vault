@@ -39,6 +39,12 @@ import {
   IMAGE_VISION_CANDIDATE_FLOOR
 } from "./image-thresholds.js";
 import { verifyProductImage } from "./image-verify.js";
+import { readImageDimensionsFromHeader } from "./image-dimensions.js";
+import {
+  buildImageCandidateDiagnostic,
+  collectImageRejectionReasons,
+  type ImageCandidateDiagnostic
+} from "./image-candidate-diagnostics.js";
 import {
   sanitizeJobDiagnostics,
   type EnrichmentDiagnosticStage,
@@ -51,6 +57,7 @@ export type ImageMeta = {
   height: number | null;
   mimeType: string | null;
   reachable: boolean;
+  dimensionsSource?: "image_header" | "unknown" | null;
 };
 
 export type ImageEnrichmentDeps = {
@@ -94,18 +101,34 @@ async function defaultProbe(url: string): Promise<ImageMeta> {
     const response = await fetch(url, {
       method: "GET",
       signal: AbortSignal.timeout(10_000),
-      headers: { Range: "bytes=0-0" }
+      // Enough bytes for JPEG/PNG/WebP headers; still the same candidate URL.
+      headers: { Range: "bytes=0-65535" }
     });
     const mimeType = (response.headers.get("content-type") ?? "").split(";")[0].trim() || null;
+    const reachable = response.ok || response.status === 206;
+    if (!reachable) {
+      return { width: null, height: null, mimeType, reachable: false, dimensionsSource: null };
+    }
+    const buf = Buffer.from(await response.arrayBuffer());
+    const dims = readImageDimensionsFromHeader(buf);
     return {
-      width: null,
-      height: null,
+      width: dims?.width ?? null,
+      height: dims?.height ?? null,
       mimeType: mimeType?.startsWith("image/") ? mimeType : mimeType,
-      reachable: response.ok || response.status === 206
+      reachable: true,
+      dimensionsSource: dims ? "image_header" : "unknown"
     };
   } catch {
-    return { width: null, height: null, mimeType: null, reachable: false };
+    return { width: null, height: null, mimeType: null, reachable: false, dimensionsSource: null };
   }
+}
+
+function classifyVisionError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("vision_parse_failed") || m === "vision_parse_failed") return "vision_parse_failed";
+  if (m.includes("vision_provider_error") || m.includes("ollama")) return "vision_provider_error";
+  if (m.includes("fetch_failed")) return "fetch_failed";
+  return "vision_provider_error";
 }
 
 async function defaultFetchPageHtml(url: string): Promise<string | null> {
@@ -507,21 +530,35 @@ export async function executeImageEnrichment(
   const brand = candidate.brand.value;
   const name = candidate.name.value;
   const probed: ImageCandidate[] = [];
+  const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
   let fetchFailed = 0;
+  const imageCandidateDiags: ImageCandidateDiagnostic[] = [];
+
   for (const seed of uniqueSeeds.slice(0, 20)) {
     let meta: ImageMeta = {
       width: seed.width ?? null,
       height: seed.height ?? null,
       mimeType: seed.mimeType ?? null,
-      reachable: true
+      reachable: true,
+      dimensionsSource: seed.width != null && seed.height != null ? null : "unknown"
     };
+    let dimsSource: "seed" | "image_header" | "unknown" =
+      seed.width != null && seed.height != null ? "seed" : "unknown";
     try {
       const probedMeta = await probe(seed.url);
+      const width = seed.width ?? probedMeta.width;
+      const height = seed.height ?? probedMeta.height;
+      if (seed.width != null && seed.height != null) dimsSource = "seed";
+      else if (probedMeta.width != null && probedMeta.height != null) {
+        dimsSource =
+          probedMeta.dimensionsSource === "unknown" ? "unknown" : "image_header";
+      }
       meta = {
-        width: seed.width ?? probedMeta.width,
-        height: seed.height ?? probedMeta.height,
+        width,
+        height,
         mimeType: seed.mimeType ?? probedMeta.mimeType,
-        reachable: probedMeta.reachable
+        reachable: probedMeta.reachable,
+        dimensionsSource: dimsSource
       };
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Image probe failed");
@@ -529,21 +566,33 @@ export async function executeImageEnrichment(
     }
     if (!meta.reachable) {
       fetchFailed += 1;
+      const failedCandidate = toCandidate(seed, brand, name, discoveredDomains);
+      imageCandidateDiags.push(
+        buildImageCandidateDiagnostic({
+          candidate: failedCandidate,
+          fetchStatus: "failed",
+          dimensionsSource: null,
+          hardPassed: false,
+          hardReasons: ["fetch_failed"],
+          accepted: false,
+          rejectionReasons: ["fetch_failed"]
+        })
+      );
       continue;
     }
-    probed.push(
-      toCandidate(
-        {
-          ...seed,
-          width: meta.width,
-          height: meta.height,
-          mimeType: meta.mimeType
-        },
-        brand,
-        name,
-        discoveredDomains
-      )
+    const item = toCandidate(
+      {
+        ...seed,
+        width: meta.width,
+        height: meta.height,
+        mimeType: meta.mimeType
+      },
+      brand,
+      name,
+      discoveredDomains
     );
+    dimensionSources.set(item.url, dimsSource);
+    probed.push(item);
   }
 
   stages.push({
@@ -562,6 +611,7 @@ export async function executeImageEnrichment(
       ? "Image candidates could not be fetched"
       : "No image candidates found";
     diagnostics.stages = stages;
+    diagnostics.imageCandidates = imageCandidateDiags;
     return {
       selected: null,
       evaluated: [],
@@ -586,9 +636,19 @@ export async function executeImageEnrichment(
         rejectionReason: reason,
         verified: false
       });
+      imageCandidateDiags.push(
+        buildImageCandidateDiagnostic({
+          candidate: item,
+          fetchStatus: "ok",
+          dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
+          hardPassed: false,
+          hardReasons: [reason],
+          accepted: false,
+          rejectionReasons: [reason]
+        })
+      );
       continue;
     }
-    // Source-type soft accounting for diagnostics.
     if (item.sourceType === "unknown") {
       rejectionCounts.unknown_source = (rejectionCounts.unknown_source ?? 0) + 1;
     }
@@ -604,6 +664,18 @@ export async function executeImageEnrichment(
         rejectionReason: "below_vision_floor",
         verified: false
       });
+      imageCandidateDiags.push(
+        buildImageCandidateDiagnostic({
+          candidate: item,
+          fetchStatus: "ok",
+          dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
+          hardPassed: true,
+          hardReasons: [],
+          score: base,
+          accepted: false,
+          rejectionReasons: ["below_vision_floor"]
+        })
+      );
     }
   }
 
@@ -626,42 +698,86 @@ export async function executeImageEnrichment(
 
   for (const item of visionQueue.slice(0, IMAGE_MAX_VISION_CHECKS)) {
     let vision: VisionVerification | null = null;
+    let visionError: string | null = null;
     try {
       vision = await verify({ candidate, imageUrl: item.url });
+      if (!vision) {
+        visionError = "vision_parse_failed";
+      }
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Vision verify failed");
+      const message = error instanceof Error ? error.message : "Vision verify failed";
+      errors.push(message);
+      visionError = classifyVisionError(message);
+    }
+
+    if (visionError || !vision) {
+      const reason = visionError || "vision_parse_failed";
       scored.push({
         ...item,
         score: scoreImageCandidateBase(item),
         rejected: true,
-        rejectionReason: "vision_error",
+        rejectionReason: reason,
         verified: false
       });
-      continue;
-    }
-    if (!vision) {
-      scored.push({
-        ...item,
-        score: scoreImageCandidateBase(item),
-        rejected: true,
-        rejectionReason: "vision_unavailable",
-        verified: false
-      });
-      continue;
-    }
-    const evaluated = evaluateCandidate(item, vision);
-    scored.push(evaluated);
-    if (evaluated.rejected) {
+      imageCandidateDiags.push(
+        buildImageCandidateDiagnostic({
+          candidate: item,
+          fetchStatus: reason === "fetch_failed" ? "failed" : "ok",
+          dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
+          hardPassed: true,
+          hardReasons: [],
+          visionError: reason,
+          score: scoreImageCandidateBase(item),
+          accepted: false,
+          rejectionReasons: [reason]
+        })
+      );
       verificationRejected += 1;
       continue;
     }
-    if (meetsAcceptanceThreshold(evaluated.score)) {
+
+    const evaluated = evaluateCandidate(item, vision);
+    if (!evaluated.rejected && !meetsAcceptanceThreshold(evaluated.score)) {
+      evaluated.rejected = true;
+      evaluated.rejectionReason = "score_below_threshold";
+      scoreRejected += 1;
+    } else if (evaluated.rejected) {
+      verificationRejected += 1;
+    } else {
       selected = evaluated;
-      break;
     }
-    scoreRejected += 1;
-    evaluated.rejected = true;
-    evaluated.rejectionReason = `score_below_threshold:${evaluated.score}<${IMAGE_ACCEPTANCE_THRESHOLD}`;
+    scored.push(evaluated);
+
+    const rejectionReasons = collectImageRejectionReasons({
+      hardReason: null,
+      vision,
+      visionError: null,
+      score: evaluated.score,
+      accepted: Boolean(selected && selected.url === evaluated.url),
+      verified: evaluated.verified
+    });
+    // Prefer primary reason from evaluateCandidate when present.
+    if (evaluated.rejected && evaluated.rejectionReason) {
+      if (!rejectionReasons.includes(evaluated.rejectionReason)) {
+        rejectionReasons.unshift(evaluated.rejectionReason);
+      }
+    }
+
+    imageCandidateDiags.push(
+      buildImageCandidateDiagnostic({
+        candidate: item,
+        fetchStatus: "ok",
+        dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
+        hardPassed: true,
+        hardReasons: [],
+        vision,
+        score: evaluated.score,
+        accepted: Boolean(selected && selected.url === evaluated.url && !evaluated.rejected),
+        rejectionReasons: evaluated.rejected ? rejectionReasons : []
+      })
+    );
+
+    if (selected) break;
   }
 
   for (const item of visionQueue.slice(IMAGE_MAX_VISION_CHECKS)) {
@@ -672,6 +788,18 @@ export async function executeImageEnrichment(
       rejectionReason: "not_checked",
       verified: false
     });
+    imageCandidateDiags.push(
+      buildImageCandidateDiagnostic({
+        candidate: item,
+        fetchStatus: "ok",
+        dimensionsSource: dimensionSources.get(item.url) ?? "unknown",
+        hardPassed: true,
+        hardReasons: [],
+        score: scoreImageCandidateBase(item),
+        accepted: false,
+        rejectionReasons: ["not_checked"]
+      })
+    );
   }
 
   stages.push({
@@ -697,16 +825,30 @@ export async function executeImageEnrichment(
     else noResultReason = "all_image_candidates_rejected";
   }
 
+  // Prefer a summary that surfaces the most specific verified failure.
+  const verifiedDiags = imageCandidateDiags.filter((d) => d.vision?.ran);
+  const scoreFail = verifiedDiags.find((d) => d.rejectionReasons.includes("score_below_threshold"));
+  const visionFail = verifiedDiags.find((d) =>
+    d.rejectionReasons.some((r) =>
+      ["wrong_product", "bottle_not_prominent", "meme_or_graphic", "contains_people"].includes(r)
+    )
+  );
+
   diagnostics.noResultReason = noResultReason;
   diagnostics.summary = selected
     ? `Accepted image score ${selected.score}`
-    : noResultReason === "verification_rejected"
-      ? "Image verification rejected candidates"
-      : noResultReason === "score_below_threshold"
-        ? "Verified candidates scored below acceptance threshold"
-        : "All image candidates were rejected";
+    : scoreFail
+      ? `Vision passed; score ${scoreFail.score} / ${IMAGE_ACCEPTANCE_THRESHOLD}; rejected: score below threshold`
+      : visionFail
+        ? `Image verification rejected candidates (${visionFail.rejectionReasons[0]})`
+        : noResultReason === "verification_rejected"
+          ? "Image verification rejected candidates"
+          : noResultReason === "score_below_threshold"
+            ? "Verified candidates scored below acceptance threshold"
+            : "All image candidates were rejected";
   diagnostics.stages = stages;
   diagnostics.accepted = selected ? ["image"] : [];
+  diagnostics.imageCandidates = imageCandidateDiags;
 
   return {
     selected,

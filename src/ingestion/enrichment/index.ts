@@ -156,6 +156,7 @@ export {
   applyVisionScoreAdjustments,
   evaluateCandidate,
   meetsAcceptanceThreshold,
+  primaryVisionRejectionReason,
   type ImageCandidate,
   type VisionVerification,
   type ScoredImageCandidate
@@ -164,8 +165,22 @@ export {
 export {
   verifyProductImage,
   parseVisionVerification,
-  buildImageVerifyPrompt
+  buildImageVerifyPrompt,
+  identityContextForVision
 } from "./image-verify.js";
+
+export {
+  buildImageScoreComponents,
+  buildImageCandidateDiagnostic,
+  collectImageRejectionReasons,
+  safeImageUrlParts,
+  sumScoreComponents,
+  formatImageRejectionReason,
+  type ImageCandidateDiagnostic,
+  type ImageScoreComponents
+} from "./image-candidate-diagnostics.js";
+
+export { readImageDimensionsFromHeader } from "./image-dimensions.js";
 
 export {
   executeImageEnrichment,
