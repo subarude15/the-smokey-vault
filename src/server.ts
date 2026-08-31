@@ -41,6 +41,7 @@ import {
   type EnrichmentBackfillJobType
 } from "./ingestion/jobs/index.js";
 import { isEnrichmentEntityType } from "./ingestion/jobs/types.js";
+import { checkEnrichmentHealth } from "./ingestion/enrichment/health.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -232,6 +233,13 @@ app.get("/api/admin/enrichment/backfill", {
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   return previewEnrichmentBackfill();
+});
+
+app.get("/api/admin/enrichment/health", {
+  schema: { tags: ["Admin"], summary: "Lightweight SearXNG and Ollama connectivity for enrichment" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return checkEnrichmentHealth();
 });
 
 app.post<{ Body: { types?: string[] } }>("/api/admin/enrichment/backfill", {

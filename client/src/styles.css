@@ -140,6 +140,8 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 @media(max-width:360px){.hero{grid-template-columns:1fr;grid-template-areas:"copy" "orbit" "lede";justify-items:start}.hero-orbit{width:124px;height:124px;margin:10px 0 0}.hero-orbit span{font-size:26px}.hero-wordmark{font-size:32px}}
 .settings-card .eyebrow{margin:0}
 .enrichment-maintenance .enrichment-refresh{margin-bottom:12px}
+.enrichment-services-health .enrichment-refresh{margin-top:14px}
+.enrichment-health-pending{font-size:13px;color:var(--muted);margin-top:12px}
 .enrichment-backfill-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 16px;margin:12px 0 14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
 .enrichment-backfill-stats div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .enrichment-backfill-stats dt{font-size:12px;color:var(--muted);margin:0}
@@ -147,6 +149,18 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .enrichment-backfill-note{color:var(--muted);font-size:13px;line-height:1.5;margin:0 0 12px}
 .enrichment-backfill-actions{display:flex;flex-wrap:wrap;gap:8px}
 .enrichment-backfill-banner{color:var(--text);font-size:13px;line-height:1.5;margin:12px 0 0;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.enrichment-backfill-warning{color:var(--text);font-size:13px;line-height:1.5;margin:12px 0 0;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,#c9873c 45%,var(--line));background:color-mix(in srgb,#c9873c 12%,var(--surface))}
+.enrichment-health-list{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.enrichment-health-row{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--surface-2);display:grid;grid-template-columns:120px 1fr;gap:4px 12px}
+.enrichment-health-name{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);grid-row:1 / span 2;align-self:center}
+.enrichment-health-status{display:flex;align-items:baseline;gap:8px}
+.enrichment-health-status strong{font:600 16px "Playfair Display"}
+.enrichment-health-latency{font-size:12px;color:var(--muted)}
+.enrichment-health-host{font-size:12px;color:var(--muted);grid-column:2}
+.enrichment-health-error{font-size:12px;color:var(--text);grid-column:2}
+.enrichment-health-connected{border-color:color-mix(in srgb,#4f8f5f 45%,var(--line))}
+.enrichment-health-degraded{border-color:color-mix(in srgb,#c9873c 45%,var(--line))}
+.enrichment-health-unreachable{border-color:color-mix(in srgb,#e9796d 45%,var(--line))}
 .scan-session-result-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .scan-session-parked{display:none!important}
 .scan-landing-tools{margin-top:18px;display:flex;flex-direction:column;gap:14px}
