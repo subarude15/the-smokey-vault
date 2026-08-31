@@ -1,6 +1,6 @@
 /**
  * Deterministic enrichment planning over BottleCandidate.
- * Does not perform searches, LLM calls, downloads, or persistence.
+ * Metadata executor fills recommended factual fields only (no tasting notes / images).
  */
 export {
   ENRICHMENT_FIELDS,
@@ -23,3 +23,24 @@ export {
 } from "./rules.js";
 
 export { planEnrichment } from "./plan.js";
+
+export {
+  METADATA_ENRICHMENT_FIELDS,
+  isMetadataEnrichmentField,
+  proofFromAbv,
+  abvFromProof,
+  type MetadataEnrichmentField
+} from "./metadata-fields.js";
+
+export {
+  executeMetadataEnrichment,
+  type EnrichmentExecutionResult,
+  type EnrichmentExecutionError,
+  type MetadataEnrichmentDeps
+} from "./execute-metadata.js";
+
+export {
+  extractMetadataFromWebText,
+  type MetadataExtractRequest,
+  type MetadataExtractResult
+} from "./metadata-extract.js";
