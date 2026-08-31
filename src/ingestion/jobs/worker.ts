@@ -1,6 +1,6 @@
 /**
  * In-process enrichment worker: concurrency 1, backoff when idle, recovers stale jobs.
- * Handles metadata and tasting_notes job types sequentially.
+ * Handles metadata, tasting_notes, and image job types sequentially.
  */
 import {
   claimNextPendingJob,
@@ -11,8 +11,10 @@ import {
 } from "./store.js";
 import { runMetadataJob } from "./metadata-job.js";
 import { runTastingNotesJob } from "./tasting-notes-job.js";
+import { runImageJob } from "./image-job.js";
 import type { MetadataEnrichmentDeps } from "../enrichment/index.js";
 import type { TastingNotesEnrichmentDeps } from "../enrichment/execute-tasting-notes.js";
+import type { ImageEnrichmentDeps } from "../enrichment/execute-images.js";
 
 export type EnrichmentLogger = {
   info: (obj: Record<string, unknown>, msg: string) => void;
@@ -30,6 +32,7 @@ export type EnrichmentWorkerOptions = {
   idleMs?: number;
   metadataDeps?: MetadataEnrichmentDeps;
   tastingNotesDeps?: TastingNotesEnrichmentDeps;
+  imageDeps?: ImageEnrichmentDeps;
   logger?: EnrichmentLogger;
   onCycle?: () => void;
 };
@@ -116,6 +119,21 @@ async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPen
       reason: result.reason,
       officialSaved: result.officialSaved,
       houseSaved: result.houseSaved
+    }, "enrichment job completed");
+    return;
+  }
+  if (job.job_type === "image") {
+    const result = await runImageJob(job, workerOptions.imageDeps);
+    markJobCompleted(job.id);
+    log.info({
+      jobId: job.id,
+      jobType: job.job_type,
+      entityType: job.entity_type,
+      entityId: job.entity_id,
+      skipped: result.skipped,
+      reason: result.reason,
+      imageSaved: result.imageSaved,
+      selectedScore: result.execution?.selected?.score ?? null
     }, "enrichment job completed");
     return;
   }

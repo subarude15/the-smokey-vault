@@ -51,19 +51,26 @@ export {
   ensureEnrichmentJobsTable,
   enqueueMetadataJob,
   enqueueTastingNotesJob,
+  enqueueImageJob,
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
+  maybeEnqueueImageEnrichment,
   startEnrichmentWorker,
   stopEnrichmentWorker,
   enrichmentJobCounts,
   getProductContent,
+  getProductImage,
   type EnrichmentJob,
   type EnrichmentJobCounts,
-  type ProductContent
+  type ProductContent,
+  type ProductImageRecord
 } from "./jobs/index.js";
 
 export {
   executeTastingNotesEnrichment,
+  executeImageEnrichment,
   classifySourceUrl,
-  type TastingNotesEnrichmentDeps
+  classifyImageSource,
+  type TastingNotesEnrichmentDeps,
+  type ImageEnrichmentDeps
 } from "./enrichment/index.js";

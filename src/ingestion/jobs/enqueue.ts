@@ -11,6 +11,11 @@ import {
   productContentFullyPopulated
 } from "./product-content.js";
 import {
+  hasAcceptedProductImage,
+  inventoryHasUserImage
+} from "./product-images.js";
+import {
+  enqueueImageJob,
   enqueueMetadataJob,
   enqueueTastingNotesJob,
   enrichmentJobCounts,
@@ -115,6 +120,54 @@ export function maybeEnqueueTastingNotesEnrichment(options: {
   }
 
   const { job, created } = enqueueTastingNotesJob({
+    entityType,
+    entityId: options.entityId,
+    upc: candidate.upc.value
+  });
+  logEnqueue(options.logger, job, created, entityType, options.entityId);
+  return { enqueued: true, created, job };
+}
+
+export function shouldScheduleImageEnrichment(options: {
+  entityType: EnrichmentEntityType;
+  entityId: number;
+  row: Record<string, unknown>;
+}): boolean {
+  if (inventoryHasUserImage(options.row)) return false;
+  if (hasAcceptedProductImage(options.entityType, options.entityId)) return false;
+  if (hasCompletedJob(options.entityType, options.entityId, "image")) return false;
+  return true;
+}
+
+/**
+ * Enqueue image enrichment independently from metadata / tasting notes.
+ * Skips when a user/shelf image already exists or a prior image job completed.
+ */
+export function maybeEnqueueImageEnrichment(options: {
+  entityType: string;
+  entityId: number;
+  row: Record<string, unknown>;
+  planOptions?: PlanEnrichmentOptions;
+  logger?: EnrichmentLogger;
+}): MaybeEnqueueResult {
+  if (!isEnrichmentEntityType(options.entityType)) {
+    return { enqueued: false, reason: "unsupported_entity" };
+  }
+  const entityType = options.entityType as EnrichmentEntityType;
+  const candidate = candidateFromInventoryRow(entityType, options.row);
+  const plan = planEnrichment(candidate, options.planOptions ?? {});
+
+  if (!plan.identified) return { enqueued: false, reason: "not_identified" };
+  if (plan.needsReview) return { enqueued: false, reason: "needs_review" };
+  if (!shouldScheduleImageEnrichment({
+    entityType,
+    entityId: options.entityId,
+    row: options.row
+  })) {
+    return { enqueued: false, reason: "already_complete" };
+  }
+
+  const { job, created } = enqueueImageJob({
     entityType,
     entityId: options.entityId,
     upc: candidate.upc.value

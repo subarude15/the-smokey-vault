@@ -20,7 +20,8 @@ import {
 import { importRowHasName, importTableFor, normalizeImportItem, normalizeImportUpc } from "./import_batch.js";
 import {
   maybeEnqueueMetadataEnrichment,
-  maybeEnqueueTastingNotesEnrichment
+  maybeEnqueueTastingNotesEnrichment,
+  maybeEnqueueImageEnrichment
 } from "./ingestion/jobs/index.js";
 
 export const MAX_IMPORT_ROWS = 1500;
@@ -414,6 +415,7 @@ export async function commitReadyImportRows(ids?: number[]): Promise<CommitResul
         const saved = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id) as Record<string, unknown>;
         maybeEnqueueMetadataEnrichment({ entityType: table, entityId: id, row: saved });
         maybeEnqueueTastingNotesEnrichment({ entityType: table, entityId: id, row: saved });
+        maybeEnqueueImageEnrichment({ entityType: table, entityId: id, row: saved });
       } catch {
         // Bottle is saved; queue failure must not roll back the import commit.
       }

@@ -69,3 +69,46 @@ export {
   type TastingNotesEnrichmentDeps,
   type TastingNotesExecutionResult
 } from "./execute-tasting-notes.js";
+
+export {
+  IMAGE_MIN_WIDTH,
+  IMAGE_MIN_HEIGHT,
+  IMAGE_LARGE_MIN,
+  IMAGE_MAX_ASPECT_RATIO,
+  IMAGE_SCORE,
+  IMAGE_ACCEPTANCE_THRESHOLD,
+  IMAGE_VISION_CANDIDATE_FLOOR,
+  IMAGE_MAX_VISION_CHECKS
+} from "./image-thresholds.js";
+
+export {
+  classifyImageSource,
+  isAcceptableImageSource,
+  type ImageSourceType
+} from "./image-sources.js";
+
+export {
+  hardRejectCandidate,
+  scoreImageCandidateBase,
+  applyVisionScoreAdjustments,
+  evaluateCandidate,
+  meetsAcceptanceThreshold,
+  type ImageCandidate,
+  type VisionVerification,
+  type ScoredImageCandidate
+} from "./image-score.js";
+
+export {
+  verifyProductImage,
+  parseVisionVerification,
+  buildImageVerifyPrompt
+} from "./image-verify.js";
+
+export {
+  executeImageEnrichment,
+  searchImageHits,
+  type ImageEnrichmentDeps,
+  type ImageEnrichmentResult,
+  type ImageCandidateSeed,
+  type ImageMeta
+} from "./execute-images.js";

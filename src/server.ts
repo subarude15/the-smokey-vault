@@ -34,6 +34,7 @@ import {
   enrichmentJobCounts,
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
+  maybeEnqueueImageEnrichment,
   startEnrichmentWorker
 } from "./ingestion/jobs/index.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
@@ -305,6 +306,24 @@ function queueTastingNotesEnrichmentSafe(
   }
 }
 
+function queueImageEnrichmentSafe(
+  entityType: string,
+  entityId: number,
+  row: Record<string, unknown>
+) {
+  try {
+    return maybeEnqueueImageEnrichment({
+      entityType,
+      entityId,
+      row,
+      logger: enrichmentLogger()
+    });
+  } catch (error) {
+    app.log.error({ error, entityType, entityId }, "Failed to enqueue image enrichment");
+    return { enqueued: false as const, reason: "enqueue_error" };
+  }
+}
+
 function queueBackgroundEnrichmentSafe(
   entityType: string,
   entityId: number,
@@ -312,6 +331,7 @@ function queueBackgroundEnrichmentSafe(
 ) {
   queueMetadataEnrichmentSafe(entityType, entityId, row);
   queueTastingNotesEnrichmentSafe(entityType, entityId, row);
+  queueImageEnrichmentSafe(entityType, entityId, row);
 }
 
 app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inventory/:table", async (request, reply) => {
