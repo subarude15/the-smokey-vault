@@ -16,7 +16,6 @@ import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
 import { listTonightPours, maybeInventoryPour } from "./pours.js";
-import { emptyVault, isPurgeWindow, previewVaultPurge, PURGE_CONFIRM } from "./vault_purge.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import {
   enrichColaRecord,
@@ -205,31 +204,6 @@ app.post<{ Body: { currentPin?: string; newPin?: string } }>("/api/auth/pin", as
   if (!newPin || !/^\d{4,12}$/.test(newPin)) return reply.code(400).send({ error: "PIN must be 4–12 digits" });
   setPin(newPin);
   return { ok: true };
-});
-
-app.get<{ Querystring: { window?: string } }>("/api/inventory/purge", {
-  schema: { tags: ["Inventory"], summary: "Preview how many scanned bottles a vault purge would remove" }
-}, async (request, reply) => {
-  if (requireAdmin(request, reply)) return;
-  if (!isPurgeWindow(request.query.window)) {
-    return reply.code(400).send({ error: "window must be 1h, 6h, 24h, or all" });
-  }
-  return previewVaultPurge(request.query.window);
-});
-
-app.post<{ Body: { window?: string; confirm?: string } }>("/api/inventory/purge", {
-  schema: { tags: ["Inventory"], summary: "Empty scanned shelf bottles (spirits, beer, wine) for a time window" }
-}, async (request, reply) => {
-  if (requireAdmin(request, reply)) return;
-  if (!isPurgeWindow(request.body?.window)) {
-    return reply.code(400).send({ error: "window must be 1h, 6h, 24h, or all" });
-  }
-  try {
-    return emptyVault(request.body.window, String(request.body?.confirm ?? ""));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not empty the vault";
-    return reply.code(400).send({ error: message });
-  }
 });
 
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
