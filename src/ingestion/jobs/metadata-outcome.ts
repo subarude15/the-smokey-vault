@@ -83,11 +83,22 @@ export function metadataOutcomeFromState(options: {
     return gaps.length ? "missing" : "complete";
   }
 
-  // Completed job — inspect stored progress when present.
+  // Completed job — inspect bottle gaps and stored progress.
   const stored = parseMetadataJobResult(
     getLatestCompletedJobResult(entityType, entityId, "metadata")
   );
   if (!gaps.length) return "complete";
+
+  // Bottle completeness is independent of the latest run's update count.
+  // A bottle with meaningful metadata (beyond shelf-default volume) and remaining
+  // gaps stays Partial even when a rerun finds nothing new (updated=[]).
+  // Empty bottles with empty reruns stay No result.
+  const meaningfulPopulated = METADATA_ENRICHMENT_FIELDS.filter((name) => {
+    if (name === "volume_ml") return false;
+    return !fieldNeedsWork(candidate[name] as ProductField<unknown>);
+  }).length;
+  if (meaningfulPopulated > 0) return "partial";
+
   if (stored && stored.updated.length > 0) return "partial";
   if (stored && stored.updated.length === 0) return "no_result";
   // Legacy completed jobs without result payload: gaps remain ⇒ not Complete.

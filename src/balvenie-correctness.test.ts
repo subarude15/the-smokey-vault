@@ -35,6 +35,8 @@ import {
   runMetadataJob,
   shouldScheduleMetadataEnrichment
 } from "./ingestion/jobs/index.js";
+import { saveToCache } from "./ingestion/catalogs/cola-cache-store.js";
+import { saveBarcodeCacheEntry } from "./barcode_cache.js";
 
 const UPC = "083664871681";
 const PREFIX = "08366487";
@@ -59,6 +61,42 @@ function insertTrustedScotch() {
     string,
     unknown
   >;
+}
+
+function seedPartialCaches(spirit: Record<string, unknown>) {
+  saveToCache(
+    {
+      upc: UPC,
+      name: String(spirit.name),
+      brand: String(spirit.brand),
+      category: "Scotch Whisky",
+      abv: 43,
+      image_url: null,
+      fill_level_percent: 100,
+      bottle_count: 1,
+      notes: null,
+      volume_ml: 750,
+      product_type: "spirit",
+      ttb_id: null,
+      origin: "Speyside",
+      approval_date: null,
+      proof: 86
+    } as never,
+    null,
+    null,
+    "cola_cloud"
+  );
+  saveBarcodeCacheEntry({
+    upc: UPC,
+    name: String(spirit.name),
+    brand: String(spirit.brand),
+    category: "Whiskey",
+    subcategory: "Scotch Whisky",
+    abv: 43,
+    proof: 86,
+    volume_ml: 750,
+    source: "enrichment"
+  });
 }
 
 test("1-2. Scotch Whisky persists into spirits row; bottle header shows subtype", () => {
@@ -172,7 +210,7 @@ test("5. keeper enrichment and BottleDetail classification agree", () => {
   cleanup();
   const spirit = insertTrustedScotch();
   const id = Number(spirit.id);
-  db.prepare(`UPDATE spirits SET origin = ? WHERE id = ?`).run("Speyside", id);
+  seedPartialCaches(spirit);
   const row = db.prepare("SELECT * FROM spirits WHERE id=?").get(id) as Record<string, unknown>;
 
   // BottleDetail convention: Family = category, Type = sub_category
@@ -195,7 +233,7 @@ test("6-7. Partial metadata with only TTB missing; empty rerun is No new data fo
   cleanup();
   const spirit = insertTrustedScotch();
   const id = Number(spirit.id);
-  db.prepare(`UPDATE spirits SET origin = ?, proof = ? WHERE id = ?`).run("Speyside", 86, id);
+  seedPartialCaches(spirit);
 
   enqueueMetadataJob({ entityType: "spirits", entityId: id, upc: UPC, force: true });
   const claimed = claimNextPendingJob()!;
@@ -238,11 +276,13 @@ test("6-7. Partial metadata with only TTB missing; empty rerun is No new data fo
   assert.ok(!/fail/i.test(metaJob?.lastRunLabel ?? ""));
 
   const stored = parseMetadataJobResult(
-    db
-      .prepare(
-        `SELECT result_json FROM enrichment_jobs WHERE entity_type='spirits' AND entity_id=? AND job_type='metadata' AND status='completed' ORDER BY id DESC LIMIT 1`
-      )
-      .get(id) as { result_json: string }
+    (
+      db
+        .prepare(
+          `SELECT result_json FROM enrichment_jobs WHERE entity_type='spirits' AND entity_id=? AND job_type='metadata' AND status='completed' ORDER BY id DESC LIMIT 1`
+        )
+        .get(id) as { result_json: string } | undefined
+    )?.result_json
   );
   assert.equal(
     metadataLastRunLabel({ bottleOutcome: "partial", stored }),
