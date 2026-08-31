@@ -139,23 +139,6 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .next-empty{color:var(--muted);margin:0}
 @media(max-width:360px){.hero{grid-template-columns:1fr;grid-template-areas:"copy" "orbit" "lede";justify-items:start}.hero-orbit{width:124px;height:124px;margin:10px 0 0}.hero-orbit span{font-size:26px}.hero-wordmark{font-size:32px}}
 .settings-card .eyebrow{margin:0}
-.vault-purge{grid-column:1/-1;border-color:color-mix(in srgb,#e9796d 55%,var(--line));background:color-mix(in srgb,#e9796d 8%,var(--surface));order:99}
-.vault-purge-open{background:color-mix(in srgb,#e9796d 12%,var(--surface))}
-.vault-purge-toggle{display:flex;align-items:center;gap:14px;width:100%;border:0;background:transparent;color:#e9796d;padding:0;cursor:pointer;text-align:left}
-.vault-purge-toggle>span{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
-.vault-purge-toggle .eyebrow{color:#e9796d}
-.vault-purge-toggle strong{font:600 22px "Playfair Display";color:#e9796d}
-.vault-purge-toggle svg:first-child{flex:none}
-.vault-purge-body{display:flex;flex-direction:column;gap:13px;padding-top:4px;border-top:1px solid color-mix(in srgb,#e9796d 35%,var(--line));margin-top:4px}
-.vault-purge-body>p{color:var(--muted);font-size:13px;line-height:1.6;margin:0}
-.vault-purge-count{color:var(--text)!important;font-size:14px!important}
-.vault-purge-count strong{color:#e9796d}
-.vault-purge-windows .chip.active{border-color:#e9796d;color:#e9796d;background:color-mix(in srgb,#e9796d 16%,var(--surface))}
-.vault-purge-all.active{background:#e9796d;color:#1a0a08;border-color:#e9796d}
-.vault-purge-go{min-height:44px;padding:0 17px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-weight:700;border:1px solid #e9796d;background:#e9796d;color:#1a0a08;align-self:flex-start}
-.vault-purge-go:hover{background:color-mix(in srgb,#e9796d 88%,#fff)}
-.vault-purge-go:disabled{opacity:.45;cursor:not-allowed}
-.vault-purge input{border-color:color-mix(in srgb,#e9796d 40%,var(--line))}
 .settings-pin input{min-height:48px;letter-spacing:.18em;font-size:20px}
 .theme-grid button{min-height:72px}
 @media(max-width:700px){.theme-grid{grid-template-columns:1fr}}

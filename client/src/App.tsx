@@ -45,8 +45,6 @@ import { StaffPage } from "./StaffPage";
 import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
 import { clearDraft, useFormDraft } from "./useFormDraft";
-import { EmptyVault } from "./EmptyVault";
-
 type Field = { key: string; label: string; type?: string; options?: string[] };
 type Module = {
   id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string;
@@ -2987,7 +2985,6 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(
           <Power size={17}/> {restarting ? "Restarting…" : "Safe restart"}
         </button>
       </section>
-      <EmptyVault onMessage={setMessage}/>
     </div>
     {message&&<div className="toast">{message}</div>}
   </>;
