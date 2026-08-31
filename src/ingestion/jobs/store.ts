@@ -127,6 +127,26 @@ export function getEnrichmentJob(id: number): EnrichmentJob | null {
   return row ? mapJob(row) : null;
 }
 
+/** Latest job per type for an entity (all statuses). */
+export function listJobsForEntity(
+  entityType: EnrichmentEntityType,
+  entityId: number
+): EnrichmentJob[] {
+  const rows = db.prepare(`
+    SELECT * FROM enrichment_jobs
+    WHERE entity_type = ? AND entity_id = ?
+    ORDER BY id DESC
+  `).all(entityType, entityId) as JobRow[];
+  const latestByType = new Map<string, EnrichmentJob>();
+  for (const row of rows) {
+    const job = mapJob(row);
+    if (!latestByType.has(job.job_type)) latestByType.set(job.job_type, job);
+  }
+  return ["metadata", "tasting_notes", "image"]
+    .map((type) => latestByType.get(type))
+    .filter((job): job is EnrichmentJob => Boolean(job));
+}
+
 export function hasCompletedJob(
   entityType: EnrichmentEntityType,
   entityId: number,

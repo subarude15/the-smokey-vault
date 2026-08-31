@@ -31,12 +31,14 @@ import {
   identifyByLocalLabelImage
 } from "./ingestion/bottle-orchestrator.js";
 import {
+  buildBottleEnrichmentView,
   enrichmentJobCounts,
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
   maybeEnqueueImageEnrichment,
   startEnrichmentWorker
 } from "./ingestion/jobs/index.js";
+import { isEnrichmentEntityType } from "./ingestion/jobs/types.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -465,6 +467,23 @@ app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id
   deleteDailyVotesForItem(request.params.table, Number(request.params.id));
   db.prepare(`DELETE FROM ${request.params.table} WHERE id=?`).run(request.params.id);
   return reply.code(204).send();
+});
+
+app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/enrichment", {
+  schema: {
+    tags: ["Lookup"],
+    summary: "Bottle enrichment / review state (provenance, jobs, tasting notes, image)"
+  }
+}, async (request, reply) => {
+  const table = request.params.table;
+  if (!isEnrichmentEntityType(table)) {
+    return reply.code(404).send({ error: "Enrichment not available for this module" });
+  }
+  const id = Number(request.params.id);
+  if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
+  const view = buildBottleEnrichmentView({ entityType: table, entityId: id });
+  if (!view) return reply.code(404).send({ error: "Item not found" });
+  return view;
 });
 
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/reviews", async (request, reply) => {
