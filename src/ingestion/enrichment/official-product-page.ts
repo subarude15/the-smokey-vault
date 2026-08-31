@@ -1,9 +1,11 @@
 /**
  * Official product-page discovery and deterministic ranking for image enrichment.
  *
- * Two-step flow (caller-driven):
+ * Flow (caller-driven):
  *   A) Broad search discovers brand registered domain(s).
- *   B) Bounded site-scoped search finds the best matching product-detail page.
+ *   B) Optional site:-scoped queries (may return zero on some SearXNG engines).
+ *   C) Broad-search fallback + code-side registered-domain filter.
+ *   D) Bounded same-domain sitemap / homepage-link discovery when search still empty.
  *
  * Ranking is rule-based — never LLM-assigned. Subdomain trust uses registered-domain
  * relationship (shop.us.example.com under example.com). CDN hosts stay untrusted
@@ -28,6 +30,13 @@ export type OfficialProductPageScoreBreakdown = {
   reasons: string[];
 };
 
+export type OfficialProductQuery = {
+  query: string;
+  label: string;
+  /** Present for optional site:-scoped tiers only. */
+  domain?: string;
+};
+
 const GENERIC_PATH_RE =
   /^\/(?:en(?:-[a-z]{2})?|us|uk|eu|global)?\/?$/i;
 const NEGATIVE_PATH_RE =
@@ -41,6 +50,12 @@ const RANGE_PRODUCT_RE =
 
 const MAX_PRODUCT_QUERIES_PER_DOMAIN = 2;
 const MAX_DOMAINS_FOR_PRODUCT_SEARCH = 2;
+const MAX_BROAD_PRODUCT_QUERIES = 4;
+const MAX_SITEMAP_HOSTS = 3;
+const MAX_SITEMAP_FETCHES = 4;
+const MAX_SITEMAP_URLS_SCANNED = 80;
+const MAX_SITEMAP_BYTES = 400_000;
+const SITEMAP_TIMEOUT_MS = 6_000;
 
 function normalizeToken(value: string): string {
   return String(value ?? "")
@@ -53,6 +68,20 @@ function tokenize(value: string): string[] {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length >= 2);
+}
+
+function cleanQuery(parts: Array<string | null | undefined>): string {
+  return parts
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Compact preferred product phrase for retrieval (aliases applied; no duplicate Yr+Year). */
+export function preferredProductPhrase(identity: SearchIdentityInput): string {
+  const tokens = extractSearchTokens(identity);
+  return tokens.productTokens.join(" ");
 }
 
 /** Pathname without trailing slash (keep root as "/"). */
@@ -76,7 +105,6 @@ export function isGenericOfficialPageUrl(url: string): boolean {
   if (GENERIC_PATH_RE.test(path)) return true;
   if (NEGATIVE_PATH_RE.test(path)) return true;
   if (COLLECTION_ONLY_RE.test(path)) return true;
-  // Bare locale homepage: /en-us, /en-gb
   if (/^\/[a-z]{2}(?:-[a-z]{2})?$/i.test(path)) return true;
   return false;
 }
@@ -111,7 +139,6 @@ export function extractExpressionTokensFromHits(
       .map(normalizeToken)
       .filter(Boolean)
   );
-  // Age numerals already known.
   for (const t of tokens.productTokens) {
     if (/^\d+$/.test(t)) known.add(t);
   }
@@ -154,7 +181,6 @@ export function extractExpressionTokensFromHits(
       ) {
         continue;
       }
-      // Prefer tokens adjacent to a known product hint (e.g. Caribbean Cask).
       const prev = i > 0 ? normalizeToken(words[i - 1]) : "";
       const next = i + 1 < words.length ? normalizeToken(words[i + 1]) : "";
       const nearProduct =
@@ -163,7 +189,6 @@ export function extractExpressionTokensFromHits(
       if (!nearProduct && !/cask|reserve|finish|batch|edition|collection/i.test(w)) {
         continue;
       }
-      // Extra gate for non-expression dictionary: require near-product OR known expression word.
       if (!nearProduct && !/^(cask|reserve|finish|batch|edition)$/i.test(w)) continue;
       learned.set(w, (learned.get(w) ?? 0) + (nearProduct ? 2 : 1));
     }
@@ -176,48 +201,46 @@ export function extractExpressionTokensFromHits(
 }
 
 /**
- * Build bounded site-scoped product-page queries for discovered brand domains.
- * Uses brand + aliased product tokens (+ optional learned expression tokens).
- * Prefer `site:` operator (SearXNG-compatible); no hardcoded product URLs.
+ * Optional site:-scoped product-page queries (may return zero on some SearXNG engines).
+ * Prefer preferred product tokens (not Yr+Year duplicates).
  */
 export function buildOfficialProductPageQueries(
   identity: SearchIdentityInput,
   discoveredDomains: string[],
   expansionTokens: string[] = []
-): Array<{ domain: string; query: string; label: string }> {
+): OfficialProductQuery[] {
   const tokens = extractSearchTokens(identity);
   const brandLoose = tokens.brandCore || tokens.brand;
-  const product = tokens.productTokens.join(" ");
-  const productLoose = tokens.productTokensWithAliases.join(" ") || product;
+  const product = preferredProductPhrase(identity);
   const expansions = expansionTokens
     .map((t) => String(t).trim())
     .filter(Boolean)
     .filter(
       (t) =>
-        !productLoose
+        !product
           .toLowerCase()
           .split(/\s+/)
           .includes(t.toLowerCase())
     );
 
-  const out: Array<{ domain: string; query: string; label: string }> = [];
+  const out: OfficialProductQuery[] = [];
   const domains = discoveredDomains
     .map((d) => String(d ?? "").trim().toLowerCase().replace(/^www\./, ""))
     .filter(Boolean)
     .slice(0, MAX_DOMAINS_FOR_PRODUCT_SEARCH);
 
   for (const domain of domains) {
-    const baseParts = [brandLoose, productLoose].filter(Boolean);
-    if (baseParts.length) {
+    const base = cleanQuery([brandLoose, product]);
+    if (base) {
       out.push({
         domain,
-        query: `site:${domain} ${baseParts.join(" ")}`.replace(/\s+/g, " ").trim(),
+        query: `site:${domain} ${base}`,
         label: "official_product_identity"
       });
     }
     if (expansions.length) {
-      const expanded = [brandLoose, productLoose, ...expansions].filter(Boolean);
-      const q = `site:${domain} ${expanded.join(" ")}`.replace(/\s+/g, " ").trim();
+      const expanded = cleanQuery([brandLoose, product, ...expansions]);
+      const q = `site:${domain} ${expanded}`;
       if (!out.some((o) => o.query === q)) {
         out.push({
           domain,
@@ -226,18 +249,92 @@ export function buildOfficialProductPageQueries(
         });
       }
     }
-    // UPC within domain when available (bounded).
     if (tokens.upc && out.filter((o) => o.domain === domain).length < MAX_PRODUCT_QUERIES_PER_DOMAIN) {
       out.push({
         domain,
-        query: `site:${domain} ${tokens.upc} ${brandLoose}`.replace(/\s+/g, " ").trim(),
+        query: cleanQuery([`site:${domain}`, tokens.upc, brandLoose]),
         label: "official_product_upc"
       });
     }
   }
 
-  // Cap total queries.
   return out.slice(0, MAX_DOMAINS_FOR_PRODUCT_SEARCH * MAX_PRODUCT_QUERIES_PER_DOMAIN);
+}
+
+/**
+ * Broad (non-site:) product-page queries. Code-side domain filtering happens after.
+ * Uses preferred tokens + optional learned expression tokens (e.g. Cask).
+ */
+export function buildOfficialProductPageBroadQueries(
+  identity: SearchIdentityInput,
+  expansionTokens: string[] = []
+): OfficialProductQuery[] {
+  const tokens = extractSearchTokens(identity);
+  const brandLoose = tokens.brandCore || tokens.brand;
+  const brandFull = tokens.brand || brandLoose;
+  const product = preferredProductPhrase(identity);
+  const expansions = expansionTokens
+    .map((t) => String(t).trim())
+    .filter(Boolean)
+    .filter((t) => !product.toLowerCase().split(/\s+/).includes(t.toLowerCase()));
+
+  const out: OfficialProductQuery[] = [];
+  const push = (label: string, parts: Array<string | null | undefined>) => {
+    const query = cleanQuery(parts);
+    if (!query) return;
+    if (out.some((o) => o.query.toLowerCase() === query.toLowerCase())) return;
+    out.push({ query, label });
+  };
+
+  push("broad_product_identity", [brandLoose, product]);
+  if (brandFull && brandFull.toLowerCase() !== brandLoose.toLowerCase()) {
+    push("broad_product_brand_full", [brandFull, product, ...expansions]);
+  }
+  if (expansions.length) {
+    push("broad_product_expanded", [brandLoose, product, ...expansions]);
+    push("broad_product_expanded_product", [brandLoose, product, ...expansions, "product"]);
+  } else {
+    push("broad_product_keyword", [brandLoose, product, "product"]);
+  }
+  const age = tokens.productTokens.find((t) => /^\d+$/.test(t));
+  const withoutYearWord = tokens.productTokens.filter(
+    (t) => !/^(year|years|old)$/i.test(t)
+  );
+  if (age && withoutYearWord.join(" ") !== product) {
+    push("broad_product_age_compact", [brandLoose, ...withoutYearWord]);
+  }
+
+  return out.slice(0, MAX_BROAD_PRODUCT_QUERIES);
+}
+
+/**
+ * Keep only hits whose registered domain matches a trusted discovered domain.
+ * Retailers / fan sites with brand-like names are rejected here.
+ */
+export function filterHitsByOfficialRegisteredDomain(
+  hits: OfficialPageHit[],
+  trustedDomains: string[]
+): OfficialPageHit[] {
+  const trusted = trustedDomains
+    .map((d) => String(d ?? "").trim().toLowerCase().replace(/^www\./, ""))
+    .filter(Boolean);
+  if (!trusted.length) return [];
+  const out: OfficialPageHit[] = [];
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    const url = String(hit.url ?? "").trim();
+    if (!url || seen.has(url)) continue;
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      continue;
+    }
+    if (!trusted.some((d) => hostMatchesDiscoveredDomain(host, d))) continue;
+    seen.add(url);
+    out.push(hit);
+  }
+  return out;
 }
 
 function pathTokenMatches(path: string, identityTokens: string[]): number {
@@ -329,7 +426,6 @@ export function scoreOfficialProductPage(
     reasons.push(`title_tokens:${titleHits}`);
   }
 
-  // Exact-ish product title: most identity tokens present.
   const needed = tokens.productTokens.filter((t) => normalizeToken(t).length >= 3);
   if (needed.length >= 2) {
     const matched = needed.filter((t) =>
@@ -377,7 +473,6 @@ export function scoreOfficialProductPage(
     }
   }
 
-  // Weak / negative signals
   if (isGenericOfficialPageUrl(url)) {
     total -= 60;
     reasons.push("generic_official_page");
@@ -407,7 +502,6 @@ export function selectBestOfficialProductPage(
   identity: SearchIdentityInput,
   options: {
     discoveredOfficialDomains?: string[];
-    /** Minimum score to accept as a product page (not merely "least bad homepage"). */
     minScore?: number;
   } = {}
 ): { hit: OfficialPageHit; score: OfficialProductPageScoreBreakdown } | null {
@@ -418,7 +512,6 @@ export function selectBestOfficialProductPage(
   for (const hit of hits) {
     const url = String(hit.url ?? "").trim();
     if (!url) continue;
-    // Restrict to discovered registered domains when known.
     if (domains.length) {
       let host = "";
       try {
@@ -480,6 +573,188 @@ export function hostIsUnderOfficialDomain(
   }
   host = host.replace(/^www\./, "");
   return discoveredDomains.some((d) => hostMatchesDiscoveredDomain(host, d));
+}
+
+function absolutizeSameDomain(raw: string, baseUrl: string, trustedDomains: string[]): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value || value.startsWith("data:") || value.startsWith("#")) return null;
+  try {
+    const abs = new URL(value, baseUrl).toString();
+    if (!/^https?:\/\//i.test(abs)) return null;
+    if (!hostIsUnderOfficialDomain(abs, trustedDomains)) return null;
+    return abs;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBoundedText(
+  url: string,
+  fetchFn: typeof fetch,
+  maxBytes = MAX_SITEMAP_BYTES
+): Promise<string | null> {
+  try {
+    const response = await fetchFn(url, {
+      signal: AbortSignal.timeout(SITEMAP_TIMEOUT_MS),
+      headers: { Accept: "application/xml,text/xml,text/plain,*/*;q=0.1" },
+      redirect: "follow"
+    });
+    if (!response.ok) return null;
+    const buf = Buffer.from(await response.arrayBuffer());
+    const slice = buf.byteLength > maxBytes ? buf.subarray(0, maxBytes) : buf;
+    return slice.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+function extractUrlsFromXml(xml: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)) {
+    const u = String(m[1] ?? "").trim();
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+function extractSitemapHintsFromRobots(robots: string): string[] {
+  const out: string[] = [];
+  for (const line of String(robots ?? "").split(/\r?\n/)) {
+    const m = line.match(/^\s*sitemap\s*:\s*(\S+)/i);
+    if (m?.[1]) out.push(m[1].trim());
+  }
+  return out;
+}
+
+function extractSameDomainLinks(html: string, pageUrl: string, trustedDomains: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of html.matchAll(/<a\b[^>]*href\s*=\s*(["'])([^"']+)\1/gi)) {
+    const abs = absolutizeSameDomain(m[2], pageUrl, trustedDomains);
+    if (!abs || seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
+export type OfficialSitemapDiscoveryResult = {
+  urls: OfficialPageHit[];
+  hostsTried: string[];
+  sitemapsFetched: number;
+  reason: string;
+};
+
+/**
+ * Bounded same-domain discovery via robots/sitemap/homepage links.
+ * Never crawls the whole site; never authorizes off-domain URLs.
+ */
+export async function discoverOfficialProductUrlsFromSite(options: {
+  trustedDomains: string[];
+  knownHosts?: string[];
+  identity: SearchIdentityInput;
+  fetchText?: (url: string) => Promise<string | null>;
+}): Promise<OfficialSitemapDiscoveryResult> {
+  const trusted = options.trustedDomains
+    .map((d) => String(d ?? "").trim().toLowerCase().replace(/^www\./, ""))
+    .filter(Boolean)
+    .slice(0, MAX_DOMAINS_FOR_PRODUCT_SEARCH);
+  if (!trusted.length) {
+    return { urls: [], hostsTried: [], sitemapsFetched: 0, reason: "no_trusted_domain" };
+  }
+
+  const fetchText = options.fetchText ?? ((url: string) => fetchBoundedText(url, fetch));
+  const hosts = new Set<string>();
+  for (const d of trusted) {
+    hosts.add(d);
+    hosts.add(`www.${d}`);
+  }
+  for (const raw of options.knownHosts ?? []) {
+    const h = String(raw ?? "").trim().toLowerCase().replace(/^www\./, "");
+    if (!h) continue;
+    if (trusted.some((d) => hostMatchesDiscoveredDomain(h, d))) hosts.add(h);
+  }
+
+  const hostsTried = [...hosts].slice(0, MAX_SITEMAP_HOSTS);
+  const candidateUrls: string[] = [];
+  const seen = new Set<string>();
+  let sitemapsFetched = 0;
+
+  const pushUrl = (url: string) => {
+    const u = String(url ?? "").trim();
+    if (!u || seen.has(u)) return;
+    if (!hostIsUnderOfficialDomain(u, trusted)) return;
+    seen.add(u);
+    candidateUrls.push(u);
+  };
+
+  for (const host of hostsTried) {
+    if (sitemapsFetched >= MAX_SITEMAP_FETCHES) break;
+    const origin = `https://${host}`;
+    const robots = await fetchText(`${origin}/robots.txt`);
+    const sitemapHints = robots ? extractSitemapHintsFromRobots(robots) : [];
+    const sitemapSeeds = [
+      ...sitemapHints,
+      `${origin}/sitemap.xml`,
+      `${origin}/sitemap_products_1.xml`,
+      `${origin}/product-sitemap.xml`
+    ];
+    for (const sm of [...new Set(sitemapSeeds)]) {
+      if (sitemapsFetched >= MAX_SITEMAP_FETCHES) break;
+      if (!hostIsUnderOfficialDomain(sm, trusted)) continue;
+      const xml = await fetchText(sm);
+      sitemapsFetched += 1;
+      if (!xml) continue;
+      const locs = extractUrlsFromXml(xml);
+      const nested = locs.filter((u) => /sitemap/i.test(u)).slice(0, 2);
+      for (const nest of nested) {
+        if (sitemapsFetched >= MAX_SITEMAP_FETCHES) break;
+        if (!hostIsUnderOfficialDomain(nest, trusted)) continue;
+        const nestedXml = await fetchText(nest);
+        sitemapsFetched += 1;
+        if (!nestedXml) continue;
+        for (const u of extractUrlsFromXml(nestedXml).slice(0, MAX_SITEMAP_URLS_SCANNED)) {
+          pushUrl(u);
+        }
+      }
+      for (const u of locs.slice(0, MAX_SITEMAP_URLS_SCANNED)) {
+        if (/sitemap/i.test(u) && !PRODUCT_PATH_RE.test(u)) continue;
+        pushUrl(u);
+      }
+    }
+
+    const homeHtml = await fetchText(`${origin}/`);
+    if (homeHtml) {
+      for (const link of extractSameDomainLinks(homeHtml, `${origin}/`, trusted)) {
+        pushUrl(link);
+      }
+    }
+  }
+
+  const hits: OfficialPageHit[] = candidateUrls
+    .filter((u) => isProductDetailPageUrl(u) || PRODUCT_PATH_RE.test(pagePathname(u)))
+    .slice(0, MAX_SITEMAP_URLS_SCANNED)
+    .map((url) => ({ url, title: pagePathname(url), content: "sitemap_or_nav" }));
+
+  const ranked = selectBestOfficialProductPage(hits, options.identity, {
+    discoveredOfficialDomains: trusted,
+    minScore: 40
+  });
+
+  return {
+    urls: ranked ? [ranked.hit] : hits.slice(0, 5),
+    hostsTried,
+    sitemapsFetched,
+    reason: ranked
+      ? `matched:${safeOfficialPageDisplay(ranked.hit.url)}`
+      : hits.length
+        ? "urls_found_none_ranked"
+        : "no_matching_product_urls"
+  };
 }
 
 export { registeredDomain };

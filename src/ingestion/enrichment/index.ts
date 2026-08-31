@@ -67,16 +67,22 @@ export {
 
 export {
   buildOfficialProductPageQueries,
+  buildOfficialProductPageBroadQueries,
+  discoverOfficialProductUrlsFromSite,
   extractExpressionTokensFromHits,
+  filterHitsByOfficialRegisteredDomain,
   hasOfficialProductDetailHit,
   hostIsUnderOfficialDomain,
   isGenericOfficialPageUrl,
   isProductDetailPageUrl,
+  preferredProductPhrase,
   safeOfficialPageDisplay,
   scoreOfficialProductPage,
   selectBestOfficialProductPage,
   type OfficialPageHit,
-  type OfficialProductPageScoreBreakdown
+  type OfficialProductPageScoreBreakdown,
+  type OfficialProductQuery,
+  type OfficialSitemapDiscoveryResult
 } from "./official-product-page.js";
 
 export {
