@@ -21,6 +21,7 @@ export {
   enqueueEnrichmentJob,
   enqueueMetadataJob,
   enqueueTastingNotesJob,
+  enqueueImageJob,
   getEnrichmentJob,
   hasCompletedJob,
   claimNextPendingJob,
@@ -55,11 +56,25 @@ export {
 
 export { runMetadataJob, type MetadataJobResult } from "./metadata-job.js";
 export { runTastingNotesJob, type TastingNotesJobResult } from "./tasting-notes-job.js";
+export { runImageJob, type ImageJobResult } from "./image-job.js";
+
+export {
+  ensureProductImagesTable,
+  getProductImage,
+  upsertProductImage,
+  inventoryHasUserImage,
+  hasAcceptedProductImage,
+  clearProductImagesForTests,
+  markProductImageEmpty,
+  type ProductImageRecord
+} from "./product-images.js";
 
 export {
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
+  maybeEnqueueImageEnrichment,
   shouldScheduleTastingNotesEnrichment,
+  shouldScheduleImageEnrichment,
   type MaybeEnqueueResult
 } from "./enqueue.js";
 

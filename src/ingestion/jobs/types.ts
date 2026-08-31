@@ -1,12 +1,12 @@
 /**
  * Persistent enrichment job queue types.
- * Job types: metadata (factual fields) and tasting_notes (optional content).
+ * Job types: metadata, tasting_notes, image (optional content).
  */
 
 export const ENRICHMENT_ENTITY_TYPES = ["spirits", "packaged_beer", "wines"] as const;
 export type EnrichmentEntityType = (typeof ENRICHMENT_ENTITY_TYPES)[number];
 
-export const ENRICHMENT_JOB_TYPES = ["metadata", "tasting_notes"] as const;
+export const ENRICHMENT_JOB_TYPES = ["metadata", "tasting_notes", "image"] as const;
 export type EnrichmentJobType = (typeof ENRICHMENT_JOB_TYPES)[number];
 
 export const ENRICHMENT_JOB_STATUSES = ["pending", "running", "completed", "failed"] as const;

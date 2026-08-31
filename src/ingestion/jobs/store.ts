@@ -118,6 +118,10 @@ export function enqueueTastingNotesJob(input: EnqueueMetadataInput): { job: Enri
   return enqueueEnrichmentJob({ ...input, jobType: "tasting_notes" });
 }
 
+export function enqueueImageJob(input: EnqueueMetadataInput): { job: EnrichmentJob; created: boolean } {
+  return enqueueEnrichmentJob({ ...input, jobType: "image" });
+}
+
 export function getEnrichmentJob(id: number): EnrichmentJob | null {
   const row = db.prepare("SELECT * FROM enrichment_jobs WHERE id=?").get(id) as JobRow | undefined;
   return row ? mapJob(row) : null;
