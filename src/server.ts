@@ -507,7 +507,12 @@ app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/en
   }
   const id = Number(request.params.id);
   if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
-  const view = buildBottleEnrichmentView({ entityType: table, entityId: id });
+  const admin = isAdmin(request.headers.authorization);
+  const view = buildBottleEnrichmentView({
+    entityType: table,
+    entityId: id,
+    includeDiagnostics: admin
+  });
   if (!view) return reply.code(404).send({ error: "Item not found" });
   return view;
 });

@@ -101,6 +101,7 @@ export {
   jobStatusLabel,
   jobsHaveActiveWork,
   collectCacheConflicts,
+  dedupeMissingLabels,
   type BottleEnrichmentView,
   type FieldView,
   type JobView,

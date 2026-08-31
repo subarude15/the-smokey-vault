@@ -4,6 +4,7 @@ import { db } from "./db.js";
 import { saveBarcodeCacheEntry, searchBarcodeCache } from "./barcode_cache.js";
 import { importTableFor } from "./import_batch.js";
 import { colaProductTypeForTable, foldSearch, getFromCache, inferImportKind, lookupProductWithSmartFallback, matchesQuery, parseProductSchema, queryTokens, rememberUnresolvedUpc, saveToCache, searchBottles, searchTableForModule, searchTablesForModule, searchVault, searchWebSnippets } from "./lookup.js";
+import { WebSearchError } from "./ingestion/web-search.js";
 
 test("foldSearch strips diacritics so troegs matches Tröegs", () => {
   assert.equal(foldSearch("Tröegs"), "troegs");
@@ -44,11 +45,10 @@ test("parseProductSchema normalizes Ollama JSON product output", () => {
   assert.equal(product.product_type, "beer");
 });
 
-test("searchWebSnippets formats SearXNG title/content and returns empty on failure", async () => {
+test("searchWebSnippets formats SearXNG title/content and throws on provider failure", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    assert.match(url, /192\.168\.1\.184:8888\/search/);
     assert.match(url, /format=json/);
     assert.match(url, /q=/);
     return new Response(JSON.stringify({
@@ -70,7 +70,11 @@ test("searchWebSnippets formats SearXNG title/content and returns empty on failu
     throw new Error("offline");
   }) as typeof fetch;
   try {
-    assert.equal(await searchWebSnippets("anything"), "");
+    await assert.rejects(() => searchWebSnippets("anything"), (error: unknown) => {
+      assert.ok(error instanceof WebSearchError);
+      assert.ok(error.code === "unreachable" || error.code === "network");
+      return true;
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

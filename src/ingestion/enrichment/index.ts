@@ -35,6 +35,7 @@ export {
 export {
   executeMetadataEnrichment,
   metadataSearchQuery,
+  buildMetadataSearchQueries,
   type EnrichmentExecutionResult,
   type EnrichmentExecutionError,
   type MetadataEnrichmentDeps
@@ -50,10 +51,21 @@ export {
   classifySourceUrl,
   classifyHit,
   isAuthoritativeSource,
+  hostLooksLikeBrandDomain,
   formatAuthoritativeSnippets,
   type SourceClass,
   type ClassifiedHit
 } from "./tasting-notes-sources.js";
+
+export {
+  sanitizeJobDiagnostics,
+  friendlyDiagnosticSummary,
+  boundUrls,
+  type JobDiagnosticsPayload,
+  type EnrichmentDiagnosticStage,
+  type NoResultReason,
+  type FieldRejectReason
+} from "./diagnostics.js";
 
 export {
   extractOfficialTastingNotes,
@@ -108,6 +120,7 @@ export {
 export {
   executeImageEnrichment,
   searchImageHits,
+  extractProductImageUrlsFromHtml,
   type ImageEnrichmentDeps,
   type ImageEnrichmentResult,
   type ImageCandidateSeed,

@@ -14,7 +14,9 @@ import {
   normalizeCanonicalVolumeMl
 } from "../../canonical-normalize.js";
 
-const LOCAL_OLLAMA_CHAT_URL = "http://192.168.1.184:11434/api/chat";
+const LOCAL_OLLAMA_CHAT_URL =
+  String(process.env.OLLAMA_CHAT_URL ?? process.env.SMOKEY_OLLAMA_CHAT_URL ?? "").trim()
+  || "http://192.168.1.184:11434/api/chat";
 
 export type MetadataExtractRequest = {
   candidate: BottleCandidate;

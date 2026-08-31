@@ -17,6 +17,28 @@ export type JobView = {
   statusLabel: "complete" | "partial" | "in_progress" | "waiting" | "no_result" | "failed" | "not_started";
   attempts: number;
   lastError: string | null;
+  diagnosticSummary?: string | null;
+  diagnostics?: {
+    jobType?: string;
+    noResultReason?: string | null;
+    summary?: string | null;
+    stages?: Array<{
+      stage: string;
+      status: string;
+      query?: string;
+      provider?: string;
+      candidateCount?: number;
+      acceptedCount?: number;
+      rejectedCount?: number;
+      reason?: string;
+      sourceUrls?: string[];
+    }>;
+    requested?: string[];
+    extracted?: string[];
+    accepted?: string[];
+    unresolved?: string[];
+    rejectReasons?: Array<{ field: string; reason: string }>;
+  } | null;
 };
 
 export type ConflictView = {
@@ -280,15 +302,47 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       ) : null}
 
       <div className="enrichment-jobs">
-        {jobs.map((job) => (
-          <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
-            <span>{jobTypeDisplay(job.type)}</span>
-            <strong>{jobStatusDisplay(job.statusLabel)}</strong>
-            {job.lastError && job.statusLabel === "failed" ? (
-              <small title={job.lastError}>Attempt {job.attempts}</small>
-            ) : null}
-          </div>
-        ))}
+        {jobs.map((job) => {
+          const showWhy =
+            (job.statusLabel === "no_result" || job.statusLabel === "failed" || job.statusLabel === "partial")
+            && (job.diagnosticSummary || job.diagnostics);
+          return (
+            <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
+              <span>{jobTypeDisplay(job.type)}</span>
+              <strong>{jobStatusDisplay(job.statusLabel)}</strong>
+              {job.lastError && job.statusLabel === "failed" ? (
+                <small title={job.lastError}>Attempt {job.attempts}</small>
+              ) : null}
+              {showWhy ? (
+                <details className="enrichment-diagnostics">
+                  <summary>Why?</summary>
+                  <p>{textChild(job.diagnosticSummary || job.diagnostics?.summary || "No additional detail")}</p>
+                  {job.diagnostics?.stages?.length ? (
+                    <ul>
+                      {job.diagnostics.stages
+                        .filter((s) => s.stage !== "source_reject")
+                        .slice(0, 8)
+                        .map((stage, index) => (
+                          <li key={`${stage.stage}-${index}`}>
+                            <strong>{stage.stage}</strong>
+                            {stage.query ? `: ${textChild(stage.query).slice(0, 80)}` : null}
+                            {stage.candidateCount != null ? ` · ${stage.candidateCount} results` : null}
+                            {stage.acceptedCount != null ? ` · ${stage.acceptedCount} accepted` : null}
+                            {stage.reason ? ` · ${textChild(stage.reason)}` : null}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : null}
+                  {job.diagnostics?.noResultReason ? (
+                    <p className="enrichment-diagnostics-reason">
+                      Reason: {textChild(job.diagnostics.noResultReason).replace(/_/g, " ")}
+                    </p>
+                  ) : null}
+                </details>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       {missing.length ? (

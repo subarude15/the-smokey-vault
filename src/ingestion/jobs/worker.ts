@@ -127,7 +127,7 @@ async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPen
   }
   if (job.job_type === "image") {
     const result = await runImageJob(job, workerOptions.imageDeps);
-    markJobCompleted(job.id);
+    markJobCompleted(job.id, result.resultPayload);
     log.info({
       jobId: job.id,
       jobType: job.job_type,
@@ -136,7 +136,8 @@ async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPen
       skipped: result.skipped,
       reason: result.reason,
       imageSaved: result.imageSaved,
-      selectedScore: result.execution?.selected?.score ?? null
+      selectedScore: result.execution?.selected?.score ?? null,
+      noResultReason: result.resultPayload.diagnostics?.noResultReason ?? null
     }, "enrichment job completed");
     return;
   }

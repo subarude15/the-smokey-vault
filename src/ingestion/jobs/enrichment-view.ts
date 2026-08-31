@@ -32,7 +32,11 @@ import {
 } from "./metadata-outcome.js";
 import { getProductContent, readPersonalNotes } from "./product-content.js";
 import { getProductImage, inventoryHasUserImage } from "./product-images.js";
-import { listJobsForEntity } from "./store.js";
+import { getLatestCompletedJobResult, listJobsForEntity } from "./store.js";
+import {
+  friendlyDiagnosticSummary,
+  type JobDiagnosticsPayload
+} from "../enrichment/diagnostics.js";
 import {
   ENRICHMENT_JOB_TYPES,
   isEnrichmentEntityType,
@@ -74,6 +78,9 @@ export type JobView = {
   statusLabel: JobStatusLabel;
   attempts: number;
   lastError: string | null;
+  /** Keeper/admin only — stripped for patrons. */
+  diagnostics?: JobDiagnosticsPayload | null;
+  diagnosticSummary?: string | null;
 };
 
 export type BottleEnrichmentView = {
@@ -335,8 +342,14 @@ function missingRecommendedLabels(candidate: BottleCandidate): string[] {
     ttb_id: "TTB ID",
     upc: "UPC"
   };
+  // Deterministic order; category appears once even though it is both a
+  // recommended identity aid and a METADATA_ENRICHMENT_FIELDS entry.
+  const order = ["upc", ...METADATA_ENRICHMENT_FIELDS] as const;
+  const seen = new Set<string>();
   const missing: string[] = [];
-  for (const name of ["upc", "category", ...METADATA_ENRICHMENT_FIELDS] as const) {
+  for (const name of order) {
+    if (seen.has(name)) continue;
+    seen.add(name);
     const f = candidate[name] as ProductField<unknown>;
     if (isUnresolvedField(f) || f.confidence < TRUSTED_MIN) {
       missing.push(labels[name] ?? name);
@@ -345,12 +358,42 @@ function missingRecommendedLabels(candidate: BottleCandidate): string[] {
   return missing;
 }
 
+/** Exported for regression tests — same dedupe rules as the bottle view. */
+export function dedupeMissingLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const label of labels) {
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out;
+}
+
+function parseJobDiagnostics(raw: string | null | undefined): JobDiagnosticsPayload | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as { diagnostics?: JobDiagnosticsPayload | null } & Partial<JobDiagnosticsPayload>;
+    if (parsed?.diagnostics && typeof parsed.diagnostics === "object") {
+      return parsed.diagnostics;
+    }
+    // Image payload may store diagnostics at the top level with jobType.
+    if (parsed && parsed.jobType && Array.isArray(parsed.stages)) {
+      return parsed as JobDiagnosticsPayload;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function buildJobViews(
   entityType: EnrichmentEntityType,
   entityId: number,
   candidate: BottleCandidate,
   content: ReturnType<typeof getProductContent>,
-  image: ReturnType<typeof getProductImage>
+  image: ReturnType<typeof getProductImage>,
+  includeDiagnostics: boolean
 ): JobView[] {
   const jobs = listJobsForEntity(entityType, entityId);
   const byType = new Map(jobs.map((j) => [j.job_type, j]));
@@ -369,7 +412,6 @@ function buildJobViews(
       } else if (job.status === "failed") {
         statusLabel = "failed";
       } else {
-        // completed — use outcome derived from actual gaps / progress, never assume success.
         statusLabel = metadataOutcomeToJobStatusLabel(outcome);
         if (statusLabel === "not_started") statusLabel = "no_result";
       }
@@ -382,13 +424,39 @@ function buildJobViews(
       }
       statusLabel = jobStatusLabel(job, { hasResult });
     }
-    return {
+
+    let diagnostics: JobDiagnosticsPayload | null = null;
+    let diagnosticSummary: string | null = null;
+    if (includeDiagnostics && job && (job.status === "completed" || job.status === "failed")) {
+      const raw = job.result_json ?? getLatestCompletedJobResult(entityType, entityId, type);
+      diagnostics = parseJobDiagnostics(raw);
+      // Metadata stores diagnostics nested; also try parseMetadataJobResult path.
+      if (!diagnostics && type === "metadata" && raw) {
+        try {
+          const parsed = JSON.parse(raw) as { diagnostics?: JobDiagnosticsPayload };
+          diagnostics = parsed.diagnostics ?? null;
+        } catch {
+          diagnostics = null;
+        }
+      }
+      diagnosticSummary = friendlyDiagnosticSummary(diagnostics);
+      if (!diagnosticSummary && job.status === "failed" && job.last_error) {
+        diagnosticSummary = String(job.last_error).slice(0, 200);
+      }
+    }
+
+    const view: JobView = {
       type,
       status: job?.status ?? "absent",
       statusLabel,
       attempts: job?.attempts ?? 0,
       lastError: job?.last_error ?? null
     };
+    if (includeDiagnostics) {
+      view.diagnostics = diagnostics;
+      view.diagnosticSummary = diagnosticSummary;
+    }
+    return view;
   });
 }
 
@@ -397,6 +465,8 @@ export function buildBottleEnrichmentView(options: {
   entityId: number;
   /** Optional injected conflicts (tests / advanced callers). */
   conflicts?: FieldConflict[];
+  /** Include keeper/admin diagnostics on job views. */
+  includeDiagnostics?: boolean;
 }): BottleEnrichmentView | null {
   if (!isEnrichmentEntityType(options.entityType)) return null;
   const entityType = options.entityType;
@@ -440,14 +510,20 @@ export function buildBottleEnrichmentView(options: {
       identified: plan.identified,
       needsReview: plan.needsReview,
       missing: missingRecommendedLabels(candidate),
-      jobs: buildJobViews(entityType, options.entityId, candidate, content, image),
+      jobs: buildJobViews(
+        entityType,
+        options.entityId,
+        candidate,
+        content,
+        image,
+        options.includeDiagnostics === true
+      ),
       conflicts: conflictViews(plan.reviewConflicts)
     },
     tastingNotes: {
       official: content?.official_tasting_notes ?? null,
       sourceUrl: content?.official_source_url ?? null,
       sourceType: content?.official_source_type ?? null,
-      // Never return a non-string — React white-screens if a JSON object is rendered as a child.
       houseProfile: normalizeTextField(content?.house_tasting_profile),
       personal: readPersonalNotes(row)
     },

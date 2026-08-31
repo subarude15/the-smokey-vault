@@ -1166,6 +1166,12 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .enrichment-job-failed{border-color:color-mix(in srgb,#e9796d 45%,var(--line))}
 .enrichment-job-in_progress,.enrichment-job-waiting{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .enrichment-job-no_result{opacity:.9}
+.enrichment-job-partial{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+.enrichment-diagnostics{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.45}
+.enrichment-diagnostics summary{cursor:pointer;color:var(--text);font-weight:600}
+.enrichment-diagnostics ul{margin:6px 0 0;padding-left:16px}
+.enrichment-diagnostics li{margin:2px 0}
+.enrichment-diagnostics-reason{margin:6px 0 0}
 .enrichment-missing{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
 .enrichment-missing .eyebrow{display:block;margin-bottom:4px}
 .enrichment-section{display:flex;flex-direction:column;gap:12px}

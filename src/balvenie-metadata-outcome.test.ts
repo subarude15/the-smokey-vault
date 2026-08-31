@@ -9,6 +9,7 @@ import { parseExtracted } from "./ingestion/enrichment/metadata-extract.js";
 import {
   executeMetadataEnrichment,
   metadataSearchQuery,
+  buildMetadataSearchQueries,
   planEnrichment,
   proofFromAbv
 } from "./ingestion/enrichment/index.js";
@@ -449,12 +450,14 @@ test("metadata search query uses trusted identity fields", () => {
     },
     "vault"
   );
-  const q = metadataSearchQuery(candidate, ["category", "abv", "proof"]);
-  assert.match(q, /The Balvenie/);
-  assert.match(q, /083664871681/);
-  assert.match(q, /ABV/i);
-  assert.ok(!/invented/i.test(q));
+  const queries = buildMetadataSearchQueries(candidate, ["category", "abv", "proof"]);
+  assert.ok(queries.some((q) => /The Balvenie/.test(q)));
+  assert.ok(queries.some((q) => /083664871681/.test(q)));
+  assert.ok(queries.some((q) => /ABV/i.test(q)));
+  assert.ok(queries.every((q) => !/invented/i.test(q)));
+  assert.match(metadataSearchQuery(candidate, ["category", "abv", "proof"]), /Balvenie/);
 });
+
 
 test("Whiskey-only evidence leaves sub_category empty on persist", async () => {
   cleanup();
