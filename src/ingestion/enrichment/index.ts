@@ -34,6 +34,7 @@ export {
 
 export {
   executeMetadataEnrichment,
+  metadataSearchQuery,
   type EnrichmentExecutionResult,
   type EnrichmentExecutionError,
   type MetadataEnrichmentDeps

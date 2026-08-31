@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { saveToCache } from "./ingestion/catalogs/cola-cache-store.js";
+import { saveBarcodeCacheEntry } from "./barcode_cache.js";
 import {
   clearAdminAuditForTests,
   clearEnrichmentJobsForTests,
@@ -28,6 +29,41 @@ const { app, createTestAdminToken } = await import("./server.js");
 
 const UPC = "080686500001";
 const PREFIX = "0806865";
+
+/** Seed cache-only metadata (proof/origin/ttb) so spirits can be truly metadata-complete. */
+function seedCompleteMetadataCaches(upc: string, name: string, brand: string, category = "Whiskey") {
+  saveToCache(
+    {
+      upc,
+      name,
+      brand,
+      category,
+      abv: 45,
+      image_url: null,
+      fill_level_percent: 100,
+      bottle_count: 1,
+      notes: null,
+      volume_ml: 750,
+      product_type: "spirit",
+      ttb_id: "TTB-COMPLETE-1",
+      origin: "Kentucky",
+      approval_date: null
+    },
+    null,
+    null,
+    "cola_cloud"
+  );
+  saveBarcodeCacheEntry({
+    upc,
+    name,
+    brand,
+    category,
+    abv: 45,
+    proof: 90,
+    volume_ml: 750,
+    source: "enrichment"
+  });
+}
 
 /** Minimal valid JPEG (1x1). */
 const TINY_JPEG = Buffer.from(
@@ -97,6 +133,7 @@ function cleanup() {
   db.prepare("DELETE FROM gallery_media").run();
   db.prepare(`DELETE FROM spirits WHERE upc LIKE '${PREFIX}%'`).run();
   db.prepare(`DELETE FROM cola_cache WHERE upc LIKE '${PREFIX}%'`).run();
+  db.prepare(`DELETE FROM barcode_cache WHERE upc LIKE '${PREFIX}%'`).run();
 }
 
 test("unauthorized user cannot preview or queue enrichment backfill", async () => {
@@ -187,8 +224,10 @@ test("eligible bottle queues image job via backfill", () => {
 
 test("fully enriched bottle queues nothing", () => {
   cleanup();
-  const spirit = insertSpirit({ upc: `${PREFIX}0006`, abv: 45, volume_ml: 750 });
+  const upc = `${PREFIX}000006`;
+  const spirit = insertSpirit({ upc, abv: 45, volume_ml: 750, category: "Whiskey" });
   const id = Number(spirit.id);
+  seedCompleteMetadataCaches(upc, String(spirit.name), String(spirit.brand), "Whiskey");
   upsertProductContent({
     entityType: "spirits",
     entityId: id,
@@ -207,13 +246,18 @@ test("fully enriched bottle queues nothing", () => {
     verified: true
   });
   markJobCompleted(
-    enqueueMetadataJob({ entityType: "spirits", entityId: id, upc: `${PREFIX}0006` }).job.id
+    enqueueMetadataJob({ entityType: "spirits", entityId: id, upc }).job.id,
+    {
+      requested: ["category", "abv", "proof", "volume_ml", "origin", "ttb_id"],
+      updated: ["category", "abv", "proof", "origin", "ttb_id"],
+      unresolved: []
+    }
   );
   markJobCompleted(
-    enqueueTastingNotesJob({ entityType: "spirits", entityId: id, upc: `${PREFIX}0006` }).job.id
+    enqueueTastingNotesJob({ entityType: "spirits", entityId: id, upc }).job.id
   );
   markJobCompleted(
-    enqueueImageJob({ entityType: "spirits", entityId: id, upc: `${PREFIX}0006` }).job.id
+    enqueueImageJob({ entityType: "spirits", entityId: id, upc }).job.id
   );
 
   try {

@@ -59,6 +59,8 @@ export function maybeEnqueueMetadataEnrichment(options: {
   row: Record<string, unknown>;
   planOptions?: PlanEnrichmentOptions;
   logger?: EnrichmentLogger;
+  /** Admin/backfill may re-run metadata when gaps remain after a completed job. */
+  force?: boolean;
 }): MaybeEnqueueResult {
   if (!isEnrichmentEntityType(options.entityType)) {
     return { enqueued: false, reason: "unsupported_entity" };
@@ -69,7 +71,12 @@ export function maybeEnqueueMetadataEnrichment(options: {
 
   if (!plan.identified) return { enqueued: false, reason: "not_identified" };
   if (plan.needsReview) return { enqueued: false, reason: "needs_review" };
-  if (!shouldScheduleMetadataEnrichment({ candidate, entityType, entityId: options.entityId })) {
+  if (!shouldScheduleMetadataEnrichment({
+    candidate,
+    entityType,
+    entityId: options.entityId,
+    force: options.force === true
+  })) {
     return { enqueued: false, reason: "already_complete" };
   }
 

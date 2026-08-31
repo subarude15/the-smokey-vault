@@ -8,6 +8,7 @@ type EnrichmentBackfillPreview = {
   metadata: number;
   tastingNotes: number;
   images: number;
+  noResultMetadata?: number;
   noResultTastingNotes: number;
   noResultImages: number;
   failedEnrichment: number;
@@ -124,6 +125,7 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
             <div><dt>Missing metadata</dt><dd>{preview.metadata}</dd></div>
             <div><dt>Missing tasting notes</dt><dd>{preview.tastingNotes}</dd></div>
             <div><dt>Missing product images</dt><dd>{preview.images}</dd></div>
+            <div><dt>No-result / partial metadata</dt><dd>{preview.noResultMetadata ?? 0}</dd></div>
             <div><dt>No-result tasting notes</dt><dd>{preview.noResultTastingNotes ?? 0}</dd></div>
             <div><dt>No-result product images</dt><dd>{preview.noResultImages ?? 0}</dd></div>
             <div><dt>Failed enrichment</dt><dd>{preview.failedEnrichment ?? 0}</dd></div>

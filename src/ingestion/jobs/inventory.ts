@@ -3,6 +3,7 @@
  * (plus barcode_cache / cola_cache when a UPC is present for fields the shelf table lacks).
  */
 import { getBarcodeCacheEntry, saveBarcodeCacheEntry } from "../../barcode_cache.js";
+import { spiritFamilyFromLabel } from "../../catalog.js";
 import {
   isUsableCanonicalFamily,
   normalizeCanonicalAbv,
@@ -29,7 +30,7 @@ import type { BottleCandidateFieldName } from "../candidate/types.js";
 
 /** Inventory columns that can receive metadata enrichment, by table. */
 const INVENTORY_COLUMN_FOR: Record<EnrichmentEntityType, Partial<Record<MetadataEnrichmentField, string>>> = {
-  spirits: { abv: "abv", volume_ml: "volume_ml" },
+  spirits: { category: "category", abv: "abv", volume_ml: "volume_ml" },
   packaged_beer: { abv: "abv" },
   wines: { origin: "region" }
 };
@@ -152,26 +153,39 @@ export function hasRecommendedMetadataWork(candidate: BottleCandidate): boolean 
 }
 
 /**
- * Whether background metadata enrichment is still useful for this saved entity.
- * Persistable shelf gaps always qualify. Cache-only gaps (origin/ttb/proof on spirits)
- * qualify only when no completed metadata job exists yet for the entity (one-shot).
+ * Whether metadata enrichment should be queued.
+ *
+ * Automatic path (force=false): one-shot — after a completed metadata job, do not
+ * re-queue on save/page-load even when gaps remain (avoids endless retry loops).
+ *
+ * Admin/backfill path (force=true): may re-queue when recommended/persistable gaps
+ * remain so expanded enrichment capability can fill prior no-result/partial bottles.
  */
 export function shouldScheduleMetadataEnrichment(options: {
   candidate: BottleCandidate;
   entityType: EnrichmentEntityType;
   entityId: number;
+  /** Explicit admin/backfill rerun — not used by ordinary save/ensure. */
+  force?: boolean;
 }): boolean {
-  const { candidate, entityType, entityId } = options;
-  if (hasPersistableMetadataWork(candidate, entityType)) return true;
-  if (!hasRecommendedMetadataWork(candidate)) return false;
-  // Remaining gaps are cache-only (or unkeyed without UPC).
-  if (!candidate.upc.value?.trim()) return false;
+  const { candidate, entityType, entityId, force = false } = options;
+  const needsPersistable = hasPersistableMetadataWork(candidate, entityType);
+  const needsRecommended = hasRecommendedMetadataWork(candidate);
+  if (!needsPersistable && !needsRecommended) return false;
+
+  // Cache-only gaps still require a UPC key for catalog/web lookup.
+  if (!needsPersistable && !candidate.upc.value?.trim()) return false;
+
   const completed = db.prepare(`
     SELECT 1 AS ok FROM enrichment_jobs
     WHERE entity_type = ? AND entity_id = ? AND job_type = 'metadata' AND status = 'completed'
     LIMIT 1
   `).get(entityType, entityId) as { ok: number } | undefined;
-  return !completed;
+
+  if (completed) {
+    return force;
+  }
+  return true;
 }
 
 function shouldPersistField(
@@ -205,6 +219,15 @@ export function persistMetadataImprovements(options: {
     const column = columnMap[name];
     if (!column) continue;
     if (!shouldPersistField(before[name] as ProductField<unknown>, after[name] as ProductField<unknown>)) continue;
+
+    if (name === "category" && entityType === "spirits") {
+      const mapped = spiritFamilyFromLabel(String(after.category.value ?? ""), "");
+      sets.push("category = ?", "sub_category = ?");
+      values.push(mapped.family, mapped.type);
+      inventoryUpdated.push("category", "sub_category");
+      continue;
+    }
+
     sets.push(`${column} = ?`);
     values.push(after[name].value);
     inventoryUpdated.push(column);
@@ -241,6 +264,11 @@ export function persistMetadataImprovements(options: {
       }
       if (name === "volume_ml") {
         cachePatch.volume_ml = after.volume_ml.value ?? 750;
+        touchCache = true;
+      }
+      if (name === "category") {
+        const mapped = spiritFamilyFromLabel(String(after.category.value ?? ""), "");
+        cachePatch.category = mapped.family || after.category.value;
         touchCache = true;
       }
       if (name === "origin" || name === "ttb_id") touchCache = true;

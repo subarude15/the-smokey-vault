@@ -39,6 +39,12 @@ export function ensureEnrichmentJobsTable() {
 
 ensureEnrichmentJobsTable();
 
+try {
+  db.exec(`ALTER TABLE enrichment_jobs ADD COLUMN result_json TEXT`);
+} catch {
+  // Column already exists.
+}
+
 type JobRow = {
   id: number;
   entity_type: string;
@@ -54,6 +60,7 @@ type JobRow = {
   started_at: string | null;
   completed_at: string | null;
   last_error: string | null;
+  result_json?: string | null;
 };
 
 function mapJob(row: JobRow): EnrichmentJob {
@@ -71,7 +78,8 @@ function mapJob(row: JobRow): EnrichmentJob {
     updated_at: row.updated_at,
     started_at: row.started_at,
     completed_at: row.completed_at,
-    last_error: row.last_error
+    last_error: row.last_error,
+    result_json: row.result_json ?? null
   };
 }
 
@@ -213,16 +221,33 @@ export function claimNextPendingJob(): EnrichmentJob | null {
   return claimed ? mapJob(claimed) : null;
 }
 
-export function markJobCompleted(id: number): EnrichmentJob | null {
+export function markJobCompleted(id: number, result?: Record<string, unknown> | null): EnrichmentJob | null {
+  const resultJson = result == null ? null : JSON.stringify(result);
   db.prepare(`
     UPDATE enrichment_jobs
     SET status = 'completed',
         completed_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP,
-        last_error = NULL
+        last_error = NULL,
+        result_json = COALESCE(?, result_json)
     WHERE id = ?
-  `).run(id);
+  `).run(resultJson, id);
   return getEnrichmentJob(id);
+}
+
+/** Latest completed job result_json for an entity + type (may be null). */
+export function getLatestCompletedJobResult(
+  entityType: EnrichmentEntityType,
+  entityId: number,
+  jobType: EnrichmentJobType
+): string | null {
+  const row = db.prepare(`
+    SELECT result_json FROM enrichment_jobs
+    WHERE entity_type = ? AND entity_id = ? AND job_type = ? AND status = 'completed'
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(entityType, entityId, jobType) as { result_json: string | null } | undefined;
+  return row?.result_json ?? null;
 }
 
 export function markJobFailedOrRetry(id: number, errorMessage: string): EnrichmentJob | null {

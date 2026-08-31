@@ -32,7 +32,8 @@ export {
   markJobFailedOrRetry,
   recoverStaleRunningJobs,
   enrichmentJobCounts,
-  clearEnrichmentJobsForTests
+  clearEnrichmentJobsForTests,
+  getLatestCompletedJobResult
 } from "./store.js";
 
 export {
@@ -124,6 +125,16 @@ export {
   bottleEnrichmentActuallyComplete,
   type EnrichmentAvailability
 } from "./enrichment-availability.js";
+
+export {
+  metadataOutcomeFromState,
+  metadataOutcomeToJobStatusLabel,
+  buildMetadataJobResultPayload,
+  parseMetadataJobResult,
+  unresolvedMetadataFields,
+  type MetadataJobResultPayload,
+  type MetadataOutcomeLabel
+} from "./metadata-outcome.js";
 
 export {
   clearAdminAuditForTests,

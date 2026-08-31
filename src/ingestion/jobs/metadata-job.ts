@@ -13,6 +13,11 @@ import {
   loadInventoryRow,
   persistMetadataImprovements
 } from "./inventory.js";
+import {
+  buildMetadataJobResultPayload,
+  type MetadataJobResultPayload,
+  unresolvedMetadataFields
+} from "./metadata-outcome.js";
 import type { EnrichmentJob } from "./types.js";
 
 export type MetadataJobResult = {
@@ -21,6 +26,8 @@ export type MetadataJobResult = {
   execution?: EnrichmentExecutionResult;
   inventoryUpdated: string[];
   cacheUpdated: boolean;
+  /** Lightweight progress for job.result_json. */
+  resultPayload: MetadataJobResultPayload;
 };
 
 export async function runMetadataJob(
@@ -36,13 +43,43 @@ export async function runMetadataJob(
   const plan = planEnrichment(before);
 
   if (!plan.identified) {
-    return { skipped: true, reason: "not_identified", inventoryUpdated: [], cacheUpdated: false };
+    return {
+      skipped: true,
+      reason: "not_identified",
+      inventoryUpdated: [],
+      cacheUpdated: false,
+      resultPayload: {
+        requested: [],
+        updated: [],
+        unresolved: unresolvedMetadataFields(before).map(String)
+      }
+    };
   }
   if (plan.needsReview) {
-    return { skipped: true, reason: "needs_review", inventoryUpdated: [], cacheUpdated: false };
+    return {
+      skipped: true,
+      reason: "needs_review",
+      inventoryUpdated: [],
+      cacheUpdated: false,
+      resultPayload: {
+        requested: [],
+        updated: [],
+        unresolved: unresolvedMetadataFields(before).map(String)
+      }
+    };
   }
   if (!hasRecommendedMetadataWork(before)) {
-    return { skipped: true, reason: "already_complete", inventoryUpdated: [], cacheUpdated: false };
+    return {
+      skipped: true,
+      reason: "already_complete",
+      inventoryUpdated: [],
+      cacheUpdated: false,
+      resultPayload: {
+        requested: [],
+        updated: [],
+        unresolved: []
+      }
+    };
   }
 
   const execution = await executeMetadataEnrichment(before, plan, deps);
@@ -61,10 +98,18 @@ export async function runMetadataJob(
     after: execution.candidate
   });
 
+  const resultPayload = buildMetadataJobResultPayload({
+    requested: execution.requested.map(String),
+    before,
+    after: execution.candidate,
+    inventoryUpdated: persisted.inventoryUpdated
+  });
+
   return {
     skipped: false,
     execution,
     inventoryUpdated: persisted.inventoryUpdated,
-    cacheUpdated: persisted.cacheUpdated
+    cacheUpdated: persisted.cacheUpdated,
+    resultPayload
   };
 }

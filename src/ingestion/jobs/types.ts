@@ -27,6 +27,8 @@ export type EnrichmentJob = {
   started_at: string | null;
   completed_at: string | null;
   last_error: string | null;
+  /** Optional JSON payload (e.g. metadata requested/updated/unresolved). */
+  result_json: string | null;
 };
 
 export type EnrichmentJobCounts = {

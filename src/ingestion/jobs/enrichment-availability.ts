@@ -1,6 +1,8 @@
 /**
  * Enrichment availability is distinct from scheduling policy.
  * shouldSchedule*() === false does NOT mean complete.
+ *
+ * Metadata availability shares semantics with bottle job views via metadataOutcomeFromState.
  */
 import { hasActiveEnrichmentJob, hasCompletedJob, hasFailedJob } from "./store.js";
 import {
@@ -11,15 +13,13 @@ import {
   hasAcceptedProductImage,
   inventoryHasUserImage
 } from "./product-images.js";
-import {
-  hasPersistableMetadataWork,
-  hasRecommendedMetadataWork
-} from "./inventory.js";
+import { metadataOutcomeFromState } from "./metadata-outcome.js";
 import type { BottleCandidate } from "../candidate/index.js";
 import type { EnrichmentEntityType } from "./types.js";
 
 export type EnrichmentAvailability =
   | "complete"
+  | "partial"
   | "missing"
   | "active"
   | "no_result"
@@ -38,27 +38,23 @@ export function metadataEnrichmentAvailability(options: {
   entityType: EnrichmentEntityType;
   entityId: number;
 }): EnrichmentAvailability {
-  const { candidate, entityType, entityId } = options;
-  if (hasActiveEnrichmentJob(entityType, entityId, "metadata")) return "active";
-
-  const needsPersistable = hasPersistableMetadataWork(candidate, entityType);
-  const needsRecommended = hasRecommendedMetadataWork(candidate);
-
-  // Shelf-applicable metadata is complete when persistable columns are satisfied
-  // and either nothing else is recommended or a one-shot metadata job already ran.
-  if (!needsPersistable && !needsRecommended) return "complete";
-  if (!needsPersistable && hasCompletedJob(entityType, entityId, "metadata")) {
-    return "complete";
+  const outcome = metadataOutcomeFromState(options);
+  switch (outcome) {
+    case "complete":
+      return "complete";
+    case "partial":
+      return "partial";
+    case "no_result":
+      return "no_result";
+    case "failed":
+      return "failed";
+    case "active":
+      return "active";
+    case "missing":
+      return "missing";
+    default:
+      return "missing";
   }
-
-  if (hasFailedEnrichmentJob(entityType, entityId, "metadata") && (needsPersistable || needsRecommended)) {
-    return "failed";
-  }
-
-  if (needsPersistable) return "missing";
-
-  // Cache-only gaps, never attempted — still missing for scheduling, not "complete".
-  return "missing";
 }
 
 export function tastingNotesEnrichmentAvailability(options: {

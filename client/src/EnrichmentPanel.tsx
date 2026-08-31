@@ -14,7 +14,7 @@ export type FieldView = {
 export type JobView = {
   type: string;
   status: string;
-  statusLabel: "complete" | "in_progress" | "waiting" | "no_result" | "failed" | "not_started";
+  statusLabel: "complete" | "partial" | "in_progress" | "waiting" | "no_result" | "failed" | "not_started";
   attempts: number;
   lastError: string | null;
 };
@@ -85,6 +85,8 @@ export function jobStatusDisplay(label: JobView["statusLabel"]): string {
   switch (label) {
     case "complete":
       return "Complete";
+    case "partial":
+      return "Partial";
     case "in_progress":
       return "In progress";
     case "waiting":

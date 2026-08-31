@@ -1,6 +1,6 @@
 /**
- * First enrichment executor: recommended factual metadata only
- * (abv, proof, volume_ml, origin, ttb_id).
+ * First enrichment executor: recommended factual metadata
+ * (category, abv, proof, volume_ml, origin, ttb_id).
  *
  * Source order:
  * 1. Deterministic abv ↔ proof derivation from trusted peer
@@ -13,6 +13,9 @@
 import { isReadyLookup } from "../../lookup-shared.js";
 import { lookupProduct, type LookupResult } from "../../lookup.js";
 import {
+  normalizeCanonicalTaxonomy
+} from "../../canonical-normalize.js";
+import {
   candidateFromLookup,
   field,
   isUnresolvedField,
@@ -23,7 +26,6 @@ import {
 } from "../candidate/index.js";
 import { TRUSTED_MIN } from "./rules.js";
 import { searchWebSnippets } from "../web-search.js";
-import { smartWebQuery } from "../normalize.js";
 import {
   extractMetadataFromWebText,
   type MetadataExtractRequest,
@@ -45,8 +47,12 @@ export type EnrichmentExecutionError = {
 
 export type EnrichmentExecutionResult = {
   candidate: BottleCandidate;
+  /** Fields this run attempted to fill. */
+  requested: EnrichmentField[];
   completed: EnrichmentField[];
   unresolved: EnrichmentField[];
+  /** Fields that newly became trusted / improved during this run. */
+  updated: EnrichmentField[];
   conflicts: FieldConflict[];
   errors: EnrichmentExecutionError[];
 };
@@ -110,12 +116,14 @@ function applyDeterministicDerivations(
   const wantProof = targets.includes("proof") && isUnresolvedField(candidate.proof);
   const wantAbv = targets.includes("abv") && isUnresolvedField(candidate.abv);
 
-  if (wantProof && !isUnresolvedField(candidate.abv) && candidate.abv.confidence >= TRUSTED_MIN) {
+  // Derive from any resolved peer (including web MEDIUM). After persist, vault reload
+  // is trusted; requiring TRUSTED_MIN here blocked same-run ABV→proof from web extracts.
+  if (wantProof && !isUnresolvedField(candidate.abv)) {
     const derived = field(proofFromAbv(candidate.abv.value as number), candidate.abv.source, candidate.abv.confidence);
     applyMerge(candidate, "proof", derived, conflicts);
   }
 
-  if (wantAbv && !isUnresolvedField(candidate.proof) && candidate.proof.confidence >= TRUSTED_MIN) {
+  if (wantAbv && !isUnresolvedField(candidate.proof)) {
     const derived = field(abvFromProof(candidate.proof.value as number), candidate.proof.source, candidate.proof.confidence);
     applyMerge(candidate, "abv", derived, conflicts);
   }
@@ -130,6 +138,13 @@ function applyCatalogProduct(
   for (const name of targets) {
     const incoming = catalog[name] as ProductField<string | number>;
     if (isUnresolvedField(incoming)) continue;
+    if (name === "category" && typeof incoming.value === "string") {
+      const tax = normalizeCanonicalTaxonomy(incoming.value, "");
+      const label = tax.type || tax.family;
+      if (!label) continue;
+      applyMerge(candidate, "category", field(label, incoming.source, incoming.confidence), conflicts);
+      continue;
+    }
     applyMerge(candidate, name, incoming, conflicts);
   }
 }
@@ -143,13 +158,13 @@ function applyExtracted(
   for (const name of targets) {
     if (!(name in extracted)) continue;
     const value = extracted[name];
-    // Web+LLM evidence → web (MEDIUM). Never stamp identity fields.
     const incoming = field(value as string | number | null, "web");
     applyMerge(candidate, name, incoming, conflicts);
   }
 }
 
 function summarize(
+  before: BottleCandidate,
   candidate: BottleCandidate,
   targets: MetadataEnrichmentField[],
   conflicts: FieldConflict[],
@@ -157,11 +172,52 @@ function summarize(
 ): EnrichmentExecutionResult {
   const completed: EnrichmentField[] = [];
   const unresolved: EnrichmentField[] = [];
+  const updated: EnrichmentField[] = [];
   for (const name of targets) {
-    if (isUnresolvedField(candidate[name] as ProductField<unknown>)) unresolved.push(name);
-    else completed.push(name);
+    const afterField = candidate[name] as ProductField<unknown>;
+    const beforeField = before[name] as ProductField<unknown>;
+    const improved =
+      (isUnresolvedField(beforeField) && !isUnresolvedField(afterField))
+      || (
+        !isUnresolvedField(afterField)
+        && (beforeField.value !== afterField.value || beforeField.confidence < afterField.confidence)
+      );
+
+    if (isUnresolvedField(afterField) || afterField.confidence < TRUSTED_MIN) {
+      unresolved.push(name);
+    } else {
+      completed.push(name);
+    }
+    // Progress includes usable fills below TRUSTED_MIN (e.g. web MEDIUM) that still persist.
+    if (improved && !isUnresolvedField(afterField)) {
+      updated.push(name);
+    }
   }
-  return { candidate, completed, unresolved, conflicts, errors };
+  return { candidate, requested: [...targets], completed, unresolved, updated, conflicts, errors };
+}
+
+/** Build a targeted web query from trusted identity + known classification. */
+export function metadataSearchQuery(
+  candidate: BottleCandidate,
+  needed: MetadataEnrichmentField[] = [...METADATA_ENRICHMENT_FIELDS]
+): string {
+  const parts = [
+    candidate.brand.value,
+    candidate.name.value,
+    candidate.upc.value,
+    candidate.product_type.value,
+    candidate.category.value
+  ].filter((part) => part != null && String(part).trim());
+
+  if (needed.includes("abv") || needed.includes("proof")) {
+    parts.push("ABV", "proof");
+  }
+  if (needed.includes("origin")) parts.push("origin", "region", "distillery");
+  if (needed.includes("category")) parts.push("whisky", "whiskey", "spirit");
+  if (needed.includes("ttb_id")) parts.push("TTB", "COLA");
+  if (needed.includes("volume_ml")) parts.push("750ml", "volume");
+
+  return parts.map(String).join(" ").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -173,20 +229,20 @@ export async function executeMetadataEnrichment(
   plan: EnrichmentPlan,
   deps: MetadataEnrichmentDeps = {}
 ): Promise<EnrichmentExecutionResult> {
+  const before = cloneCandidate(input);
   const candidate = cloneCandidate(input);
   const targets = targetMetadataFields(plan);
   const conflicts: FieldConflict[] = [];
   const errors: EnrichmentExecutionError[] = [];
 
   if (!targets.length) {
-    return summarize(candidate, targets, conflicts, errors);
+    return summarize(before, candidate, targets, conflicts, errors);
   }
 
   const lookupByUpc = deps.lookupByUpc ?? ((upc: string) => lookupProduct(upc, { mode: "live" }));
   const searchWeb = deps.searchWeb ?? searchWebSnippets;
   const extractMetadata = deps.extractMetadata ?? extractMetadataFromWebText;
 
-  // 1. Deterministic abv ↔ proof
   try {
     applyDeterministicDerivations(candidate, targets, conflicts);
   } catch (error) {
@@ -196,8 +252,6 @@ export async function executeMetadataEnrichment(
     });
   }
 
-  // 2. Catalog / lookup by UPC — apply for all planned metadata targets so
-  // equal-confidence disagreements with an existing value surface as conflicts.
   const upc = candidate.upc.value?.trim();
   if (targets.length && upc) {
     try {
@@ -216,14 +270,10 @@ export async function executeMetadataEnrichment(
     }
   }
 
-  // 3. SearXNG + targeted LLM for remaining gaps
   const needed = stillNeeded(candidate, targets);
   if (needed.length) {
     try {
-      const query = smartWebQuery({
-        upc: upc || undefined,
-        name: [candidate.brand.value, candidate.name.value].filter(Boolean).join(" ") || undefined
-      });
+      const query = metadataSearchQuery(candidate, needed);
       const snippets = query ? await searchWeb(query, 5) : "";
       if (snippets.trim()) {
         const extracted = await extractMetadata({
@@ -231,7 +281,6 @@ export async function executeMetadataEnrichment(
           fields: needed,
           webSnippets: snippets
         });
-        // Strip any identity keys the model might still emit (defense in depth).
         const safe: MetadataExtractResult = {};
         for (const name of needed) {
           if (name in extracted) safe[name] = extracted[name] ?? null;
@@ -248,14 +297,13 @@ export async function executeMetadataEnrichment(
     }
   }
 
-  // Re-run derivation after catalog/web fills one side of abv/proof.
   try {
     applyDeterministicDerivations(candidate, targets, conflicts);
   } catch {
     // Already reported on first pass if needed.
   }
 
-  return summarize(candidate, targets, conflicts, errors);
+  return summarize(before, candidate, targets, conflicts, errors);
 }
 
 export { METADATA_ENRICHMENT_FIELDS };

@@ -94,7 +94,7 @@ async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPen
   const log = workerOptions.logger ?? defaultLogger;
   if (job.job_type === "metadata") {
     const result = await runMetadataJob(job, workerOptions.metadataDeps);
-    markJobCompleted(job.id);
+    markJobCompleted(job.id, result.resultPayload);
     log.info({
       jobId: job.id,
       jobType: job.job_type,
@@ -103,7 +103,10 @@ async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPen
       skipped: result.skipped,
       reason: result.reason,
       inventoryUpdated: result.inventoryUpdated,
-      cacheUpdated: result.cacheUpdated
+      cacheUpdated: result.cacheUpdated,
+      requested: result.resultPayload.requested,
+      updated: result.resultPayload.updated,
+      unresolved: result.resultPayload.unresolved
     }, "enrichment job completed");
     return;
   }
