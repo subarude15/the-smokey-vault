@@ -57,7 +57,7 @@ export type ImageMeta = {
   height: number | null;
   mimeType: string | null;
   reachable: boolean;
-  dimensionsSource?: "image_header" | "unknown" | null;
+  dimensionsSource?: "seed" | "image_header" | "unknown" | null;
 };
 
 export type ImageEnrichmentDeps = {
