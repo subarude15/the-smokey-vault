@@ -61,7 +61,7 @@ test("mapToSpiritCategory keeps vault select options", () => {
   assert.equal(mapToSpiritCategory("Kentucky Straight Bourbon Whiskey"), "Whiskey");
   assert.equal(mapToSpiritType("Kentucky Straight Bourbon Whiskey"), "Bourbon");
   assert.equal(mapToSpiritCategory("Islay Single Malt Scotch"), "Whiskey");
-  assert.equal(mapToSpiritType("Islay Single Malt Scotch"), "Scotch");
+  assert.equal(mapToSpiritType("Islay Single Malt Scotch"), "Scotch Whisky");
   assert.equal(mapToSpiritCategory("London Dry Gin"), "Gin");
 });
 
