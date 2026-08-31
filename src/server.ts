@@ -36,6 +36,10 @@ import {
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
   maybeEnqueueImageEnrichment,
+  resolveFieldConflict,
+  verifyEnrichmentField,
+  rerunEnrichmentJob,
+  ReviewActionError,
   startEnrichmentWorker
 } from "./ingestion/jobs/index.js";
 import { isEnrichmentEntityType } from "./ingestion/jobs/types.js";
@@ -450,10 +454,9 @@ app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id
 });
 
 /**
- * Read-only enrichment / review state.
- * Intentionally public (no requireAdmin): patrons may view provenance and job status.
- * There is no mutation surface on this route — conflict resolution, re-runs, and
- * content edits are deferred and must use requireAdmin when added.
+ * Enrichment / review state.
+ * GET is public (patrons may view provenance and job status).
+ * Mutations live on sibling admin-only routes below.
  */
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/enrichment", {
   schema: {
@@ -470,6 +473,83 @@ app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/en
   const view = buildBottleEnrichmentView({ entityType: table, entityId: id });
   if (!view) return reply.code(404).send({ error: "Item not found" });
   return view;
+});
+
+function reviewActionFail(reply: FastifyReply, error: unknown, fallback: string) {
+  if (error instanceof ReviewActionError) {
+    return reply.code(error.status).send({ error: error.message });
+  }
+  const message = error instanceof Error ? error.message : fallback;
+  app.log.error(error);
+  return reply.code(400).send({ error: message });
+}
+
+app.post<{
+  Params: { table: string; id: string };
+  Body: { field?: string; choice?: string };
+}>("/api/inventory/:table/:id/enrichment/resolve-conflict", {
+  schema: {
+    tags: ["Lookup"],
+    summary: "Admin: resolve an enrichment identity conflict"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    const choice = request.body?.choice;
+    if (choice !== "keep" && choice !== "accept") {
+      return reply.code(400).send({ error: "choice must be keep or accept" });
+    }
+    return resolveFieldConflict({
+      entityType: request.params.table,
+      entityId: Number(request.params.id),
+      field: String(request.body?.field ?? ""),
+      choice
+    });
+  } catch (error) {
+    return reviewActionFail(reply, error, "Could not resolve conflict");
+  }
+});
+
+app.post<{
+  Params: { table: string; id: string };
+  Body: { field?: string };
+}>("/api/inventory/:table/:id/enrichment/verify-field", {
+  schema: {
+    tags: ["Lookup"],
+    summary: "Admin: mark an enrichment field as user-verified"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return verifyEnrichmentField({
+      entityType: request.params.table,
+      entityId: Number(request.params.id),
+      field: String(request.body?.field ?? "")
+    });
+  } catch (error) {
+    return reviewActionFail(reply, error, "Could not verify field");
+  }
+});
+
+app.post<{
+  Params: { table: string; id: string };
+  Body: { jobType?: string };
+}>("/api/inventory/:table/:id/enrichment/rerun", {
+  schema: {
+    tags: ["Lookup"],
+    summary: "Admin: re-queue metadata, tasting_notes, or image enrichment"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return rerunEnrichmentJob({
+      entityType: request.params.table,
+      entityId: Number(request.params.id),
+      jobType: String(request.body?.jobType ?? "")
+    });
+  } catch (error) {
+    return reviewActionFail(reply, error, "Could not re-run enrichment");
+  }
 });
 
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/reviews", async (request, reply) => {
