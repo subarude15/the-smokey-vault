@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 
 export type FieldView = {
@@ -69,6 +69,14 @@ export type BottleEnrichmentView = {
     verified: boolean | null;
     userPreferred: boolean;
   };
+  audit?: Array<{
+    id: number;
+    action: string;
+    field: string | null;
+    jobType: string | null;
+    createdAt: string;
+  }>;
+  verifiedFields?: string[];
 };
 
 /** Modest polling while jobs are pending/running. */
@@ -111,7 +119,23 @@ export function jobTypeDisplay(type: string): string {
   }
 }
 
-function FieldRow({ label, field }: { label: string; field: FieldView }) {
+function FieldRow({
+  label,
+  field,
+  fieldKey,
+  admin,
+  verified,
+  busy,
+  onVerify
+}: {
+  label: string;
+  field: FieldView;
+  fieldKey: string;
+  admin: boolean;
+  verified: boolean;
+  busy: boolean;
+  onVerify: (field: string) => void;
+}) {
   const value =
     field.value == null || field.value === ""
       ? "—"
@@ -122,6 +146,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView }) {
     field.confidence != null
       ? `${field.sourceLabel ?? "Unknown"} · ${field.confidenceLabel} (${field.confidence})`
       : undefined;
+  const canVerify = admin && field.status !== "missing" && !verified;
   return (
     <div className={`enrichment-field enrichment-field-${field.status}`} title={title}>
       <span className="enrichment-field-label">{label}</span>
@@ -133,24 +158,54 @@ function FieldRow({ label, field }: { label: string; field: FieldView }) {
           <>
             {field.sourceLabel ? <span className="chip static">{field.sourceLabel}</span> : null}
             <span className={`chip static enrichment-band-${field.confidenceBand}`}>{field.confidenceLabel}</span>
+            {verified ? <span className="chip static">Verified</span> : null}
             {field.status === "review" ? <span className="chip static miss-chip">Review</span> : null}
             {field.status === "low_confidence" ? <span className="chip static miss-chip">Low confidence</span> : null}
           </>
         )}
       </div>
+      {canVerify ? (
+        <button
+          type="button"
+          className="secondary enrichment-action-btn"
+          disabled={busy}
+          onClick={() => {
+            if (confirm(`Mark ${label} as verified? This pins the current value as keeper-confirmed.`)) {
+              onVerify(fieldKey);
+            }
+          }}
+        >
+          Mark verified
+        </button>
+      ) : null}
     </div>
   );
 }
 
 /**
- * Read-only enrichment / review panel for patrons and keepers.
- * Does not offer conflict resolution, re-runs, or content edits.
+ * Enrichment / review panel.
+ * Patrons see read-only provenance. Admin sessions get resolve / verify / re-run controls.
  * Patron reviews and gallery uploads remain separate community flows.
  */
-export function EnrichmentPanel({ table, itemId }: { table: string; itemId: number }) {
+export function EnrichmentPanel({
+  table,
+  itemId,
+  admin = false
+}: {
+  table: string;
+  itemId: number;
+  admin?: boolean;
+}) {
   const [view, setView] = useState<BottleEnrichmentView | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const applyView = useCallback((next: BottleEnrichmentView) => {
+    setView(next);
+    setError("");
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,9 +215,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       try {
         const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`);
         if (cancelled) return;
-        setView(next);
-        setError("");
-        setLoading(false);
+        applyView(next);
         if (timer) {
           clearInterval(timer);
           timer = null;
@@ -184,7 +237,27 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [table, itemId]);
+  }, [table, itemId, applyView]);
+
+  async function runAction(path: string, body: Record<string, unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ view?: BottleEnrichmentView }>(path, {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+      if (result.view) applyView(result.view);
+      else {
+        const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`);
+        applyView(next);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (!ENRICHMENT_MODULES.has(table)) return null;
 
@@ -209,6 +282,8 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   if (!view) return null;
 
   const polling = shouldPollEnrichment(view.enrichment.jobs);
+  const verified = new Set(view.verifiedFields ?? []);
+  const base = `/inventory/${table}/${itemId}/enrichment`;
 
   return (
     <section className="enrichment-panel">
@@ -223,7 +298,10 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       {view.enrichment.needsReview ? (
         <div className="enrichment-review-banner" role="status">
           <strong>Needs review</strong>
-          <p>Trusted sources disagree on identity. Kept values are shown; competing values are listed below. Editing is not available here yet.</p>
+          <p>
+            Trusted sources disagree on identity. Kept values are shown; competing values are listed below.
+            {admin ? " Choose which value to keep." : " Unlock Keeper Mode to resolve conflicts."}
+          </p>
         </div>
       ) : null}
 
@@ -232,8 +310,26 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
             <span>{jobTypeDisplay(job.type)}</span>
             <strong>{jobStatusDisplay(job.statusLabel)}</strong>
-            {job.lastError && job.statusLabel === "failed" ? (
-              <small title={job.lastError}>Attempt {job.attempts}</small>
+            {job.statusLabel === "failed" ? (
+              <small title={job.lastError ?? undefined}>
+                Attempt {job.attempts}
+                {job.lastError ? ` · ${job.lastError.slice(0, 80)}` : ""}
+              </small>
+            ) : null}
+            {admin && (job.statusLabel === "failed" || job.statusLabel === "no_result" || job.statusLabel === "complete" || job.statusLabel === "not_started") ? (
+              <button
+                type="button"
+                className="secondary enrichment-action-btn"
+                disabled={busy || job.statusLabel === "waiting" || job.statusLabel === "in_progress"}
+                onClick={() => {
+                  const label = job.statusLabel === "failed" ? "Retry" : "Run again";
+                  if (confirm(`${label} ${jobTypeDisplay(job.type)} enrichment? Existing good data is kept while it runs.`)) {
+                    void runAction(`${base}/rerun`, { jobType: job.type });
+                  }
+                }}
+              >
+                {job.statusLabel === "failed" ? "Retry" : "Run again"}
+              </button>
             ) : null}
           </div>
         ))}
@@ -249,22 +345,22 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       <div className="enrichment-section">
         <span className="eyebrow">Identity</span>
         <div className="enrichment-field-grid">
-          <FieldRow label="Name" field={view.identity.name} />
-          <FieldRow label="Brand" field={view.identity.brand} />
-          <FieldRow label="Product type" field={view.identity.productType} />
-          <FieldRow label="UPC" field={view.identity.upc} />
+          <FieldRow label="Name" fieldKey="name" field={view.identity.name} admin={admin} verified={verified.has("name")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="Brand" fieldKey="brand" field={view.identity.brand} admin={admin} verified={verified.has("brand")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="Product type" fieldKey="product_type" field={view.identity.productType} admin={admin} verified={verified.has("product_type")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="UPC" fieldKey="upc" field={view.identity.upc} admin={admin} verified={verified.has("upc")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
         </div>
       </div>
 
       <div className="enrichment-section">
         <span className="eyebrow">Product facts</span>
         <div className="enrichment-field-grid">
-          <FieldRow label="Category" field={view.metadata.category} />
-          <FieldRow label="ABV" field={view.metadata.abv} />
-          <FieldRow label="Proof" field={view.metadata.proof} />
-          <FieldRow label="Volume (ml)" field={view.metadata.volumeMl} />
-          <FieldRow label="Origin" field={view.metadata.origin} />
-          <FieldRow label="TTB ID" field={view.metadata.ttbId} />
+          <FieldRow label="Category" fieldKey="category" field={view.metadata.category} admin={admin} verified={verified.has("category")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="ABV" fieldKey="abv" field={view.metadata.abv} admin={admin} verified={verified.has("abv")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="Proof" fieldKey="proof" field={view.metadata.proof} admin={admin} verified={verified.has("proof")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="Volume (ml)" fieldKey="volume_ml" field={view.metadata.volumeMl} admin={admin} verified={verified.has("volume_ml")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="Origin" fieldKey="origin" field={view.metadata.origin} admin={admin} verified={verified.has("origin")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
+          <FieldRow label="TTB ID" fieldKey="ttb_id" field={view.metadata.ttbId} admin={admin} verified={verified.has("ttb_id")} busy={busy} onVerify={(f) => void runAction(`${base}/verify-field`, { field: f })} />
         </div>
       </div>
 
@@ -276,9 +372,39 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
               <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
                 <strong>{c.field}</strong>
                 <p>
-                  Kept <em>{String(c.keptValue ?? "—")}</em> ({c.keptSourceLabel}) vs{" "}
-                  <em>{String(c.competingValue ?? "—")}</em> ({c.competingSourceLabel})
+                  Current: <em>{String(c.keptValue ?? "—")}</em> ({c.keptSourceLabel})
                 </p>
+                <p>
+                  Competing: <em>{String(c.competingValue ?? "—")}</em> ({c.competingSourceLabel})
+                </p>
+                {admin ? (
+                  <div className="enrichment-conflict-actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        if (confirm(`Keep current ${c.field} value (${String(c.keptValue ?? "—")})?`)) {
+                          void runAction(`${base}/resolve-conflict`, { field: c.field, choice: "keep" });
+                        }
+                      }}
+                    >
+                      Keep current
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={busy}
+                      onClick={() => {
+                        if (confirm(`Accept competing ${c.field} value (${String(c.competingValue ?? "—")})?`)) {
+                          void runAction(`${base}/resolve-conflict`, { field: c.field, choice: "accept" });
+                        }
+                      }}
+                    >
+                      Use competing value
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

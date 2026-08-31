@@ -21,7 +21,9 @@ import { TRUSTED_MIN } from "../enrichment/rules.js";
 import { candidateFromInventoryRow, loadInventoryRow } from "./inventory.js";
 import { getProductContent, readPersonalNotes } from "./product-content.js";
 import { getProductImage, inventoryHasUserImage } from "./product-images.js";
+import { hasFieldOverride, listFieldOverrides } from "./field-overrides.js";
 import { listJobsForEntity } from "./store.js";
+import { listReviewAudit } from "./review-audit.js";
 import {
   ENRICHMENT_JOB_TYPES,
   isEnrichmentEntityType,
@@ -107,6 +109,16 @@ export type BottleEnrichmentView = {
     verified: boolean | null;
     userPreferred: boolean;
   };
+  /** Recent admin review actions (no secrets). */
+  audit: Array<{
+    id: number;
+    action: string;
+    field: string | null;
+    jobType: string | null;
+    createdAt: string;
+  }>;
+  /** Fields with an admin override / verification. */
+  verifiedFields: string[];
 };
 
 const SOURCE_LABELS: Record<ProductFieldSource, string> = {
@@ -352,7 +364,8 @@ export function buildBottleEnrichmentView(options: {
   if (!row) return null;
 
   const candidate = candidateFromInventoryRow(entityType, row);
-  const conflicts = options.conflicts ?? collectCacheConflicts(entityType, row);
+  const rawConflicts = options.conflicts ?? collectCacheConflicts(entityType, row);
+  const conflicts = rawConflicts.filter((c) => !hasFieldOverride(entityType, options.entityId, c.field));
   const plan = planEnrichment(candidate, { conflicts });
   const reviewFields = new Set(plan.reviewConflicts.map((c) => c.field));
 
@@ -360,6 +373,8 @@ export function buildBottleEnrichmentView(options: {
   const image = getProductImage(entityType, options.entityId);
   const userImage = inventoryHasUserImage(row);
   const shelfImage = String(row.image_url ?? "").trim() || null;
+  const overrides = listFieldOverrides(entityType, options.entityId);
+  const overrideFields = new Set(overrides.map((o) => o.field));
 
   const fieldOpt = (name: BottleCandidateFieldName) =>
     fieldViewFromProductField(candidate[name] as ProductField<unknown>, {
@@ -406,6 +421,14 @@ export function buildBottleEnrichmentView(options: {
       score: userImage ? null : (image?.score ?? null),
       verified: userImage ? true : (image ? image.verified : null),
       userPreferred: userImage
-    }
+    },
+    audit: listReviewAudit(entityType, options.entityId, 20).map((row) => ({
+      id: row.id,
+      action: row.action,
+      field: row.field,
+      jobType: row.job_type,
+      createdAt: row.created_at
+    })),
+    verifiedFields: [...overrideFields]
   };
 }
