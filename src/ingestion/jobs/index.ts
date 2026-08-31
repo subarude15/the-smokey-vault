@@ -24,6 +24,7 @@ export {
   enqueueImageJob,
   getEnrichmentJob,
   hasCompletedJob,
+  listJobsForEntity,
   claimNextPendingJob,
   markJobCompleted,
   markJobFailedOrRetry,
@@ -87,3 +88,21 @@ export {
   type EnrichmentLogger,
   type EnrichmentWorkerOptions
 } from "./worker.js";
+
+export {
+  buildBottleEnrichmentView,
+  sourceLabel,
+  confidenceBandForScore,
+  confidenceLabelForBand,
+  fieldViewFromProductField,
+  jobStatusLabel,
+  jobsHaveActiveWork,
+  collectCacheConflicts,
+  type BottleEnrichmentView,
+  type FieldView,
+  type JobView,
+  type ConflictView,
+  type ConfidenceBand,
+  type FieldViewStatus,
+  type JobStatusLabel
+} from "./enrichment-view.js";

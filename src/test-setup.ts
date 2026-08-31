@@ -12,6 +12,8 @@ import { join } from "node:path";
  */
 const scratch = mkdtempSync(join(tmpdir(), "smokey-test-"));
 process.env.DB_PATH = join(scratch, `smokey-test-${Date.now()}.db`);
+/** HTTP inject tests import the Fastify app; never bind a port or start workers during npm test. */
+process.env.SMOKEY_TEST_NO_LISTEN = "1";
 
 process.on("exit", () => {
   try {

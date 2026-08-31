@@ -7,6 +7,7 @@ import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists,
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
+import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
@@ -1849,6 +1850,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       {flavors.length > 0 && <div className="detail-chip-block">{module.id === "brews" ? <span className="eyebrow">FLAVOR PROFILE</span> : null}<div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div></div>}
       {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
+      {ENRICHMENT_MODULES.has(module.id) ? <EnrichmentPanel table={module.id} itemId={item.id} /> : null}
       {!(module.id === "taps" && isTapEmpty(item)) && <GuestReviews table={module.id} itemId={item.id} admin={admin}/>}
     </section>
   );

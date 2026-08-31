@@ -1111,3 +1111,51 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
   .hero,.hero-orbit,.ai-loading{animation:none}
   .stat-card:hover,.feature-card:hover,.overview-tap:hover,.overview-brew:hover,.overview-low:hover{transform:none}
 }
+
+/* Bottle enrichment / review panel */
+.enrichment-panel{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:22px}
+.enrichment-panel-head{display:flex;justify-content:space-between;align-items:start;gap:12px}
+.enrichment-panel-head h2{font:600 26px "Playfair Display";margin:6px 0 0}
+.enrichment-review-banner{border:1px solid color-mix(in srgb,#e4b86e 45%,var(--line));background:color-mix(in srgb,#e4b86e 12%,var(--surface));border-radius:10px;padding:14px 16px}
+.enrichment-review-banner strong{display:block;margin-bottom:4px;color:#e4b86e}
+.enrichment-review-banner p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.enrichment-jobs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.enrichment-job{border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:4px}
+.enrichment-job span{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.enrichment-job strong{font:600 16px "Playfair Display"}
+.enrichment-job small{color:var(--muted);font-size:11px}
+.enrichment-job-complete{border-color:color-mix(in srgb,#4f8f5f 45%,var(--line))}
+.enrichment-job-failed{border-color:color-mix(in srgb,#e9796d 45%,var(--line))}
+.enrichment-job-in_progress,.enrichment-job-waiting{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.enrichment-job-no_result{opacity:.9}
+.enrichment-missing{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.enrichment-missing .eyebrow{display:block;margin-bottom:4px}
+.enrichment-section{display:flex;flex-direction:column;gap:12px}
+.enrichment-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.enrichment-field{border:1px solid var(--line);background:var(--surface-2);border-radius:10px;padding:12px 14px}
+.enrichment-field-label{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.enrichment-field-value{display:block;font:600 18px "Playfair Display";margin-bottom:8px}
+.enrichment-field-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.enrichment-field-missing{opacity:.85}
+.enrichment-field-review{border-color:color-mix(in srgb,#e4b86e 50%,var(--line))}
+.enrichment-field-low_confidence{border-color:color-mix(in srgb,#e4b86e 30%,var(--line))}
+.enrichment-band-very_high,.enrichment-band-high{border-color:color-mix(in srgb,#4f8f5f 40%,var(--line))}
+.enrichment-conflicts{display:flex;flex-direction:column;gap:8px}
+.enrichment-conflict{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--surface-2)}
+.enrichment-conflict p{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
+.enrichment-notes{gap:14px}
+.enrichment-note-card{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--surface-2)}
+.enrichment-note-card h3{font:600 18px "Playfair Display";margin:0 0 8px}
+.enrichment-note-card p{margin:0;line-height:1.55;white-space:pre-wrap}
+.enrichment-note-house{border-style:dashed}
+.enrichment-ai-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px!important}
+.enrichment-house-body{color:var(--text)}
+.enrichment-link{color:var(--accent-2);font-size:12px;font-weight:600}
+.enrichment-image-row{display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:start}
+.enrichment-image-frame{width:120px;height:160px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);display:grid;place-items:center;overflow:hidden}
+.enrichment-image-frame img{width:100%;height:100%;object-fit:cover}
+.enrichment-image-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.muted{color:var(--muted)}
+@media(max-width:700px){
+  .enrichment-jobs,.enrichment-field-grid,.enrichment-image-row{grid-template-columns:1fr}
+}
