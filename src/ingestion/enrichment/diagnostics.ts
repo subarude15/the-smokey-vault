@@ -65,7 +65,7 @@ export type JobDiagnosticsPayload = {
 };
 
 const MAX_URLS = 12;
-const MAX_STAGES = 24;
+const MAX_STAGES = 40;
 const MAX_REJECTS = 24;
 
 export function boundUrls(urls: Array<string | null | undefined>): string[] {
