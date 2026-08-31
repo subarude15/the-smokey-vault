@@ -58,6 +58,32 @@ export {
 } from "./tasting-notes-sources.js";
 
 export {
+  discoverOfficialDomains,
+  classifySourceUrlWithDiscovery,
+  registeredDomain,
+  hostMatchesDiscoveredDomain,
+  type OfficialDomainDiscovery
+} from "./official-domain.js";
+
+export {
+  buildMetadataQueryTiers,
+  buildImageQueryTiers,
+  extractSearchTokens,
+  searchAliasesForToken,
+  queryQuotesEntireName,
+  brandCoreToken,
+  identityFromCandidate,
+  type SearchQueryTier,
+  type SearchIdentityInput
+} from "./search-query.js";
+
+export {
+  extractStructuredProductFacts,
+  fetchBoundedPageHtml,
+  type StructuredProductFacts
+} from "./page-extract.js";
+
+export {
   sanitizeJobDiagnostics,
   friendlyDiagnosticSummary,
   boundUrls,

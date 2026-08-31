@@ -451,10 +451,12 @@ test("metadata search query uses trusted identity fields", () => {
     "vault"
   );
   const queries = buildMetadataSearchQueries(candidate, ["category", "abv", "proof"]);
-  assert.ok(queries.some((q) => /The Balvenie/.test(q)));
+  assert.ok(queries.some((q) => /Balvenie/i.test(q)));
   assert.ok(queries.some((q) => /083664871681/.test(q)));
   assert.ok(queries.some((q) => /ABV/i.test(q)));
   assert.ok(queries.every((q) => !/invented/i.test(q)));
+  // Progressive search must not exact-quote the entire stored name by default.
+  assert.ok(queries.every((q) => !q.includes('"Balvenie 14 Yr Carribbean"')));
   assert.match(metadataSearchQuery(candidate, ["category", "abv", "proof"]), /Balvenie/);
 });
 

@@ -46,11 +46,23 @@ import {
   type MetadataEnrichmentField
 } from "./metadata-fields.js";
 import {
-  classifyHit,
   formatAuthoritativeSnippets,
   isAuthoritativeSource,
   type ClassifiedHit
 } from "./tasting-notes-sources.js";
+import {
+  classifySourceUrlWithDiscovery,
+  discoverOfficialDomains
+} from "./official-domain.js";
+import {
+  buildMetadataQueryTiers,
+  identityFromCandidate,
+  queryQuotesEntireName
+} from "./search-query.js";
+import {
+  extractStructuredProductFacts,
+  fetchBoundedPageHtml
+} from "./page-extract.js";
 import {
   sanitizeJobDiagnostics,
   sourceClassDiagnosticReason,
@@ -84,6 +96,8 @@ export type MetadataEnrichmentDeps = {
   /** Legacy snippet inject (tests) — treated as a single authoritative blob. */
   searchWeb?: (query: string, limit?: number) => Promise<string>;
   extractMetadata?: (request: MetadataExtractRequest) => Promise<MetadataExtractResult>;
+  /** Optional authoritative page fetch for structured facts (JSON-LD / OG). */
+  fetchPageHtml?: (url: string) => Promise<string | null>;
 };
 
 function cloneCandidate(candidate: BottleCandidate): BottleCandidate {
@@ -119,59 +133,12 @@ function stillNeeded(candidate: BottleCandidate, targets: MetadataEnrichmentFiel
   });
 }
 
-function quotePart(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (/\s/.test(trimmed)) return `"${trimmed.replace(/"/g, "")}"`;
-  return trimmed;
-}
-
-/** Build up to 3 targeted queries from trusted identity + unresolved needs. */
+/** Progressive metadata queries (retrieval-only aliases; never mutates candidate). */
 export function buildMetadataSearchQueries(
   candidate: BottleCandidate,
   needed: MetadataEnrichmentField[] = [...METADATA_ENRICHMENT_FIELDS]
 ): string[] {
-  const brand = String(candidate.brand.value ?? "").trim();
-  const name = String(candidate.name.value ?? "").trim();
-  const upc = String(candidate.upc.value ?? "").trim();
-  const productType = String(candidate.product_type.value ?? "").trim();
-  const category = String(candidate.category.value ?? "").trim();
-  const queries: string[] = [];
-
-  const identityCore = [quotePart(brand), quotePart(name), upc].filter(Boolean).join(" ");
-
-  const wantsClass = needed.includes("category") || needed.includes("origin");
-  const wantsStrength = needed.includes("abv") || needed.includes("proof");
-  const wantsTtb = needed.includes("ttb_id");
-
-  if (wantsClass) {
-    queries.push(
-      [identityCore, productType, category || "whisky whiskey", "spirit"]
-        .filter(Boolean)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim()
-    );
-  }
-  if (wantsStrength) {
-    queries.push(
-      [identityCore, "ABV", "proof"].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
-    );
-  }
-  if (wantsTtb) {
-    queries.push(
-      [identityCore, "TTB", "COLA"].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
-    );
-  }
-  if (!queries.length && identityCore) {
-    queries.push([identityCore, productType, "ABV"].filter(Boolean).join(" "));
-  }
-
-  const unique: string[] = [];
-  for (const q of queries) {
-    if (q && !unique.includes(q)) unique.push(q);
-  }
-  return unique.slice(0, 3);
+  return buildMetadataQueryTiers(identityFromCandidate(candidate), needed).map((t) => t.query);
 }
 
 /** Single combined query (compat + diagnostics). */
@@ -180,6 +147,16 @@ export function metadataSearchQuery(
   needed: MetadataEnrichmentField[] = [...METADATA_ENRICHMENT_FIELDS]
 ): string {
   return buildMetadataSearchQueries(candidate, needed)[0] ?? "";
+}
+
+function classifyHitWithDiscovery(
+  hit: WebSearchHit,
+  options: { brand?: string | null; name?: string | null; discoveredOfficialDomains?: string[] }
+): ClassifiedHit {
+  return {
+    ...hit,
+    sourceClass: classifySourceUrlWithDiscovery(hit.url, options)
+  };
 }
 
 function applyMergeTracked(
@@ -484,45 +461,109 @@ export async function executeMetadataEnrichment(
 
   const needed = stillNeeded(candidate, targets);
   if (needed.length) {
-    const queries = buildMetadataSearchQueries(candidate, needed);
+    const tiers = buildMetadataQueryTiers(identityFromCandidate(candidate), needed);
+    const rawName = String(candidate.name.value ?? "");
     let allHits: WebSearchHit[] = [];
     let searchError: Error | null = null;
     let totalResults = 0;
+    let discoveredDomains: string[] = [];
+    let stoppedEarly = false;
 
-    for (const query of queries) {
+    for (const tier of tiers) {
+      // Avoid always exact-quoting the entire stored bottle name.
+      if (queryQuotesEntireName(tier.query, rawName)) {
+        stages.push({
+          stage: `query_tier_${tier.tier}`,
+          status: "skipped",
+          query: tier.query,
+          reason: "skipped_exact_name_quote"
+        });
+        continue;
+      }
       try {
         let hits: WebSearchHit[] = [];
         if (deps.searchWeb && !deps.searchWebHits) {
-          const snippets = await deps.searchWeb(query, 5);
+          const snippets = await deps.searchWeb(tier.query, 5);
           if (snippets.trim()) {
             hits = [{ title: "injected", content: snippets, url: "https://injected.local/snippet" }];
           }
         } else {
-          hits = await searchHits(query, 5);
+          hits = await searchHits(tier.query, 5);
         }
         totalResults += hits.length;
         stages.push({
-          stage: "search",
+          stage: `query_tier_${tier.tier}`,
           status: hits.length ? "ok" : "no_result",
-          query,
+          query: tier.query,
           provider: "searxng",
           candidateCount: hits.length,
-          reason: hits.length ? undefined : "no_search_results"
+          reason: hits.length ? `tier:${tier.label}` : "no_search_results"
         });
         allHits.push(...hits);
+
+        // Deduplicate as we go for early-stop checks.
+        const seen = new Set<string>();
+        const deduped = allHits.filter((h) => {
+          const key = h.url || `${h.title}:${h.content.slice(0, 40)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        allHits = deduped;
+
+        const discovery = discoverOfficialDomains(allHits, {
+          brand: candidate.brand.value,
+          name: candidate.name.value
+        });
+        if (discovery.domains.length) {
+          discoveredDomains = [...new Set([...discoveredDomains, ...discovery.domains])];
+          stages.push({
+            stage: "official_domain_discovered",
+            status: "ok",
+            reason: discovery.domains.join(",").slice(0, 160),
+            sourceUrls: discovery.sourceUrls
+          });
+        }
+
+        const classifiedProbe = allHits.map((h) =>
+          classifyHitWithDiscovery(h, {
+            brand: candidate.brand.value,
+            name: candidate.name.value,
+            discoveredOfficialDomains: discoveredDomains
+          })
+        );
+        const authCount = classifiedProbe.filter(
+          (h) => isAuthoritativeSource(h.sourceClass) || h.url.includes("injected.local")
+        ).length;
+        if (authCount > 0 && hits.length > 0) {
+          stoppedEarly = true;
+          stages.push({
+            stage: "query_ladder_stop",
+            status: "ok",
+            acceptedCount: authCount,
+            reason: `enough_evidence_after_tier_${tier.tier}`
+          });
+          break;
+        }
       } catch (error) {
         searchError = error instanceof Error ? error : new Error(String(error));
         const reason = isWebSearchError(error)
           ? `${error.code}:${error.message}`.slice(0, 120)
           : (searchError.message.slice(0, 120));
         stages.push({
-          stage: "search",
+          stage: `query_tier_${tier.tier}`,
           status: "error",
-          query,
+          query: tier.query,
           provider: "searxng",
           reason
         });
-        // Provider failures should surface as retryable job errors.
+        stages.push({
+          stage: "search",
+          status: "error",
+          query: tier.query,
+          provider: "searxng",
+          reason
+        });
         for (const name of needed) {
           errors.push({
             field: name,
@@ -535,14 +576,28 @@ export async function executeMetadataEnrichment(
       }
     }
 
-    // Deduplicate hits by URL.
-    const seenUrls = new Set<string>();
-    allHits = allHits.filter((h) => {
-      const key = h.url || `${h.title}:${h.content.slice(0, 40)}`;
-      if (seenUrls.has(key)) return false;
-      seenUrls.add(key);
-      return true;
-    });
+    if (!stoppedEarly && !searchError && tiers.length) {
+      stages.push({
+        stage: "query_ladder_stop",
+        status: totalResults ? "ok" : "no_result",
+        reason: totalResults ? "ladder_exhausted" : "no_search_results"
+      });
+    }
+
+    // Compat search stage: prefer first successful tier query, else last attempted.
+    const tierStages = stages.filter((s) => /^query_tier_/.test(s.stage));
+    const bestTier = tierStages.filter((s) => s.status === "ok" && (s.candidateCount ?? 0) > 0);
+    const searchCompat = bestTier[0] ?? tierStages[tierStages.length - 1];
+    if (searchCompat && !stages.some((s) => s.stage === "search")) {
+      stages.push({
+        stage: "search",
+        status: searchCompat.status,
+        query: searchCompat.query,
+        provider: "searxng",
+        candidateCount: searchCompat.candidateCount,
+        reason: searchCompat.reason
+      });
+    }
 
     if (!searchError) {
       if (totalResults === 0 && allHits.length === 0) {
@@ -551,10 +606,25 @@ export async function executeMetadataEnrichment(
       } else {
         const brand = candidate.brand.value;
         const name = candidate.name.value;
+        if (!discoveredDomains.length) {
+          const discovery = discoverOfficialDomains(allHits, { brand, name });
+          discoveredDomains = discovery.domains;
+          if (discovery.domains.length) {
+            stages.push({
+              stage: "official_domain_discovered",
+              status: "ok",
+              reason: discovery.domains.join(",").slice(0, 160),
+              sourceUrls: discovery.sourceUrls
+            });
+          }
+        }
         const classified: ClassifiedHit[] = allHits.map((h) =>
-          classifyHit(h, { brand, name })
+          classifyHitWithDiscovery(h, {
+            brand,
+            name,
+            discoveredOfficialDomains: discoveredDomains
+          })
         );
-        // Injected test snippets bypass retailer filter.
         const authoritative = classified.filter(
           (h) =>
             isAuthoritativeSource(h.sourceClass)
@@ -577,7 +647,6 @@ export async function executeMetadataEnrichment(
           ]
         });
 
-        // Record per-class rejection reasons compactly.
         for (const hit of rejected.slice(0, 8)) {
           stages.push({
             stage: "source_reject",
@@ -592,17 +661,77 @@ export async function executeMetadataEnrichment(
           diagnostics.summary = "No authoritative source produced usable metadata";
         } else {
           try {
-            const snippets = authoritative.some((h) => h.url.includes("injected.local"))
-              ? authoritative.map((h) => h.content).join("\n")
-              : formatAuthoritativeSnippets(authoritative);
+            const fetchHtml = deps.fetchPageHtml ?? fetchBoundedPageHtml;
+            // Supplement snippets with bounded structured page facts (no full HTML persist).
+            const enriched: ClassifiedHit[] = [];
+            let pageFetchFails = 0;
+            for (const hit of authoritative.slice(0, 3)) {
+              if (hit.url.includes("injected.local")) {
+                enriched.push(hit);
+                continue;
+              }
+              let content = hit.content;
+              try {
+                const html = await fetchHtml(hit.url);
+                if (html) {
+                  const facts = extractStructuredProductFacts(html, hit.url);
+                  if (facts.textSnippet) {
+                    content = `${hit.content}\n${facts.textSnippet}`.slice(0, 2000);
+                    stages.push({
+                      stage: "source_fetch",
+                      status: "ok",
+                      reason: [
+                        facts.usedJsonLd ? "json_ld" : null,
+                        facts.usedOpenGraph ? "open_graph" : null,
+                        facts.abv != null ? `abv:${facts.abv}` : null
+                      ]
+                        .filter(Boolean)
+                        .join(",")
+                        .slice(0, 160) || "page_fetched",
+                      sourceUrls: [hit.url]
+                    });
+                  } else {
+                    stages.push({
+                      stage: "source_fetch",
+                      status: "no_result",
+                      reason: "no_structured_metadata",
+                      sourceUrls: [hit.url]
+                    });
+                  }
+                } else {
+                  pageFetchFails += 1;
+                  stages.push({
+                    stage: "source_fetch",
+                    status: "error",
+                    reason: "source_fetch_failed",
+                    sourceUrls: [hit.url]
+                  });
+                }
+              } catch {
+                pageFetchFails += 1;
+                stages.push({
+                  stage: "source_fetch",
+                  status: "error",
+                  reason: "source_fetch_failed",
+                  sourceUrls: [hit.url]
+                });
+              }
+              enriched.push({ ...hit, content });
+            }
+            // Keep remaining authoritative hits without fetch.
+            for (const hit of authoritative.slice(3)) enriched.push(hit);
+
+            const snippets = enriched.some((h) => h.url.includes("injected.local"))
+              ? enriched.map((h) => h.content).join("\n")
+              : formatAuthoritativeSnippets(enriched);
             const extracted = await extractMetadata({
               candidate,
               fields: needed,
               webSnippets: snippets
             });
             const safe: MetadataExtractResult = {};
-            for (const name of needed) {
-              if (name in extracted) safe[name] = extracted[name] ?? null;
+            for (const fieldName of needed) {
+              if (fieldName in extracted) safe[fieldName] = extracted[fieldName] ?? null;
             }
             const { extractedNonNull, accepted } = applyExtracted(
               candidate,
@@ -622,7 +751,9 @@ export async function executeMetadataEnrichment(
               acceptedCount: accepted.length,
               reason: extractedNonNull.length
                 ? undefined
-                : "extractor_returned_null"
+                : pageFetchFails && !extractedNonNull.length
+                  ? "extractor_returned_null"
+                  : "extractor_returned_null"
             });
 
             if (!extractedNonNull.length) {
@@ -640,9 +771,9 @@ export async function executeMetadataEnrichment(
                 : "Extracted values were weaker than existing data";
             }
           } catch (error) {
-            for (const name of needed) {
+            for (const fieldName of needed) {
               errors.push({
-                field: name,
+                field: fieldName,
                 message: error instanceof Error ? error.message : "Web/LLM metadata extract failed"
               });
             }

@@ -10,7 +10,19 @@ import {
   type WebSearchHit
 } from "../web-search.js";
 import { classifyImageSource } from "./image-sources.js";
-import { classifySourceUrl, isAuthoritativeSource } from "./tasting-notes-sources.js";
+import { isAuthoritativeSource } from "./tasting-notes-sources.js";
+import {
+  classifySourceUrlWithDiscovery,
+  discoverOfficialDomains
+} from "./official-domain.js";
+import {
+  buildImageQueryTiers,
+  identityFromCandidate
+} from "./search-query.js";
+import {
+  extractStructuredProductFacts,
+  fetchBoundedPageHtml
+} from "./page-extract.js";
 import {
   evaluateCandidate,
   hardRejectCandidate,
@@ -67,16 +79,8 @@ export type ImageEnrichmentResult = {
 };
 
 function imageSearchQuery(candidate: BottleCandidate): string {
-  return [
-    candidate.brand.value,
-    candidate.name.value,
-    candidate.product_type.value,
-    candidate.upc.value,
-    "bottle product photo"
-  ]
-    .map((p) => String(p ?? "").trim())
-    .filter(Boolean)
-    .join(" ");
+  const tiers = buildImageQueryTiers(identityFromCandidate(candidate));
+  return tiers[0]?.query ?? "";
 }
 
 /** Default SearXNG image category search (throws WebSearchError on provider failure). */
@@ -104,83 +108,25 @@ async function defaultProbe(url: string): Promise<ImageMeta> {
 }
 
 async function defaultFetchPageHtml(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(8_000),
-      headers: { Accept: "text/html" }
-    });
-    if (!response.ok) return null;
-    const text = await response.text();
-    return text.slice(0, 200_000);
-  } catch {
-    return null;
-  }
+  return fetchBoundedPageHtml(url);
 }
 
 /** Extract og:image / JSON-LD Product image URLs from an authoritative HTML page. */
 export function extractProductImageUrlsFromHtml(html: string, pageUrl: string): string[] {
-  const out: string[] = [];
-  const push = (raw: string) => {
-    const value = String(raw ?? "").trim();
-    if (!value) return;
-    try {
-      const abs = new URL(value, pageUrl).toString();
-      if (/^https?:\/\//i.test(abs) && !out.includes(abs)) out.push(abs);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const og = html.match(
-    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["'][^>]*>/i
-  ) || html.match(
-    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["'][^>]*>/i
-  );
-  if (og?.[1]) push(og[1]);
-
-  const jsonLdBlocks = html.matchAll(
-    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
-  );
-  for (const block of jsonLdBlocks) {
-    const raw = block[1]?.trim();
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      const nodes = Array.isArray(parsed) ? parsed : [parsed];
-      for (const node of nodes) {
-        if (!node || typeof node !== "object") continue;
-        const record = node as Record<string, unknown>;
-        const type = String(record["@type"] ?? "");
-        if (!/product/i.test(type) && !record.image) continue;
-        const image = record.image;
-        if (typeof image === "string") push(image);
-        else if (Array.isArray(image)) {
-          for (const item of image) {
-            if (typeof item === "string") push(item);
-            else if (item && typeof item === "object" && "url" in item) {
-              push(String((item as { url?: unknown }).url ?? ""));
-            }
-          }
-        } else if (image && typeof image === "object" && "url" in (image as object)) {
-          push(String((image as { url?: unknown }).url ?? ""));
-        }
-      }
-    } catch {
-      /* ignore malformed json-ld */
-    }
-  }
-  return out.slice(0, 5);
+  return extractStructuredProductFacts(html, pageUrl).imageUrls;
 }
 
 function toCandidate(
   seed: ImageCandidateSeed,
   brand: string | null,
-  name: string | null
+  name: string | null,
+  discoveredOfficialDomains: string[] = []
 ): ImageCandidate {
   const sourceType = classifyImageSource(seed.url, {
     brand,
     name,
-    pageUrl: seed.sourceUrl
+    pageUrl: seed.sourceUrl,
+    discoveredOfficialDomains
   });
   return {
     url: seed.url,
@@ -221,52 +167,152 @@ export async function executeImageEnrichment(
   const stages: EnrichmentDiagnosticStage[] = [];
   const diagnostics = emptyImageDiagnostics();
 
-  const query = imageSearchQuery(candidate);
-  try {
-    const imageSeeds = await searchImages(query, 8);
-    seeds.push(...imageSeeds);
-    stages.push({
-      stage: "search",
-      status: imageSeeds.length ? "ok" : "no_result",
-      query,
-      provider: "searxng",
-      candidateCount: imageSeeds.length,
-      reason: imageSeeds.length ? undefined : "no_search_results"
-    });
-  } catch (error) {
-    const message = isWebSearchError(error)
-      ? `SearXNG ${error.code}: ${error.message}`
-      : error instanceof Error
-        ? error.message
-        : "Image search failed";
-    errors.push(message);
-    stages.push({
-      stage: "search",
-      status: "error",
-      query,
-      provider: "searxng",
-      reason: message.slice(0, 120)
-    });
-    diagnostics.noResultReason = "provider_error";
-    diagnostics.summary = "Provider or network error";
-    diagnostics.stages = stages;
-    return {
-      selected: null,
-      evaluated: [],
-      errors,
-      diagnostics: sanitizeJobDiagnostics(diagnostics)
-    };
+  const queryTiers = buildImageQueryTiers(identityFromCandidate(candidate));
+  let discoveredDomains: string[] = [];
+  let imageSearchHadResults = false;
+  let primaryQuery = queryTiers[0]?.query ?? imageSearchQuery(candidate);
+
+  for (const tier of queryTiers.slice(0, 3)) {
+    try {
+      const imageSeeds = await searchImages(tier.query, 8);
+      if (imageSeeds.length) {
+        imageSearchHadResults = true;
+        seeds.push(...imageSeeds);
+        primaryQuery = tier.query;
+        stages.push({
+          stage: `query_tier_${tier.tier}`,
+          status: "ok",
+          query: tier.query,
+          provider: "searxng",
+          candidateCount: imageSeeds.length,
+          reason: `tier:${tier.label}`
+        });
+        // First successful image SERP is enough for candidate seeds.
+        break;
+      }
+      stages.push({
+        stage: `query_tier_${tier.tier}`,
+        status: "no_result",
+        query: tier.query,
+        provider: "searxng",
+        candidateCount: 0,
+        reason: "no_search_results"
+      });
+    } catch (error) {
+      const message = isWebSearchError(error)
+        ? `SearXNG ${error.code}: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : "Image search failed";
+      errors.push(message);
+      stages.push({
+        stage: `query_tier_${tier.tier}`,
+        status: "error",
+        query: tier.query,
+        provider: "searxng",
+        reason: message.slice(0, 120)
+      });
+      stages.push({
+        stage: "search",
+        status: "error",
+        query: tier.query,
+        provider: "searxng",
+        reason: message.slice(0, 120)
+      });
+      diagnostics.noResultReason = "provider_error";
+      diagnostics.summary = "Provider or network error";
+      diagnostics.stages = stages;
+      return {
+        selected: null,
+        evaluated: [],
+        errors,
+        diagnostics: sanitizeJobDiagnostics(diagnostics)
+      };
+    }
   }
 
-  // Supplement with official page hits; pull og:image / JSON-LD when authoritative.
+  stages.push({
+    stage: "search",
+    status: imageSearchHadResults ? "ok" : "no_result",
+    query: primaryQuery,
+    provider: "searxng",
+    candidateCount: seeds.length,
+    reason: imageSearchHadResults ? undefined : "no_search_results"
+  });
+
+  // Progressive web search for official pages; pull og:image / JSON-LD when authoritative.
+  let officialPagesScanned = 0;
+  let officialPagesFound = 0;
+  let officialImagesFromMeta = 0;
+  let officialPagesWithoutImageMeta = 0;
   try {
-    const hits = await searchWeb(query, 5);
-    let officialPages = 0;
-    for (const hit of hits) {
-      if (!hit.url) continue;
-      const pageClass = classifySourceUrl(hit.url, {
+    const webTiers = queryTiers.slice(0, 4);
+    let allHits: WebSearchHit[] = [];
+    for (const tier of webTiers) {
+      const hits = await searchWeb(tier.query, 5);
+      stages.push({
+        stage: `page_query_tier_${tier.tier}`,
+        status: hits.length ? "ok" : "no_result",
+        query: tier.query,
+        provider: "searxng",
+        candidateCount: hits.length,
+        reason: hits.length ? `tier:${tier.label}` : "no_search_results"
+      });
+      allHits.push(...hits);
+      const discovery = discoverOfficialDomains(allHits, {
         brand: candidate.brand.value,
         name: candidate.name.value
+      });
+      if (discovery.domains.length) {
+        discoveredDomains = [...new Set([...discoveredDomains, ...discovery.domains])];
+        stages.push({
+          stage: "official_domain_discovered",
+          status: "ok",
+          reason: discovery.domains.join(",").slice(0, 160),
+          sourceUrls: discovery.sourceUrls
+        });
+      }
+      const authNow = allHits.filter((hit) => {
+        const pageClass = classifySourceUrlWithDiscovery(hit.url, {
+          brand: candidate.brand.value,
+          name: candidate.name.value,
+          discoveredOfficialDomains: discoveredDomains
+        });
+        return isAuthoritativeSource(pageClass);
+      });
+      if (authNow.length) break;
+    }
+
+    // Dedup hits
+    const seenHit = new Set<string>();
+    allHits = allHits.filter((h) => {
+      if (!h.url || seenHit.has(h.url)) return false;
+      seenHit.add(h.url);
+      return true;
+    });
+
+    if (!discoveredDomains.length) {
+      const discovery = discoverOfficialDomains(allHits, {
+        brand: candidate.brand.value,
+        name: candidate.name.value
+      });
+      discoveredDomains = discovery.domains;
+      if (discovery.domains.length) {
+        stages.push({
+          stage: "official_domain_discovered",
+          status: "ok",
+          reason: discovery.domains.join(",").slice(0, 160),
+          sourceUrls: discovery.sourceUrls
+        });
+      }
+    }
+
+    for (const hit of allHits) {
+      if (!hit.url) continue;
+      const pageClass = classifySourceUrlWithDiscovery(hit.url, {
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        discoveredOfficialDomains: discoveredDomains
       });
       if (!isAuthoritativeSource(pageClass) && pageClass !== "unknown") continue;
       const sourceType = classifyImageSource(hit.url, {
@@ -274,26 +320,77 @@ export async function executeImageEnrichment(
         name: candidate.name.value,
         pageUrl: hit.url
       });
-      if (sourceType === "official" || sourceType === "licensed" || sourceType === "approved") {
-        officialPages += 1;
+      // Re-check with discovered domains for official classification of page hosts.
+      const pageLooksOfficial =
+        pageClass === "official"
+        || sourceType === "official"
+        || (discoveredDomains.length > 0
+          && classifySourceUrlWithDiscovery(hit.url, {
+            brand: candidate.brand.value,
+            name: candidate.name.value,
+            discoveredOfficialDomains: discoveredDomains
+          }) === "official");
+
+      if (pageLooksOfficial || sourceType === "licensed" || sourceType === "approved") {
+        if (pageLooksOfficial) officialPagesFound += 1;
         if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(hit.url)) {
           seeds.push({ url: hit.url, sourceUrl: hit.url });
-        } else if (isAuthoritativeSource(pageClass) || sourceType === "official") {
+          if (pageLooksOfficial) officialImagesFromMeta += 1;
+        } else if (pageLooksOfficial || isAuthoritativeSource(pageClass)) {
+          officialPagesScanned += 1;
           const html = await fetchHtml(hit.url);
           if (html) {
-            for (const imageUrl of extractProductImageUrlsFromHtml(html, hit.url)) {
-              seeds.push({ url: imageUrl, sourceUrl: hit.url });
+            const facts = extractStructuredProductFacts(html, hit.url);
+            const imageUrls = facts.imageUrls.length
+              ? facts.imageUrls
+              : extractProductImageUrlsFromHtml(html, hit.url);
+            if (!imageUrls.length) {
+              officialPagesWithoutImageMeta += 1;
+              stages.push({
+                stage: "official_image_meta",
+                status: "no_result",
+                reason: "official_page_no_image_metadata",
+                sourceUrls: [hit.url]
+              });
+            } else {
+              officialImagesFromMeta += imageUrls.length;
+              for (const imageUrl of imageUrls) {
+                seeds.push({ url: imageUrl, sourceUrl: hit.url });
+              }
+              stages.push({
+                stage: "official_image_meta",
+                status: "ok",
+                acceptedCount: imageUrls.length,
+                reason: [
+                  facts.usedOpenGraph ? "og:image" : null,
+                  facts.usedJsonLd ? "json_ld_image" : null
+                ]
+                  .filter(Boolean)
+                  .join(",") || "image_metadata",
+                sourceUrls: [hit.url]
+              });
             }
+          } else {
+            stages.push({
+              stage: "official_image_meta",
+              status: "error",
+              reason: "official_page_fetch_failed",
+              sourceUrls: [hit.url]
+            });
           }
         }
       }
     }
     stages.push({
       stage: "page_discovery",
-      status: officialPages ? "ok" : "skipped",
-      candidateCount: hits.length,
-      acceptedCount: officialPages,
-      reason: officialPages ? "official_pages_scanned" : "no_official_pages"
+      status: officialPagesFound ? "ok" : "skipped",
+      candidateCount: allHits.length,
+      acceptedCount: officialPagesFound,
+      reason: officialPagesFound
+        ? "official_pages_scanned"
+        : discoveredDomains.length
+          ? "official_domain_but_no_pages"
+          : "no_official_pages"
     });
   } catch (error) {
     const message = isWebSearchError(error)
@@ -307,6 +404,28 @@ export async function executeImageEnrichment(
       status: "error",
       provider: "searxng",
       reason: message.slice(0, 120)
+    });
+  }
+
+  // Record distinct image diagnostic outcomes for keeper review.
+  if (!officialPagesFound) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "no_result",
+      reason: "no_official_page_discovered"
+    });
+  } else if (officialPagesWithoutImageMeta && !officialImagesFromMeta) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "no_result",
+      reason: "official_page_discovered_but_no_image_metadata"
+    });
+  } else if (officialImagesFromMeta) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "ok",
+      acceptedCount: officialImagesFromMeta,
+      reason: "official_image_metadata_found"
     });
   }
 
@@ -354,7 +473,8 @@ export async function executeImageEnrichment(
           mimeType: meta.mimeType
         },
         brand,
-        name
+        name,
+        discoveredDomains
       )
     );
   }
