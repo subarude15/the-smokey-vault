@@ -1,12 +1,21 @@
 /**
- * Decide whether to enqueue background metadata enrichment after inventory save.
+ * Decide whether to enqueue background enrichment jobs after inventory save.
  */
 import { planEnrichment, type PlanEnrichmentOptions } from "../enrichment/index.js";
 import {
   candidateFromInventoryRow,
   shouldScheduleMetadataEnrichment
 } from "./inventory.js";
-import { enqueueMetadataJob, enrichmentJobCounts } from "./store.js";
+import {
+  getProductContent,
+  productContentFullyPopulated
+} from "./product-content.js";
+import {
+  enqueueMetadataJob,
+  enqueueTastingNotesJob,
+  enrichmentJobCounts,
+  hasCompletedJob
+} from "./store.js";
 import type { EnrichmentEntityType, EnrichmentJob } from "./types.js";
 import { isEnrichmentEntityType } from "./types.js";
 import type { EnrichmentLogger } from "./worker.js";
@@ -14,6 +23,26 @@ import type { EnrichmentLogger } from "./worker.js";
 export type MaybeEnqueueResult =
   | { enqueued: false; reason: string }
   | { enqueued: true; created: boolean; job: EnrichmentJob };
+
+function logEnqueue(
+  logger: EnrichmentLogger | undefined,
+  job: EnrichmentJob,
+  created: boolean,
+  entityType: string,
+  entityId: number
+) {
+  logger?.info(
+    {
+      jobId: job.id,
+      created,
+      jobType: job.job_type,
+      entityType,
+      entityId,
+      counts: enrichmentJobCounts()
+    },
+    created ? "enrichment job queued" : "enrichment job already active"
+  );
+}
 
 /**
  * Enqueue metadata enrichment when the saved bottle is identified, not in review,
@@ -23,7 +52,6 @@ export function maybeEnqueueMetadataEnrichment(options: {
   entityType: string;
   entityId: number;
   row: Record<string, unknown>;
-  /** Optional planner conflicts (e.g. identity disagreements) for needsReview gating. */
   planOptions?: PlanEnrichmentOptions;
   logger?: EnrichmentLogger;
 }): MaybeEnqueueResult {
@@ -45,17 +73,52 @@ export function maybeEnqueueMetadataEnrichment(options: {
     entityId: options.entityId,
     upc: candidate.upc.value
   });
+  logEnqueue(options.logger, job, created, entityType, options.entityId);
+  return { enqueued: true, created, job };
+}
 
-  options.logger?.info(
-    {
-      jobId: job.id,
-      created,
-      entityType,
-      entityId: options.entityId,
-      counts: enrichmentJobCounts()
-    },
-    created ? "enrichment job queued" : "enrichment job already active"
-  );
+export function shouldScheduleTastingNotesEnrichment(options: {
+  entityType: EnrichmentEntityType;
+  entityId: number;
+}): boolean {
+  const content = getProductContent(options.entityType, options.entityId);
+  if (productContentFullyPopulated(content)) return false;
+  // One-shot: after a completed tasting_notes job, do not keep re-queueing null results.
+  if (hasCompletedJob(options.entityType, options.entityId, "tasting_notes")) {
+    return false;
+  }
+  return true;
+}
 
+/**
+ * Enqueue tasting-note enrichment independently from metadata.
+ * Gate: identified, not needsReview, content gaps remain, no prior completed job.
+ */
+export function maybeEnqueueTastingNotesEnrichment(options: {
+  entityType: string;
+  entityId: number;
+  row: Record<string, unknown>;
+  planOptions?: PlanEnrichmentOptions;
+  logger?: EnrichmentLogger;
+}): MaybeEnqueueResult {
+  if (!isEnrichmentEntityType(options.entityType)) {
+    return { enqueued: false, reason: "unsupported_entity" };
+  }
+  const entityType = options.entityType as EnrichmentEntityType;
+  const candidate = candidateFromInventoryRow(entityType, options.row);
+  const plan = planEnrichment(candidate, options.planOptions ?? {});
+
+  if (!plan.identified) return { enqueued: false, reason: "not_identified" };
+  if (plan.needsReview) return { enqueued: false, reason: "needs_review" };
+  if (!shouldScheduleTastingNotesEnrichment({ entityType, entityId: options.entityId })) {
+    return { enqueued: false, reason: "already_complete" };
+  }
+
+  const { job, created } = enqueueTastingNotesJob({
+    entityType,
+    entityId: options.entityId,
+    upc: candidate.upc.value
+  });
+  logEnqueue(options.logger, job, created, entityType, options.entityId);
   return { enqueued: true, created, job };
 }

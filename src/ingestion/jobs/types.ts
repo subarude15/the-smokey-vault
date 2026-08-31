@@ -1,12 +1,12 @@
 /**
  * Persistent enrichment job queue types.
- * Job type for this PR: metadata only (abv/proof/volume/origin/ttb).
+ * Job types: metadata (factual fields) and tasting_notes (optional content).
  */
 
 export const ENRICHMENT_ENTITY_TYPES = ["spirits", "packaged_beer", "wines"] as const;
 export type EnrichmentEntityType = (typeof ENRICHMENT_ENTITY_TYPES)[number];
 
-export const ENRICHMENT_JOB_TYPES = ["metadata"] as const;
+export const ENRICHMENT_JOB_TYPES = ["metadata", "tasting_notes"] as const;
 export type EnrichmentJobType = (typeof ENRICHMENT_JOB_TYPES)[number];
 
 export const ENRICHMENT_JOB_STATUSES = ["pending", "running", "completed", "failed"] as const;
@@ -36,6 +36,14 @@ export type EnrichmentJobCounts = {
   failed: number;
 };
 
+export type EnqueueJobInput = {
+  entityType: EnrichmentEntityType;
+  entityId: number;
+  upc?: string | null;
+  jobType: EnrichmentJobType;
+};
+
+/** Metadata enqueue helper input (jobType fixed to metadata). */
 export type EnqueueMetadataInput = {
   entityType: EnrichmentEntityType;
   entityId: number;
@@ -56,4 +64,8 @@ export function retryDelaySeconds(attemptNumber: number): number {
 
 export function isEnrichmentEntityType(value: string): value is EnrichmentEntityType {
   return (ENRICHMENT_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+export function isEnrichmentJobType(value: string): value is EnrichmentJobType {
+  return (ENRICHMENT_JOB_TYPES as readonly string[]).includes(value);
 }
