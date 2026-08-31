@@ -25,6 +25,7 @@ import type { MetadataEnrichmentField } from "../enrichment/metadata-fields.js";
 import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import type { EnrichmentEntityType } from "./types.js";
+import type { BottleCandidateFieldName } from "../candidate/types.js";
 
 /** Inventory columns that can receive metadata enrichment, by table. */
 const INVENTORY_COLUMN_FOR: Record<EnrichmentEntityType, Partial<Record<MetadataEnrichmentField, string>>> = {
@@ -43,27 +44,11 @@ export function loadInventoryRow(
 
 function applyMergeOnto(
   candidate: BottleCandidate,
-  name: MetadataEnrichmentField,
+  name: BottleCandidateFieldName,
   incoming: ProductField<unknown>
 ) {
   const merged = mergeField(candidate[name] as ProductField<unknown>, incoming, name);
-  switch (name) {
-    case "abv":
-      candidate.abv = merged.field as BottleCandidate["abv"];
-      break;
-    case "proof":
-      candidate.proof = merged.field as BottleCandidate["proof"];
-      break;
-    case "volume_ml":
-      candidate.volume_ml = merged.field as BottleCandidate["volume_ml"];
-      break;
-    case "origin":
-      candidate.origin = merged.field as BottleCandidate["origin"];
-      break;
-    case "ttb_id":
-      candidate.ttb_id = merged.field as BottleCandidate["ttb_id"];
-      break;
-  }
+  (candidate as unknown as Record<string, ProductField<unknown>>)[name] = merged.field;
 }
 
 function overlayUpcCaches(candidate: BottleCandidate): BottleCandidate {
@@ -73,7 +58,7 @@ function overlayUpcCaches(candidate: BottleCandidate): BottleCandidate {
   const cola = getFromCache(upc, { allowStale: true });
   if (cola) {
     const fromCola = candidateFromProduct(cola, "cola_cache");
-    for (const name of METADATA_ENRICHMENT_FIELDS) {
+    for (const name of [...METADATA_ENRICHMENT_FIELDS, "category", "product_type", "name", "brand"] as const) {
       applyMergeOnto(candidate, name, fromCola[name] as ProductField<unknown>);
     }
   }
@@ -92,7 +77,7 @@ function overlayUpcCaches(candidate: BottleCandidate): BottleCandidate {
       },
       "barcode_cache"
     );
-    for (const name of ["abv", "proof", "volume_ml"] as const) {
+    for (const name of ["abv", "proof", "volume_ml", "category", "name", "brand"] as const) {
       applyMergeOnto(candidate, name, fromBarcode[name] as ProductField<unknown>);
     }
   }
@@ -118,11 +103,13 @@ export function candidateFromInventoryRow(
   const subRaw = String(row.sub_category ?? "");
   const tax = normalizeCanonicalTaxonomy(categoryRaw, subRaw);
   const usableFamily = tax.family || (isUsableCanonicalFamily(categoryRaw) ? categoryRaw : "");
+  const classification = tax.type || usableFamily;
 
   const normalized: Record<string, unknown> = {
     ...row,
     brand: row.brand ?? row.brewery ?? row.producer ?? "",
-    category: usableFamily,
+    category: classification || usableFamily,
+    sub_category: tax.type,
     product_type: row.product_type || tax.productType || inferredType,
     origin: row.origin ?? row.region ?? null,
     volume_ml: normalizeCanonicalVolumeMl(row.volume_ml),
@@ -137,7 +124,7 @@ export function candidateFromInventoryRow(
   if (isUnresolvedField(candidate.product_type)) {
     candidate.product_type = field(inferredType, "vault");
   }
-  if (!usableFamily) {
+  if (!classification && !usableFamily) {
     candidate.category = emptyField();
   }
   return overlayUpcCaches(candidate);

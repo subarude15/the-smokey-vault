@@ -10,6 +10,7 @@ import { GuestReviews } from "./GuestReviews";
 import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
 import { BottlePublicContent } from "./BottlePublicContent";
 import { useFormDraft } from "./useFormDraft";
+import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
@@ -2943,7 +2944,7 @@ function lastBrewfatherSyncLabel(iso?: string) {
 function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(v:string)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void;go:(page:string)=>void}) {
   const [settings,setSettings] = useState<Record<string, string | boolean>>({});
   const [keeperDraft,setKeeperDraft] = useState(DEFAULT_KEEPER_NAME);
-  const [message,setMessage]=useState("");
+  const { notice: message, setNotice: setMessage } = useTransientNotice();
   const [syncing,setSyncing]=useState(false);
   useEffect(()=>{
     api<Record<string, string | boolean>>("/settings").then((values) => {

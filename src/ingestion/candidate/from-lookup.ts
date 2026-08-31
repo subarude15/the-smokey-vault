@@ -1,5 +1,13 @@
 import type { ProductSchema } from "../../cola_client.js";
 import type { LookupResult } from "../../lookup-shared.js";
+import {
+  isCommerceTaxonomyJunk,
+  normalizeCanonicalAbv,
+  normalizeCanonicalProof,
+  normalizeCanonicalTaxonomy,
+  normalizeCanonicalVolumeMl,
+  stripPackageTokensFromName
+} from "../../canonical-normalize.js";
 import { confidenceForSource, fieldSourceFromLookupSource } from "./confidence.js";
 import { emptyField, field, isUnresolvedField, mergeField } from "./fields.js";
 import type {
@@ -30,22 +38,57 @@ function numberFrom(record: Record<string, unknown>, ...keys: string[]): number 
   return null;
 }
 
+function classificationFromRecord(record: Record<string, unknown>): {
+  productType: string | null;
+  category: string | null;
+} {
+  const categoryRaw = stringFrom(record, "category", "categories", "style") ?? "";
+  const subRaw = stringFrom(record, "sub_category", "subcategory") ?? "";
+  const tax = normalizeCanonicalTaxonomy(categoryRaw, subRaw);
+  const productTypeRaw = stringFrom(record, "product_type");
+  const productType =
+    tax.productType
+    ?? (productTypeRaw
+      ? (/distilled\s+spirit/i.test(productTypeRaw)
+        ? "spirit"
+        : /malt\s+beverage/i.test(productTypeRaw)
+          ? "beer"
+          : /\bwine\b/i.test(productTypeRaw)
+            ? "wine"
+            : productTypeRaw.toLowerCase())
+      : null);
+
+  // Most specific alcohol label for provenance/display (Scotch Whisky > Whiskey).
+  let category = tax.type || tax.family || null;
+  if (!category && categoryRaw && !isCommerceTaxonomyJunk(categoryRaw) && !categoryRaw.includes(">")) {
+    category = categoryRaw;
+  }
+  return { productType, category };
+}
+
 /** Build a candidate from a ProductSchema / inventory-like record with one provenance source. */
 export function candidateFromProduct(
   product: ProductSchema | Record<string, unknown>,
   source: ProductFieldSource
 ): BottleCandidate {
   const record = product as Record<string, unknown>;
+  const { productType, category } = classificationFromRecord(record);
+  const nameRaw = stringFrom(record, "name", "product_name", "batch_name");
+  const name = nameRaw ? stripPackageTokensFromName(nameRaw) || nameRaw : null;
+  const abv = normalizeCanonicalAbv(numberFrom(record, "abv"), { productType });
+  const proof = normalizeCanonicalProof(numberFrom(record, "proof"));
+  const volume = normalizeCanonicalVolumeMl(numberFrom(record, "volume_ml"));
+
   return {
     primarySource: source,
     upc: field(stringFrom(record, "upc"), source),
-    name: field(stringFrom(record, "name", "product_name", "batch_name"), source),
+    name: field(name, source),
     brand: field(stringFrom(record, "brand", "brewery", "producer", "maker", "brand_name"), source),
-    product_type: field(stringFrom(record, "product_type"), source),
-    category: field(stringFrom(record, "category", "categories", "style"), source),
-    abv: field(numberFrom(record, "abv"), source),
-    proof: field(numberFrom(record, "proof"), source),
-    volume_ml: field(numberFrom(record, "volume_ml"), source),
+    product_type: field(productType, source),
+    category: field(category, source),
+    abv: field(abv, source),
+    proof: field(proof, source),
+    volume_ml: field(volume, source),
     origin: field(stringFrom(record, "origin", "origin_name"), source),
     ttb_id: field(stringFrom(record, "ttb_id"), source)
   };

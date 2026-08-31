@@ -28,6 +28,7 @@ export type CanonicalSpiritFamily = (typeof CANONICAL_SPIRIT_FAMILIES)[number];
 export const CANONICAL_WHISKEY_TYPES = [
   "Bourbon",
   "Rye",
+  "Scotch Whisky",
   "Scotch",
   "Irish",
   "Corn whiskey",
@@ -158,8 +159,10 @@ export function isUsableCanonicalType(value: string | null | undefined): boolean
   if (!text) return false;
   if (isCommerceTaxonomyJunk(text)) return false;
   if (text.includes(">")) return false;
-  if (text.length > 40) return false;
-  if (/food|beverage|tobacco|grocery|liquor\s*&\s*spirits/i.test(text)) return false;
+  if (text.length > 48) return false;
+  if (/food|beverage|tobacco|grocery|liquor\s*&\s*spirits/i.test(text) && !/\b(whisky|whiskey|scotch|bourbon|rye)\b/i.test(text)) {
+    return false;
+  }
   return true;
 }
 
@@ -183,8 +186,99 @@ export function canonicalFamilyFromText(haystack: string): CanonicalSpiritFamily
 
 export function canonicalWhiskeyTypeFromText(haystack: string): string | null {
   const lower = haystack.toLowerCase();
-  const found = CANONICAL_WHISKEY_TYPES.find((value) => lower.includes(value.toLowerCase()));
+  // Prefer the fuller Scotch Whisky label when evidence supports it.
+  if (/\bscotch\s+whisk(?:y|ey)\b/.test(lower)) return "Scotch Whisky";
+  if (/\bsingle\s+malt\s+scotch\b/.test(lower)) return "Scotch Whisky";
+  if (/\bscotch\b/.test(lower)) return "Scotch";
+  const found = CANONICAL_WHISKEY_TYPES.find((value) => {
+    if (/^scotch/i.test(value)) return false;
+    return lower.includes(value.toLowerCase());
+  });
   return found ?? null;
+}
+
+/** Classification rank: higher = more specific alcohol label. */
+export function classificationSpecificity(value: string | null | undefined): number {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  const key = normalizeKey(text);
+  if (key === "spirit" || key === "distilled spirits" || key === "distilled spirit") return 1;
+  if (matchCanonicalFamilyLabel(text) || canonicalFamilyFromText(text)) {
+    const whiskeyType = canonicalWhiskeyTypeFromText(text);
+    if (whiskeyType) return 3;
+    return 2;
+  }
+  if (canonicalWhiskeyTypeFromText(text)) return 3;
+  return 1;
+}
+
+/** True when incoming is a compatible, more-specific form of existing (e.g. Whiskey → Scotch Whisky). */
+export function isCompatibleClassificationSpecialization(
+  existing: string | null | undefined,
+  incoming: string | null | undefined
+): boolean {
+  const a = String(existing ?? "").trim();
+  const b = String(incoming ?? "").trim();
+  if (!a || !b) return false;
+  if (canonicalizeClassificationLabel(a) === canonicalizeClassificationLabel(b)) return false;
+  const familyA = canonicalFamilyFromText(a) ?? matchCanonicalFamilyLabel(a);
+  const familyB = canonicalFamilyFromText(b) ?? matchCanonicalFamilyLabel(b);
+  const typeA = canonicalWhiskeyTypeFromText(a);
+  const typeB = canonicalWhiskeyTypeFromText(b);
+  // Generic Whiskey → Scotch / Bourbon / …
+  if ((familyA === "Whiskey" || /^whisky|whiskey$/i.test(a)) && typeB && !typeA) return true;
+  if (familyA && familyB && familyA === familyB && typeB && !typeA) return true;
+  // Broad product_type spirit → Whiskey family label
+  if (/^spirit$|^distilled spirits?$/i.test(a) && (familyB || typeB)) return true;
+  return classificationSpecificity(b) > classificationSpecificity(a)
+    && (!!familyA && !!familyB && familyA === familyB || /^spirit$/i.test(a));
+}
+
+/** Collapse synonymous classification labels for conflict comparison. */
+export function canonicalizeClassificationLabel(value: string): string {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const tax = normalizeCanonicalTaxonomy(text, "");
+  const whiskeyType = tax.type || canonicalWhiskeyTypeFromText(text);
+  if (whiskeyType) {
+    // Scotch / Scotch Whisky / Scotch Whiskey compare equal.
+    if (/^scotch/i.test(whiskeyType)) return "whiskey:scotch";
+    return `whiskey:${normalizeKey(whiskeyType)}`;
+  }
+  if (tax.family) return normalizeKey(tax.family);
+  if (tax.productType) return tax.productType;
+  return normalizeKey(text)
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Canonical string for conflict comparison.
+ * Strips package suffixes for names; synonym-folds classification labels.
+ */
+export function canonicalizeForCompare(
+  value: unknown,
+  fieldName?: string
+): string {
+  if (value == null) return "";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    return String(value);
+  }
+  let text = String(value).trim();
+  if (!text) return "";
+  if (fieldName === "name") {
+    text = stripPackageTokensFromName(text);
+  }
+  if (fieldName === "category" || fieldName === "product_type") {
+    return canonicalizeClassificationLabel(text);
+  }
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function inferProductType(haystack: string, family: string): CanonicalProductType | null {
@@ -234,9 +328,12 @@ export function normalizeCanonicalTaxonomy(
     family = "Whiskey";
     if (!type) {
       // Only assign subtype when text supports a known whiskey type — not bare "Whiskey".
-      type = whiskeyType && whiskeyType.toLowerCase() !== "whiskey" ? whiskeyType : "";
+      type = whiskeyType && !/^(whisky|whiskey)$/i.test(whiskeyType) ? whiskeyType : "";
     } else if (!isUsableCanonicalType(type)) {
-      type = whiskeyType && whiskeyType.toLowerCase() !== "whiskey" ? whiskeyType : "";
+      type = whiskeyType && !/^(whisky|whiskey)$/i.test(whiskeyType) ? whiskeyType : "";
+    } else if (whiskeyType && /^scotch/i.test(whiskeyType) && /^scotch$/i.test(type)) {
+      // Prefer fuller Scotch Whisky label when evidence supports it.
+      type = whiskeyType;
     }
   } else if (!family) {
     // Lift bare whiskey types (Bourbon, Rye, …) into Whiskey family.

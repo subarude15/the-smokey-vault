@@ -4,7 +4,7 @@ export const SPIRIT_FAMILIES = [
 ];
 
 export const SPIRIT_TYPES: Record<string, string[]> = {
-  Whiskey: ["Bourbon", "Rye", "Scotch", "Irish", "Corn whiskey", "Tennessee", "Canadian", "Japanese", "Blended", "Wheat whiskey"],
+  Whiskey: ["Bourbon", "Rye", "Scotch Whisky", "Scotch", "Irish", "Corn whiskey", "Tennessee", "Canadian", "Japanese", "Blended", "Wheat whiskey"],
   Gin: ["London Dry", "Old Tom", "Contemporary", "Plymouth", "Navy Strength"],
   Rum: ["White", "Gold", "Dark", "Spiced", "Agricole", "Overproof"],
   Tequila: ["Blanco", "Reposado", "Añejo", "Extra Añejo", "Cristalino"],

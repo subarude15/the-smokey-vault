@@ -6,6 +6,7 @@ import { getBarcodeCacheEntry } from "../../barcode_cache.js";
 import {
   isUsableCanonicalFamily,
   normalizeCanonicalAbv,
+  normalizeCanonicalProof,
   normalizeCanonicalTaxonomy,
   normalizeCanonicalVolumeMl
 } from "../../canonical-normalize.js";
@@ -247,18 +248,21 @@ export function collectCacheConflicts(
 ): FieldConflict[] {
   const inferredType =
     entityType === "packaged_beer" ? "beer" : entityType === "wines" ? "wine" : "spirit";
+  const categoryRaw = String(row.category ?? row.style ?? row.varietal ?? row.type ?? "");
+  const subRaw = String(row.sub_category ?? "");
+  const tax = normalizeCanonicalTaxonomy(categoryRaw, subRaw);
+  const classification =
+    tax.type || tax.family || (isUsableCanonicalFamily(categoryRaw) ? categoryRaw : "");
   const normalized: Record<string, unknown> = {
     ...row,
     brand: row.brand ?? row.brewery ?? row.producer ?? "",
-    category: (() => {
-      const raw = String(row.category ?? row.style ?? row.varietal ?? row.type ?? "");
-      const tax = normalizeCanonicalTaxonomy(raw, String(row.sub_category ?? ""));
-      return tax.family || (isUsableCanonicalFamily(raw) ? raw : "");
-    })(),
-    product_type: row.product_type || inferredType,
+    category: classification,
+    sub_category: tax.type,
+    product_type: row.product_type || tax.productType || inferredType,
     origin: row.origin ?? row.region ?? null,
     volume_ml: normalizeCanonicalVolumeMl(row.volume_ml),
-    abv: normalizeCanonicalAbv(row.abv, { productType: inferredType })
+    abv: normalizeCanonicalAbv(row.abv, { productType: inferredType }),
+    proof: normalizeCanonicalProof((row as { proof?: unknown }).proof)
   };
   const vault = candidateFromProduct(normalized, "vault");
   if (isUnresolvedField(vault.product_type)) {
