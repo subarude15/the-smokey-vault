@@ -35,7 +35,10 @@ import {
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
   maybeEnqueueImageEnrichment,
-  startEnrichmentWorker
+  previewEnrichmentBackfill,
+  queueEnrichmentBackfill,
+  startEnrichmentWorker,
+  type EnrichmentBackfillJobType
 } from "./ingestion/jobs/index.js";
 import { isEnrichmentEntityType } from "./ingestion/jobs/types.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
@@ -204,6 +207,37 @@ app.post<{ Body: { currentPin?: string; newPin?: string } }>("/api/auth/pin", as
   if (!newPin || !/^\d{4,12}$/.test(newPin)) return reply.code(400).send({ error: "PIN must be 4–12 digits" });
   setPin(newPin);
   return { ok: true };
+});
+
+const BACKFILL_JOB_TYPES = new Set<EnrichmentBackfillJobType>(["metadata", "tasting_notes", "image"]);
+
+function parseBackfillJobTypes(raw: unknown): EnrichmentBackfillJobType[] | undefined | null {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) return null;
+  const types: EnrichmentBackfillJobType[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string" || !BACKFILL_JOB_TYPES.has(value as EnrichmentBackfillJobType)) return null;
+    types.push(value as EnrichmentBackfillJobType);
+  }
+  return types.length ? types : null;
+}
+
+app.get("/api/admin/enrichment/backfill", {
+  schema: { tags: ["Admin"], summary: "Preview missing enrichment jobs across shelf inventory (dry run)" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return previewEnrichmentBackfill();
+});
+
+app.post<{ Body: { types?: string[] } }>("/api/admin/enrichment/backfill", {
+  schema: { tags: ["Admin"], summary: "Queue missing enrichment jobs for eligible shelf bottles" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const types = parseBackfillJobTypes(request.body?.types);
+  if (types === null) {
+    return reply.code(400).send({ error: "types must be metadata, tasting_notes, and/or image" });
+  }
+  return queueEnrichmentBackfill(types?.length ? { types } : undefined);
 });
 
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {

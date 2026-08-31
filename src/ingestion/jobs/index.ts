@@ -24,6 +24,7 @@ export {
   enqueueImageJob,
   getEnrichmentJob,
   hasCompletedJob,
+  hasActiveEnrichmentJob,
   listJobsForEntity,
   claimNextPendingJob,
   markJobCompleted,
@@ -106,3 +107,18 @@ export {
   type FieldViewStatus,
   type JobStatusLabel
 } from "./enrichment-view.js";
+
+export {
+  previewEnrichmentBackfill,
+  queueEnrichmentBackfill,
+  type EnrichmentBackfillPreview,
+  type EnrichmentBackfillQueueResult,
+  type EnrichmentBackfillJobType
+} from "./enrichment-backfill.js";
+
+export {
+  clearAdminAuditForTests,
+  getLatestAdminAuditEvent,
+  recordAdminAuditEvent,
+  type AdminAuditEvent
+} from "./admin-audit.js";
