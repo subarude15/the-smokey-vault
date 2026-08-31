@@ -6,7 +6,8 @@ import {
   CONFIDENCE,
   isUnresolvedField,
   type BottleCandidateFieldName,
-  type FieldConflict
+  type FieldConflict,
+  type ProductField
 } from "../candidate/index.js";
 import { buildBottleEnrichmentView, collectCacheConflicts } from "./enrichment-view.js";
 import {
@@ -204,7 +205,7 @@ export function verifyEnrichmentField(input: {
     input.entityId,
     candidateFromInventoryRow(loaded.entityType, loaded.row)
   );
-  const productField = candidate[input.field as BottleCandidateFieldName];
+  const productField = candidate[input.field as BottleCandidateFieldName] as ProductField<unknown>;
   if (isUnresolvedField(productField)) {
     throw new ReviewActionError("Cannot verify a missing field");
   }
