@@ -40,6 +40,37 @@ export type JobView = {
     accepted?: string[];
     unresolved?: string[];
     rejectReasons?: Array<{ field: string; reason: string }>;
+    imageCandidates?: Array<{
+      urlHost: string;
+      urlPath?: string;
+      sourceType: string;
+      sourcePageHost?: string;
+      width?: number | null;
+      height?: number | null;
+      mimeType?: string | null;
+      fetchStatus?: string;
+      vision?: {
+        ran: boolean;
+        correctProduct?: boolean | null;
+        bottleProminent?: boolean | null;
+        containsPeople?: boolean | null;
+        memeOrGraphic?: boolean | null;
+        cleanProductPhoto?: boolean | null;
+        error?: string | null;
+      };
+      score?: number | null;
+      threshold?: number;
+      accepted: boolean;
+      rejectionReasons: string[];
+      scoreComponents?: {
+        official_source?: number;
+        identity_match?: number;
+        clean_photo?: number;
+        large_image?: number;
+        total?: number;
+        threshold?: number;
+      } | null;
+    }>;
   } | null;
 };
 
@@ -135,6 +166,26 @@ export function jobTypeDisplay(type: string): string {
     default:
       return type;
   }
+}
+
+function formatRejectionLabel(reason: string): string {
+  return String(reason)
+    .replace(/^score_below_threshold:.*/, "score below threshold")
+    .replace(/_/g, " ");
+}
+
+function visionSummaryLine(vision: NonNullable<NonNullable<JobView["diagnostics"]>["imageCandidates"]>[number]["vision"]): string | null {
+  if (!vision?.ran) return null;
+  if (vision.error) return `Vision error: ${formatRejectionLabel(vision.error)}`;
+  const bits: string[] = [];
+  if (vision.correctProduct) bits.push("correct product");
+  else if (vision.correctProduct === false) bits.push("wrong product");
+  if (vision.bottleProminent) bits.push("bottle prominent");
+  else if (vision.bottleProminent === false) bits.push("bottle not prominent");
+  if (vision.cleanProductPhoto) bits.push("clean photo");
+  if (vision.containsPeople) bits.push("people");
+  if (vision.memeOrGraphic) bits.push("meme/graphic");
+  return bits.length ? `Vision: ${bits.join(", ")}` : "Vision: checked";
 }
 
 /** Coerce API / storage values that must never be rendered as raw objects (white-screen). */
@@ -327,6 +378,49 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                 <details className="enrichment-diagnostics">
                   <summary>Why?</summary>
                   <p>{textChild(job.diagnosticSummary || job.diagnostics?.summary || "No additional detail")}</p>
+                  {job.type === "image" && job.diagnostics?.imageCandidates?.length ? (
+                    <div className="enrichment-image-candidates">
+                      <p>
+                        {job.diagnostics.imageCandidates.length} candidate
+                        {job.diagnostics.imageCandidates.length === 1 ? "" : "s"} checked
+                      </p>
+                      <ol>
+                        {job.diagnostics.imageCandidates.slice(0, 8).map((c, index) => {
+                          const dims =
+                            c.width != null && c.height != null
+                              ? `${c.width}×${c.height}`
+                              : "dimensions unknown";
+                          const mime = c.mimeType ? ` · ${c.mimeType}` : "";
+                          const visionLine = visionSummaryLine(c.vision);
+                          const scoreLine =
+                            c.score != null
+                              ? `Score: ${c.score} / ${c.threshold ?? 75}`
+                              : null;
+                          return (
+                            <li key={`${c.urlHost}-${index}`}>
+                              <details>
+                                <summary>
+                                  <code>{textChild(c.urlHost)}{textChild(c.urlPath || "")}</code>
+                                  {c.accepted ? " · accepted" : c.rejectionReasons?.[0] ? ` · ${formatRejectionLabel(c.rejectionReasons[0])}` : ""}
+                                </summary>
+                                <p>{dims}{mime}{c.sourceType ? ` · ${c.sourceType}` : ""}</p>
+                                {visionLine ? <p>{visionLine}</p> : null}
+                                {scoreLine ? <p>{scoreLine}</p> : null}
+                                {c.accepted ? (
+                                  <p>Accepted</p>
+                                ) : c.rejectionReasons?.length ? (
+                                  <p>
+                                    Rejected:{" "}
+                                    {c.rejectionReasons.map(formatRejectionLabel).join(", ")}
+                                  </p>
+                                ) : null}
+                              </details>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </div>
+                  ) : null}
                   {job.diagnostics?.stages?.length ? (
                     <ul>
                       {job.diagnostics.stages

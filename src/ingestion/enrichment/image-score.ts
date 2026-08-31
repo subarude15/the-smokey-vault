@@ -123,6 +123,22 @@ export function meetsAcceptanceThreshold(score: number): boolean {
   return score >= IMAGE_ACCEPTANCE_THRESHOLD;
 }
 
+/**
+ * Primary rejection reason after vision (most specific first).
+ * Product-image acceptance requires a prominent bottle subject.
+ */
+export function primaryVisionRejectionReason(
+  vision: VisionVerification,
+  score: number
+): string | null {
+  if (!vision.correct_product) return "wrong_product";
+  if (vision.meme_or_graphic) return "meme_or_graphic";
+  if (!vision.bottle_prominent) return "bottle_not_prominent";
+  if (!vision.clean_product_photo) return "not_clean_product_photo";
+  if (vision.contains_people && score < IMAGE_ACCEPTANCE_THRESHOLD) return "contains_people";
+  return null;
+}
+
 export function evaluateCandidate(
   candidate: ImageCandidate,
   vision: VisionVerification | null = null
@@ -142,30 +158,13 @@ export function evaluateCandidate(
   if (vision) {
     score = applyVisionScoreAdjustments(score, vision);
     verified = true;
-    if (!vision.correct_product) {
+    const visionReject = primaryVisionRejectionReason(vision, score);
+    if (visionReject) {
       return {
         ...candidate,
         score,
         rejected: true,
-        rejectionReason: "wrong_product",
-        verified: true
-      };
-    }
-    if (vision.meme_or_graphic) {
-      return {
-        ...candidate,
-        score,
-        rejected: true,
-        rejectionReason: "meme_or_graphic",
-        verified: true
-      };
-    }
-    if (vision.contains_people && score < IMAGE_ACCEPTANCE_THRESHOLD) {
-      return {
-        ...candidate,
-        score,
-        rejected: true,
-        rejectionReason: "person_heavy",
+        rejectionReason: visionReject,
         verified: true
       };
     }

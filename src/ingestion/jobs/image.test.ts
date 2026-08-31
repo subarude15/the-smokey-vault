@@ -217,13 +217,13 @@ test("person-heavy image is rejected/penalized", () => {
   const scored = evaluateCandidate(officialCandidate(), {
     ...cleanVision,
     contains_people: true,
-    clean_product_photo: false,
-    bottle_prominent: false,
+    clean_product_photo: true,
+    bottle_prominent: true,
     correct_product: true
   });
-  // Base official+large+identity = 40+10+30 = 80, person -40 = 40 < 75 → person_heavy reject
+  // Base official+large+identity+clean = 100, person -40 = 60 < 75 → contains_people reject
   assert.equal(scored.rejected, true);
-  assert.equal(scored.rejectionReason, "person_heavy");
+  assert.equal(scored.rejectionReason, "contains_people");
   assert.ok(scored.score < IMAGE_ACCEPTANCE_THRESHOLD);
 });
 
