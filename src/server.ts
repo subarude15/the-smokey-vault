@@ -59,6 +59,11 @@ import {
 } from "./import_queue.js";
 import { buildAiFailoverChain, defaultAiBaseUrl, defaultAiModel, isRetryableAiStatus, resolveAiModel, type AiProviderConfig } from "./ai_providers.js";
 import { pruneAttempts, recordFailure, retryAfterMs, type PinAttempts } from "./pin_guard.js";
+import {
+  saveScanSessionBottle,
+  undoScanSessionMutation,
+  type ScanSessionUndo
+} from "./scan-session.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
 import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
@@ -238,6 +243,33 @@ app.post<{ Body: { types?: string[] } }>("/api/admin/enrichment/backfill", {
     return reply.code(400).send({ error: "types must be metadata, tasting_notes, and/or image" });
   }
   return queueEnrichmentBackfill(types?.length ? { types } : undefined);
+});
+
+app.post<{ Body: { code?: string; kind?: string } }>("/api/admin/inventory/scan-session/save", {
+  schema: { tags: ["Admin"], summary: "Identify and save a scanned bottle during a shelf scan session" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const code = String(request.body?.code ?? "").trim();
+  const kind = request.body?.kind;
+  if (!code) return reply.code(400).send({ error: "code is required" });
+  if (!kind || !isImportKind(kind)) {
+    return reply.code(400).send({ error: "kind must be spirits, wines, beer, or mixers" });
+  }
+  return saveScanSessionBottle({ code, kind });
+});
+
+app.post<{ Body: ScanSessionUndo }>("/api/admin/inventory/scan-session/undo", {
+  schema: { tags: ["Admin"], summary: "Undo the immediately previous scan-session inventory mutation" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const undo = request.body;
+  if (!undo?.table || !undo.id || !undo.action || !undo.snapshot) {
+    return reply.code(400).send({ error: "Invalid undo payload" });
+  }
+  if (!["spirits", "packaged_beer", "wines"].includes(undo.table)) {
+    return reply.code(400).send({ error: "Unsupported inventory table" });
+  }
+  return undoScanSessionMutation(undo);
 });
 
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
