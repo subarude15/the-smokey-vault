@@ -75,6 +75,15 @@ export function EnrichmentServicesHealth() {
         Quick connectivity check for SearXNG and Ollama. This does not change the enrichment queue
         or retry behavior.
       </p>
+      {error ? <p className="error">{error}</p> : null}
+      {report ? (
+        <div className="enrichment-health-list" aria-live="polite">
+          <ServiceRow name="SearXNG" service={report.searxng} />
+          <ServiceRow name="Ollama" service={report.ollama} />
+        </div>
+      ) : loading ? (
+        <p className="enrichment-health-pending">Checking services…</p>
+      ) : null}
       <button
         type="button"
         className="secondary enrichment-refresh"
@@ -83,13 +92,6 @@ export function EnrichmentServicesHealth() {
       >
         <RefreshCw size={16} /> {loading ? "Checking…" : "Check again"}
       </button>
-      {error ? <p className="error">{error}</p> : null}
-      {report ? (
-        <div className="enrichment-health-list" aria-live="polite">
-          <ServiceRow name="SearXNG" service={report.searxng} />
-          <ServiceRow name="Ollama" service={report.ollama} />
-        </div>
-      ) : null}
     </section>
   );
 }

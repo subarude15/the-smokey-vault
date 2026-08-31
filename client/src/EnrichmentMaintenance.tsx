@@ -128,7 +128,10 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
         Scan shelf bottles and queue missing metadata, tasting-note, and image enrichment jobs.
         This only inserts work into the existing queue — it does not edit inventory directly.
       </p>
-      <button type="button" className="secondary enrichment-refresh" disabled={loading || busy} onClick={() => void loadPreview()}>
+      <button type="button" className="secondary enrichment-refresh" disabled={loading || busy} onClick={() => {
+        void loadPreview();
+        void loadHealthHint();
+      }}>
         <RefreshCw size={16}/> {loading ? "Loading preview…" : "Refresh preview"}
       </button>
       {searxngUnreachable ? (

@@ -140,6 +140,8 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 @media(max-width:360px){.hero{grid-template-columns:1fr;grid-template-areas:"copy" "orbit" "lede";justify-items:start}.hero-orbit{width:124px;height:124px;margin:10px 0 0}.hero-orbit span{font-size:26px}.hero-wordmark{font-size:32px}}
 .settings-card .eyebrow{margin:0}
 .enrichment-maintenance .enrichment-refresh{margin-bottom:12px}
+.enrichment-services-health .enrichment-refresh{margin-top:14px}
+.enrichment-health-pending{font-size:13px;color:var(--muted);margin-top:12px}
 .enrichment-backfill-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 16px;margin:12px 0 14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
 .enrichment-backfill-stats div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .enrichment-backfill-stats dt{font-size:12px;color:var(--muted);margin:0}
