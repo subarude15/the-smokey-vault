@@ -806,12 +806,15 @@ export async function executeMetadataEnrichment(
   const result = summarize(before, candidate, targets, conflicts, errors, diagnostics);
 
   // Clear no-result reason when we made useful progress.
+  // Summary "still missing" excludes fields that were updated this run.
   if (result.updated.length > 0) {
     result.diagnostics.noResultReason = null;
-    if (!result.unresolved.length) {
+    const stillMissing = result.unresolved.filter((name) => !result.updated.includes(name));
+    result.diagnostics.unresolved = stillMissing;
+    if (!stillMissing.length) {
       result.diagnostics.summary = "Metadata fields filled";
     } else {
-      result.diagnostics.summary = `Updated ${result.updated.join(", ")}; still missing ${result.unresolved.join(", ")}`;
+      result.diagnostics.summary = `Updated ${result.updated.join(", ")}; still missing ${stillMissing.join(", ")}`;
     }
   }
 

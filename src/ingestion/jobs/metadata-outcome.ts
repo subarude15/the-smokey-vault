@@ -49,7 +49,8 @@ export function parseMetadataJobResult(raw: string | null | undefined): Metadata
     return {
       requested: Array.isArray(parsed.requested) ? parsed.requested.map(String) : [],
       updated: Array.isArray(parsed.updated) ? parsed.updated.map(String) : [],
-      unresolved: Array.isArray(parsed.unresolved) ? parsed.unresolved.map(String) : []
+      unresolved: Array.isArray(parsed.unresolved) ? parsed.unresolved.map(String) : [],
+      diagnostics: parsed.diagnostics ?? null
     };
   } catch {
     return null;
@@ -123,7 +124,9 @@ export function buildMetadataJobResultPayload(options: {
   diagnostics?: JobDiagnosticsPayload | null;
 }): MetadataJobResultPayload {
   const { requested, before, after, inventoryUpdated, diagnostics } = options;
-  const updated = new Set<string>(inventoryUpdated);
+  const updated = new Set<string>(inventoryUpdated.filter((name) => name !== "sub_category"));
+  // Map inventory column aliases back to enrichment field names.
+  if (inventoryUpdated.includes("region")) updated.add("origin");
   for (const name of requested) {
     const fieldName = name as MetadataEnrichmentField;
     if (!METADATA_ENRICHMENT_FIELDS.includes(fieldName)) continue;
@@ -137,11 +140,44 @@ export function buildMetadataJobResultPayload(options: {
       updated.add(name);
     }
   }
-  const unresolved = unresolvedMetadataFields(after).map(String);
+
+  // Final unresolved MUST come from the post-persist/post-reload candidate.
+  // A field that is present & trusted on the final bottle cannot stay unresolved.
+  const unresolved = unresolvedMetadataFields(after)
+    .map(String)
+    .filter((name) => !updated.has(name));
+
+  const nextDiagnostics = diagnostics
+    ? {
+        ...diagnostics,
+        unresolved,
+        accepted: [...new Set([...(diagnostics.accepted ?? []), ...updated])],
+        summary: rebuildMetadataDiagnosticSummary([...updated], unresolved, diagnostics.summary)
+      }
+    : null;
+  if (nextDiagnostics && updated.size > 0) {
+    nextDiagnostics.noResultReason = null;
+  }
+
   return {
     requested: [...requested],
     updated: [...updated],
     unresolved,
-    diagnostics: diagnostics ?? null
+    diagnostics: nextDiagnostics
   };
+}
+
+/** Keeper summary from final updated/unresolved — never lists an updated field as still missing. */
+export function rebuildMetadataDiagnosticSummary(
+  updated: string[],
+  unresolved: string[],
+  previousSummary?: string | null
+): string | null {
+  if (updated.length > 0) {
+    if (!unresolved.length) return "Metadata fields filled";
+    return `Updated ${updated.join(", ")}; still missing ${unresolved.join(", ")}`;
+  }
+  if (previousSummary?.trim()) return previousSummary.trim();
+  if (unresolved.length) return `Still missing ${unresolved.join(", ")}`;
+  return previousSummary ?? null;
 }

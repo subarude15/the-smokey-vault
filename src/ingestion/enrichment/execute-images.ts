@@ -23,6 +23,7 @@ import {
   extractStructuredProductFacts,
   fetchBoundedPageHtml
 } from "./page-extract.js";
+import { extractOfficialPageImgCandidates } from "./official-page-images.js";
 import {
   evaluateCandidate,
   hardRejectCandidate,
@@ -344,15 +345,7 @@ export async function executeImageEnrichment(
             const imageUrls = facts.imageUrls.length
               ? facts.imageUrls
               : extractProductImageUrlsFromHtml(html, hit.url);
-            if (!imageUrls.length) {
-              officialPagesWithoutImageMeta += 1;
-              stages.push({
-                stage: "official_image_meta",
-                status: "no_result",
-                reason: "official_page_no_image_metadata",
-                sourceUrls: [hit.url]
-              });
-            } else {
+            if (imageUrls.length) {
               officialImagesFromMeta += imageUrls.length;
               for (const imageUrl of imageUrls) {
                 seeds.push({ url: imageUrl, sourceUrl: hit.url });
@@ -369,6 +362,57 @@ export async function executeImageEnrichment(
                   .join(",") || "image_metadata",
                 sourceUrls: [hit.url]
               });
+            } else {
+              officialPagesWithoutImageMeta += 1;
+              stages.push({
+                stage: "official_image_meta",
+                status: "no_result",
+                reason: "official_page_no_image_metadata",
+                sourceUrls: [hit.url]
+              });
+              // Bounded <img> fallback on authoritative pages only.
+              const imgScan = extractOfficialPageImgCandidates(html, hit.url, {
+                brand: candidate.brand.value,
+                name: candidate.name.value
+              });
+              stages.push({
+                stage: "official_page_img_scan",
+                status: imgScan.scanned ? "ok" : "no_result",
+                candidateCount: imgScan.scanned,
+                reason: `${imgScan.scanned} images found`,
+                sourceUrls: [hit.url]
+              });
+              const rejectBlob = Object.entries(imgScan.rejectedReasons)
+                .map(([k, v]) => `${k}:${v}`)
+                .join(",")
+                .slice(0, 160);
+              stages.push({
+                stage: "official_page_img_prefilter",
+                status: imgScan.prefiltered.length ? "ok" : "no_result",
+                candidateCount: imgScan.scanned,
+                acceptedCount: imgScan.prefiltered.length,
+                reason: imgScan.prefiltered.length
+                  ? `${imgScan.prefiltered.length} candidates`
+                  : rejectBlob || "logos_or_small_assets_only",
+                sourceUrls: [hit.url]
+              });
+              for (const img of imgScan.prefiltered) {
+                seeds.push({
+                  url: img.url,
+                  sourceUrl: hit.url,
+                  width: img.width,
+                  height: img.height
+                });
+              }
+              if (imgScan.prefiltered.length) {
+                stages.push({
+                  stage: "official_page_img_candidate",
+                  status: "ok",
+                  acceptedCount: imgScan.prefiltered.length,
+                  reason: "accepted for verification",
+                  sourceUrls: imgScan.prefiltered.slice(0, 6).map((i) => i.url)
+                });
+              }
             }
           } else {
             stages.push({
@@ -408,17 +452,14 @@ export async function executeImageEnrichment(
   }
 
   // Record distinct image diagnostic outcomes for keeper review.
+  const imgFallbackAccepted = stages.some(
+    (s) => s.stage === "official_page_img_candidate" && s.status === "ok"
+  );
   if (!officialPagesFound) {
     stages.push({
       stage: "official_page_outcome",
       status: "no_result",
       reason: "no_official_page_discovered"
-    });
-  } else if (officialPagesWithoutImageMeta && !officialImagesFromMeta) {
-    stages.push({
-      stage: "official_page_outcome",
-      status: "no_result",
-      reason: "official_page_discovered_but_no_image_metadata"
     });
   } else if (officialImagesFromMeta) {
     stages.push({
@@ -426,6 +467,18 @@ export async function executeImageEnrichment(
       status: "ok",
       acceptedCount: officialImagesFromMeta,
       reason: "official_image_metadata_found"
+    });
+  } else if (imgFallbackAccepted) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "ok",
+      reason: "official_page_img_fallback"
+    });
+  } else if (officialPagesWithoutImageMeta) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "no_result",
+      reason: "official_page_discovered_but_no_image_metadata"
     });
   }
 

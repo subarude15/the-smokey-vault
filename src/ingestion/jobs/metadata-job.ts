@@ -98,10 +98,15 @@ export async function runMetadataJob(
     after: execution.candidate
   });
 
+  // Final diagnostics must reflect post-persist canonical state (vault + caches),
+  // not the pre-run candidate or in-memory MEDIUM-confidence web fields alone.
+  const finalRow = loadInventoryRow(job.entity_type, job.entity_id) ?? row;
+  const afterFinal = candidateFromInventoryRow(job.entity_type, finalRow);
+
   const resultPayload = buildMetadataJobResultPayload({
     requested: execution.requested.map(String),
     before,
-    after: execution.candidate,
+    after: afterFinal,
     inventoryUpdated: persisted.inventoryUpdated,
     diagnostics: execution.diagnostics
   });

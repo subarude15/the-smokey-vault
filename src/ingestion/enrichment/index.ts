@@ -84,6 +84,14 @@ export {
 } from "./page-extract.js";
 
 export {
+  extractOfficialPageImgCandidates,
+  isLikelyPageDecoration,
+  parseSrcsetUrls,
+  type OfficialPageImgCandidate,
+  type OfficialPageImgScanResult
+} from "./official-page-images.js";
+
+export {
   sanitizeJobDiagnostics,
   friendlyDiagnosticSummary,
   boundUrls,
