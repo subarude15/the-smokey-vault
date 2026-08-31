@@ -10,8 +10,14 @@ import {
   packagedCount,
   preparePackagedWrite,
   prepareSpiritWrite,
+  spiritFamilyFromLabel,
   spiritStock
 } from "./catalog.js";
+import {
+  normalizeCanonicalAbv,
+  normalizeCanonicalVolumeMl,
+  stripPackageTokensFromName
+} from "./canonical-normalize.js";
 import { identifyByBarcode } from "./ingestion/bottle-orchestrator.js";
 import {
   maybeEnqueueImageEnrichment,
@@ -92,15 +98,21 @@ function buildCreatePayload(result: LookupResult): { table: ImportTable; body: R
   const categories = textField(product, "categories", "category");
   const productType = textField(product, "product_type");
   const rawAbv = product.abv ?? product.alcohol_100g ?? (product.nutriments as Record<string, unknown> | undefined)?.alcohol_100g;
-  const abv = typeof rawAbv === "number" ? rawAbv : Number.parseFloat(String(rawAbv ?? "")) || 0;
-  const name = textField(product, "product_name", "product_name_en", "name");
+  const abv = normalizeCanonicalAbv(
+    typeof rawAbv === "number" ? rawAbv : Number.parseFloat(String(rawAbv ?? "")),
+    { productType: productType || undefined }
+  );
+  const nameRaw = textField(product, "product_name", "product_name_en", "name");
+  const name = stripPackageTokensFromName(nameRaw) || nameRaw;
   const brand = textField(product, "brands", "brand", "producer", "brewery");
   const upc = result.upc ?? textField(product, "code", "upc");
   const image = textField(product, "image_front_url", "image_url");
   const notes = textField(product, "notes");
-  const volume = typeof product.volume_ml === "number"
-    ? product.volume_ml
-    : Number.parseFloat(String(product.volume_ml ?? "")) || 750;
+  const volume = normalizeCanonicalVolumeMl(
+    typeof product.volume_ml === "number"
+      ? product.volume_ml
+      : Number.parseFloat(String(product.volume_ml ?? ""))
+  ) ?? 750;
 
   const table = result.table && SCAN_TABLES.has(result.table)
     ? result.table
@@ -115,7 +127,7 @@ function buildCreatePayload(result: LookupResult): { table: ImportTable; body: R
         name,
         brewery: brand,
         style: categories.split(",")[0] ?? "",
-        abv,
+        abv: abv ?? 0,
         count: 1,
         vessel: /bottle/i.test(`${categories} ${productType} ${name}`) ? "Bottle" : "Can",
         upc,
@@ -144,13 +156,15 @@ function buildCreatePayload(result: LookupResult): { table: ImportTable; body: R
     };
   }
 
+  const subHint = textField(product, "sub_category", "derived_subcategory");
+  const mapped = spiritFamilyFromLabel(categories, subHint);
   return {
     table: "spirits",
     body: {
       name,
       brand,
-      category: categories.split(",")[0] || "Mixer",
-      sub_category: textField(product, "sub_category", "derived_subcategory"),
+      category: mapped.family || "",
+      sub_category: mapped.type,
       abv,
       upc,
       image_url: image,

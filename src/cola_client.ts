@@ -1,4 +1,10 @@
 import { spiritFamilyFromLabel } from "./catalog.js";
+import {
+  normalizeCanonicalAbv,
+  normalizeCanonicalTaxonomy,
+  normalizeCanonicalVolumeMl,
+  stripPackageTokensFromName
+} from "./canonical-normalize.js";
 
 export const COLA_API_BASE = "https://app.colacloud.us/api/v1";
 export const CACHE_TTL_SECONDS = 86400 * 30;
@@ -315,23 +321,31 @@ export function mapColaToSchema(upc: string, summary: ColaSummary, detail?: Cola
 
 /** Inventory-facing fields used by the existing scan review form. */
 export function productToInventoryFields(product: ProductSchema) {
-  const mapped = spiritFamilyFromLabel(product.category);
+  const tax = normalizeCanonicalTaxonomy(product.category ?? "", "");
+  const mapped = tax.family
+    ? { family: tax.family, type: tax.type }
+    : spiritFamilyFromLabel(product.category ?? "");
+  const abv = normalizeCanonicalAbv(product.abv, {
+    productType: product.product_type ?? tax.productType
+  });
+  const volume = normalizeCanonicalVolumeMl(product.volume_ml);
+  const name = stripPackageTokensFromName(product.name || "");
   return {
     upc: product.upc,
-    name: product.name,
+    name: name || product.name,
     brand: product.brand,
     category: mapped.family,
     sub_category: mapped.type,
-    abv: product.abv ?? 0,
+    abv: abv,
     image_url: product.image_url ?? "",
     notes: product.notes ?? "",
     fill_level: product.fill_level_percent,
     stock_count: product.bottle_count,
-    volume_ml: product.volume_ml ?? 750,
-    product_name: product.name,
+    volume_ml: volume ?? (product.volume_ml == null ? 750 : null),
+    product_name: name || product.name,
     brands: product.brand,
-    categories: product.category,
-    product_type: product.product_type,
+    categories: mapped.family || product.category,
+    product_type: tax.productType ?? product.product_type,
     ttb_id: product.ttb_id,
     origin: product.origin,
     approval_date: product.approval_date

@@ -61,8 +61,17 @@ export {
   onTapLabel, parseGravity, tapsForBatch, brewDisplayName,
   comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedCount, packagedStockLabel,
   compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
-  spiritStock, spiritStockLabel, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS
+  spiritStock, spiritStockLabel, spiritFamilyFromLabel, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS
 } from "../../src/catalog";
+
+export {
+  displayCanonicalFamily,
+  displayCanonicalType,
+  stripPackageTokensFromName,
+  normalizeCanonicalAbv,
+  normalizeCanonicalVolumeMl,
+  normalizeCanonicalTaxonomy
+} from "../../src/canonical-normalize";
 
 export {
   SEASONS, collectionGroup, compareCocktails, currentSeason

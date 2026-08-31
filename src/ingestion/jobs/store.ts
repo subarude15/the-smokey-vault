@@ -168,6 +168,22 @@ export function hasCompletedJob(
   return Boolean(row);
 }
 
+/** True when the latest job of this type failed and none completed. */
+export function hasFailedJob(
+  entityType: EnrichmentEntityType,
+  entityId: number,
+  jobType: EnrichmentJobType
+): boolean {
+  if (hasCompletedJob(entityType, entityId, jobType)) return false;
+  const row = db.prepare(`
+    SELECT status FROM enrichment_jobs
+    WHERE entity_type = ? AND entity_id = ? AND job_type = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(entityType, entityId, jobType) as { status: string } | undefined;
+  return row?.status === "failed";
+}
+
 /** Atomically claim the next available pending job. */
 export function claimNextPendingJob(): EnrichmentJob | null {
   const claim = db.transaction(() => {
