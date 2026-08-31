@@ -141,7 +141,7 @@ test("3-4. later generic Whiskey / no-result does not erase trusted Scotch Whisk
   // Full metadata rerun that finds nothing new.
   enqueueMetadataJob({ entityType: "spirits", entityId: id, upc: UPC, force: true });
   const claimed = claimNextPendingJob()!;
-  await runMetadataJob(claimed, {
+  const run = await runMetadataJob(claimed, {
     lookupByUpc: async () => ({ source: "none", upc: UPC }),
     searchWebHits: async () => [
       {
@@ -159,6 +159,7 @@ test("3-4. later generic Whiskey / no-result does not erase trusted Scotch Whisk
       ttb_id: null
     })
   });
+  markJobCompleted(claimed.id, run.resultPayload);
 
   row = db.prepare("SELECT * FROM spirits WHERE id=?").get(id) as Record<string, unknown>;
   assert.equal(row.category, "Whiskey");
@@ -198,7 +199,7 @@ test("6-7. Partial metadata with only TTB missing; empty rerun is No new data fo
 
   enqueueMetadataJob({ entityType: "spirits", entityId: id, upc: UPC, force: true });
   const claimed = claimNextPendingJob()!;
-  await runMetadataJob(claimed, {
+  const run = await runMetadataJob(claimed, {
     lookupByUpc: async () => ({ source: "none", upc: UPC }),
     searchWebHits: async () => [
       {
@@ -216,6 +217,7 @@ test("6-7. Partial metadata with only TTB missing; empty rerun is No new data fo
       ttb_id: null
     })
   });
+  markJobCompleted(claimed.id, run.resultPayload);
 
   const candidate = candidateFromInventoryRow(
     "spirits",
