@@ -130,6 +130,21 @@ export function sourceLabel(source: string | null | undefined): string {
   return SOURCE_LABELS[source as ProductFieldSource] ?? source;
 }
 
+/** Ensure tasting-note / house-profile fields are plain strings for React children. */
+export function normalizeTextField(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export function confidenceBandForScore(score: number | null | undefined): ConfidenceBand {
   if (score == null || !Number.isFinite(score) || score <= CONFIDENCE.NONE) return "none";
   if (score >= CONFIDENCE.VERY_HIGH) return "very_high";
@@ -155,10 +170,10 @@ export function confidenceLabelForBand(band: ConfidenceBand): string {
 }
 
 export function fieldViewFromProductField<T>(
-  productField: ProductField<T>,
+  productField: ProductField<T> | null | undefined,
   options: { inReview?: boolean } = {}
 ): FieldView<T> {
-  if (isUnresolvedField(productField)) {
+  if (!productField || isUnresolvedField(productField)) {
     return {
       value: null,
       source: null,
@@ -395,7 +410,8 @@ export function buildBottleEnrichmentView(options: {
       official: content?.official_tasting_notes ?? null,
       sourceUrl: content?.official_source_url ?? null,
       sourceType: content?.official_source_type ?? null,
-      houseProfile: content?.house_tasting_profile ?? null,
+      // Never return a non-string — React white-screens if a JSON object is rendered as a child.
+      houseProfile: normalizeTextField(content?.house_tasting_profile),
       personal: readPersonalNotes(row)
     },
     image: {

@@ -82,7 +82,7 @@ export function ScanSession({
 }) {
   const [kind, setKind] = useState<ImportKind>("spirits");
   const [busy, setBusy] = useState(false);
-  const [stats, setStats] = useState<SessionStats>(emptyStats);
+  const [stats, setStats] = useState<SessionStats>(() => emptyStats());
   const [recent, setRecent] = useState<RecentScan[]>([]);
   const [lastResult, setLastResult] = useState<ScanSessionSaveResult | null>(null);
   const [lastUndo, setLastUndo] = useState<ScanSessionUndo | null>(null);

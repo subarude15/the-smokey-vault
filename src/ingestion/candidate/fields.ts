@@ -15,7 +15,8 @@ export function isUnresolvedValue(value: unknown): boolean {
   return false;
 }
 
-export function isUnresolvedField<T>(field: ProductField<T>): boolean {
+export function isUnresolvedField<T>(field: ProductField<T> | null | undefined): boolean {
+  if (!field) return true;
   return isUnresolvedValue(field.value);
 }
 

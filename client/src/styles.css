@@ -1176,6 +1176,14 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .enrichment-note-card{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--surface-2)}
 .enrichment-note-card h3{font:600 18px "Playfair Display";margin:0 0 8px}
 .enrichment-note-card p{margin:0;line-height:1.55;white-space:pre-wrap}
+.bottle-public-content{display:flex;flex-direction:column;gap:14px}
+.bottle-notes-house .enrichment-ai-label{display:block;font-size:12px;color:var(--muted);margin:0 0 8px}
+.bottle-public-image{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface);max-width:280px}
+.bottle-public-image img{display:block;width:100%;height:auto}
+.app-error-boundary{min-height:100vh;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:12px;padding:32px 20px;max-width:520px;margin:0 auto;color:var(--text)}
+.app-error-boundary h1{font:600 40px "Playfair Display";margin:0}
+.app-error-boundary p{color:var(--muted);line-height:1.55;margin:0}
+.app-error-boundary-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .enrichment-note-house{border-style:dashed}
 .enrichment-ai-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px!important}
 .enrichment-house-body{color:var(--text)}
