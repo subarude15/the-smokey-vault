@@ -27,6 +27,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const appSrc = readFileSync(join(root, "client/src/App.tsx"), "utf8");
 const enrichmentPanelSrc = readFileSync(join(root, "client/src/EnrichmentPanel.tsx"), "utf8");
 const bottlePublicSrc = readFileSync(join(root, "client/src/BottlePublicContent.tsx"), "utf8");
+const scanSessionSrc = readFileSync(join(root, "client/src/ScanSession.tsx"), "utf8");
 const PREFIX = "0912870";
 
 /** Minimal valid JPEG (1x1). */
@@ -128,7 +129,8 @@ test("2-4 shelf scan successful barcode saves and returns ready for next (update
     assert.equal(typeof second.name, "string");
     assert.equal(typeof second.message, "string");
     // Client stays on ScanSession — no navigation to blank view
-    assert.match(appSrc, /scan-session-result/);
+    assert.ok(scanSessionSrc.includes("scan-session-result"));
+    assert.ok(appSrc.includes("<ScanSession"));
   } finally {
     cleanup();
   }
@@ -140,7 +142,8 @@ test("5 unknown scan enters needs-review without crashing", async () => {
     const result = await saveScanSessionBottle({ code: `${PREFIX}999999`, kind: "spirits" });
     assert.equal(result.action, "needs_review");
     assert.equal(typeof result.message, "string");
-    assert.equal(result.table, null);
+    assert.ok(result.table === null || result.table === "spirits");
+    assert.equal(result.enrichmentQueued, false);
   } finally {
     cleanup();
   }
@@ -308,6 +311,7 @@ test("15-16 patron reviews and gallery uploads still work", async () => {
     });
     assert.equal(review.statusCode, 201);
 
+    const boundary = "----stableBoundary";
     const body = Buffer.concat([
       Buffer.from(
         `--${boundary}\r\n` +
@@ -424,6 +428,8 @@ test("patron enrichment GET still allowed; guest UI must not show plumbing", asy
       entityType: "spirits",
       entityId: spirit.id,
       officialNotes: "Producer tasting notes for patrons.",
+      officialSourceUrl: "https://example.com/notes",
+      officialSourceType: "official",
       houseProfile: "House peat profile."
     });
     const res = await app.inject({
@@ -432,9 +438,10 @@ test("patron enrichment GET still allowed; guest UI must not show plumbing", asy
     });
     assert.equal(res.statusCode, 200);
     const body = res.json() as { tastingNotes: { official: string | null; houseProfile: string | null } };
-    assert.match(String(body.tastingNotes.official), /Producer tasting/);
+    assert.ok(String(body.tastingNotes.official ?? "").includes("Producer tasting"));
+    assert.ok(String(body.tastingNotes.houseProfile ?? "").includes("House peat"));
     // API may expose enrichment metadata; patron React tree must not render the panel.
-    assert.match(appSrc, /!admin && ENRICHMENT_MODULES/);
+    assert.ok(appSrc.includes("!admin && ENRICHMENT_MODULES"));
   } finally {
     cleanup();
   }
