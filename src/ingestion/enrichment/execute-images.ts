@@ -43,6 +43,8 @@ import { readImageDimensionsFromHeader } from "./image-dimensions.js";
 import {
   buildImageCandidateDiagnostic,
   collectImageRejectionReasons,
+  mergeImageSeedsByNormalizedUrl,
+  summarizeImageCandidateDiagnostics,
   type ImageCandidateDiagnostic
 } from "./image-candidate-diagnostics.js";
 import {
@@ -519,13 +521,8 @@ export async function executeImageEnrichment(
     });
   }
 
-  const seen = new Set<string>();
-  const uniqueSeeds = seeds.filter((s) => {
-    const key = s.url.trim();
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const seenSeeds = mergeImageSeedsByNormalizedUrl(seeds);
+  const uniqueSeeds = seenSeeds.filter((s) => Boolean(String(s.url ?? "").trim()));
 
   const brand = candidate.brand.value;
   const name = candidate.name.value;
@@ -575,7 +572,8 @@ export async function executeImageEnrichment(
           hardPassed: false,
           hardReasons: ["fetch_failed"],
           accepted: false,
-          rejectionReasons: ["fetch_failed"]
+          rejectionReasons: ["fetch_failed"],
+          stageReached: "discovered"
         })
       );
       continue;
@@ -644,7 +642,8 @@ export async function executeImageEnrichment(
           hardPassed: false,
           hardReasons: [reason],
           accepted: false,
-          rejectionReasons: [reason]
+          rejectionReasons: [reason],
+          stageReached: "hard_filter"
         })
       );
       continue;
@@ -673,7 +672,8 @@ export async function executeImageEnrichment(
           hardReasons: [],
           score: base,
           accepted: false,
-          rejectionReasons: ["below_vision_floor"]
+          rejectionReasons: ["below_vision_floor"],
+          stageReached: "hard_filter"
         })
       );
     }
@@ -729,7 +729,8 @@ export async function executeImageEnrichment(
           visionError: reason,
           score: scoreImageCandidateBase(item),
           accepted: false,
-          rejectionReasons: [reason]
+          rejectionReasons: [reason],
+          stageReached: "verification"
         })
       );
       verificationRejected += 1;
@@ -763,6 +764,13 @@ export async function executeImageEnrichment(
       }
     }
 
+    const isAccepted = Boolean(selected && selected.url === evaluated.url && !evaluated.rejected);
+    const stageReached = isAccepted
+      ? "accepted"
+      : evaluated.rejectionReason === "score_below_threshold"
+        ? "scoring"
+        : "verification";
+
     imageCandidateDiags.push(
       buildImageCandidateDiagnostic({
         candidate: item,
@@ -772,8 +780,9 @@ export async function executeImageEnrichment(
         hardReasons: [],
         vision,
         score: evaluated.score,
-        accepted: Boolean(selected && selected.url === evaluated.url && !evaluated.rejected),
-        rejectionReasons: evaluated.rejected ? rejectionReasons : []
+        accepted: isAccepted,
+        rejectionReasons: evaluated.rejected ? rejectionReasons : [],
+        stageReached
       })
     );
 
@@ -797,7 +806,8 @@ export async function executeImageEnrichment(
         hardReasons: [],
         score: scoreImageCandidateBase(item),
         accepted: false,
-        rejectionReasons: ["not_checked"]
+        rejectionReasons: ["not_checked"],
+        stageReached: "verification"
       })
     );
   }
@@ -825,27 +835,11 @@ export async function executeImageEnrichment(
     else noResultReason = "all_image_candidates_rejected";
   }
 
-  // Prefer a summary that surfaces the most specific verified failure.
-  const verifiedDiags = imageCandidateDiags.filter((d) => d.vision?.ran);
-  const scoreFail = verifiedDiags.find((d) => d.rejectionReasons.includes("score_below_threshold"));
-  const visionFail = verifiedDiags.find((d) =>
-    d.rejectionReasons.some((r) =>
-      ["wrong_product", "bottle_not_prominent", "meme_or_graphic", "contains_people"].includes(r)
-    )
-  );
-
   diagnostics.noResultReason = noResultReason;
-  diagnostics.summary = selected
-    ? `Accepted image score ${selected.score}`
-    : scoreFail
-      ? `Vision passed; score ${scoreFail.score} / ${IMAGE_ACCEPTANCE_THRESHOLD}; rejected: score below threshold`
-      : visionFail
-        ? `Image verification rejected candidates (${visionFail.rejectionReasons[0]})`
-        : noResultReason === "verification_rejected"
-          ? "Image verification rejected candidates"
-          : noResultReason === "score_below_threshold"
-            ? "Verified candidates scored below acceptance threshold"
-            : "All image candidates were rejected";
+  diagnostics.summary = summarizeImageCandidateDiagnostics(imageCandidateDiags, {
+    selectedScore: selected?.score ?? null,
+    noResultReason
+  });
   diagnostics.stages = stages;
   diagnostics.accepted = selected ? ["image"] : [];
   diagnostics.imageCandidates = imageCandidateDiags;

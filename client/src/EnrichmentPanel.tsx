@@ -49,6 +49,7 @@ export type JobView = {
       height?: number | null;
       mimeType?: string | null;
       fetchStatus?: string;
+      stageReached?: string;
       vision?: {
         ran: boolean;
         correctProduct?: boolean | null;
@@ -176,16 +177,26 @@ function formatRejectionLabel(reason: string): string {
 
 function visionSummaryLine(vision: NonNullable<NonNullable<JobView["diagnostics"]>["imageCandidates"]>[number]["vision"]): string | null {
   if (!vision?.ran) return null;
-  if (vision.error) return `Vision error: ${formatRejectionLabel(vision.error)}`;
-  const bits: string[] = [];
-  if (vision.correctProduct) bits.push("correct product");
-  else if (vision.correctProduct === false) bits.push("wrong product");
-  if (vision.bottleProminent) bits.push("bottle prominent");
-  else if (vision.bottleProminent === false) bits.push("bottle not prominent");
-  if (vision.cleanProductPhoto) bits.push("clean photo");
-  if (vision.containsPeople) bits.push("people");
-  if (vision.memeOrGraphic) bits.push("meme/graphic");
-  return bits.length ? `Vision: ${bits.join(", ")}` : "Vision: checked";
+  if (vision.error) return `Vision failed: ${formatRejectionLabel(vision.error)}`;
+  return null;
+}
+
+function visionDetailLines(vision: NonNullable<NonNullable<JobView["diagnostics"]>["imageCandidates"]>[number]["vision"]): string[] {
+  if (!vision?.ran) return [];
+  if (vision.error) return [`Vision failed to parse/run: ${formatRejectionLabel(vision.error)}`];
+  const lines: string[] = [];
+  if (vision.correctProduct != null) {
+    lines.push(`correct product: ${vision.correctProduct ? "yes" : "no"}`);
+  }
+  if (vision.bottleProminent != null) {
+    lines.push(`bottle prominent: ${vision.bottleProminent ? "yes" : "no"}`);
+  }
+  if (vision.cleanProductPhoto != null) {
+    lines.push(`clean product photo: ${vision.cleanProductPhoto ? "yes" : "no"}`);
+  }
+  if (vision.containsPeople) lines.push("contains people: yes");
+  if (vision.memeOrGraphic) lines.push("meme/graphic: yes");
+  return lines;
 }
 
 /** Coerce API / storage values that must never be rendered as raw objects (white-screen). */
@@ -380,31 +391,54 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                   <p>{textChild(job.diagnosticSummary || job.diagnostics?.summary || "No additional detail")}</p>
                   {job.type === "image" && job.diagnostics?.imageCandidates?.length ? (
                     <div className="enrichment-image-candidates">
-                      <p>
-                        {job.diagnostics.imageCandidates.length} candidate
-                        {job.diagnostics.imageCandidates.length === 1 ? "" : "s"} checked
-                      </p>
                       <ol>
-                        {job.diagnostics.imageCandidates.slice(0, 8).map((c, index) => {
+                        {job.diagnostics.imageCandidates.map((c, index) => {
                           const dims =
                             c.width != null && c.height != null
                               ? `${c.width}×${c.height}`
                               : "dimensions unknown";
                           const mime = c.mimeType ? ` · ${c.mimeType}` : "";
-                          const visionLine = visionSummaryLine(c.vision);
+                          const sourceLabel = c.sourceType
+                            ? c.sourceType.charAt(0).toUpperCase() + c.sourceType.slice(1)
+                            : "";
+                          const visionLines = visionDetailLines(c.vision);
+                          const visionFail = visionSummaryLine(c.vision);
                           const scoreLine =
                             c.score != null
                               ? `Score: ${c.score} / ${c.threshold ?? 75}`
                               : null;
+                          const openByDefault =
+                            c.stageReached === "verification"
+                            || c.stageReached === "scoring"
+                            || c.stageReached === "accepted"
+                            || Boolean(c.vision?.ran);
                           return (
                             <li key={`${c.urlHost}-${index}`}>
-                              <details>
+                              <details open={openByDefault}>
                                 <summary>
                                   <code>{textChild(c.urlHost)}{textChild(c.urlPath || "")}</code>
-                                  {c.accepted ? " · accepted" : c.rejectionReasons?.[0] ? ` · ${formatRejectionLabel(c.rejectionReasons[0])}` : ""}
+                                  {c.accepted
+                                    ? " · accepted"
+                                    : c.rejectionReasons?.[0]
+                                      ? ` · ${formatRejectionLabel(c.rejectionReasons[0])}`
+                                      : ""}
                                 </summary>
-                                <p>{dims}{mime}{c.sourceType ? ` · ${c.sourceType}` : ""}</p>
-                                {visionLine ? <p>{visionLine}</p> : null}
+                                <p>
+                                  {sourceLabel ? `${sourceLabel} · ` : ""}
+                                  {dims}
+                                  {mime}
+                                </p>
+                                {visionFail ? <p>{visionFail}</p> : null}
+                                {visionLines.length ? (
+                                  <div className="enrichment-vision-details">
+                                    <strong>Verification</strong>
+                                    <ul>
+                                      {visionLines.map((line) => (
+                                        <li key={line}>{line}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ) : null}
                                 {scoreLine ? <p>{scoreLine}</p> : null}
                                 {c.accepted ? (
                                   <p>Accepted</p>
