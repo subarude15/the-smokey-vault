@@ -70,8 +70,9 @@ test("7 Review now explicitly opens Import Review without ending session", () =>
 
 test("8 View bottle explicitly opens BottleDetail", () => {
   assert.ok(appSrc.includes("onViewBottle={(table, id)"));
-  assert.ok(appSrc.includes('mode: "view"'));
-  assert.ok(sessionSrc.includes(">View bottle<") || sessionSrc.includes("View bottle"));
+  assert.ok(appSrc.includes("setShelfViewItem"));
+  assert.ok(appSrc.includes("openItem={shelfViewItem"));
+  assert.ok(sessionSrc.includes("View bottle"));
 });
 
 test("9 bottom Scan tab opens scanner landing, not legacy Import Review by default", () => {

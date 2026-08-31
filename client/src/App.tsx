@@ -480,6 +480,8 @@ export default function App() {
   /** Shelf session mode lives in App so navigating away from Scan does not destroy it. */
   const [shelfSessionMode, setShelfSessionMode] = useState<ShelfSessionMode>("idle");
   const [shelfSessionSummary, setShelfSessionSummary] = useState<ScanSessionSummaryState | null>(null);
+  /** Explicit "View bottle" from an active shelf session — survives Inventory remounts. */
+  const [shelfViewItem, setShelfViewItem] = useState<{ moduleId: ScanModuleId; item: Item } | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const [house, setHouse] = useState<HouseInfo>(EMPTY_HOUSE);
@@ -503,6 +505,7 @@ export default function App() {
     setScanMiss(null);
     setShelfSessionMode("idle");
     setShelfSessionSummary(null);
+    setShelfViewItem(null);
     setUnlock(false);
     setUnread(0);
     setMobileNav(false);
@@ -518,6 +521,7 @@ export default function App() {
     setScanMiss(null);
     setShelfSessionMode("idle");
     setShelfSessionSummary(null);
+    setShelfViewItem(null);
     setUnlock(false);
     setUnread(0);
     setMobileNav(false);
@@ -797,6 +801,8 @@ export default function App() {
             scanDraft={scanDraft?.moduleId===module.id?scanDraft:undefined}
             finishScanReview={finishScanReview}
             openScanner={() => navigate("scan")}
+            openItem={shelfViewItem?.moduleId === module.id ? shelfViewItem.item : undefined}
+            onOpenItemConsumed={() => setShelfViewItem(null)}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
             onPutOnTap={admin && module.id === "brews" ? async (brew) => {
@@ -836,12 +842,7 @@ export default function App() {
                       const rows = await api<Item[]>(`/inventory/${table}`);
                       const found = rows.find((row) => Number(row.id) === Number(id));
                       if (!found) return;
-                      setScanDraft({
-                        moduleId: table,
-                        key: Date.now(),
-                        values: found,
-                        mode: "view"
-                      });
+                      setShelfViewItem({ moduleId: table, item: found });
                       navigate(table);
                     } catch {
                       // Keep the shelf session; detail open is optional.
@@ -1619,8 +1620,9 @@ function ScanPage({
   </>;
 }
 
-function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, seedCreate, onSeedConsumed, onPutOnTap }: {
+function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, openItem, onOpenItemConsumed, seedCreate, onSeedConsumed, onPutOnTap }: {
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
+  openItem?: Item; onOpenItemConsumed?: () => void;
   seedCreate?: Item; onSeedConsumed?: () => void; onPutOnTap?: (item: Item) => void;
 }) {
   const { brewfatherConfigured } = useHouse();
@@ -1652,10 +1654,17 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
     setSyncing(false);
   }, [load]);
   useEffect(() => {
-    setViewing(undefined);
+    // Preserve an explicit shelf-session "View bottle" target across mount/load.
+    if (openItem) setViewing(openItem);
+    else setViewing(undefined);
     if (admin && module.id === "brews" && brewfatherConfigured) void syncFromBrewfather(false);
     else void load();
-  }, [admin, module.id, brewfatherConfigured, load, syncFromBrewfather]);
+  }, [admin, module.id, brewfatherConfigured, load, syncFromBrewfather, openItem]);
+  useEffect(() => {
+    if (!openItem) return;
+    setEditing(undefined);
+    setViewing(openItem);
+  }, [openItem]);
   useEffect(() => {
     if (module.id !== "brews") {
       setTaps([]);
@@ -1746,8 +1755,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, se
       module={module}
       item={viewing}
       admin={admin}
-      onBack={() => setViewing(undefined)}
-      onEdit={() => { setEditing(viewing); setViewing(undefined); }}
+      onBack={() => { setViewing(undefined); onOpenItemConsumed?.(); }}
+      onEdit={() => { setEditing(viewing); setViewing(undefined); onOpenItemConsumed?.(); }}
       onDelete={() => module.id === "taps" ? clearTap(viewing) : remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
       onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
