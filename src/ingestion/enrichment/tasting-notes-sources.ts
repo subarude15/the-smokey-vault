@@ -2,7 +2,13 @@
  * Deterministic classification of web hits for official tasting-note sourcing.
  * Retailer / UGC / blog copy must never become "official" producer notes.
  */
-export type SourceClass = "official" | "importer" | "retailer" | "ugc" | "unknown";
+export type SourceClass =
+  | "official"
+  | "regulatory"
+  | "importer"
+  | "retailer"
+  | "ugc"
+  | "unknown";
 
 export type ClassifiedHit = {
   title: string;
@@ -69,6 +75,18 @@ const UGC_HOST_FRAGMENTS = [
   "reddit."
 ] as const;
 
+/** Government / regulatory hosts for COLA / TTB-style evidence. */
+const REGULATORY_HOST_FRAGMENTS = [
+  "ttb.gov",
+  "alcoholtobacco",
+  "fda.gov",
+  "gov.uk",
+  "canada.ca",
+  "gc.ca",
+  "europa.eu",
+  "colacloud"
+] as const;
+
 const IMPORTER_HINTS = [
   "importer",
   "importing",
@@ -109,6 +127,24 @@ function parseHost(url: string): string | null {
 }
 
 /**
+ * True when a brand token appears as a host label (thebalvenie.com, shop.thebalvenie.com).
+ * Host-based only — never invents Scotch from brand fame alone.
+ */
+export function hostLooksLikeBrandDomain(host: string, brand: string): boolean {
+  const tokens = brandTokens(brand);
+  if (!tokens.length) return false;
+  const hostNorm = normalizeToken(host);
+  const labels = host.toLowerCase().split(".").filter(Boolean);
+  return tokens.some((token) => {
+    if (token.length < 4) return false;
+    if (hostNorm.includes(token)) return true;
+    return labels.some(
+      (label) => normalizeToken(label) === token || normalizeToken(label).includes(token)
+    );
+  });
+}
+
+/**
  * Classify a hit URL using brand/product identity.
  * Prefer null official notes over mis-attributing retailer/blog copy.
  */
@@ -121,12 +157,10 @@ export function classifySourceUrl(
 
   if (hostMatchesFragment(host, RETAILER_HOST_FRAGMENTS)) return "retailer";
   if (hostMatchesFragment(host, UGC_HOST_FRAGMENTS)) return "ugc";
+  if (hostMatchesFragment(host, REGULATORY_HOST_FRAGMENTS)) return "regulatory";
 
   const brand = String(options.brand ?? "").trim();
-  const tokens = brandTokens(brand);
-  const hostNorm = normalizeToken(host);
-
-  if (tokens.some((token) => hostNorm.includes(token) && token.length >= 4)) {
+  if (brand && hostLooksLikeBrandDomain(host, brand)) {
     return "official";
   }
 
@@ -135,8 +169,6 @@ export function classifySourceUrl(
     return "importer";
   }
 
-  // Distillery/winery/brewery domains that include product family words but not brand —
-  // still unknown unless brand matched; avoid over-crediting.
   return "unknown";
 }
 
@@ -151,7 +183,7 @@ export function classifyHit(
 }
 
 export function isAuthoritativeSource(sourceClass: SourceClass): boolean {
-  return sourceClass === "official" || sourceClass === "importer";
+  return sourceClass === "official" || sourceClass === "importer" || sourceClass === "regulatory";
 }
 
 /** Format authoritative hits for LLM extraction (includes URL for attribution). */

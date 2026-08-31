@@ -86,7 +86,7 @@ export async function runMetadataJob(
 
   // Transient system/dep failures with zero progress should retry, not look like
   // a successful "nothing found" completion.
-  if (execution.errors.length > 0 && execution.completed.length === 0) {
+  if (execution.errors.length > 0 && execution.updated.length === 0) {
     const message = execution.errors.map((e) => e.message).join("; ") || "metadata enrichment failed";
     throw new Error(message);
   }
@@ -102,7 +102,8 @@ export async function runMetadataJob(
     requested: execution.requested.map(String),
     before,
     after: execution.candidate,
-    inventoryUpdated: persisted.inventoryUpdated
+    inventoryUpdated: persisted.inventoryUpdated,
+    diagnostics: execution.diagnostics
   });
 
   return {

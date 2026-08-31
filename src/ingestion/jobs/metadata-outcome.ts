@@ -11,11 +11,14 @@ import {
   hasRecommendedMetadataWork
 } from "./inventory.js";
 import type { EnrichmentEntityType } from "./types.js";
+import type { JobDiagnosticsPayload } from "../enrichment/diagnostics.js";
 
 export type MetadataJobResultPayload = {
   requested: string[];
   updated: string[];
   unresolved: string[];
+  /** Keeper/admin diagnostics — never secrets/prompts. */
+  diagnostics?: JobDiagnosticsPayload | null;
 };
 
 /** User-facing / availability labels for metadata enrichment. */
@@ -117,8 +120,9 @@ export function buildMetadataJobResultPayload(options: {
   before: BottleCandidate;
   after: BottleCandidate;
   inventoryUpdated: string[];
+  diagnostics?: JobDiagnosticsPayload | null;
 }): MetadataJobResultPayload {
-  const { requested, before, after, inventoryUpdated } = options;
+  const { requested, before, after, inventoryUpdated, diagnostics } = options;
   const updated = new Set<string>(inventoryUpdated);
   for (const name of requested) {
     const fieldName = name as MetadataEnrichmentField;
@@ -137,6 +141,7 @@ export function buildMetadataJobResultPayload(options: {
   return {
     requested: [...requested],
     updated: [...updated],
-    unresolved
+    unresolved,
+    diagnostics: diagnostics ?? null
   };
 }
