@@ -75,10 +75,15 @@ function relativeTime(at: number) {
 
 export function ScanSession({
   onFinish,
-  onReview
+  onReview,
+  onViewBottle,
+  paused = false
 }: {
   onFinish: (summary: SessionStats & { startedAt: number }) => void;
-  onReview?: (table: string, id?: number) => void;
+  onReview?: () => void;
+  onViewBottle?: (table: "spirits" | "packaged_beer" | "wines", id: number) => void;
+  /** Pause the camera when the Scan tab is parked (session still active). */
+  paused?: boolean;
 }) {
   const [kind, setKind] = useState<ImportKind>("spirits");
   const [busy, setBusy] = useState(false);
@@ -217,7 +222,8 @@ export function ScanSession({
             onKindChange={setKind}
             onUpc={handleUpc}
             busy={busy}
-            statusHint={busy ? "Saving…" : undefined}
+            paused={paused}
+            statusHint={busy ? "Saving…" : paused ? "Shelf scan paused — return to Scan to continue" : undefined}
           />
           {lastResult && (
             <article className={`scan-session-result scan-session-result-${lastResult.action}`} aria-live="polite">
@@ -225,26 +231,40 @@ export function ScanSession({
                 {resultIcon(lastResult.action)}
                 <strong>{lastResult.name}</strong>
               </div>
-              <p>{lastResult.message}</p>
+              {lastResult.action === "added" ? (
+                <p>Added</p>
+              ) : lastResult.action === "updated" && lastResult.quantityBefore != null && lastResult.quantityAfter != null ? (
+                <p>Already in vault · {lastResult.quantityBefore} → {lastResult.quantityAfter}</p>
+              ) : lastResult.action === "needs_review" ? (
+                <p>Added to review queue</p>
+              ) : (
+                <p>{lastResult.message}</p>
+              )}
               {lastResult.action === "added" && lastResult.enrichmentQueued && (
                 <p className="scan-session-enrichment">Enrichment queued in background</p>
               )}
-              {lastResult.action === "updated" && lastResult.quantityBefore != null && lastResult.quantityAfter != null && (
-                <p className="scan-session-quantity">
-                  Already in vault · {lastResult.quantityBefore} → {lastResult.quantityAfter}
-                </p>
-              )}
-              {lastResult.action === "needs_review" && onReview && (
-                <button type="button" className="secondary" onClick={() => onReview(kind)}>
-                  Review now
-                </button>
-              )}
+              <div className="scan-session-result-actions">
+                {(lastResult.action === "added" || lastResult.action === "updated") && lastResult.undo && onViewBottle ? (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => onViewBottle(lastResult.undo!.table, lastResult.undo!.id)}
+                  >
+                    View bottle
+                  </button>
+                ) : null}
+                {lastResult.action === "needs_review" && onReview ? (
+                  <button type="button" className="secondary" onClick={onReview}>
+                    Review now
+                  </button>
+                ) : null}
+              </div>
             </article>
           )}
           {error && <p className="error">{error}</p>}
           <div className="scan-session-actions">
             {lastUndo && (
-              <button type="button" className="secondary" disabled={busy} onClick={() => void undoLast()}>
+              <button type="button" className="secondary" disabled={busy || paused} onClick={() => void undoLast()}>
                 <RotateCcw size={16}/> Undo last
               </button>
             )}

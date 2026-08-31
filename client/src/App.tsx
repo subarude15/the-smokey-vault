@@ -48,6 +48,10 @@ import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { ScanSession, ScanSessionSummary } from "./ScanSession";
+import {
+  type ShelfSessionMode,
+  scanTabSurface
+} from "./scan-session-nav";
 type Field = { key: string; label: string; type?: string; options?: string[] };
 type Module = {
   id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string;
@@ -473,6 +477,9 @@ export default function App() {
   const [backupDue, setBackupDue] = useState(false);
   const [scanDraft, setScanDraft] = useState<ScanDraft>();
   const [scanMiss, setScanMiss] = useState<ScanResult | null>(null);
+  /** Shelf session mode lives in App so navigating away from Scan does not destroy it. */
+  const [shelfSessionMode, setShelfSessionMode] = useState<ShelfSessionMode>("idle");
+  const [shelfSessionSummary, setShelfSessionSummary] = useState<ScanSessionSummaryState | null>(null);
   const [tapSeed, setTapSeed] = useState<Item>();
   const [sharedRecipeUrl, setSharedRecipeUrl] = useState("");
   const [house, setHouse] = useState<HouseInfo>(EMPTY_HOUSE);
@@ -494,6 +501,8 @@ export default function App() {
     setAdmin(false);
     setScanDraft(undefined);
     setScanMiss(null);
+    setShelfSessionMode("idle");
+    setShelfSessionSummary(null);
     setUnlock(false);
     setUnread(0);
     setMobileNav(false);
@@ -507,6 +516,8 @@ export default function App() {
     setAdmin(false);
     setScanDraft(undefined);
     setScanMiss(null);
+    setShelfSessionMode("idle");
+    setShelfSessionSummary(null);
     setUnlock(false);
     setUnread(0);
     setMobileNav(false);
@@ -600,8 +611,13 @@ export default function App() {
     setMoreSheet(false);
     if (navHint) dismissNavHint();
   };
+  /** Legacy single-scan only — never used by an active shelf ScanSession. */
   function handleScan(result: ScanResult) {
     if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
+    if (shelfSessionMode === "active") {
+      // Belt-and-suspenders: shelf session owns navigation; never open BottleDetail from legacy callbacks.
+      return Promise.resolve("cancelled" as ScanReviewOutcome);
+    }
     const table = result.table;
     const vaultId = result.source === "vault" && table ? itemId(result.product) : 0;
     if (!vaultId && (result.source === "not_found" || result.reason || !scanProductName(result))) {
@@ -799,15 +815,43 @@ export default function App() {
           {page === "cocktails" && <Cocktails admin={admin} sharedUrl={admin ? sharedRecipeUrl : ""} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
           {page === "mixologist" && <Mixologist admin={admin}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
-          {page === "scan" && admin && <ScanPage
-            onProduct={handleScan}
-            miss={scanMiss}
-            onMiss={(result) => setScanMiss(result)}
-            onRescan={() => setScanMiss(null)}
-            onPickMiss={handleScanMissPick}
-            onManual={handleScanManual}
-            onFinishSession={navigate}
-          />}
+          {admin && (page === "scan" || shelfSessionMode !== "idle") && (
+            <div className={page === "scan" ? undefined : "scan-session-parked"} hidden={page !== "scan"} aria-hidden={page !== "scan"}>
+              <ScanPage
+                visible={page === "scan"}
+                sessionMode={shelfSessionMode}
+                sessionSummary={shelfSessionSummary}
+                onSessionModeChange={setShelfSessionMode}
+                onSessionSummaryChange={setShelfSessionSummary}
+                onProduct={handleScan}
+                miss={scanMiss}
+                onMiss={(result) => setScanMiss(result)}
+                onRescan={() => setScanMiss(null)}
+                onPickMiss={handleScanMissPick}
+                onManual={handleScanManual}
+                onOpenImport={() => navigate("import")}
+                onViewBottle={(table, id) => {
+                  void (async () => {
+                    try {
+                      const rows = await api<Item[]>(`/inventory/${table}`);
+                      const found = rows.find((row) => Number(row.id) === Number(id));
+                      if (!found) return;
+                      setScanDraft({
+                        moduleId: table,
+                        key: Date.now(),
+                        values: found,
+                        mode: "view"
+                      });
+                      navigate(table);
+                    } catch {
+                      // Keep the shelf session; detail open is optional.
+                    }
+                  })();
+                }}
+                onFinishNavigate={(target) => navigate(target)}
+              />
+            </div>
+          )}
           {page === "import" && admin && <>
             <PageTitle eyebrow="VAULT TOOLS" title="Import Review." subtitle="Overnight CSV hits wait here as Ready. Misses stay until you search, scan a label, add by hand, or skip. Commit writes Ready rows only."/>
             <ImportReview
@@ -1452,73 +1496,126 @@ function emptyScanSummary() {
 type ScanSessionSummaryState = ReturnType<typeof emptyScanSummary>;
 
 function ScanPage({
-  onProduct, miss, onMiss, onRescan, onPickMiss, onManual, onFinishSession
+  visible,
+  sessionMode,
+  sessionSummary,
+  onSessionModeChange,
+  onSessionSummaryChange,
+  onProduct,
+  miss,
+  onMiss,
+  onRescan,
+  onPickMiss,
+  onManual,
+  onOpenImport,
+  onViewBottle,
+  onFinishNavigate
 }: {
+  visible: boolean;
+  sessionMode: ShelfSessionMode;
+  sessionSummary: ScanSessionSummaryState | null;
+  onSessionModeChange: (mode: ShelfSessionMode) => void;
+  onSessionSummaryChange: (summary: ScanSessionSummaryState | null) => void;
   onProduct: (result: ScanResult) => Promise<ScanReviewOutcome>;
   miss: ScanResult | null;
   onMiss: (result: ScanResult) => void;
   onRescan: () => void;
   onPickMiss: (hit: BottleSearchHit, upc: string) => Promise<void>;
   onManual: (table: ScanModuleId, upc: string) => void;
-  onFinishSession: (target: string) => void;
+  onOpenImport: () => void;
+  onViewBottle: (table: "spirits" | "packaged_beer" | "wines", id: number) => void;
+  onFinishNavigate: (target: string) => void;
 }) {
-  const [sessionMode, setSessionMode] = useState<"idle" | "active" | "summary">("idle");
-  const [sessionSummary, setSessionSummary] = useState<ScanSessionSummaryState | null>(null);
+  const surface = scanTabSurface(sessionMode, Boolean(miss));
 
-  if (sessionMode === "summary" && sessionSummary) {
+  if (surface === "summary" && sessionSummary) {
     return <ScanSessionSummary
       summary={sessionSummary}
       onClose={() => {
-        setSessionMode("idle");
-        setSessionSummary(null);
-        onFinishSession("spirits");
+        onSessionModeChange("idle");
+        onSessionSummaryChange(null);
+        onFinishNavigate("spirits");
       }}
       onOpenMaintenance={() => {
-        setSessionMode("idle");
-        setSessionSummary(null);
-        onFinishSession("import");
+        onSessionModeChange("idle");
+        onSessionSummaryChange(null);
+        onOpenImport();
       }}
     />;
   }
 
-  if (sessionMode === "active") {
+  if (surface === "session") {
     return <ScanSession
+      paused={!visible}
       onFinish={(summary) => {
-        setSessionSummary(summary);
-        setSessionMode("summary");
+        onSessionSummaryChange(summary);
+        onSessionModeChange("summary");
       }}
-      onReview={() => onFinishSession("import")}
+      onReview={() => {
+        // Explicit exit to Import Review — keep session active so Scan restores it.
+        onOpenImport();
+      }}
+      onViewBottle={onViewBottle}
     />;
   }
 
   return <>
     <PageTitle
       eyebrow="VAULT TOOLS"
-      title={miss ? "Look it up." : "Scan a bottle."}
-      subtitle={miss
-        ? missMessage(miss.reason ?? "no_catalog", miss.upc, miss.variants)
-        : "Start a shelf scan for fast repeated scanning, or use single-scan review for one bottle at a time."}
+      title="Scan a bottle."
+      subtitle="Start a shelf scan for fast repeated scanning, or use single-scan review for one bottle at a time."
     />
-    {!miss && (
-      <section className="settings-card scan-session-launch">
-        <span className="eyebrow">SHELF SCAN</span>
-        <h3>Start shelf scan</h3>
-        <p>Scan → save → next bottle. Enrichment runs in the background while you keep scanning.</p>
-        <button type="button" className="primary" onClick={() => setSessionMode("active")}>
-          <ScanBarcode size={17}/> Start shelf scan
+    <section className="settings-card scan-session-launch">
+      <span className="eyebrow">SHELF SCAN</span>
+      <h3>Start shelf scan</h3>
+      <p>Scan → save → next bottle. Enrichment runs in the background while you keep scanning.</p>
+      <button
+        type="button"
+        className="primary"
+        onClick={() => {
+          onRescan();
+          onSessionSummaryChange(null);
+          onSessionModeChange("active");
+        }}
+      >
+        <ScanBarcode size={17}/> Start shelf scan
+      </button>
+    </section>
+
+    <div className="scan-landing-tools">
+      <section className="scan-landing-single">
+        <span className="eyebrow">SINGLE SCAN</span>
+        <h3>{miss ? "Look it up." : "One bottle at a time"}</h3>
+        <p>
+          {miss
+            ? missMessage(miss.reason ?? "no_catalog", miss.upc, miss.variants)
+            : "Legacy single-scan review opens the bottle or needs-review form after each read."}
+        </p>
+        {miss
+          ? <ImportReview
+              focusUpc={miss.upc}
+              liveMiss={miss}
+              onConfirmHit={onProduct}
+              onManual={onManual}
+              onSearchPick={onPickMiss}
+              onRescan={onRescan}
+            />
+          : visible
+            ? <Scanner onProduct={onProduct} onMiss={onMiss}/>
+            : null}
+      </section>
+
+      <section className="scan-landing-import">
+        <div>
+          <span className="eyebrow">VAULT TOOLS</span>
+          <strong>Import review</strong>
+          <p>Review unresolved lookups, CSV imports, and skipped UPCs — separate from the camera scanner.</p>
+        </div>
+        <button type="button" className="secondary" onClick={onOpenImport}>
+          <Upload size={16}/> Import review
         </button>
       </section>
-    )}
-    {miss
-      ? <ImportReview
-          focusUpc={miss.upc}
-          liveMiss={miss}
-          onConfirmHit={onProduct}
-          onManual={onManual}
-          onSearchPick={onPickMiss}
-          onRescan={onRescan}
-        />
-      : <Scanner onProduct={onProduct} onMiss={onMiss}/>}
+    </div>
   </>;
 }
 
