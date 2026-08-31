@@ -66,6 +66,20 @@ export {
 } from "./official-domain.js";
 
 export {
+  buildOfficialProductPageQueries,
+  extractExpressionTokensFromHits,
+  hasOfficialProductDetailHit,
+  hostIsUnderOfficialDomain,
+  isGenericOfficialPageUrl,
+  isProductDetailPageUrl,
+  safeOfficialPageDisplay,
+  scoreOfficialProductPage,
+  selectBestOfficialProductPage,
+  type OfficialPageHit,
+  type OfficialProductPageScoreBreakdown
+} from "./official-product-page.js";
+
+export {
   buildMetadataQueryTiers,
   buildImageQueryTiers,
   extractSearchTokens,

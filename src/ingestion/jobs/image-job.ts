@@ -17,11 +17,16 @@ import {
   markProductImageEmpty,
   upsertProductImage
 } from "./product-images.js";
+import {
+  getEnrichmentSource,
+  upsertEnrichmentSource
+} from "./enrichment-sources.js";
 import type { EnrichmentJob } from "./types.js";
 
 export type ImageJobResultPayload = {
   imageSaved: boolean;
   diagnostics?: JobDiagnosticsPayload | null;
+  officialProductPageUrl?: string | null;
 };
 
 export type ImageJobResult = {
@@ -93,7 +98,25 @@ export async function runImageJob(
     };
   }
 
-  const execution = await executeImageEnrichment(before, deps);
+  const knownOfficial = getEnrichmentSource(
+    job.entity_type,
+    job.entity_id,
+    "official_product_page"
+  );
+  const execution = await executeImageEnrichment(before, {
+    ...deps,
+    knownOfficialProductPageUrl:
+      deps.knownOfficialProductPageUrl ?? knownOfficial?.sourceUrl ?? null
+  });
+
+  if (execution.selectedOfficialProductPageUrl) {
+    upsertEnrichmentSource({
+      entityType: job.entity_type,
+      entityId: job.entity_id,
+      sourceType: "official_product_page",
+      sourceUrl: execution.selectedOfficialProductPageUrl
+    });
+  }
 
   if (execution.errors.length > 0 && !execution.selected && execution.evaluated.length === 0) {
     throw new Error(execution.errors.join("; ") || "image enrichment failed");
@@ -132,7 +155,8 @@ export async function runImageJob(
     inventoryImageUrl,
     resultPayload: {
       imageSaved,
-      diagnostics: execution.diagnostics
+      diagnostics: execution.diagnostics,
+      officialProductPageUrl: execution.selectedOfficialProductPageUrl ?? null
     }
   };
 }
