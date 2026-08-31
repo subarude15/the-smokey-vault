@@ -9,6 +9,7 @@ import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSugg
 import { GuestReviews } from "./GuestReviews";
 import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
 import { BottlePublicContent } from "./BottlePublicContent";
+import { useFormDraft } from "./useFormDraft";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,

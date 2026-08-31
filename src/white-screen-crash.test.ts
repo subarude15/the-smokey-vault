@@ -353,6 +353,11 @@ test("AppErrorBoundary wraps App and recovery UI omits stacks/secrets", () => {
   assert.doesNotMatch(html, /\bPIN\b|Bearer |sessionSecret/i);
 });
 
+test("ItemForm imports useFormDraft — missing import caused edit white-screen", () => {
+  assert.ok(appSrc.includes('from "./useFormDraft"') || appSrc.includes("from './useFormDraft'"));
+  assert.ok(appSrc.includes("useFormDraft(draftScope"));
+});
+
 test("LOOKUP_SOURCE_LABELS unknown source renders safely with fallback", () => {
   const html = render(React.createElement(SourceChip, { source: "not_a_real_source" as LookupSource }));
   assert.equal(html, "<span>not_a_real_source</span>");
