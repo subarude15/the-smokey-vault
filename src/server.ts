@@ -30,6 +30,11 @@ import {
   identifyByBarcode,
   identifyByLocalLabelImage
 } from "./ingestion/bottle-orchestrator.js";
+import {
+  enrichmentJobCounts,
+  maybeEnqueueMetadataEnrichment,
+  startEnrichmentWorker
+} from "./ingestion/jobs/index.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -255,6 +260,28 @@ app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, 
   });
 });
 
+function queueMetadataEnrichmentSafe(
+  entityType: string,
+  entityId: number,
+  row: Record<string, unknown>
+) {
+  try {
+    return maybeEnqueueMetadataEnrichment({
+      entityType,
+      entityId,
+      row,
+      logger: {
+        info: (obj, msg) => app.log.info(obj, msg),
+        warn: (obj, msg) => app.log.warn(obj, msg),
+        error: (obj, msg) => app.log.error(obj, msg)
+      }
+    });
+  } catch (error) {
+    app.log.error({ error, entityType, entityId }, "Failed to enqueue metadata enrichment");
+    return { enqueued: false as const, reason: "enqueue_error" };
+  }
+}
+
 app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inventory/:table", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
@@ -274,7 +301,9 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   const result = db.prepare(`INSERT INTO ${table} (${values.join(",")}) VALUES (${values.map(() => "?").join(",")})`)
     .run(...values.map((field) => body[field] as never));
-  return reply.code(201).send(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid));
+  const created = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid) as Record<string, unknown>;
+  queueMetadataEnrichmentSafe(table, Number(created.id), created);
+  return reply.code(201).send(created);
 });
 
 app.post<{ Body: unknown }>("/api/inventory/import-batch", {
@@ -372,6 +401,7 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
     .run(...values.map((field) => body[field] as never), request.params.id);
   const updated = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id) as Record<string, unknown>;
   maybeInventoryPour(table, existing, updated);
+  queueMetadataEnrichmentSafe(table, Number(updated.id), updated);
   return updated;
 });
 
@@ -1506,5 +1536,19 @@ app.log.info(
   bootFallbacks.length ? "AI failover armed" : "No AI failover providers configured"
 );
 app.log.info({ configured: isBrewfatherConfigured() }, "Brewfather batch sync");
+
+try {
+  startEnrichmentWorker({
+    idleMs: 2_000,
+    logger: {
+      info: (obj, msg) => app.log.info(obj, msg),
+      warn: (obj, msg) => app.log.warn(obj, msg),
+      error: (obj, msg) => app.log.error(obj, msg)
+    }
+  });
+  app.log.info({ counts: enrichmentJobCounts() }, "Background metadata enrichment worker armed");
+} catch (error) {
+  app.log.error({ error }, "Failed to start enrichment worker");
+}
 
 await app.listen({ port: Number(process.env.PORT ?? 8080), host: "0.0.0.0" });
