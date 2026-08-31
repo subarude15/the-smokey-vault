@@ -131,6 +131,7 @@ export {
   metadataOutcomeFromState,
   metadataOutcomeToJobStatusLabel,
   buildMetadataJobResultPayload,
+  rebuildMetadataDiagnosticSummary,
   parseMetadataJobResult,
   unresolvedMetadataFields,
   type MetadataJobResultPayload,
