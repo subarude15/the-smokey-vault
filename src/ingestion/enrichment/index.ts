@@ -68,6 +68,18 @@ export {
 } from "./diagnostics.js";
 
 export {
+  checkEnrichmentHealth,
+  checkSearxngHealth,
+  checkOllamaHealth,
+  ollamaBaseUrl,
+  ollamaSafeHost,
+  type EnrichmentHealthReport,
+  type ServiceHealthResult,
+  type ServiceHealthStatus,
+  type EnrichmentHealthDeps
+} from "./health.js";
+
+export {
   extractOfficialTastingNotes,
   generateHouseTastingProfile,
   formatHouseProfile,

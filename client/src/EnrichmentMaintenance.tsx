@@ -52,6 +52,7 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastQueue, setLastQueue] = useState<EnrichmentBackfillQueueResult | null>(null);
+  const [searxngUnreachable, setSearxngUnreachable] = useState(false);
 
   const loadPreview = useCallback(async () => {
     setError("");
@@ -66,9 +67,22 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
     }
   }, []);
 
+  const loadHealthHint = useCallback(async () => {
+    try {
+      const health = await api<{
+        searxng?: { status?: string };
+      }>("/admin/enrichment/health");
+      setSearxngUnreachable(health.searxng?.status === "unreachable");
+    } catch {
+      // Health is advisory only — never block maintenance on a health check failure.
+      setSearxngUnreachable(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadPreview();
-  }, [loadPreview]);
+    void loadHealthHint();
+  }, [loadPreview, loadHealthHint]);
 
   async function queue(types?: JobType[]) {
     if (!preview) return;
@@ -117,6 +131,11 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
       <button type="button" className="secondary enrichment-refresh" disabled={loading || busy} onClick={() => void loadPreview()}>
         <RefreshCw size={16}/> {loading ? "Loading preview…" : "Refresh preview"}
       </button>
+      {searxngUnreachable ? (
+        <p className="enrichment-backfill-warning" role="status">
+          Metadata/image enrichment may fail because SearXNG is unavailable.
+        </p>
+      ) : null}
       {error && <p className="error">{error}</p>}
       {preview && (
         <>

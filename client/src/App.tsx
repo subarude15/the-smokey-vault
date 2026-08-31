@@ -51,6 +51,7 @@ import { StaffPage } from "./StaffPage";
 import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
+import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
 import { ScanSession, ScanSessionSummary } from "./ScanSession";
 import {
   type ShelfSessionMode,
@@ -3100,6 +3101,7 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(
         </button>
       </section>
       <BulkImport onMessage={setMessage} onQueued={() => go("import")}/>
+      <EnrichmentServicesHealth/>
       <EnrichmentMaintenance onMessage={setMessage}/>
       <section className="settings-card">
         <span className="eyebrow">GUEST PORTAL</span>

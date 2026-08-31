@@ -170,3 +170,70 @@ export async function searchImageHitsFromSearx(query: string, limit = 8): Promis
 export function isWebSearchError(error: unknown): error is WebSearchError {
   return error instanceof WebSearchError;
 }
+
+/** Host:port only — never userinfo, path, or query (may contain secrets). */
+export function safeHostFromUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.port) return `${parsed.hostname}:${parsed.port}`;
+    return parsed.hostname || "unknown";
+  } catch {
+    // Last resort: strip credentials-looking segments without throwing.
+    const cleaned = String(rawUrl ?? "")
+      .replace(/^[a-z]+:\/\//i, "")
+      .replace(/^[^/@]+@/, "")
+      .split(/[/?#]/)[0]
+      ?.trim();
+    return cleaned || "unknown";
+  }
+}
+
+export function searxngSafeHost(): string {
+  return safeHostFromUrl(searxngSearchUrl());
+}
+
+/**
+ * Lightweight SearXNG connectivity probe.
+ * Uses a tiny JSON search with a short timeout — not a full enrichment search.
+ * Throws WebSearchError on failure (same classification as enrichment search).
+ */
+export async function probeSearxngConnectivity(options?: {
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<{ latencyMs: number; httpStatus: number }> {
+  const fetchFn = options?.fetch ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? 3_000;
+  const params = new URLSearchParams({ q: ".", format: "json" });
+  const url = `${searxngSearchUrl()}?${params}`;
+  const started = Date.now();
+
+  let response: Response;
+  try {
+    response = await fetchFn(url, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    throw classifyFetchError(error);
+  }
+
+  if (!response.ok) {
+    throw new WebSearchError(
+      "http_error",
+      `SearXNG returned HTTP ${response.status}`,
+      response.status
+    );
+  }
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new WebSearchError(
+      "invalid_json",
+      `SearXNG returned malformed JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!data || typeof data !== "object") {
+    throw new WebSearchError("invalid_json", "SearXNG JSON root was not an object");
+  }
+
+  return { latencyMs: Date.now() - started, httpStatus: response.status };
+}
