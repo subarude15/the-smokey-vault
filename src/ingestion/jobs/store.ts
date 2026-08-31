@@ -94,6 +94,14 @@ function findActiveJob(
   return row ? mapJob(row) : null;
 }
 
+export function hasActiveEnrichmentJob(
+  entityType: EnrichmentEntityType,
+  entityId: number,
+  jobType: EnrichmentJobType
+): boolean {
+  return findActiveJob(entityType, entityId, jobType) !== null;
+}
+
 /** Enqueue any job type; dedupes active rows for the same entity + job type. */
 export function enqueueEnrichmentJob(input: EnqueueJobInput): { job: EnrichmentJob; created: boolean } {
   const existing = findActiveJob(input.entityType, input.entityId, input.jobType);
