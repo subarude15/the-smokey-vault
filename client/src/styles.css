@@ -1154,7 +1154,9 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .enrichment-image-row{display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:start}
 .enrichment-image-frame{width:120px;height:160px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);display:grid;place-items:center;overflow:hidden}
 .enrichment-image-frame img{width:100%;height:100%;object-fit:cover}
-.enrichment-image-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.enrichment-action-btn{margin-top:8px;align-self:start;font-size:12px;padding:6px 10px}
+.enrichment-conflict-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.enrichment-field .enrichment-action-btn{width:fit-content}
 .muted{color:var(--muted)}
 @media(max-width:700px){
   .enrichment-jobs,.enrichment-field-grid,.enrichment-image-row{grid-template-columns:1fr}

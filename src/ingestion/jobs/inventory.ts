@@ -17,6 +17,7 @@ import type { MetadataEnrichmentField } from "../enrichment/metadata-fields.js";
 import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import type { EnrichmentEntityType } from "./types.js";
+import { applyFieldOverridesToCandidate } from "./field-overrides.js";
 
 /** Inventory columns that can receive metadata enrichment, by table. */
 const INVENTORY_COLUMN_FOR: Record<EnrichmentEntityType, Partial<Record<MetadataEnrichmentField, string>>> = {
@@ -125,7 +126,12 @@ export function candidateFromInventoryRow(
   if (isUnresolvedField(candidate.product_type)) {
     candidate.product_type = field(inferredType, "vault");
   }
-  return overlayUpcCaches(candidate);
+  const withCaches = overlayUpcCaches(candidate);
+  const entityId = Number(row.id);
+  if (Number.isFinite(entityId) && entityId > 0) {
+    return applyFieldOverridesToCandidate(entityType, entityId, withCaches);
+  }
+  return withCaches;
 }
 
 function fieldNeedsWork(f: ProductField<unknown>): boolean {

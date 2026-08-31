@@ -106,3 +106,37 @@ export {
   type FieldViewStatus,
   type JobStatusLabel
 } from "./enrichment-view.js";
+
+export {
+  ensureFieldOverridesTable,
+  applyFieldOverridesToCandidate,
+  upsertFieldOverride,
+  listFieldOverrides,
+  getFieldOverride,
+  hasFieldOverride,
+  clearFieldOverridesForTests,
+  isReviewableField,
+  REVIEWABLE_FIELDS,
+  type FieldOverride,
+  type ReviewableField,
+  type OverrideAction
+} from "./field-overrides.js";
+
+export {
+  ensureReviewAuditTable,
+  recordReviewAudit,
+  listReviewAudit,
+  clearReviewAuditForTests,
+  type ReviewAuditRow,
+  type ReviewAuditAction
+} from "./review-audit.js";
+
+export {
+  resolveFieldConflict,
+  verifyEnrichmentField,
+  rerunEnrichmentJob,
+  ReviewActionError,
+  inventoryColumnForField,
+  candidateWithOverrides,
+  type ConflictChoice
+} from "./review-actions.js";

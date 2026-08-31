@@ -1850,7 +1850,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       {flavors.length > 0 && <div className="detail-chip-block">{module.id === "brews" ? <span className="eyebrow">FLAVOR PROFILE</span> : null}<div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div></div>}
       {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
-      {ENRICHMENT_MODULES.has(module.id) ? <EnrichmentPanel table={module.id} itemId={item.id} /> : null}
+      {ENRICHMENT_MODULES.has(module.id) ? <EnrichmentPanel table={module.id} itemId={item.id} admin={admin} /> : null}
       {!(module.id === "taps" && isTapEmpty(item)) && <GuestReviews table={module.id} itemId={item.id} admin={admin}/>}
     </section>
   );
