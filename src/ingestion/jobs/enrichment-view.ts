@@ -35,6 +35,7 @@ import {
 } from "./metadata-outcome.js";
 import { getProductContent, readPersonalNotes } from "./product-content.js";
 import { getProductImage, inventoryHasUserImage } from "./product-images.js";
+import { isAcceptableImageSource } from "../enrichment/image-sources.js";
 import { getLatestCompletedJobResult, listJobsForEntity } from "./store.js";
 import {
   friendlyDiagnosticSummary,
@@ -498,6 +499,76 @@ function buildJobViews(
   });
 }
 
+
+function resolveDisplayImage(options: {
+  userImage: boolean;
+  shelfImage: string | null;
+  image: ReturnType<typeof getProductImage>;
+}): BottleEnrichmentView["image"] {
+  const { userImage, shelfImage, image } = options;
+
+  // 1. User / shelf upload wins.
+  if (userImage && shelfImage) {
+    return {
+      displayUrl: shelfImage,
+      enrichedUrl: image?.url ?? null,
+      sourceType: "user",
+      sourceUrl: null,
+      score: null,
+      verified: true,
+      userPreferred: true
+    };
+  }
+
+  // 2. Verified enriched official/licensed/approved image.
+  const enrichedAccepted =
+    Boolean(image?.url)
+    && Boolean(image?.verified)
+    && image?.source_type != null
+    && image.source_type !== "lookup"
+    && isAcceptableImageSource(image.source_type);
+
+  if (enrichedAccepted && image?.url) {
+    return {
+      displayUrl: image.url,
+      enrichedUrl: image.url,
+      sourceType: image.source_type,
+      sourceUrl: image.source_url,
+      score: image.score,
+      verified: true,
+      userPreferred: false
+    };
+  }
+
+  // 3. Lookup / reference fallback (fast barcode image — not verified).
+  const lookupUrl =
+    (image?.source_type === "lookup" ? (image.url || shelfImage) : null)
+    || (!image?.verified ? shelfImage : null)
+    || shelfImage;
+
+  if (lookupUrl) {
+    return {
+      displayUrl: lookupUrl,
+      enrichedUrl: image?.url && image.source_type !== "lookup" ? image.url : null,
+      sourceType: image?.source_type === "lookup" || !image?.verified ? "lookup" : (image?.source_type ?? "lookup"),
+      sourceUrl: image?.source_type === "lookup" ? image.source_url : null,
+      score: null,
+      verified: false,
+      userPreferred: false
+    };
+  }
+
+  return {
+    displayUrl: null,
+    enrichedUrl: image?.url ?? null,
+    sourceType: image?.source_type ?? null,
+    sourceUrl: image?.source_url ?? null,
+    score: image?.score ?? null,
+    verified: image ? image.verified : null,
+    userPreferred: false
+  };
+}
+
 export function buildBottleEnrichmentView(options: {
   entityType: string;
   entityId: number;
@@ -518,8 +589,8 @@ export function buildBottleEnrichmentView(options: {
 
   const content = getProductContent(entityType, options.entityId);
   const image = getProductImage(entityType, options.entityId);
-  const userImage = inventoryHasUserImage(row);
   const shelfImage = String(row.image_url ?? "").trim() || null;
+  const userImage = inventoryHasUserImage(row, entityType, options.entityId);
 
   const fieldOpt = (name: BottleCandidateFieldName) =>
     fieldViewFromProductField(candidate[name] as ProductField<unknown>, {
@@ -565,14 +636,6 @@ export function buildBottleEnrichmentView(options: {
       houseProfile: normalizeTextField(content?.house_tasting_profile),
       personal: readPersonalNotes(row)
     },
-    image: {
-      displayUrl: userImage ? shelfImage : (image?.url ?? shelfImage),
-      enrichedUrl: image?.url ?? null,
-      sourceType: userImage ? "user" : (image?.source_type ?? null),
-      sourceUrl: userImage ? null : (image?.source_url ?? null),
-      score: userImage ? null : (image?.score ?? null),
-      verified: userImage ? true : (image ? image.verified : null),
-      userPreferred: userImage
-    }
+    image: resolveDisplayImage({ userImage, shelfImage, image })
   };
 }

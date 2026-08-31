@@ -89,12 +89,49 @@ export function getProductImage(
   return row ? mapRow(row) : null;
 }
 
-/** True when inventory already has a user-associated image we must not replace. */
-export function inventoryHasUserImage(row: Record<string, unknown>): boolean {
+/**
+ * True when inventory already has a *user* image we must not replace.
+ * Remote lookup/CDN URLs and lookup-fallback provenance are NOT user images.
+ */
+export function inventoryHasUserImage(
+  row: Record<string, unknown>,
+  entityType?: EnrichmentEntityType,
+  entityId?: number
+): boolean {
   const url = String(row.image_url ?? "").trim();
   if (!url) return false;
-  // Local uploads and any non-empty shelf image count as user/existing association.
-  return isLocalImagePath(url) || url.startsWith("http") || url.startsWith("/");
+  // Remote catalog / lookup URLs are never user uploads.
+  if (url.startsWith("http://") || url.startsWith("https://")) return false;
+  if (!isLocalImagePath(url)) return false;
+  if (entityType != null && entityId != null) {
+    const stored = getProductImage(entityType, entityId);
+    if (stored?.source_type === "lookup") return false;
+    if (stored?.source_type === "user") return true;
+  }
+  // Local media path without lookup provenance — treat as user/shelf upload.
+  return true;
+}
+
+/** Persist a barcode-lookup / reference fallback image (not verified, not official). */
+export function recordLookupImageFallback(options: {
+  entityType: EnrichmentEntityType;
+  entityId: number;
+  url: string | null | undefined;
+}): void {
+  const url = String(options.url ?? "").trim();
+  if (!url) return;
+  const existing = getProductImage(options.entityType, options.entityId);
+  if (existing?.source_type === "user") return;
+  if (existing?.verified && existing.source_type && existing.source_type !== "lookup") return;
+  upsertProductImage({
+    entityType: options.entityType,
+    entityId: options.entityId,
+    url,
+    sourceType: "lookup",
+    verified: false,
+    score: null,
+    rejectionReason: null
+  });
 }
 
 export function upsertProductImage(options: {
@@ -178,5 +215,7 @@ export function hasAcceptedProductImage(
   entityId: number
 ): boolean {
   const row = getProductImage(entityType, entityId);
-  return Boolean(row?.url && row.verified && (row.score ?? 0) > 0);
+  if (!row?.url || !row.verified) return false;
+  if (row.source_type === "lookup") return false;
+  return (row.score ?? 0) > 0;
 }

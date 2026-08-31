@@ -140,7 +140,7 @@ export function shouldScheduleImageEnrichment(options: {
   entityId: number;
   row: Record<string, unknown>;
 }): boolean {
-  if (inventoryHasUserImage(options.row)) return false;
+  if (inventoryHasUserImage(options.row, options.entityType, options.entityId)) return false;
   if (hasAcceptedProductImage(options.entityType, options.entityId)) return false;
   if (hasCompletedJob(options.entityType, options.entityId, "image")) return false;
   return true;

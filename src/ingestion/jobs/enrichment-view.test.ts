@@ -280,7 +280,7 @@ test("user shelf image remains preferred over enriched external image", () => {
   const spirit = insertSpirit({
     name: "EnrichView User Image",
     upc: `${UPC_PREFIX}1004`,
-    image_url: "https://vault.example/user-shelf.jpg",
+    image_url: "/api/media/images/user-shelf.jpg",
     notes: null,
     tasting_notes: null
   });
@@ -296,7 +296,7 @@ test("user shelf image remains preferred over enriched external image", () => {
   });
 
   const view = buildBottleEnrichmentView({ entityType: "spirits", entityId })!;
-  assert.equal(view.image.displayUrl, "https://vault.example/user-shelf.jpg");
+  assert.equal(view.image.displayUrl, "/api/media/images/user-shelf.jpg");
   assert.equal(view.image.sourceType, "user");
   assert.equal(view.image.userPreferred, true);
   assert.equal(view.image.enrichedUrl, "https://cdn.example/enriched.jpg");
