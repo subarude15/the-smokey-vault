@@ -76,6 +76,7 @@ export {
   getProductImage,
   upsertProductImage,
   inventoryHasUserImage,
+  recordLookupImageFallback,
   hasAcceptedProductImage,
   clearProductImagesForTests,
   markProductImageEmpty,

@@ -14,7 +14,7 @@ export function mapOffToSchema(upc: string, offProduct: Record<string, unknown>)
     upc,
     name: stripPackageTokensFromName(nameRaw) || nameRaw,
     brand,
-    category: tax.family || (tax.discardedJunk ? "" : categoryRaw) || "Mixer",
+    category: tax.family || (tax.discardedJunk ? "" : categoryRaw) || "",
     abv,
     image_url: String(offProduct.image_front_url || offProduct.image_url || "") || null,
     fill_level_percent: 100,

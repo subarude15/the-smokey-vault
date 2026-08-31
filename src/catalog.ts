@@ -1,5 +1,7 @@
 import {
   CANONICAL_WHISKEY_TYPES,
+  canonicalFamilyFromText,
+  canonicalWhiskeyTypeFromText,
   isCompatibleClassificationSpecialization,
   normalizeCanonicalAbv,
   normalizeCanonicalTaxonomy,
@@ -60,7 +62,8 @@ function uniqueList(values: string[]): string[] {
 export function spiritFamilyFromLabel(category: string, subCategory = ""): { family: string; type: string } {
   const familyRaw = category.trim();
   const typeRaw = subCategory.trim();
-  if (!familyRaw && !typeRaw) return { family: "Mixer", type: "" };
+  // Unresolved — never invent Mixer without affirmative evidence.
+  if (!familyRaw && !typeRaw) return { family: "", type: "" };
 
   const tax = normalizeCanonicalTaxonomy(familyRaw, typeRaw);
   if (tax.family) {
@@ -83,6 +86,87 @@ export function spiritFamilyFromLabel(category: string, subCategory = ""): { fam
  * Merge an incoming classification label with an existing spirits row family/type.
  * Specificity is monotonic: Whiskey + Scotch Whisky cannot collapse to Whiskey / "".
  */
+
+/** Affirmative mixer evidence in trusted identity text (name / category / product_type). */
+const MIXER_AFFIRMATIVE_RE =
+  /\b(mixer|tonic(?:\s+water)?|soda(?:\s+water)?|syrup|ginger\s*beer|club\s*soda|seltzer|sparkling\s*water|grenadine|collins\s*mix|sweet\s*(?:&|and)\s*sour)\b/i;
+
+export function hasAffirmativeMixerEvidence(text: string): boolean {
+  return MIXER_AFFIRMATIVE_RE.test(String(text ?? ""));
+}
+
+/**
+ * Conservative first-save classification reconciliation.
+ * Uses trusted lookup name / category / product_type evidence only — never brand-only guessing.
+ * Strong spirit identity in the name outranks a weak upstream Mixer (or empty) category.
+ */
+export function reconcileSpiritClassificationForFirstSave(input: {
+  name?: string | null;
+  category?: string | null;
+  subCategory?: string | null;
+  productType?: string | null;
+}): { family: string; type: string } {
+  const name = String(input.name ?? "").trim();
+  const category = String(input.category ?? "").trim();
+  const subCategory = String(input.subCategory ?? "").trim();
+  const productType = String(input.productType ?? "").trim();
+
+  const fromLabels = spiritFamilyFromLabel(category, subCategory);
+
+  const nameFamily = canonicalFamilyFromText(name);
+  const nameWhiskeyType = canonicalWhiskeyTypeFromText(name);
+  let identityFamily = nameFamily ?? "";
+  let identityType = "";
+  if (nameFamily === "Whiskey" || nameWhiskeyType) {
+    identityFamily = "Whiskey";
+    identityType = nameWhiskeyType && !/^(whisky|whiskey)$/i.test(nameWhiskeyType) ? nameWhiskeyType : "";
+  } else if (nameFamily) {
+    identityFamily = nameFamily;
+    identityType = "";
+  }
+  if (!identityFamily && productType) {
+    const ptFamily = canonicalFamilyFromText(productType);
+    const ptWhiskey = canonicalWhiskeyTypeFromText(productType);
+    if (ptFamily === "Whiskey" || ptWhiskey) {
+      identityFamily = "Whiskey";
+      identityType = ptWhiskey && !/^(whisky|whiskey)$/i.test(ptWhiskey) ? ptWhiskey : "";
+    } else if (ptFamily && ptFamily !== "Mixer") {
+      identityFamily = ptFamily;
+    }
+  }
+
+  const mixerHaystack = `${name} ${category} ${subCategory} ${productType}`;
+  const mixerAffirmative = hasAffirmativeMixerEvidence(mixerHaystack);
+
+  // Name/product_type spirit evidence wins over Mixer or empty.
+  if (identityFamily && identityFamily !== "Mixer") {
+    if (!fromLabels.family || fromLabels.family === "Mixer") {
+      return { family: identityFamily, type: identityType };
+    }
+    if (fromLabels.family === identityFamily) {
+      return resolveMonotonicSpiritClassification({
+        incomingLabel: identityType || identityFamily,
+        existingFamily: fromLabels.family,
+        existingType: fromLabels.type
+      });
+    }
+  }
+
+  if (fromLabels.family === "Mixer") {
+    if (mixerAffirmative && !(identityFamily && identityFamily !== "Mixer")) {
+      return { family: "Mixer", type: "" };
+    }
+    // Weak Mixer without affirmative evidence — do not persist.
+    return identityFamily
+      ? { family: identityFamily, type: identityType }
+      : { family: "", type: "" };
+  }
+
+  if (fromLabels.family) return fromLabels;
+  if (identityFamily) return { family: identityFamily, type: identityType };
+  return { family: "", type: "" };
+}
+
 export function resolveMonotonicSpiritClassification(options: {
   incomingLabel: string;
   existingFamily?: string | null;
@@ -422,15 +506,20 @@ export function prepareSpiritWrite(body: Record<string, unknown>): Record<string
   if (next.fill_level !== undefined) next.fill_level = nearestFillStop(next.fill_level);
   if (next.stock_count !== undefined) next.stock_count = spiritStock(next.stock_count);
 
-  const category = String(next.category ?? "");
-  const subCategory = String(next.sub_category ?? "");
-  if (category || subCategory) {
-    const mapped = spiritFamilyFromLabel(category, subCategory);
-    next.category = mapped.family;
-    if (next.sub_category !== undefined || subCategory) next.sub_category = mapped.type;
-  }
   if (typeof next.name === "string" && next.name.trim()) {
     next.name = stripPackageTokensFromName(next.name);
+  }
+
+  // Deterministic first-save (and update) classification reconciliation.
+  const reconciled = reconcileSpiritClassificationForFirstSave({
+    name: typeof next.name === "string" ? next.name : "",
+    category: next.category == null ? "" : String(next.category),
+    subCategory: next.sub_category == null ? "" : String(next.sub_category),
+    productType: next.product_type == null ? "" : String(next.product_type)
+  });
+  next.category = reconciled.family;
+  if (next.sub_category !== undefined || reconciled.type || next.category) {
+    next.sub_category = reconciled.type;
   }
   if (next.abv !== undefined) {
     next.abv = normalizeCanonicalAbv(next.abv, {

@@ -22,7 +22,8 @@ import { identifyByBarcode } from "./ingestion/bottle-orchestrator.js";
 import {
   maybeEnqueueImageEnrichment,
   maybeEnqueueMetadataEnrichment,
-  maybeEnqueueTastingNotesEnrichment
+  maybeEnqueueTastingNotesEnrichment,
+  recordLookupImageFallback
 } from "./ingestion/jobs/index.js";
 import { localizeImage } from "./images.js";
 import { queueLookupResult } from "./import_queue.js";
@@ -333,6 +334,14 @@ export async function saveScanSessionBottle(options: {
     const body = await localizeBodyImage({ ...create.body });
     const saved = insertInventoryRow(create.table, body);
     const id = Number(saved.id);
+    // Lookup/reference image is a fast fallback — not user/verified provenance.
+    if (create.table === "spirits" || create.table === "packaged_beer" || create.table === "wines") {
+      recordLookupImageFallback({
+        entityType: create.table,
+        entityId: id,
+        url: saved.image_url == null ? null : String(saved.image_url)
+      });
+    }
     const enrichmentQueued = queueEnrichment(create.table, id, saved);
     return {
       action: "added",

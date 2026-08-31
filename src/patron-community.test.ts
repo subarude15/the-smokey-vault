@@ -174,7 +174,7 @@ test("patron review does not mutate canonical inventory or enrichment content", 
 
 test("patron gallery photo does not replace canonical product or shelf image", async () => {
   const id = insertSpirit({
-    image_url: "https://vault.example/user-shelf.jpg"
+    image_url: "/api/media/images/user-shelf.jpg"
   });
   upsertProductImage({
     entityType: "spirits",
@@ -216,7 +216,7 @@ test("patron gallery photo does not replace canonical product or shelf image", a
     assert.deepEqual(snapshotCanonical(id), before);
     const view = buildBottleEnrichmentView({ entityType: "spirits", entityId: id })!;
     assert.equal(view.image.userPreferred, true);
-    assert.equal(view.image.displayUrl, "https://vault.example/user-shelf.jpg");
+    assert.equal(view.image.displayUrl, "/api/media/images/user-shelf.jpg");
     assert.equal(view.image.enrichedUrl, "https://cdn.example/enriched-canonical.jpg");
     assert.notEqual(view.image.displayUrl, (upload.json() as { url: string }).url);
   } finally {

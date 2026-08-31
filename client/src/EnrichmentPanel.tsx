@@ -260,6 +260,24 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
  * Patrons see BottlePublicContent instead — useful notes without plumbing.
  * Does not offer conflict resolution, re-runs, or content edits.
  */
+
+function imageSourceLabel(sourceType: string | null | undefined, verified: boolean | null | undefined): string {
+  switch (sourceType) {
+    case "user":
+      return "User / shelf image";
+    case "lookup":
+      return "Lookup fallback";
+    case "official":
+      return "Official enrichment";
+    case "licensed":
+      return "Licensed enrichment";
+    case "approved":
+      return "Approved enrichment";
+    default:
+      return sourceType ? String(sourceType) : "Unknown source";
+  }
+}
+
 export function EnrichmentPanel({ table, itemId }: { table: string; itemId: number }) {
   const [view, setView] = useState<BottleEnrichmentView | null>(null);
   const [error, setError] = useState("");
@@ -268,10 +286,14 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => abort.abort(), 12_000);
 
     async function load() {
       try {
-        const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`);
+        const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`, {
+          signal: abort.signal
+        });
         if (cancelled) return;
         setView(next);
         setError("");
@@ -288,6 +310,10 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       } catch (err) {
         if (cancelled) return;
         setLoading(false);
+        if (abort.signal.aborted) {
+          setError("Enrichment request timed out");
+          return;
+        }
         setError(err instanceof Error ? err.message : "Could not load enrichment");
       }
     }
@@ -295,6 +321,8 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     void load();
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
+      abort.abort();
       if (timer) clearInterval(timer);
     };
   }, [table, itemId]);
@@ -366,6 +394,17 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       ) : null}
 
       <div className="enrichment-jobs">
+        {(() => {
+          const allIdle = jobs.length > 0 && jobs.every((j) => j.statusLabel === "not_started");
+          const anyActive = polling;
+          if (!jobs.length) {
+            return <p className="muted">No enrichment queued</p>;
+          }
+          if (allIdle && !anyActive) {
+            return <p className="muted">{enrichment.identified ? "Enrichment pending" : "No enrichment queued"}</p>;
+          }
+          return null;
+        })()}
         {jobs.map((job) => {
           const showWhy =
             (job.statusLabel === "no_result" || job.statusLabel === "failed" || job.statusLabel === "partial")
@@ -582,11 +621,15 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
             {image.userPreferred ? (
               <span className="chip static">User / shelf image preferred</span>
             ) : null}
-            {image.sourceType ? (
-              <span className="chip static">{textChild(image.sourceType)}</span>
+            {image.sourceType || image.displayUrl ? (
+              <span className="chip static">
+                {imageSourceLabel(image.sourceType, image.verified)}
+              </span>
             ) : null}
             {image.verified != null ? (
-              <span className="chip static">{image.verified ? "Verified" : "Unverified"}</span>
+              <span className="chip static">{image.verified ? "Verified" : "Not verified"}</span>
+            ) : image.displayUrl ? (
+              <span className="chip static">Not verified</span>
             ) : null}
             {image.score != null ? (
               <span className="chip static" title="Deterministic acceptance score">

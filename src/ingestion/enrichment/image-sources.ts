@@ -9,7 +9,7 @@
 import { classifySourceUrlWithDiscovery } from "./official-domain.js";
 import type { SourceClass } from "./tasting-notes-sources.js";
 
-export type ImageSourceType = "user" | "official" | "licensed" | "approved" | "unknown";
+export type ImageSourceType = "user" | "official" | "licensed" | "approved" | "lookup" | "unknown";
 
 /** Hosts treated as clearly licensed / open imagery. */
 const LICENSED_HOST_FRAGMENTS = [
