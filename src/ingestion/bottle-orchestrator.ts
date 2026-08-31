@@ -23,6 +23,9 @@
  *
  * Internal (not HTTP): identifyByBarcodeWithCandidate wraps (1) with BottleCandidate
  * field provenance for later enrichment. See src/ingestion/candidate/.
+ * Enrichment planning (pure): planEnrichment(candidate) → EnrichmentPlan — see
+ * src/ingestion/enrichment/. Metadata execution: executeMetadataEnrichment
+ * (abv/proof/volume/origin/ttb_id only; no tasting notes/images yet).
  *
  * Individual responsibilities stay in their modules (lookup, vision_label, cola_client,
  * barcode_cache, fwgs, catalog_beer, ai_providers). This file only sequences them.

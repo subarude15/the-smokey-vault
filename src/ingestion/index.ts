@@ -31,3 +31,18 @@ export {
   type ProductField,
   type ProductFieldSource
 } from "./candidate/index.js";
+
+export {
+  planEnrichment,
+  executeMetadataEnrichment,
+  TRUSTED_MIN,
+  ENRICH_BELOW,
+  IDENTITY_FIELDS,
+  RECOMMENDED_FIELDS,
+  OPTIONAL_CONTENT_FIELDS,
+  METADATA_ENRICHMENT_FIELDS,
+  type EnrichmentPlan,
+  type EnrichmentTask,
+  type EnrichmentField,
+  type EnrichmentExecutionResult
+} from "./enrichment/index.js";
