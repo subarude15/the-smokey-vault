@@ -304,8 +304,8 @@ test("legacy + shelf scan client wiring does not open blank views after save", (
   // Legacy: vault hit opens BottleDetail (mode view), not a nameless route.
   assert.match(appSrc, /mode: "view"/);
   assert.match(appSrc, /scanDraft\.mode === "view"/);
-  // Shelf: ScanSession stays mounted; compact result + scanner ready.
-  assert.match(appSrc, /sessionMode === "active"/);
+  // Shelf: session mode is lifted; active sessions stay in ScanSession (parked when away).
+  assert.ok(appSrc.includes("shelfSessionMode") || appSrc.includes('surface === "session"'));
   assert.match(appSrc, /<ScanSession/);
   assert.match(scanSessionScannerSrc, /statusHint is display-only/);
   assert.match(scanSessionScannerSrc, /}, \[kind, paused, busy\]\);/);

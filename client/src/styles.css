@@ -147,7 +147,16 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .enrichment-backfill-note{color:var(--muted);font-size:13px;line-height:1.5;margin:0 0 12px}
 .enrichment-backfill-actions{display:flex;flex-wrap:wrap;gap:8px}
 .enrichment-backfill-banner{color:var(--text);font-size:13px;line-height:1.5;margin:12px 0 0;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
-.scan-session-launch{margin-bottom:16px}
+.scan-session-result-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.scan-session-parked{display:none!important}
+.scan-landing-tools{margin-top:18px;display:flex;flex-direction:column;gap:14px}
+.scan-landing-single{padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.scan-landing-single h3{margin:0 0 6px;font:600 20px "Playfair Display"}
+.scan-landing-single > p{margin:0 0 12px;color:var(--muted);line-height:1.45}
+.scan-landing-import{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}
+.scan-landing-import p{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
+.scan-session-active-banner{margin-bottom:14px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.scan-session-active-banner strong{display:block;margin-bottom:4px}
 .scan-session{max-width:980px}
 .scan-session-header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-bottom:16px}
 .scan-session-header h2{font:600 34px "Playfair Display";margin:4px 0}
