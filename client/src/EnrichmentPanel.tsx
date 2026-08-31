@@ -142,6 +142,11 @@ function FieldRow({ label, field }: { label: string; field: FieldView }) {
   );
 }
 
+/**
+ * Read-only enrichment / review panel for patrons and keepers.
+ * Does not offer conflict resolution, re-runs, or content edits.
+ * Patron reviews and gallery uploads remain separate community flows.
+ */
 export function EnrichmentPanel({ table, itemId }: { table: string; itemId: number }) {
   const [view, setView] = useState<BottleEnrichmentView | null>(null);
   const [error, setError] = useState("");

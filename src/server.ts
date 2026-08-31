@@ -4,10 +4,10 @@ import multipart from "@fastify/multipart";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import fastifyStatic from "@fastify/static";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession } from "./auth.js";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
 import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
@@ -110,23 +110,18 @@ await app.register(swagger, {
 await app.register(swaggerUi, { routePrefix: "/api/docs" });
 
 function token(exp = Date.now() + 15 * 60_000) {
-  const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
-  return `${payload}.${createHmac("sha256", secret).update(payload).digest("base64url")}`;
+  return createAdminToken(secret, exp);
 }
 
 function isAdmin(header?: string) {
-  const raw = header?.replace(/^Bearer /i, "");
-  if (!raw) return false;
-  const [payload, signature] = raw.split(".");
-  if (!payload || !signature) return false;
-  const expected = createHmac("sha256", secret).update(payload).digest();
-  const actual = Buffer.from(signature, "base64url");
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return false;
-  try { return JSON.parse(Buffer.from(payload, "base64url").toString()).exp > Date.now(); } catch { return false; }
+  return isAdminSession(header, secret);
 }
 
-function requireAdmin(request: { headers: { authorization?: string } }, reply: { code: (n: number) => { send: (v: unknown) => unknown } }) {
-  if (!isAdmin(request.headers.authorization)) return reply.code(401).send({ error: "Admin session required" });
+function requireAdmin(
+  request: { headers: { authorization?: string } },
+  reply: { code: (n: number) => { send: (v: unknown) => unknown } }
+) {
+  return requireAdminSession(request, reply, secret);
 }
 
 function keeperName() {
@@ -174,21 +169,6 @@ app.get("/api/house", { schema: { tags: ["System"], summary: "Public house name,
     enabledTabs: parseEnabledTabs(getSetting("enabled_tabs"))
   };
 });
-
-function samePin(pin: string, candidate?: string) {
-  if (!candidate) return false;
-  const a = Buffer.from(pin);
-  const b = Buffer.from(candidate);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-/**
- * The stored PIN, plus optional env overrides. ADMIN_PIN and MASTER_PIN are the way back
- * in when the stored PIN is forgotten, since nothing can read it back out of the database.
- */
-function pinAccepted(pin: string) {
-  return verifyPin(pin) || samePin(pin, process.env.ADMIN_PIN) || samePin(pin, process.env.MASTER_PIN);
-}
 
 /** Failed unlock attempts per client address. In memory on purpose: a restart is a reset. */
 const pinAttempts = new Map<string, PinAttempts>();
@@ -469,6 +449,12 @@ app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id
   return reply.code(204).send();
 });
 
+/**
+ * Read-only enrichment / review state.
+ * Intentionally public (no requireAdmin): patrons may view provenance and job status.
+ * There is no mutation surface on this route — conflict resolution, re-runs, and
+ * content edits are deferred and must use requireAdmin when added.
+ */
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/enrichment", {
   schema: {
     tags: ["Lookup"],
@@ -1577,14 +1563,19 @@ app.post("/api/backups/snapshot", async (request, reply) => {
   return { file: basename(createBackup()) };
 });
 
-setTimeout(() => { try { createBackup(); } catch (error) { app.log.error(error); } }, 5000);
-setInterval(() => { try { createBackup(); } catch (error) { app.log.error(error); } }, 24 * 60 * 60_000).unref();
+/** When set (HTTP inject tests), skip listen + background timers so suites can import the app. */
+const skipListen = /^(1|true|yes)$/i.test(process.env.SMOKEY_TEST_NO_LISTEN?.trim() ?? "");
 
-setInterval(() => {
-  flushDiscordAlerts()
-    .then((sent) => { if (sent) app.log.info({ sent }, "Announced unanswered guest messages on Discord"); })
-    .catch((error) => app.log.error({ error }, "Discord message alert failed"));
-}, DISCORD_ALERT_INTERVAL_MS).unref();
+if (!skipListen) {
+  setTimeout(() => { try { createBackup(); } catch (error) { app.log.error(error); } }, 5000);
+  setInterval(() => { try { createBackup(); } catch (error) { app.log.error(error); } }, 24 * 60 * 60_000).unref();
+
+  setInterval(() => {
+    flushDiscordAlerts()
+      .then((sent) => { if (sent) app.log.info({ sent }, "Announced unanswered guest messages on Discord"); })
+      .catch((error) => app.log.error({ error }, "Discord message alert failed"));
+  }, DISCORD_ALERT_INTERVAL_MS).unref();
+}
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../client/dist");
 if (existsSync(root)) {
@@ -1608,18 +1599,22 @@ app.log.info(
 );
 app.log.info({ configured: isBrewfatherConfigured() }, "Brewfather batch sync");
 
-try {
-  startEnrichmentWorker({
-    idleMs: 2_000,
-    logger: {
-      info: (obj, msg) => app.log.info(obj, msg),
-      warn: (obj, msg) => app.log.warn(obj, msg),
-      error: (obj, msg) => app.log.error(obj, msg)
-    }
-  });
-  app.log.info({ counts: enrichmentJobCounts() }, "Background metadata enrichment worker armed");
-} catch (error) {
-  app.log.error({ error }, "Failed to start enrichment worker");
+if (!skipListen) {
+  try {
+    startEnrichmentWorker({
+      idleMs: 2_000,
+      logger: {
+        info: (obj, msg) => app.log.info(obj, msg),
+        warn: (obj, msg) => app.log.warn(obj, msg),
+        error: (obj, msg) => app.log.error(obj, msg)
+      }
+    });
+    app.log.info({ counts: enrichmentJobCounts() }, "Background metadata enrichment worker armed");
+  } catch (error) {
+    app.log.error({ error }, "Failed to start enrichment worker");
+  }
+
+  await app.listen({ port: Number(process.env.PORT ?? 8080), host: "0.0.0.0" });
 }
 
-await app.listen({ port: Number(process.env.PORT ?? 8080), host: "0.0.0.0" });
+export { app, secret as sessionSecret, token as createTestAdminToken };
