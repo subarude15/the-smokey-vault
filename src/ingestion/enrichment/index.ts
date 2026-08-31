@@ -85,10 +85,14 @@ export {
 
 export {
   extractOfficialPageImgCandidates,
+  extractOfficialPageImgCandidatesAsync,
+  extractCssBackgroundUrls,
   isLikelyPageDecoration,
+  looksLikeClientRenderedShell,
   parseSrcsetUrls,
   type OfficialPageImgCandidate,
-  type OfficialPageImgScanResult
+  type OfficialPageImgScanResult,
+  type OfficialPageImageDiagnostic
 } from "./official-page-images.js";
 
 export {

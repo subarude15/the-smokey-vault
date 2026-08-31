@@ -1,8 +1,17 @@
 /**
- * Bounded <img> extraction from already-authoritative product pages.
- * Only used when og:image / JSON-LD yield no usable candidates.
- * Provenance stays tied to the official page URL — CDN hosts are not globally trusted.
+ * Authoritative-page-only image fallback: extract product-looking image URLs
+ * from already-fetched brand/producer HTML when OG / JSON-LD yield nothing.
+ *
+ * Mechanisms (static HTML only — no JS execution / headless browser):
+ * - <img> src / srcset / data-* lazy attrs
+ * - <picture> / <source> srcset / data-srcset
+ * - <link rel="preload|prefetch" as="image">
+ * - CSS background-image: url(...) from inline styles / <style> / bounded linked CSS
+ *
+ * Provenance stays page-scoped: candidates are official only because the
+ * authoritative page referenced them. CDN domains are not globally trusted.
  */
+
 export type OfficialPageImgCandidate = {
   url: string;
   /** Official product page that referenced the asset. */
@@ -14,14 +23,27 @@ export type OfficialPageImgCandidate = {
   reason: string;
 };
 
+export type OfficialPageImageDiagnostic =
+  | "official_page_img_candidates"
+  | "official_page_no_product_imgs"
+  | "official_page_logos_or_small_assets_only"
+  | "official_page_client_rendered";
+
 export type OfficialPageImgScanResult = {
   scanned: number;
   prefiltered: OfficialPageImgCandidate[];
   rejectedReasons: Record<string, number>;
+  /** Distinct diagnostic when zero candidates after scan. */
+  diagnostic: OfficialPageImageDiagnostic;
+  /** True when the page looks like a JS shell with no static image assets. */
+  clientRenderedShell: boolean;
 };
 
-const MAX_SCAN = 40;
+const MAX_SCAN = 80;
 const MAX_CANDIDATES = 16;
+const MAX_LINKED_CSS = 3;
+const MAX_CSS_BYTES = 200_000;
+const CSS_FETCH_TIMEOUT_MS = 4_000;
 
 const LOGO_ICON_RE =
   /logo|icon|favicon|sprite|avatar|badge|social|facebook|twitter|instagram|pinterest|youtube|tiktok|menu|nav|footer|header|cart|search|arrow|chevron|play-button|close-btn|tracking|pixel|1x1|spacer/i;
@@ -29,9 +51,19 @@ const LOGO_ICON_RE =
 const PRODUCTISH_RE =
   /bottle|product|packshot|pack-shot|hero|whisky|whiskey|bourbon|scotch|wine|beer|can|label|range|expression/i;
 
+const LAZY_ATTRS = [
+  "data-src",
+  "data-original",
+  "data-lazy-src",
+  "data-image",
+  "data-background-image",
+  "data-lazy",
+  "data-url"
+] as const;
+
 function absolutize(raw: string, pageUrl: string): string | null {
   const value = String(raw ?? "").trim();
-  if (!value || value.startsWith("data:")) return null;
+  if (!value || value.startsWith("data:") || value.startsWith("blob:")) return null;
   try {
     const abs = new URL(value, pageUrl).toString();
     return /^https?:\/\//i.test(abs) ? abs : null;
@@ -106,7 +138,6 @@ export function isLikelyPageDecoration(options: {
       return { reject: true, reason: "tiny_thumbnail" };
     }
   }
-  // Path hints for tiny UI sprites.
   if (/\/(icons?|sprites?|ui|chrome)\//i.test(url)) {
     return { reject: true, reason: "ui_path" };
   }
@@ -158,9 +189,235 @@ function productScore(options: {
   return { score, reason: reasons.join(",") || "weak_signal" };
 }
 
+/** Extract url(...) references from a CSS fragment. */
+export function extractCssBackgroundUrls(cssText: string, baseUrl: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /url\(\s*['"]?([^'")\s]+)['"]?\s*\)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(cssText)) !== null) {
+    const abs = absolutize(m[1], baseUrl);
+    if (!abs) continue;
+    if (/\.(woff2?|ttf|otf|eot)(\?|$)/i.test(abs)) continue;
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  return out;
+}
+
 /**
- * Scan an authoritative HTML page for product-like <img> candidates.
+ * Heuristic: page is a client-rendered shell when static HTML has essentially
+ * no product image asset references and shows SPA/framework markers.
+ */
+export function looksLikeClientRenderedShell(
+  html: string,
+  staticImageRefCount: number
+): boolean {
+  if (staticImageRefCount > 0) return false;
+  const sample = html.slice(0, 80_000);
+  const markers = [
+    /id=["']__next["']/i,
+    /id=["']root["']/i,
+    /id=["']app["']/i,
+    /data-reactroot/i,
+    /ng-version=/i,
+    /window\.__INITIAL_STATE__/i,
+    /__NUXT__/i,
+    /<script[^>]+src=["'][^"']*\/_next\/static/i,
+    /<script[^>]+src=["'][^"']*chunk/i
+  ];
+  const hit = markers.some((re) => re.test(sample));
+  const mediaTags =
+    (sample.match(/<img\b/gi) || []).length +
+    (sample.match(/<picture\b/gi) || []).length +
+    (sample.match(/<source\b[^>]+srcset/gi) || []).length;
+  return hit || mediaTags === 0;
+}
+
+type RawRef = {
+  url: string;
+  alt: string;
+  width: number | null;
+  height: number | null;
+};
+
+function collectLazyAndSrcset(tag: string, pageUrl: string): string[] {
+  const rawUrls: string[] = [];
+  const src = attr(tag, "src");
+  if (src) rawUrls.push(src);
+  for (const a of LAZY_ATTRS) {
+    const v = attr(tag, a);
+    if (v) rawUrls.push(v);
+  }
+  rawUrls.push(...parseSrcsetUrls(attr(tag, "srcset"), pageUrl));
+  rawUrls.push(...parseSrcsetUrls(attr(tag, "data-srcset"), pageUrl));
+  return rawUrls;
+}
+
+function scoreAndCollect(
+  refs: RawRef[],
+  pageUrl: string,
+  brand: string,
+  name: string,
+  rejectedReasons: Record<string, number>
+): OfficialPageImgCandidate[] {
+  const bump = (reason: string) => {
+    rejectedReasons[reason] = (rejectedReasons[reason] ?? 0) + 1;
+  };
+  const seen = new Set<string>();
+  const scored: OfficialPageImgCandidate[] = [];
+
+  for (const ref of refs) {
+    if (!ref.url || seen.has(ref.url)) continue;
+    seen.add(ref.url);
+
+    const decoration = isLikelyPageDecoration({
+      url: ref.url,
+      alt: ref.alt,
+      width: ref.width,
+      height: ref.height
+    });
+    if (decoration.reject) {
+      bump(decoration.reason || "decoration");
+      continue;
+    }
+
+    const hint = productScore({
+      url: ref.url,
+      alt: ref.alt,
+      brand,
+      name,
+      width: ref.width,
+      height: ref.height
+    });
+    if (hint.score < 2) {
+      bump("weak_product_signal");
+      continue;
+    }
+
+    scored.push({
+      url: ref.url,
+      sourceUrl: pageUrl,
+      alt: ref.alt,
+      width: ref.width,
+      height: ref.height,
+      scoreHint: hint.score,
+      reason: hint.reason
+    });
+  }
+
+  scored.sort((a, b) => b.scoreHint - a.scoreHint);
+  return scored;
+}
+
+function gatherStaticImageRefs(html: string, pageUrl: string): { refs: RawRef[]; scanned: number } {
+  const refs: RawRef[] = [];
+  let scanned = 0;
+
+  // <img>
+  const imgTags = [...html.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]).slice(0, MAX_SCAN);
+  for (const tag of imgTags) {
+    scanned += 1;
+    const alt = attr(tag, "alt");
+    const width = parseDimension(attr(tag, "width"));
+    const height = parseDimension(attr(tag, "height"));
+    for (const raw of collectLazyAndSrcset(tag, pageUrl)) {
+      const url = absolutize(raw, pageUrl);
+      if (url) refs.push({ url, alt, width, height });
+    }
+  }
+
+  // <picture> / <source>
+  const sourceTags = [
+    ...html.matchAll(/<source\b[^>]*>/gi)
+  ]
+    .map((m) => m[0])
+    .slice(0, MAX_SCAN);
+  for (const tag of sourceTags) {
+    scanned += 1;
+    const width = parseDimension(attr(tag, "width"));
+    const height = parseDimension(attr(tag, "height"));
+    const raws = [
+      attr(tag, "src"),
+      ...LAZY_ATTRS.map((a) => attr(tag, a)),
+      ...parseSrcsetUrls(attr(tag, "srcset"), pageUrl),
+      ...parseSrcsetUrls(attr(tag, "data-srcset"), pageUrl)
+    ];
+    for (const raw of raws) {
+      const url = absolutize(raw, pageUrl);
+      if (url) refs.push({ url, alt: "", width, height });
+    }
+  }
+
+  // preload / prefetch as=image
+  const linkTags = [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]);
+  for (const tag of linkTags) {
+    const rel = attr(tag, "rel").toLowerCase();
+    if (!/\bpreload\b|\bprefetch\b/.test(rel)) continue;
+    const as = attr(tag, "as").toLowerCase();
+    const imagesrcset = attr(tag, "imagesrcset");
+    if (as !== "image" && !imagesrcset) continue;
+    scanned += 1;
+    const href = attr(tag, "href");
+    if (href) {
+      if (href.includes(",") && /\d+w/i.test(href)) {
+        for (const u of parseSrcsetUrls(href, pageUrl)) {
+          refs.push({ url: u, alt: "preload", width: null, height: null });
+        }
+      } else {
+        const url = absolutize(href, pageUrl);
+        if (url) refs.push({ url, alt: "preload", width: null, height: null });
+      }
+    }
+    if (imagesrcset) {
+      for (const u of parseSrcsetUrls(imagesrcset, pageUrl)) {
+        refs.push({ url: u, alt: "preload", width: null, height: null });
+      }
+    }
+  }
+
+  // Inline style background-image
+  const styleAttrRe = /style\s*=\s*(["'])([\s\S]*?)\1/gi;
+  let sm: RegExpExecArray | null;
+  while ((sm = styleAttrRe.exec(html)) !== null) {
+    const style = sm[2];
+    if (!/url\(/i.test(style)) continue;
+    scanned += 1;
+    for (const u of extractCssBackgroundUrls(style, pageUrl)) {
+      refs.push({ url: u, alt: "css-background", width: null, height: null });
+    }
+  }
+
+  // <style> blocks
+  const styleBlocks = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)];
+  for (const block of styleBlocks) {
+    const css = block[1] || "";
+    if (!css.includes("url(")) continue;
+    for (const u of extractCssBackgroundUrls(css, pageUrl)) {
+      scanned += 1;
+      refs.push({ url: u, alt: "css-background", width: null, height: null });
+    }
+  }
+
+  return { refs, scanned };
+}
+
+function resolveDiagnostic(
+  prefiltered: OfficialPageImgCandidate[],
+  scanned: number,
+  clientRenderedShell: boolean
+): OfficialPageImageDiagnostic {
+  if (prefiltered.length > 0) return "official_page_img_candidates";
+  if (clientRenderedShell) return "official_page_client_rendered";
+  if (scanned > 0) return "official_page_logos_or_small_assets_only";
+  return "official_page_no_product_imgs";
+}
+
+/**
+ * Scan an authoritative HTML page for product-like image candidates.
  * Does not execute scripts. Caps scan and candidate counts.
+ * Sync: skips linked external CSS fetch.
  */
 export function extractOfficialPageImgCandidates(
   html: string,
@@ -170,61 +427,116 @@ export function extractOfficialPageImgCandidates(
   const brand = String(options.brand ?? "");
   const name = String(options.name ?? "");
   const rejectedReasons: Record<string, number> = {};
-  const bump = (reason: string) => {
-    rejectedReasons[reason] = (rejectedReasons[reason] ?? 0) + 1;
+
+  const { refs, scanned } = gatherStaticImageRefs(html, pageUrl);
+  const scored = scoreAndCollect(refs, pageUrl, brand, name, rejectedReasons);
+  const prefiltered = scored.slice(0, MAX_CANDIDATES);
+  const clientRenderedShell = looksLikeClientRenderedShell(html, prefiltered.length);
+
+  return {
+    scanned,
+    prefiltered,
+    rejectedReasons,
+    diagnostic: resolveDiagnostic(prefiltered, scanned, clientRenderedShell),
+    clientRenderedShell
   };
+}
 
-  const imgTags = [...html.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]).slice(0, MAX_SCAN);
-  const seen = new Set<string>();
-  const scored: OfficialPageImgCandidate[] = [];
+async function fetchBoundedCss(href: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CSS_FETCH_TIMEOUT_MS);
+    const res = await fetch(href, {
+      signal: controller.signal,
+      headers: { Accept: "text/css,*/*;q=0.1", "User-Agent": "TheSmokeyVaultBot/1.0" },
+      redirect: "follow"
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (
+      ct
+      && !ct.includes("css")
+      && !ct.includes("text/plain")
+      && !ct.includes("octet-stream")
+      && !/\.css(\?|$)/i.test(href)
+    ) {
+      return null;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength > MAX_CSS_BYTES) {
+      return buf.subarray(0, MAX_CSS_BYTES).toString("utf8");
+    }
+    return buf.toString("utf8");
+  } catch {
+    return null;
+  }
+}
 
-  for (const tag of imgTags) {
-    const alt = attr(tag, "alt");
-    const width = parseDimension(attr(tag, "width"));
-    const height = parseDimension(attr(tag, "height"));
-    const rawUrls = [
-      attr(tag, "src"),
-      attr(tag, "data-src"),
-      attr(tag, "data-lazy-src"),
-      attr(tag, "data-original"),
-      ...parseSrcsetUrls(attr(tag, "srcset"), pageUrl),
-      ...parseSrcsetUrls(attr(tag, "data-srcset"), pageUrl)
-    ];
+/**
+ * Async variant that also fetches a few linked stylesheets for background-image URLs.
+ */
+export async function extractOfficialPageImgCandidatesAsync(
+  html: string,
+  pageUrl: string,
+  options: {
+    brand?: string | null;
+    name?: string | null;
+    fetchLinkedCss?: boolean;
+  } = {}
+): Promise<OfficialPageImgScanResult> {
+  const brand = String(options.brand ?? "");
+  const name = String(options.name ?? "");
+  const rejectedReasons: Record<string, number> = {};
+  const fetchLinkedCss = options.fetchLinkedCss !== false;
 
-    for (const raw of rawUrls) {
-      const url = absolutize(raw, pageUrl);
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
+  const { refs, scanned: baseScanned } = gatherStaticImageRefs(html, pageUrl);
+  let scanned = baseScanned;
 
-      const decoration = isLikelyPageDecoration({ url, alt, width, height });
-      if (decoration.reject) {
-        bump(decoration.reason || "decoration");
-        continue;
+  if (fetchLinkedCss) {
+    let pageOrigin = "";
+    try {
+      pageOrigin = new URL(pageUrl).origin;
+    } catch {
+      pageOrigin = "";
+    }
+    const cssHrefs: string[] = [];
+    for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
+      const tag = m[0];
+      const rel = attr(tag, "rel").toLowerCase();
+      if (!/\bstylesheet\b/.test(rel)) continue;
+      const href = attr(tag, "href");
+      if (!href) continue;
+      const abs = absolutize(href, pageUrl);
+      if (!abs) continue;
+      try {
+        const u = new URL(abs);
+        if (pageOrigin && u.origin === pageOrigin) cssHrefs.push(abs);
+        else if (/product|theme|main|app|hero/i.test(u.pathname)) cssHrefs.push(abs);
+      } catch {
+        /* skip */
       }
-
-      const hint = productScore({ url, alt, brand, name, width, height });
-      // Require at least a weak product/brand signal OR decent size without chrome.
-      if (hint.score < 2) {
-        bump("weak_product_signal");
-        continue;
+      if (cssHrefs.length >= MAX_LINKED_CSS) break;
+    }
+    for (const href of cssHrefs.slice(0, MAX_LINKED_CSS)) {
+      const css = await fetchBoundedCss(href);
+      if (!css) continue;
+      for (const u of extractCssBackgroundUrls(css, href)) {
+        scanned += 1;
+        refs.push({ url: u, alt: "css-background", width: null, height: null });
       }
-
-      scored.push({
-        url,
-        sourceUrl: pageUrl,
-        alt,
-        width,
-        height,
-        scoreHint: hint.score,
-        reason: hint.reason
-      });
     }
   }
 
-  scored.sort((a, b) => b.scoreHint - a.scoreHint);
+  const scored = scoreAndCollect(refs, pageUrl, brand, name, rejectedReasons);
+  const prefiltered = scored.slice(0, MAX_CANDIDATES);
+  const clientRenderedShell = looksLikeClientRenderedShell(html, prefiltered.length);
+
   return {
-    scanned: Math.min(imgTags.length, MAX_SCAN),
-    prefiltered: scored.slice(0, MAX_CANDIDATES),
-    rejectedReasons
+    scanned,
+    prefiltered,
+    rejectedReasons,
+    diagnostic: resolveDiagnostic(prefiltered, scanned, clientRenderedShell),
+    clientRenderedShell
   };
 }

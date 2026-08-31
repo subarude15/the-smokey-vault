@@ -116,6 +116,29 @@ export function metadataOutcomeToJobStatusLabel(
   }
 }
 
+/**
+ * Wording for the most recent completed metadata *run*, distinct from bottle completeness.
+ * A search that found nothing new is not an overall metadata failure when the bottle is Partial.
+ */
+export function metadataLastRunLabel(options: {
+  bottleOutcome: MetadataOutcomeLabel;
+  stored: MetadataJobResultPayload | null;
+  jobFailed?: boolean;
+}): string | null {
+  if (options.jobFailed) return "Failed";
+  const stored = options.stored;
+  if (!stored) return null;
+  if (stored.updated.length > 0) {
+    const n = stored.updated.length;
+    return `Updated ${n} field${n === 1 ? "" : "s"}`;
+  }
+  // Successful completion with zero new fields.
+  if (options.bottleOutcome === "partial" || options.bottleOutcome === "complete") {
+    return "No new data found";
+  }
+  return "No result";
+}
+
 export function buildMetadataJobResultPayload(options: {
   requested: string[];
   before: BottleCandidate;

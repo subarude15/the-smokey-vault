@@ -23,7 +23,7 @@ import {
   extractStructuredProductFacts,
   fetchBoundedPageHtml
 } from "./page-extract.js";
-import { extractOfficialPageImgCandidates } from "./official-page-images.js";
+import { extractOfficialPageImgCandidatesAsync } from "./official-page-images.js";
 import {
   evaluateCandidate,
   hardRejectCandidate,
@@ -370,8 +370,8 @@ export async function executeImageEnrichment(
                 reason: "official_page_no_image_metadata",
                 sourceUrls: [hit.url]
               });
-              // Bounded <img> fallback on authoritative pages only.
-              const imgScan = extractOfficialPageImgCandidates(html, hit.url, {
+              // Bounded static HTML fallback (img/picture/preload/CSS) — no JS render.
+              const imgScan = await extractOfficialPageImgCandidatesAsync(html, hit.url, {
                 brand: candidate.brand.value,
                 name: candidate.name.value
               });
@@ -379,13 +379,27 @@ export async function executeImageEnrichment(
                 stage: "official_page_img_scan",
                 status: imgScan.scanned ? "ok" : "no_result",
                 candidateCount: imgScan.scanned,
-                reason: `${imgScan.scanned} images found`,
+                reason: imgScan.clientRenderedShell
+                  ? "official_page_client_rendered: static HTML contained no product image assets"
+                  : `${imgScan.scanned} image refs found`,
                 sourceUrls: [hit.url]
               });
+              if (imgScan.diagnostic === "official_page_client_rendered") {
+                stages.push({
+                  stage: "official_page_client_rendered",
+                  status: "no_result",
+                  reason: "static HTML contained no product image assets",
+                  sourceUrls: [hit.url]
+                });
+              }
               const rejectBlob = Object.entries(imgScan.rejectedReasons)
                 .map(([k, v]) => `${k}:${v}`)
                 .join(",")
                 .slice(0, 160);
+              const emptyReason =
+                imgScan.diagnostic === "official_page_client_rendered"
+                  ? "official_page_client_rendered"
+                  : rejectBlob || imgScan.diagnostic || "logos_or_small_assets_only";
               stages.push({
                 stage: "official_page_img_prefilter",
                 status: imgScan.prefiltered.length ? "ok" : "no_result",
@@ -393,7 +407,7 @@ export async function executeImageEnrichment(
                 acceptedCount: imgScan.prefiltered.length,
                 reason: imgScan.prefiltered.length
                   ? `${imgScan.prefiltered.length} candidates`
-                  : rejectBlob || "logos_or_small_assets_only",
+                  : emptyReason,
                 sourceUrls: [hit.url]
               });
               for (const img of imgScan.prefiltered) {

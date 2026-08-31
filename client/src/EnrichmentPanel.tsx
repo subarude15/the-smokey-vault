@@ -18,6 +18,8 @@ export type JobView = {
   attempts: number;
   lastError: string | null;
   diagnosticSummary?: string | null;
+  lastRunLabel?: string | null;
+  stillMissing?: string[];
   diagnostics?: {
     jobType?: string;
     noResultReason?: string | null;
@@ -310,6 +312,14 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
             <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
               <span>{jobTypeDisplay(job.type)}</span>
               <strong>{jobStatusDisplay(job.statusLabel)}</strong>
+              {job.type === "metadata" && job.lastRunLabel ? (
+                <small className="enrichment-last-run">Last run: {textChild(job.lastRunLabel)}</small>
+              ) : null}
+              {job.type === "metadata" && job.stillMissing?.length ? (
+                <small className="enrichment-still-missing">
+                  Still missing: {job.stillMissing.map((f) => textChild(f)).join(", ")}
+                </small>
+              ) : null}
               {job.lastError && job.statusLabel === "failed" ? (
                 <small title={job.lastError}>Attempt {job.attempts}</small>
               ) : null}
