@@ -34,6 +34,8 @@ import {
   upsertProductImage
 } from "./ingestion/jobs/index.js";
 import { planEnrichment } from "./ingestion/enrichment/index.js";
+import { saveToCache } from "./ingestion/catalogs/cola-cache-store.js";
+import { saveBarcodeCacheEntry } from "./barcode_cache.js";
 import { db } from "./db.js";
 
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
@@ -55,6 +57,8 @@ function cleanup() {
   clearProductContentForTests();
   clearProductImagesForTests();
   db.prepare(`DELETE FROM spirits WHERE upc LIKE '${PREFIX}%' OR upc = ?`).run(BALVENIE_FIXTURE.upc);
+  db.prepare(`DELETE FROM cola_cache WHERE upc LIKE '${PREFIX}%' OR upc = ?`).run(BALVENIE_FIXTURE.upc);
+  db.prepare(`DELETE FROM barcode_cache WHERE upc LIKE '${PREFIX}%' OR upc = ?`).run(BALVENIE_FIXTURE.upc);
 }
 
 test("hierarchical liquor taxonomy normalizes to canonical spirit category", () => {
@@ -254,12 +258,44 @@ test("tasting-note no_result status behaves correctly", () => {
 
 test("maintenance preview counts actual complete vs no_result correctly", () => {
   cleanup();
-  // Actually complete bottle
+  // Actually complete bottle — shelf + cache-only metadata + content + image
+  const upcComplete = `${PREFIX}000005`;
   const complete = db.prepare(`
     INSERT INTO spirits (name, brand, category, abv, volume_ml, upc, image_url)
     VALUES ('Preview Complete', 'Brand', 'Whiskey', 45, 750, ?, '')
-  `).run(`${PREFIX}0005`);
+  `).run(upcComplete);
   const completeId = Number(complete.lastInsertRowid);
+  saveToCache(
+    {
+      upc: upcComplete,
+      name: "Preview Complete",
+      brand: "Brand",
+      category: "Whiskey",
+      abv: 45,
+      image_url: null,
+      fill_level_percent: 100,
+      bottle_count: 1,
+      notes: null,
+      volume_ml: 750,
+      product_type: "spirit",
+      ttb_id: "TTB-PC-1",
+      origin: "Kentucky",
+      approval_date: null
+    },
+    null,
+    null,
+    "cola_cloud"
+  );
+  saveBarcodeCacheEntry({
+    upc: upcComplete,
+    name: "Preview Complete",
+    brand: "Brand",
+    category: "Whiskey",
+    abv: 45,
+    proof: 90,
+    volume_ml: 750,
+    source: "enrichment"
+  });
   upsertProductContent({
     entityType: "spirits",
     entityId: completeId,
@@ -278,20 +314,25 @@ test("maintenance preview counts actual complete vs no_result correctly", () => 
     verified: true
   });
   markJobCompleted(
-    enqueueMetadataJob({ entityType: "spirits", entityId: completeId, upc: `${PREFIX}0005` }).job.id
+    enqueueMetadataJob({ entityType: "spirits", entityId: completeId, upc: upcComplete }).job.id,
+    {
+      requested: ["category", "abv", "proof", "volume_ml", "origin", "ttb_id"],
+      updated: ["abv", "proof", "origin", "ttb_id"],
+      unresolved: []
+    }
   );
 
   // No-result image + tasting (metadata filled)
   const noResult = db.prepare(`
     INSERT INTO spirits (name, brand, category, abv, volume_ml, upc, image_url)
     VALUES ('Preview NoResult', 'Brand', 'Whiskey', 45, 750, ?, '')
-  `).run(`${PREFIX}0006`);
+  `).run(`${PREFIX}000006`);
   const noResultId = Number(noResult.lastInsertRowid);
   markJobCompleted(
-    enqueueImageJob({ entityType: "spirits", entityId: noResultId, upc: `${PREFIX}0006` }).job.id
+    enqueueImageJob({ entityType: "spirits", entityId: noResultId, upc: `${PREFIX}000006` }).job.id
   );
   markJobCompleted(
-    enqueueTastingNotesJob({ entityType: "spirits", entityId: noResultId, upc: `${PREFIX}0006` }).job.id
+    enqueueTastingNotesJob({ entityType: "spirits", entityId: noResultId, upc: `${PREFIX}000006` }).job.id
   );
 
   const preview = previewEnrichmentBackfill();

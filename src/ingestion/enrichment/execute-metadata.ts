@@ -116,12 +116,14 @@ function applyDeterministicDerivations(
   const wantProof = targets.includes("proof") && isUnresolvedField(candidate.proof);
   const wantAbv = targets.includes("abv") && isUnresolvedField(candidate.abv);
 
-  if (wantProof && !isUnresolvedField(candidate.abv) && candidate.abv.confidence >= TRUSTED_MIN) {
+  // Derive from any resolved peer (including web MEDIUM). After persist, vault reload
+  // is trusted; requiring TRUSTED_MIN here blocked same-run ABV→proof from web extracts.
+  if (wantProof && !isUnresolvedField(candidate.abv)) {
     const derived = field(proofFromAbv(candidate.abv.value as number), candidate.abv.source, candidate.abv.confidence);
     applyMerge(candidate, "proof", derived, conflicts);
   }
 
-  if (wantAbv && !isUnresolvedField(candidate.proof) && candidate.proof.confidence >= TRUSTED_MIN) {
+  if (wantAbv && !isUnresolvedField(candidate.proof)) {
     const derived = field(abvFromProof(candidate.proof.value as number), candidate.proof.source, candidate.proof.confidence);
     applyMerge(candidate, "abv", derived, conflicts);
   }
@@ -174,17 +176,21 @@ function summarize(
   for (const name of targets) {
     const afterField = candidate[name] as ProductField<unknown>;
     const beforeField = before[name] as ProductField<unknown>;
+    const improved =
+      (isUnresolvedField(beforeField) && !isUnresolvedField(afterField))
+      || (
+        !isUnresolvedField(afterField)
+        && (beforeField.value !== afterField.value || beforeField.confidence < afterField.confidence)
+      );
+
     if (isUnresolvedField(afterField) || afterField.confidence < TRUSTED_MIN) {
       unresolved.push(name);
     } else {
       completed.push(name);
-      if (
-        isUnresolvedField(beforeField)
-        || beforeField.value !== afterField.value
-        || beforeField.confidence < afterField.confidence
-      ) {
-        updated.push(name);
-      }
+    }
+    // Progress includes usable fills below TRUSTED_MIN (e.g. web MEDIUM) that still persist.
+    if (improved && !isUnresolvedField(afterField)) {
+      updated.push(name);
     }
   }
   return { candidate, requested: [...targets], completed, unresolved, updated, conflicts, errors };

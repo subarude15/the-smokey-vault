@@ -121,8 +121,6 @@ function parseExtracted(
       out[name] = normalizeCanonicalVolumeMl(value);
       continue;
     }
-    const n = typeof value === "number" ? value : Number.parseFloat(String(value));
-    out[name] = Number.isFinite(n) ? n : null;
   }
   return out;
 }

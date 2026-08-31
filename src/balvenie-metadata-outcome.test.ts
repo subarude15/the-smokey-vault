@@ -28,12 +28,11 @@ import {
   persistMetadataImprovements,
   previewEnrichmentBackfill,
   queueEnrichmentBackfill,
-  shouldScheduleMetadataEnrichment,
-  upsertProductImage
+  shouldScheduleMetadataEnrichment
 } from "./ingestion/jobs/index.js";
 import { saveToCache } from "./ingestion/catalogs/cola-cache-store.js";
-import { candidateFromProduct, field } from "./ingestion/candidate/index.js";
-import { CONFIDENCE } from "./ingestion/candidate/types.js";
+import { saveBarcodeCacheEntry } from "./barcode_cache.js";
+import { candidateFromProduct } from "./ingestion/candidate/index.js";
 
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
 
@@ -116,10 +115,16 @@ test("1. completed metadata + all recommended fields satisfied = Complete", () =
     "cola_cloud"
   );
   // barcode_cache carries proof for overlay
-  db.prepare(`
-    INSERT INTO barcode_cache (upc, name, brand, category, abv, proof, volume_ml, source)
-    VALUES (?, ?, ?, 'Whiskey', 43, 86, 750, 'enrichment')
-  `).run(UPC, spirit.name, spirit.brand);
+  saveBarcodeCacheEntry({
+    upc: UPC,
+    name: String(spirit.name),
+    brand: String(spirit.brand),
+    category: "Whiskey",
+    abv: 43,
+    proof: 86,
+    volume_ml: 750,
+    source: "enrichment"
+  });
 
   const job = enqueueMetadataJob({ entityType: "spirits", entityId: id, upc: UPC }).job;
   markJobCompleted(job.id, {
