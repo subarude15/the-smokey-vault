@@ -12,7 +12,7 @@
     "build:client": "vite build --config client/vite.config.ts",
     "start": "node dist/server.js",
     "test": "tsx --import ./src/test-setup.ts --test src/*.test.ts src/ingestion/*.test.ts src/ingestion/catalogs/*.test.ts src/ingestion/candidate/*.test.ts src/ingestion/enrichment/*.test.ts src/ingestion/jobs/*.test.ts",
-    "test:catalog-import-runtime": "tsx --import ./src/test-setup.ts --test src/catalog-import-runtime.test.ts",
+    "test:catalog-import-runtime": "CATALOG_IMPORT_RUNTIME=1 tsx --import ./src/test-setup.ts --test src/catalog-import-runtime.test.ts",
     "verify:catalog-import-docker": "bash scripts/verify-catalog-import-runtime.sh",
     "import:iowa": "tsx src/import-iowa.ts",
     "catalog:generate-fixtures": "node dist/generate-catalog-import-fixtures.js",

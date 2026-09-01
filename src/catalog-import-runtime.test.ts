@@ -62,7 +62,7 @@ test("exceljs resolves from production node_modules (PA imports)", () => {
   assert.ok(existsSync(exceljsPath));
 });
 
-test("compiled catalog importers run via node dist and share one DB", () => {
+test("compiled catalog importers run via node dist and share one DB", { skip: process.env.CATALOG_IMPORT_RUNTIME !== "1" }, () => {
   assertDistBuilt();
 
   const workDir = mkdtempSync(join(tmpdir(), "catalog-import-runtime-"));
