@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import * as XLSX from "xlsx";
+import { writeExcelMatrix } from "./government/excel-matrix.js";
 import {
   CONFIDENCE,
   PRODUCT_FIELD_SOURCES,
@@ -102,10 +102,10 @@ async function withGovDbAsync<T>(fn: (dbPath: string) => Promise<T>): Promise<T>
   }
 }
 
-function writePaWorkbook(
+async function writePaWorkbook(
   rows: Array<Record<string, unknown> & { upcs?: string[] }>,
   filePath: string
-): void {
+): Promise<void> {
   const aoa: unknown[][] = [[...PA_EXPECTED_HEADERS]];
   for (const row of rows) {
     const upcs = row.upcs ?? ["", "", "", "", ""];
@@ -117,9 +117,7 @@ function writePaWorkbook(
       })
     );
   }
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(aoa), "Sheet1");
-  XLSX.writeFile(book, filePath);
+  await writeExcelMatrix(aoa, filePath);
 }
 
 function marieRows(): Array<Record<string, unknown> & { upcs?: string[] }> {
@@ -295,7 +293,7 @@ function stubProduct(
   };
 }
 
-test("PA expected headers include five UPC columns and trailing Promotion Retail space", () => {
+test("PA expected headers include five UPC columns and trailing Promotion Retail space", async () => {
   const upcIndexes = PA_EXPECTED_HEADERS.map((h, i) => (h === "UPC" ? i : -1)).filter(
     (i) => i >= 0
   );
@@ -304,11 +302,11 @@ test("PA expected headers include five UPC columns and trailing Promotion Retail
   assert.equal(PA_EXPECTED_HEADERS.length, 34);
 });
 
-test("validatePaHeaders accepts the 34-column signature", () => {
+test("validatePaHeaders accepts the 34-column signature", async () => {
   assert.doesNotThrow(() => validatePaHeaders([...PA_EXPECTED_HEADERS]));
 });
 
-test("mapPaRow renames five UPC columns by ordinal and keeps Promotion Retail", () => {
+test("mapPaRow renames five UPC columns by ordinal and keeps Promotion Retail", async () => {
   let upcSeen = 0;
   const cells = PA_EXPECTED_HEADERS.map((h) => {
     if (h === "UPC") {
@@ -331,11 +329,11 @@ test("mapPaRow renames five UPC columns by ordinal and keeps Promotion Retail", 
   assert.equal(mapped.promotion_retail, "12.34");
 });
 
-test("PLCB SCC Item is the PA raw-row identity with extraction date", () => {
+test("PLCB SCC Item is the PA raw-row identity with extraction date", async () => {
   const file = path.join(os.tmpdir(), `pa-scc-${Date.now()}.xlsx`);
-  writePaWorkbook(marieRows(), file);
-  withGovDb((dbPath) => {
-    const stats = importPaSpiritsWorkbook(file, { dbPath });
+  await writePaWorkbook(marieRows(), file);
+  await withGovDbAsync(async (dbPath) => {
+    const stats = await importPaSpiritsWorkbook(file, { dbPath });
     assert.equal(stats.rowsImported, 2);
     assert.equal(stats.duplicateSourceItemIds, 1);
     const db = openGovernmentDb(dbPath);
@@ -362,11 +360,11 @@ test("PLCB SCC Item is the PA raw-row identity with extraction date", () => {
   fs.unlinkSync(file);
 });
 
-test("product consolidation merges matching Marie rows but not gift sets", () => {
+test("product consolidation merges matching Marie rows but not gift sets", async () => {
   const file = path.join(os.tmpdir(), `pa-consol-${Date.now()}.xlsx`);
-  writePaWorkbook([...marieRows(), giftSetRow()], file);
-  withGovDb((dbPath) => {
-    const stats = importPaSpiritsWorkbook(file, { dbPath });
+  await writePaWorkbook([...marieRows(), giftSetRow()], file);
+  await withGovDbAsync(async (dbPath) => {
+    const stats = await importPaSpiritsWorkbook(file, { dbPath });
     assert.equal(stats.rowsImported, 3);
     assert.equal(stats.productsNormalized, 2);
     assert.equal(isGiftOrSpecialtyPackage("Marie Duffau Armagnac Napoleon Gift Set"), true);
@@ -393,18 +391,18 @@ test("13-digit EAN-13 and 14-digit GTIN-14 typing", () => {
   assert.equal(typeof gtin14.checkDigitValid, "boolean");
 });
 
-test("8-digit GTIN-8 validation helper", () => {
+test("8-digit GTIN-8 validation helper", async () => {
   assert.equal(validateGtinCheckDigit("96385074"), true);
   assert.equal(normalizeGovernmentBarcode("96385074").gtinType, "gtin8");
 });
 
-test("9-digit barcode is flagged for review", () => {
+test("9-digit barcode is flagged for review", async () => {
   const n = normalizeGovernmentBarcode("806864821");
   assert.equal(n.gtinType, null);
   assert.ok(n.qualityFlags.includes("nine_digit_review"));
 });
 
-test("UPC-A and zero-prefixed EAN-13 share comparison key when valid", () => {
+test("UPC-A and zero-prefixed EAN-13 share comparison key when valid", async () => {
   const upc = "036000291452";
   assert.equal(validateGtinCheckDigit(upc), true);
   const ean = `0${upc}`;
@@ -416,13 +414,13 @@ test("UPC-A and zero-prefixed EAN-13 share comparison key when valid", () => {
   );
 });
 
-test("scientific notation barcode is rejected rather than invented", () => {
+test("scientific notation barcode is rejected rather than invented", async () => {
   const n = normalizeGovernmentBarcode("8.06864821e+11");
   assert.equal(n.usable, false);
   assert.ok(n.qualityFlags.includes("scientific_precision_lost"));
 });
 
-test("PA spirits taxonomy maps Brandy-Cognac to Armagnac", () => {
+test("PA spirits taxonomy maps Brandy-Cognac to Armagnac", async () => {
   const t = mapPaSpiritsTaxonomy({
     divisionName: "Stock Spirits",
     groupName: "Brandy-Cognac",
@@ -433,7 +431,7 @@ test("PA spirits taxonomy maps Brandy-Cognac to Armagnac", () => {
   assert.equal(t.normalizedSubcategory, "Armagnac");
 });
 
-test("PA wines taxonomy preserves group/class hierarchy", () => {
+test("PA wines taxonomy preserves group/class hierarchy", async () => {
   const t = mapPaWinesTaxonomy({
     divisionName: "Stock Wines",
     groupName: "Red Table",
@@ -444,13 +442,13 @@ test("PA wines taxonomy preserves group/class hierarchy", () => {
   assert.equal(t.normalizedSubcategory, "Cabernet Sauvignon");
 });
 
-test("Iowa taxonomy maps whiskey categories", () => {
+test("Iowa taxonomy maps whiskey categories", async () => {
   const t = mapIowaTaxonomy("American Whiskies");
   assert.equal(t.domain, "spirit");
   assert.ok(t.normalizedFamily);
 });
 
-test("volume L to ml parsing and 748 ml preserved", () => {
+test("volume L to ml parsing and 748 ml preserved", async () => {
   assert.equal(parseGovernmentVolume("1.75 L").volumeMl, 1750);
   assert.equal(parseGovernmentVolume("1 L").volumeMl, 1000);
   assert.equal(parseGovernmentVolume("750 ml").volumeMl, 750);
@@ -459,7 +457,7 @@ test("volume L to ml parsing and 748 ml preserved", () => {
   assert.equal(odd.volumeRaw, "748 ml");
 });
 
-test("PA proof parsing and Not Found brand", () => {
+test("PA proof parsing and Not Found brand", async () => {
   assert.equal(parsePaProof("80").proof, 80);
   assert.equal(parsePaProof("N/A").proof, null);
   assert.equal(parsePaProof("").proof, null);
@@ -467,11 +465,11 @@ test("PA proof parsing and Not Found brand", () => {
   assert.equal(normalizePaBrand("MARIE DUFFAU"), "MARIE DUFFAU");
 });
 
-test("PA spirits import: Marie Duffau + Everclear fixtures", () => {
+test("PA spirits import: Marie Duffau + Everclear fixtures", async () => {
   const file = path.join(os.tmpdir(), `pa-spirits-fix-${Date.now()}.xlsx`);
-  writePaWorkbook([...marieRows(), everclearRow()], file);
-  withGovDb((dbPath) => {
-    const stats = importPaSpiritsWorkbook(file, { dbPath });
+  await writePaWorkbook([...marieRows(), everclearRow()], file);
+  await withGovDbAsync(async (dbPath) => {
+    const stats = await importPaSpiritsWorkbook(file, { dbPath });
     assert.ok(stats.rowsImported >= 3);
     assert.ok(stats.productsNormalized >= 2);
     assert.ok(stats.barcodeAliases >= 3);
@@ -511,11 +509,11 @@ test("PA spirits import: Marie Duffau + Everclear fixtures", () => {
   fs.unlinkSync(file);
 });
 
-test("PA wines import: N/A proof, region, Not Found brand, 748 ml", () => {
+test("PA wines import: N/A proof, region, Not Found brand, 748 ml", async () => {
   const file = path.join(os.tmpdir(), `pa-wines-fix-${Date.now()}.xlsx`);
-  writePaWorkbook(wineRows(), file);
-  withGovDb((dbPath) => {
-    const stats = importPaWinesWorkbook(file, { dbPath });
+  await writePaWorkbook(wineRows(), file);
+  await withGovDbAsync(async (dbPath) => {
+    const stats = await importPaWinesWorkbook(file, { dbPath });
     assert.equal(stats.rowsImported, 2);
     assert.ok(stats.productsWithRegion >= 1);
 
@@ -566,7 +564,7 @@ test("Iowa government import maps into shared schema; vendor is not brand", asyn
   fs.unlinkSync(csv);
 });
 
-test("barcode collisions return multiple candidates or ambiguous when material conflict", () => {
+test("barcode collisions return multiple candidates or ambiguous when material conflict", async () => {
   const rows = [
     {
       ...everclearRow(),
@@ -583,9 +581,9 @@ test("barcode collisions return multiple candidates or ambiguous when material c
     }
   ];
   const file = path.join(os.tmpdir(), `pa-collide-${Date.now()}.xlsx`);
-  writePaWorkbook(rows, file);
-  withGovDb((dbPath) => {
-    importPaSpiritsWorkbook(file, { dbPath });
+  await writePaWorkbook(rows, file);
+  await withGovDbAsync(async (dbPath) => {
+    await importPaSpiritsWorkbook(file, { dbPath });
     const hit = searchGovernmentByBarcode("012345678905", { dbPath });
     assert.ok(hit.status === "ambiguous" || hit.status === "hit");
     if (hit.status === "ambiguous") {
@@ -595,7 +593,7 @@ test("barcode collisions return multiple candidates or ambiguous when material c
   fs.unlinkSync(file);
 });
 
-test("exact raw barcode match ranks above comparison-key-only match", () => {
+test("exact raw barcode match ranks above comparison-key-only match", async () => {
   const hits: RankableHit[] = [
     {
       product: stubProduct({
@@ -641,7 +639,7 @@ test("exact raw barcode match ranks above comparison-key-only match", () => {
 
 test("PA and Iowa agreement retains independent source products", async () => {
   const file = path.join(os.tmpdir(), `pa-agree-${Date.now()}.xlsx`);
-  writePaWorkbook(
+  await writePaWorkbook(
     [
       {
         ...everclearRow(),
@@ -664,7 +662,7 @@ test("PA and Iowa agreement retains independent source products", async () => {
     ])
   );
   await withGovDbAsync(async (dbPath) => {
-    importPaSpiritsWorkbook(file, { dbPath });
+    await importPaSpiritsWorkbook(file, { dbPath });
     await importIowaGovernmentCsv(csv, { dbPath });
     const db = openGovernmentDb(dbPath);
     const datasets = db
@@ -685,7 +683,7 @@ test("PA and Iowa agreement retains independent source products", async () => {
 
 test("PA/Iowa proof disagreement keeps both proofs auditable", async () => {
   const file = path.join(os.tmpdir(), `pa-disagree-${Date.now()}.xlsx`);
-  writePaWorkbook(
+  await writePaWorkbook(
     [
       {
         ...everclearRow(),
@@ -706,7 +704,7 @@ test("PA/Iowa proof disagreement keeps both proofs auditable", async () => {
     ])
   );
   await withGovDbAsync(async (dbPath) => {
-    importPaSpiritsWorkbook(file, { dbPath });
+    await importPaSpiritsWorkbook(file, { dbPath });
     await importIowaGovernmentCsv(csv, { dbPath });
     const hit = searchGovernmentByBarcode("080480160099", { dbPath });
     const db = openGovernmentDb(dbPath);
@@ -723,7 +721,7 @@ test("PA/Iowa proof disagreement keeps both proofs auditable", async () => {
   fs.unlinkSync(csv);
 });
 
-test("government HIGH confidence does not overwrite Vault/user VERY_HIGH", () => {
+test("government HIGH confidence does not overwrite Vault/user VERY_HIGH", async () => {
   assert.equal(SOURCE_CONFIDENCE.plcb_spirits, CONFIDENCE.HIGH);
   assert.equal(SOURCE_CONFIDENCE.plcb_wines, CONFIDENCE.HIGH);
   assert.equal(SOURCE_CONFIDENCE.iowa, CONFIDENCE.HIGH);
@@ -745,16 +743,16 @@ test("government HIGH confidence does not overwrite Vault/user VERY_HIGH", () =>
   assert.ok(merged.conflicts.some((c) => c.field === "name"));
 });
 
-test("government DB path helpers", () => {
+test("government DB path helpers", async () => {
   assert.ok(String(DEFAULT_GOVERNMENT_DB_PATH).includes("government"));
   assert.equal(typeof getGovernmentDbPath(), "string");
 });
 
-test("snapshot imports retain prior rows", () => {
+test("snapshot imports retain prior rows", async () => {
   const file1 = path.join(os.tmpdir(), `pa-snap1-${Date.now()}.xlsx`);
   const file2 = path.join(os.tmpdir(), `pa-snap2-${Date.now()}.xlsx`);
-  writePaWorkbook(marieRows(), file1);
-  writePaWorkbook(
+  await writePaWorkbook(marieRows(), file1);
+  await writePaWorkbook(
     marieRows().map((r) => ({
       ...r,
       "Extraction Date": "2026-04-01",
@@ -762,9 +760,9 @@ test("snapshot imports retain prior rows", () => {
     })),
     file2
   );
-  withGovDb((dbPath) => {
-    importPaSpiritsWorkbook(file1, { dbPath });
-    importPaSpiritsWorkbook(file2, { dbPath });
+  await withGovDbAsync(async (dbPath) => {
+    await importPaSpiritsWorkbook(file1, { dbPath });
+    await importPaSpiritsWorkbook(file2, { dbPath });
     const db = openGovernmentDb(dbPath);
     const sources = db.prepare(`SELECT COUNT(*) AS c FROM catalog_sources`).get() as {
       c: number;
@@ -779,20 +777,20 @@ test("snapshot imports retain prior rows", () => {
   fs.unlinkSync(file2);
 });
 
-test("hash stability for identical workbook bytes", () => {
+test("hash stability for identical workbook bytes", async () => {
   const file = path.join(os.tmpdir(), `pa-hash-${Date.now()}.xlsx`);
-  writePaWorkbook(marieRows(), file);
+  await writePaWorkbook(marieRows(), file);
   const a = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   const b = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   assert.equal(a, b);
   fs.unlinkSync(file);
 });
 
-test("importPaWorkbook accepts plcb_wines dataset", () => {
+test("importPaWorkbook accepts plcb_wines dataset", async () => {
   const file = path.join(os.tmpdir(), `pa-domain-${Date.now()}.xlsx`);
-  writePaWorkbook(wineRows(), file);
-  withGovDb((dbPath) => {
-    const stats = importPaWorkbook(file, { dataset: "plcb_wines", dbPath });
+  await writePaWorkbook(wineRows(), file);
+  await withGovDbAsync(async (dbPath) => {
+    const stats = await importPaWorkbook(file, { dataset: "plcb_wines", dbPath });
     assert.equal(stats.dataset, "plcb_wines");
     assert.ok(stats.rowsImported >= 1);
   });

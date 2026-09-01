@@ -8,14 +8,17 @@ import {
   printPaImportStats
 } from "./ingestion/catalogs/government/pa-import.js";
 
-function main() {
+async function main() {
   const fileArg = process.argv[2];
   if (!fileArg) {
     console.error("Usage: npm run catalog:import:pa-spirits -- /path/to/pa-spirits.xlsx");
     process.exit(1);
   }
-  const stats = importPaSpiritsWorkbook(resolve(fileArg));
+  const stats = await importPaSpiritsWorkbook(resolve(fileArg));
   console.log(printPaImportStats(stats));
 }
 
-main();
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

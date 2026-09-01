@@ -3,9 +3,9 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import * as XLSX from "xlsx";
 import { normalizeCanonicalAbv, normalizeCanonicalProof } from "../../../canonical-normalize.js";
 import { normalizeGovernmentBarcode } from "./barcode.js";
+import { readExcelMatrix } from "./excel-matrix.js";
 import {
   formatImportStats,
   getGovernmentDbPath,
@@ -93,19 +93,14 @@ function canConsolidate(existing: MutableProduct, row: PaRawRow): boolean {
   return true;
 }
 
-export function importPaWorkbook(filePath: string, options: PaImportOptions): GovernmentImportStats {
+export async function importPaWorkbook(
+  filePath: string,
+  options: PaImportOptions
+): Promise<GovernmentImportStats> {
   const abs = resolve(filePath);
   const fileBuf = readFileSync(abs);
   const fileHash = hashFileBuffer(fileBuf);
-  const workbook = XLSX.read(fileBuf, { type: "buffer", cellDates: false, raw: false });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error("PA workbook has no sheets");
-  const sheet = workbook.Sheets[sheetName]!;
-  const matrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
-    header: 1,
-    defval: "",
-    raw: false
-  }) as unknown as unknown[][];
+  const matrix = await readExcelMatrix(fileBuf);
   if (!matrix.length) throw new Error("PA workbook is empty");
 
   const headerRow = (matrix[0] ?? []).map((h) => String(h ?? ""));
@@ -410,17 +405,17 @@ export function importPaWorkbook(filePath: string, options: PaImportOptions): Go
   };
 }
 
-export function importPaSpiritsWorkbook(
+export async function importPaSpiritsWorkbook(
   filePath: string,
   options: { dbPath?: string } = {}
-): GovernmentImportStats {
+): Promise<GovernmentImportStats> {
   return importPaWorkbook(filePath, { ...options, dataset: "plcb_spirits" });
 }
 
-export function importPaWinesWorkbook(
+export async function importPaWinesWorkbook(
   filePath: string,
   options: { dbPath?: string } = {}
-): GovernmentImportStats {
+): Promise<GovernmentImportStats> {
   return importPaWorkbook(filePath, { ...options, dataset: "plcb_wines" });
 }
 

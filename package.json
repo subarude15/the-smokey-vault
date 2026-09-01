@@ -26,6 +26,7 @@
     "@zxing/browser": "latest",
     "@zxing/library": "^0.23.0",
     "better-sqlite3": "latest",
+    "exceljs": "^4.4.0",
     "fastify": "latest",
     "lucide-react": "latest",
     "nanoid": "latest",
@@ -34,7 +35,6 @@
     "react-dom": "latest",
     "react-router-dom": "latest",
     "sharp": "^0.34.5",
-    "xlsx": "^0.18.5",
     "zod": "latest"
   },
   "devDependencies": {
