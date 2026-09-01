@@ -116,6 +116,15 @@ export {
 } from "./official-page-images.js";
 
 export {
+  applyGovernmentCatalogEvidence,
+  logGovernmentEvidenceOutcome,
+  isGovernmentFieldSource,
+  governmentConfirmationEvidence,
+  type GovernmentEvidenceOutcome,
+  type GovernmentEvidenceApplyResult
+} from "./government-evidence.js";
+
+export {
   sanitizeJobDiagnostics,
   friendlyDiagnosticSummary,
   boundUrls,

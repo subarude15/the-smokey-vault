@@ -32,6 +32,8 @@ export type EnrichmentDiagnosticStage = {
   provider?: string;
   candidateCount?: number;
   acceptedCount?: number;
+  confirmedCount?: number;
+  conflictCount?: number;
   rejectedCount?: number;
   reason?: string;
   /** Bounded URL list (max ~12). */
@@ -99,6 +101,8 @@ export function sanitizeDiagnosticStage(stage: EnrichmentDiagnosticStage): Enric
     provider: stage.provider != null ? String(stage.provider).slice(0, 64) : undefined,
     candidateCount: stage.candidateCount,
     acceptedCount: stage.acceptedCount,
+    confirmedCount: stage.confirmedCount,
+    conflictCount: stage.conflictCount,
     rejectedCount: stage.rejectedCount,
     reason: stage.reason != null ? String(stage.reason).slice(0, 160) : undefined,
     sourceUrls: stage.sourceUrls ? boundUrls(stage.sourceUrls) : undefined

@@ -42,20 +42,40 @@ const defaultGovernmentLookupLog: GovernmentLookupLog = {
   }
 };
 
+export type GovernmentLookupLogExtras = {
+  outcome?: string;
+  source?: string | null;
+  contributedCount?: number;
+  confirmedCount?: number;
+  conflictCount?: number;
+  sourceItemId?: string | null;
+  matchedCode?: string | null;
+};
+
 export function logGovernmentLookupOutcome(
   logger: GovernmentLookupLog | undefined,
   upc: string,
-  lookup: GovernmentLookupResult
+  lookup: GovernmentLookupResult,
+  extras: GovernmentLookupLogExtras = {}
 ): void {
   const sink = logger ?? defaultGovernmentLookupLog;
   const winner = lookup.winner;
+  const outcome =
+    extras.outcome
+    ?? (lookup.status === "hit" ? "hit_contributed" : lookup.status);
   sink.info(
     {
       event: "government_catalog_lookup",
       status: lookup.status,
+      outcome,
       upc: boundUpcForLog(upc),
-      source: winner?.dataset ?? null,
-      candidateCount: Math.min(lookup.candidates.length, 12)
+      source: extras.source ?? winner?.dataset ?? null,
+      candidateCount: Math.min(lookup.candidates.length, 12),
+      ...(extras.contributedCount != null ? { contributedCount: extras.contributedCount } : {}),
+      ...(extras.confirmedCount != null ? { confirmedCount: extras.confirmedCount } : {}),
+      ...(extras.conflictCount != null ? { conflictCount: extras.conflictCount } : {}),
+      ...(extras.sourceItemId != null ? { sourceItemId: String(extras.sourceItemId).slice(0, 64) } : {}),
+      ...(extras.matchedCode != null ? { matchedCode: String(extras.matchedCode).slice(0, 32) } : {})
     },
     "Government catalog lookup"
   );

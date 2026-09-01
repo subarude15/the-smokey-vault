@@ -9,6 +9,20 @@ export type FieldView = {
   confidenceBand: string;
   confidenceLabel: string;
   status: "trusted" | "missing" | "low_confidence" | "review";
+  contributors?: Array<{
+    source: string;
+    sourceLabel: string;
+    confidence: number | null;
+    confidenceBand: string;
+    confidenceLabel: string;
+    role: "confirmation" | "conflict";
+    value?: string | number | null;
+    sourceItemId?: string | null;
+    matchedCode?: string | null;
+  }>;
+  note?: string | null;
+  sourceItemId?: string | null;
+  matchedCode?: string | null;
 };
 
 export type JobView = {
@@ -31,6 +45,8 @@ export type JobView = {
       provider?: string;
       candidateCount?: number;
       acceptedCount?: number;
+      confirmedCount?: number;
+      conflictCount?: number;
       rejectedCount?: number;
       reason?: string;
       sourceUrls?: string[];
@@ -238,6 +254,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
     field.confidence != null
       ? `${field.sourceLabel ?? "Unknown"} · ${field.confidenceLabel ?? "Unknown"} (${field.confidence})`
       : undefined;
+  const confirmations = (field.contributors ?? []).filter((c) => c.role === "confirmation");
   return (
     <div className={`enrichment-field enrichment-field-${field.status ?? "missing"}`} title={title}>
       <span className="enrichment-field-label">{label}</span>
@@ -256,6 +273,29 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
           </>
         )}
       </div>
+      {field.note ? <div className="enrichment-field-note">{field.note}</div> : null}
+      {confirmations.length ? (
+        <div className="enrichment-field-confirmations">
+          {confirmations.map((c) => (
+            <div
+              key={`${c.source}-${String(c.value)}`}
+              className="enrichment-field-confirmation"
+              title={
+                c.sourceItemId || c.matchedCode
+                  ? [
+                      c.sourceItemId ? `Source item ${c.sourceItemId}` : null,
+                      c.matchedCode ? `Matched ${c.matchedCode}` : null
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : undefined
+              }
+            >
+              Confirmed by {c.sourceLabel} · {c.confidenceLabel}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -510,6 +550,12 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                             {stage.query ? `: ${textChild(stage.query).slice(0, 80)}` : null}
                             {stage.candidateCount != null ? ` · ${stage.candidateCount} results` : null}
                             {stage.acceptedCount != null ? ` · ${stage.acceptedCount} accepted` : null}
+                            {stage.confirmedCount != null && stage.confirmedCount > 0
+                              ? ` · ${stage.confirmedCount} confirmed`
+                              : null}
+                            {stage.conflictCount != null && stage.conflictCount > 0
+                              ? ` · ${stage.conflictCount} conflict`
+                              : null}
                             {stage.reason ? ` · ${textChild(stage.reason)}` : null}
                           </li>
                         ))}
@@ -560,15 +606,31 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         <div className="enrichment-section">
           <span className="eyebrow">Conflicts</span>
           <div className="enrichment-conflicts">
-            {conflicts.map((c) => (
-              <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
-                <strong>{c.field}</strong>
-                <p>
-                  Kept <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
-                  <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
-                </p>
-              </div>
-            ))}
+            {conflicts.map((c) => {
+              const governmentCompeting =
+                c.competingSource === "plcb_spirits"
+                || c.competingSource === "plcb_wines"
+                || c.competingSource === "iowa";
+              return (
+                <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
+                  <strong>{c.field}</strong>
+                  <p>
+                    {governmentCompeting ? (
+                      <>
+                        Government conflict: {c.competingSourceLabel ?? c.competingSource} reported{" "}
+                        {c.field} <em>{textChild(c.competingValue) || "—"}</em>. Canonical value remains{" "}
+                        <em>{textChild(c.keptValue) || "—"}</em> from {c.keptSourceLabel ?? c.keptSource}.
+                      </>
+                    ) : (
+                      <>
+                        Kept <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
+                        <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
+                      </>
+                    )}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}
