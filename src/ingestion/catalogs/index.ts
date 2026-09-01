@@ -2,7 +2,7 @@
  * Barcode catalog stages used by lookupProduct.
  *
  * Spirits/wines order:
- *   vault → barcode_cache → beer_cache (n/a) → cola_cache → FWGS → COLA → OFF → upcitemdb → miss
+ *   vault → barcode_cache → Iowa → cola_cache → FWGS → COLA → OFF → upcitemdb → miss
  *
  * Beer order (existing behavior preserved):
  *   vault → barcode_cache → beer_cache → cola_cache → OFF → upcitemdb → COLA → miss
@@ -10,6 +10,7 @@
  */
 export { findInVault } from "./vault.js";
 export { tryBarcodeCache } from "./barcode-cache.js";
+export { tryIowaStage } from "./iowa.js";
 export { tryBeerCache, persistBeerHit } from "./beer-cache.js";
 export { resolveColaCache, type ColaCacheResolution } from "./cola-cache.js";
 export {

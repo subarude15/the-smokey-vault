@@ -139,6 +139,7 @@ const SOURCE_LABELS: Record<ProductFieldSource, string> = {
   barcode_cache: "Barcode cache",
   beer_cache: "Beer cache",
   cola_cache: "COLA cache",
+  iowa: "Iowa",
   fwgs: "FWGS",
   cola: "COLA",
   open_food_facts: "Open Food Facts",

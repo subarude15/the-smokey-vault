@@ -47,6 +47,7 @@ import {
   searchOpenFoodFactsByQuery,
   success,
   tryBarcodeCache,
+  tryIowaStage,
   tryBeerCache,
   tryBeerColaStage,
   tryFwgsStage,
@@ -98,6 +99,7 @@ export type BottleSearchHit = {
 export type SearchTable = BottleSearchHit["table"];
 
 export type LookupCatalogs = {
+  searchIowa?: (upc: string) => Promise<ProductSchema | null>;
   searchFwgs?: (upc: string) => Promise<FwgsProduct | null>;
   searchCola?: (upc: string, waitOnBurst?: boolean) => Promise<ColaSummary | null>;
   searchOff?: (upc: string) => Promise<ProductSchema | null>;
@@ -172,7 +174,7 @@ export async function searchCatalogBeerSuggestions(query: string, limit = 5) {
 /**
  * Public barcode orchestration entrypoint.
  *
- * Spirits/wines: vault → barcode_cache → cola_cache → FWGS → COLA → OFF → upcitemdb → miss
+ * Spirits/wines: vault → barcode_cache → Iowa → cola_cache → FWGS → COLA → OFF → upcitemdb → miss
  * Beer: vault → barcode_cache → beer_cache → cola_cache → OFF → upcitemdb → COLA → miss
  * Mixers: vault → barcode_cache → cola_cache → no_catalog (catalogs skipped)
  */
@@ -216,6 +218,16 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
     if (beerCached) {
       return await success("beer_cache", upc, beerCached, kindHint);
     }
+  }
+
+  // Iowa local catalog — spirits/wines only, before cola_cache / remote catalogs.
+  if (!beerPath && kind !== "mixers") {
+    const iowa = await tryIowaStage({
+      upc,
+      kindHint,
+      searchIowaFn: catalogs.searchIowa
+    });
+    if (iowa.hit) return iowa.hit;
   }
 
   let staleFallback: ProductSchema | null = null;

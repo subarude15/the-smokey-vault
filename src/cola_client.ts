@@ -69,6 +69,7 @@ export type ProductSchema = {
   ttb_id: string | null;
   origin: string | null;
   approval_date: string | null;
+  proof?: number | null;
 };
 
 export function getColaApiKey() {
@@ -348,7 +349,8 @@ export function productToInventoryFields(product: ProductSchema) {
     product_type: tax.productType ?? product.product_type,
     ttb_id: product.ttb_id,
     origin: product.origin,
-    approval_date: product.approval_date
+    approval_date: product.approval_date,
+    proof: product.proof ?? null
   };
 }
 

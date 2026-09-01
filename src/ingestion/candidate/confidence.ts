@@ -7,7 +7,7 @@ import { CONFIDENCE, type ProductFieldSource } from "./types.js";
  * | Band        | Score | When |
  * |-------------|-------|------|
  * | VERY_HIGH  | 0.95  | vault shelf hit, user edit, barcode_cache UPC memory |
- * | HIGH        | 0.80  | beer_cache, cola_cache, FWGS, COLA, vision label text |
+ * | HIGH        | 0.80  | beer_cache, cola_cache, Iowa, FWGS, COLA, vision label text |
  * | MEDIUM      | 0.55  | Open Food Facts, upcitemdb, generic web extraction |
  * | LOW         | 0.30  | unsupported LLM inference, unknown |
  * | NONE        | 0.00  | unresolved / empty field |
@@ -18,6 +18,7 @@ export const SOURCE_CONFIDENCE: Record<ProductFieldSource, number> = {
   user: CONFIDENCE.VERY_HIGH,
   beer_cache: CONFIDENCE.HIGH,
   cola_cache: CONFIDENCE.HIGH,
+  iowa: CONFIDENCE.HIGH,
   fwgs: CONFIDENCE.HIGH,
   cola: CONFIDENCE.HIGH,
   vision: CONFIDENCE.HIGH,
@@ -47,6 +48,8 @@ export function fieldSourceFromLookupSource(source: LookupSource): ProductFieldS
     case "beer_cache":
     case "catalog_beer":
       return "beer_cache";
+    case "iowa":
+      return "iowa";
     case "fwgs":
       return "fwgs";
     case "cola_cloud":
