@@ -25,7 +25,27 @@ To provision AI through Docker, set `AI_PROVIDER`, `AI_API_KEY` / `GEMINI_API_KE
 
 Live barcode scans try Fine Wine & Good Spirits first for liquor and wine (no API key), then one COLA Cloud list/barcode call if that hit is thin. Beer scans use vault → beer cache → Open Food Facts → upcitemdb, with COLA last. Beer name search uses vault → beer cache → [Catalog.beer](https://catalog.beer/signup) (free tier: 1,000 requests/month), with COLA only when results are sparse. Mixers skip catalogs. Set `COLA_API_KEY` for optional TTB records (free signup at [app.colacloud.us](https://app.colacloud.us/auth/register)). Set `CATALOG_BEER_API_KEY` for beer autocomplete and label-read suggestions. Optional `UNTAPPD_SCRAPE_ENABLED=true` can fetch label images from Untappd beer pages after you pick a match (personal use). `COLA_BURST_LIMIT` defaults to 10. Quota pauses COLA only; other catalogs still run. Overnight CSV drops on Import Review — list-only lookups, confirm Ready rows before anything is written to inventory.
 
-The SQLite database and daily snapshots live in `./data` locally, or in the NAS data mount in production. Camera streaming works on `localhost` or HTTPS; plain LAN HTTP automatically supports photo capture instead.
+The SQLite vault database and daily snapshots live in `./data` locally, or in the NAS data mount in production. Camera streaming works on `localhost` or HTTPS; plain LAN HTTP automatically supports photo capture instead.
+
+### Government alcohol catalogs (PA PLCB + Iowa)
+
+Runtime lookup and the import CLIs share one SQLite file:
+
+- Production Docker: `/app/data/government-catalog.sqlite` (`GOVERNMENT_CATALOG_DB_PATH`)
+- Local dev: `./data/government-catalog.sqlite`
+
+Compose dual-mounts the host data folder to both `/data` (vault DB) and `/app/data` (government catalogs) so imports survive image redeploys. The catalog DB is **not** baked into the image (`.dockerignore` excludes `data/`). Startup and Keeper → Enrichment services report the resolved path, whether `/app/data` is writable, whether the DB exists, and file size — they never auto-create or auto-import the catalog.
+
+After copying source files into the container (or onto the mounted volume), run:
+
+```bash
+# Paths below assume files were copied to /app/data/imports inside the container.
+docker exec -it smokey-vault sh -lc 'cd /app && npm run catalog:import:pa-spirits -- /app/data/imports/Wholesale_Spirits_Catalog_Full.xlsx'
+docker exec -it smokey-vault sh -lc 'cd /app && npm run catalog:import:pa-wines -- /app/data/imports/Wholesale_Wines_Catalog_Full.xlsx'
+docker exec -it smokey-vault sh -lc 'cd /app && npm run catalog:import:iowa -- /app/data/imports/iowa_liquor_products.csv'
+```
+
+Confirm Keeper → Settings → Enrichment services shows the government catalog as Ready (or check `/api/admin/enrichment/health`). Override with `GOVERNMENT_CATALOG_DB_PATH` / `GOVERNMENT_CATALOG_DATA_DIR` if needed; importers and lookup honor the same resolver.
 
 ## Local development
 
