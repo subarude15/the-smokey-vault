@@ -3,9 +3,19 @@
  * Observability only — does not create the DB or change lookup behavior.
  */
 import Database from "better-sqlite3";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { getGovernmentDbPath } from "./schema.js";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import {
+  getGovernmentDbPath,
+  PRODUCTION_GOVERNMENT_DATA_DIR
+} from "./schema.js";
 import { GOVERNMENT_DATASETS, type GovernmentDataset } from "./types.js";
 
 export type GovernmentDatasetSnapshotHealth = {
@@ -20,6 +30,12 @@ export type GovernmentDatasetSnapshotHealth = {
 export type GovernmentCatalogHealth = {
   exists: boolean;
   path: string;
+  /** Directory that should hold the catalog DB (prefer /app/data in production). */
+  dataDir: string;
+  /** Whether dataDir exists and is writable (never creates the directory). */
+  dataDirWritable: boolean;
+  /** Byte size of the catalog DB file when present. */
+  fileSizeBytes: number | null;
   totals: {
     sources: number;
     products: number;
@@ -49,15 +65,44 @@ function emptyByDataset(): Record<GovernmentDataset, GovernmentDatasetSnapshotHe
   ) as Record<GovernmentDataset, GovernmentDatasetSnapshotHealth>;
 }
 
+/** Probe writability without creating directories. Never leaves probe files behind. */
+export function probeDirectoryWritable(dir: string): boolean {
+  if (!existsSync(dir)) return false;
+  try {
+    accessSync(dir, constants.W_OK);
+    const probe = join(dir, `.gov-catalog-write-probe-${process.pid}-${Date.now()}`);
+    writeFileSync(probe, "ok");
+    unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function fileSizeBytes(path: string): number | null {
+  try {
+    if (!existsSync(path)) return null;
+    return Number(statSync(path).size);
+  } catch {
+    return null;
+  }
+}
+
 function baseHealth(
   path: string,
+  dataDir: string,
+  dataDirWritable: boolean,
   warning: string | null,
   lookupOperational: boolean,
-  exists: boolean
+  exists: boolean,
+  size: number | null = null
 ): GovernmentCatalogHealth {
   return {
     exists,
     path,
+    dataDir,
+    dataDirWritable,
+    fileSizeBytes: size,
     totals: { sources: 0, products: 0, barcodes: 0 },
     currentByDataset: emptyByDataset(),
     latestExtractedAt: null,
@@ -67,20 +112,43 @@ function baseHealth(
   };
 }
 
+function missingDbWarning(path: string, dataDir: string, dataDirWritable: boolean): string {
+  const parts = [
+    `Government catalog database is missing at ${path}.`,
+    "Import PA PLCB and/or Iowa catalogs before lookup can use them."
+  ];
+  if (!existsSync(dataDir)) {
+    parts.push(
+      `Data directory ${dataDir} does not exist — mount persistent storage at ${PRODUCTION_GOVERNMENT_DATA_DIR} (and/or set GOVERNMENT_CATALOG_DB_PATH).`
+    );
+  } else if (!dataDirWritable) {
+    parts.push(`Data directory ${dataDir} is not writable.`);
+  }
+  return parts.join(" ");
+}
+
 /**
  * Report government catalog DB presence, current snapshot counts, and lookup readiness.
- * Never creates the database file.
+ * Never creates the database file or data directory.
  */
 export function getGovernmentCatalogHealth(
   options: { dbPath?: string } = {}
 ): GovernmentCatalogHealth {
   const path = resolve(options.dbPath ?? getGovernmentDbPath());
+  // Always report the directory that owns the resolved DB file (importers write here).
+  const dataDir = dirname(path);
+  const dataDirWritable = probeDirectoryWritable(dataDir);
+  const size = fileSizeBytes(path);
+
   if (!existsSync(path)) {
     return baseHealth(
       path,
-      "Government catalog database is missing. Import PA PLCB and/or Iowa catalogs before lookup can use them.",
+      dataDir,
+      dataDirWritable,
+      missingDbWarning(path, dataDir, dataDirWritable),
       false,
-      false
+      false,
+      null
     );
   }
 
@@ -98,9 +166,12 @@ export function getGovernmentCatalogHealth(
     if (Number(tableCount?.n ?? 0) < 3) {
       return baseHealth(
         path,
+        dataDir,
+        dataDirWritable,
         "Government catalog database exists but is missing required tables.",
         false,
-        true
+        true,
+        size
       );
     }
 
@@ -176,14 +247,20 @@ export function getGovernmentCatalogHealth(
     ).get();
 
     const currentProducts = Number(currentProductCount?.n ?? 0);
-    const warning =
-      currentProducts === 0
-        ? "Government catalog database exists but has zero current products. Runtime lookup will miss until a catalog import marks a current snapshot."
-        : null;
+    let warning: string | null = null;
+    if (currentProducts === 0) {
+      warning =
+        "Government catalog database exists but has zero current products. Runtime lookup will miss until a catalog import marks a current snapshot.";
+    } else if (!dataDirWritable) {
+      warning = `Government catalog is readable but data directory ${dataDir} is not writable — imports will fail until the mount is fixed.`;
+    }
 
     return {
       exists: true,
       path,
+      dataDir,
+      dataDirWritable,
+      fileSizeBytes: size,
       totals: {
         sources: Number(totals?.sources ?? 0),
         products: Number(totals?.products ?? 0),
@@ -199,9 +276,12 @@ export function getGovernmentCatalogHealth(
     const message = error instanceof Error ? error.message : "Catalog probe failed";
     return baseHealth(
       path,
+      dataDir,
+      dataDirWritable,
       `Government catalog database exists but lookup is not operational (${message.slice(0, 160)}).`,
       false,
-      true
+      true,
+      size
     );
   } finally {
     try {
@@ -210,4 +290,25 @@ export function getGovernmentCatalogHealth(
       /* ignore */
     }
   }
+}
+
+/** Bounded startup/health log fields (no catalog payloads). */
+export function governmentCatalogHealthLogFields(
+  health: GovernmentCatalogHealth
+): Record<string, unknown> {
+  return {
+    path: health.path,
+    dataDir: health.dataDir,
+    dataDirWritable: health.dataDirWritable,
+    exists: health.exists,
+    fileSizeBytes: health.fileSizeBytes,
+    lookupOperational: health.lookupOperational,
+    warning: health.warning,
+    totals: health.totals,
+    currentProducts: {
+      plcb_spirits: health.currentByDataset.plcb_spirits.currentProducts,
+      plcb_wines: health.currentByDataset.plcb_wines.currentProducts,
+      iowa: health.currentByDataset.iowa.currentProducts
+    }
+  };
 }

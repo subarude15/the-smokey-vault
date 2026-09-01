@@ -42,6 +42,10 @@ import {
 } from "./ingestion/jobs/index.js";
 import { isEnrichmentEntityType } from "./ingestion/jobs/types.js";
 import { checkEnrichmentHealth } from "./ingestion/enrichment/health.js";
+import {
+  getGovernmentCatalogHealth,
+  governmentCatalogHealthLogFields
+} from "./ingestion/catalogs/government/status.js";
 import { isImportKind, isMissReason, isReadyLookup, type ImportKind, type ImportRowStatus, type MissReason } from "./lookup-shared.js";
 import { isColaConfigured } from "./cola_client.js";
 import { readImportPayload } from "./import_batch.js";
@@ -1651,6 +1655,16 @@ app.log.info(
   bootFallbacks.length ? "AI failover armed" : "No AI failover providers configured"
 );
 app.log.info({ configured: isBrewfatherConfigured() }, "Brewfather batch sync");
+
+try {
+  const govHealth = getGovernmentCatalogHealth();
+  app.log.info(
+    governmentCatalogHealthLogFields(govHealth),
+    "Government catalog health"
+  );
+} catch (error) {
+  app.log.warn({ error }, "Government catalog health probe failed");
+}
 
 if (!skipListen) {
   try {

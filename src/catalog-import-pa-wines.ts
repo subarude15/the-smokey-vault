@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CLI: npm run catalog:import:pa-wines -- file.xlsx
+ * CLI: npm run catalog:import:pa-wines -- file.xlsx  (production: node dist/catalog-import-pa-wines.js)
  */
 import { resolve } from "node:path";
 import {

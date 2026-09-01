@@ -29,6 +29,8 @@ export {
 } from "./lookup.js";
 export {
   getGovernmentCatalogHealth,
+  governmentCatalogHealthLogFields,
+  probeDirectoryWritable,
   type GovernmentCatalogHealth,
   type GovernmentDatasetSnapshotHealth
 } from "./status.js";

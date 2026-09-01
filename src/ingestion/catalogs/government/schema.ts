@@ -4,9 +4,40 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 
-export const DEFAULT_GOVERNMENT_DB_PATH = resolve("data/government-catalog.sqlite");
+/** Filename used under the resolved government data directory. */
+export const GOVERNMENT_CATALOG_FILENAME = "government-catalog.sqlite";
+
+/**
+ * Production persistent data directory for government catalogs.
+ * Docker mounts host storage at /app/data (same host folder as /data for the vault DB).
+ */
+export const PRODUCTION_GOVERNMENT_DATA_DIR = "/app/data";
+
+/** Local-dev relative default (cwd/data/...), for tests and documentation. */
+export const DEFAULT_GOVERNMENT_DB_PATH = resolve("data", GOVERNMENT_CATALOG_FILENAME);
+
+/**
+ * Resolve the government catalog data directory.
+ * Priority: GOVERNMENT_CATALOG_DATA_DIR → production /app/data → ./data
+ */
+export function getGovernmentDataDir(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.GOVERNMENT_CATALOG_DATA_DIR?.trim();
+  if (explicit) return isAbsolute(explicit) ? explicit : resolve(explicit);
+  if (env.NODE_ENV === "production") return PRODUCTION_GOVERNMENT_DATA_DIR;
+  return resolve("data");
+}
+
+/**
+ * Resolve the government catalog SQLite path used by importers and runtime lookup.
+ * Priority: GOVERNMENT_CATALOG_DB_PATH → <dataDir>/government-catalog.sqlite
+ */
+export function getGovernmentDbPath(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.GOVERNMENT_CATALOG_DB_PATH?.trim();
+  if (explicit) return isAbsolute(explicit) ? explicit : resolve(explicit);
+  return resolve(getGovernmentDataDir(env), GOVERNMENT_CATALOG_FILENAME);
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -97,10 +128,6 @@ CREATE INDEX IF NOT EXISTS idx_catalog_codes_raw
 
 let governmentDb: Database.Database | null = null;
 let governmentDbPath: string | null = null;
-
-export function getGovernmentDbPath(): string {
-  return process.env.GOVERNMENT_CATALOG_DB_PATH?.trim() || DEFAULT_GOVERNMENT_DB_PATH;
-}
 
 export function openGovernmentDb(path = getGovernmentDbPath()): Database.Database {
   const resolved = resolve(path);

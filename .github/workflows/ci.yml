@@ -36,3 +36,29 @@ jobs:
 
       - name: Typecheck + client/server build
         run: npm run build
+
+      - name: Catalog import runtime (dist CLIs)
+        run: npm run test:catalog-import-runtime
+
+  catalog-import-docker:
+    name: catalog-import-docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 make g++
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Docker runtime catalog import verification
+        run: bash scripts/verify-catalog-import-runtime.sh

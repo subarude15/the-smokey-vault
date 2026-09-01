@@ -16,6 +16,7 @@ services:
       NODE_ENV: production
       PORT: 8080
       DB_PATH: /data/smokeyvault.db
+      GOVERNMENT_CATALOG_DB_PATH: /app/data/government-catalog.sqlite
       SESSION_SECRET: ${SESSION_SECRET:-change-this-on-your-server}
       DEFAULT_PIN: ${DEFAULT_PIN:-1234}
       AI_PROVIDER: ${AI_PROVIDER:-}
@@ -30,4 +31,6 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       FWGS_DELAY_MS: ${FWGS_DELAY_MS:-400}
     volumes:
+      # Same host ./data folder at /data (vault) and /app/data (government catalogs).
       - ./data:/data
+      - ./data:/app/data

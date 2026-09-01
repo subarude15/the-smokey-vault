@@ -18,13 +18,17 @@ services:
     ports:
       - "6616:8080"
     volumes:
-      # App reads DB_PATH=/data/smokeyvault.db. The old /app/data mount
-      # left the live site on an empty internal volume.
+      # Vault DB lives at DB_PATH=/data/smokeyvault.db.
+      # Government catalogs prefer /app/data/government-catalog.sqlite.
+      # Dual-mount the same host folder so both paths are persistent and survive redeploy.
+      # (An empty /app/data-only mount previously left the live site on an unused volume.)
       - /volume1/docker/thesmokeyvault/data:/data
+      - /volume1/docker/thesmokeyvault/data:/app/data
     environment:
       NODE_ENV: production
       PORT: 8080
       DB_PATH: /data/smokeyvault.db
+      GOVERNMENT_CATALOG_DB_PATH: /app/data/government-catalog.sqlite
       # Public hostname sits behind the Synology reverse proxy.
       TRUST_PROXY: "true"
       SESSION_SECRET: ${SESSION_SECRET:-}

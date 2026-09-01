@@ -172,6 +172,9 @@ describe("enrichment dependency health helpers", () => {
       governmentCatalogHealth: () => ({
         exists: false,
         path: "/tmp/missing-government-catalog.sqlite",
+        dataDir: "/tmp",
+        dataDirWritable: true,
+        fileSizeBytes: null,
         totals: { sources: 0, products: 0, barcodes: 0 },
         currentByDataset: {
           plcb_spirits: { dataset: "plcb_spirits", currentSources: 0, currentProducts: 0, currentBarcodes: 0, extractedAt: null, importedAt: null },
@@ -256,6 +259,9 @@ describe("GET /api/admin/enrichment/health", () => {
     assert.ok(body.governmentCatalog);
     assert.equal(typeof body.governmentCatalog.exists, "boolean");
     assert.equal(typeof body.governmentCatalog.path, "string");
+    assert.equal(typeof body.governmentCatalog.dataDir, "string");
+    assert.equal(typeof body.governmentCatalog.dataDirWritable, "boolean");
+    assert.ok("fileSizeBytes" in body.governmentCatalog);
     assert.equal(typeof body.governmentCatalog.lookupOperational, "boolean");
     assert.ok(body.governmentCatalog.currentByDataset.plcb_spirits);
     assert.ok(body.governmentCatalog.currentByDataset.plcb_wines);

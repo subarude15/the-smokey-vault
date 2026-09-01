@@ -12,10 +12,13 @@
     "build:client": "vite build --config client/vite.config.ts",
     "start": "node dist/server.js",
     "test": "tsx --import ./src/test-setup.ts --test src/*.test.ts src/ingestion/*.test.ts src/ingestion/catalogs/*.test.ts src/ingestion/candidate/*.test.ts src/ingestion/enrichment/*.test.ts src/ingestion/jobs/*.test.ts",
+    "test:catalog-import-runtime": "CATALOG_IMPORT_RUNTIME=1 tsx --import ./src/test-setup.ts --test src/catalog-import-runtime.test.ts",
+    "verify:catalog-import-docker": "bash scripts/verify-catalog-import-runtime.sh",
     "import:iowa": "tsx src/import-iowa.ts",
-    "catalog:import:pa-spirits": "tsx src/catalog-import-pa-spirits.ts",
-    "catalog:import:pa-wines": "tsx src/catalog-import-pa-wines.ts",
-    "catalog:import:iowa": "tsx src/catalog-import-iowa.ts"
+    "catalog:generate-fixtures": "node dist/generate-catalog-import-fixtures.js",
+    "catalog:import:pa-spirits": "node dist/catalog-import-pa-spirits.js",
+    "catalog:import:pa-wines": "node dist/catalog-import-pa-wines.js",
+    "catalog:import:iowa": "node dist/catalog-import-iowa.js"
   },
   "dependencies": {
     "@fastify/cors": "latest",

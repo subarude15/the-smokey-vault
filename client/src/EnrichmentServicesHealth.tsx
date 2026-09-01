@@ -23,6 +23,9 @@ export type GovernmentDatasetSnapshotHealth = {
 export type GovernmentCatalogHealth = {
   exists: boolean;
   path: string;
+  dataDir: string;
+  dataDirWritable: boolean;
+  fileSizeBytes: number | null;
   totals: {
     sources: number;
     products: number;
@@ -101,6 +104,13 @@ function GovernmentCatalogPanel({ catalog }: { catalog: GovernmentCatalogHealth 
       </div>
       <div className="enrichment-health-host">{catalog.path}</div>
       <div className="enrichment-health-catalog-meta">
+        <div>
+          Data dir: {catalog.dataDir} ·{" "}
+          {catalog.dataDirWritable ? "writable" : "not writable"}
+          {catalog.fileSizeBytes != null
+            ? ` · ${(catalog.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB`
+            : ""}
+        </div>
         <div>
           Totals: {catalog.totals.sources.toLocaleString()} sources ·{" "}
           {catalog.totals.products.toLocaleString()} products ·{" "}
