@@ -27,3 +27,8 @@ export {
   governmentProductToSchema,
   type GovernmentStageResult
 } from "./lookup.js";
+export {
+  getGovernmentCatalogHealth,
+  type GovernmentCatalogHealth,
+  type GovernmentDatasetSnapshotHealth
+} from "./status.js";

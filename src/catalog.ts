@@ -4,6 +4,7 @@ import {
   canonicalWhiskeyTypeFromText,
   isCompatibleClassificationSpecialization,
   normalizeCanonicalAbv,
+  normalizeCanonicalProof,
   normalizeCanonicalTaxonomy,
   normalizeCanonicalVolumeMl,
   stripPackageTokensFromName
@@ -525,6 +526,9 @@ export function prepareSpiritWrite(body: Record<string, unknown>): Record<string
     next.abv = normalizeCanonicalAbv(next.abv, {
       productType: String(next.product_type ?? "spirit")
     });
+  }
+  if (next.proof !== undefined) {
+    next.proof = normalizeCanonicalProof(next.proof);
   }
   if (next.volume_ml !== undefined) {
     const volume = normalizeCanonicalVolumeMl(next.volume_ml);

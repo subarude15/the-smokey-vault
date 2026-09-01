@@ -1,6 +1,7 @@
 import { spiritFamilyFromLabel } from "./catalog.js";
 import {
   normalizeCanonicalAbv,
+  normalizeCanonicalProof,
   normalizeCanonicalTaxonomy,
   normalizeCanonicalVolumeMl,
   stripPackageTokensFromName
@@ -329,6 +330,7 @@ export function productToInventoryFields(product: ProductSchema) {
   const abv = normalizeCanonicalAbv(product.abv, {
     productType: product.product_type ?? tax.productType
   });
+  const proof = normalizeCanonicalProof(product.proof);
   const volume = normalizeCanonicalVolumeMl(product.volume_ml);
   const name = stripPackageTokensFromName(product.name || "");
   return {
@@ -350,7 +352,7 @@ export function productToInventoryFields(product: ProductSchema) {
     ttb_id: product.ttb_id,
     origin: product.origin,
     approval_date: product.approval_date,
-    proof: product.proof ?? null
+    proof: proof
   };
 }
 

@@ -34,7 +34,7 @@ export function placeholderProduct(upc: string) {
     name: "",
     brand: "",
     category: "Spirits",
-    abv: 0,
+    abv: null,
     image_url: "",
     notes: "",
     fill_level: 100,

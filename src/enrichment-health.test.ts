@@ -168,9 +168,27 @@ describe("enrichment dependency health helpers", () => {
         headers: { "content-type": "application/json" }
       });
     });
-    const health = await checkEnrichmentHealth();
+    const health = await checkEnrichmentHealth({
+      governmentCatalogHealth: () => ({
+        exists: false,
+        path: "/tmp/missing-government-catalog.sqlite",
+        totals: { sources: 0, products: 0, barcodes: 0 },
+        currentByDataset: {
+          plcb_spirits: { dataset: "plcb_spirits", currentSources: 0, currentProducts: 0, currentBarcodes: 0, extractedAt: null, importedAt: null },
+          plcb_wines: { dataset: "plcb_wines", currentSources: 0, currentProducts: 0, currentBarcodes: 0, extractedAt: null, importedAt: null },
+          iowa: { dataset: "iowa", currentSources: 0, currentProducts: 0, currentBarcodes: 0, extractedAt: null, importedAt: null }
+        },
+        latestExtractedAt: null,
+        latestImportedAt: null,
+        lookupOperational: false,
+        warning: "Government catalog database is missing."
+      })
+    });
     assert.equal(health.searxng.status, "connected");
     assert.equal(health.ollama.status, "connected");
+    assert.equal(health.governmentCatalog.exists, false);
+    assert.equal(health.governmentCatalog.lookupOperational, false);
+    assert.ok(health.governmentCatalog.warning);
     assert.ok(health.checkedAt);
   });
 
@@ -235,8 +253,16 @@ describe("GET /api/admin/enrichment/health", () => {
     assert.equal(body.searxng.status, "connected");
     assert.equal(body.ollama.status, "connected");
     assert.ok(body.searxng.host);
+    assert.ok(body.governmentCatalog);
+    assert.equal(typeof body.governmentCatalog.exists, "boolean");
+    assert.equal(typeof body.governmentCatalog.path, "string");
+    assert.equal(typeof body.governmentCatalog.lookupOperational, "boolean");
+    assert.ok(body.governmentCatalog.currentByDataset.plcb_spirits);
+    assert.ok(body.governmentCatalog.currentByDataset.plcb_wines);
+    assert.ok(body.governmentCatalog.currentByDataset.iowa);
     assert.ok(!JSON.stringify(body).includes("q=."));
     assert.ok(!JSON.stringify(body).toLowerCase().includes("password"));
+    assert.ok(!JSON.stringify(body.governmentCatalog).includes("raw_payload"));
     assert.ok(body.checkedAt);
   });
 
@@ -287,6 +313,7 @@ describe("enrichment health UI contracts", () => {
     assert.match(src, /Enrichment services/);
     assert.match(src, /SearXNG/);
     assert.match(src, /Ollama/);
+    assert.match(src, /Government catalog/);
     assert.match(src, /Check again/);
     assert.match(src, /\/admin\/enrichment\/health/);
     assert.match(src, /Connected/);
