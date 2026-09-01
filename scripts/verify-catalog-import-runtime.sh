@@ -33,12 +33,10 @@ echo "==> Starting container with dual /data + /app/data mount"
 docker run -d --name "$CONTAINER1" \
   -v "$DATA_DIR:/data" \
   -v "$DATA_DIR:/app/data" \
+  -v "$FIXTURES_DIR:/app/data/imports:ro" \
   -e NODE_ENV=production \
   -e GOVERNMENT_CATALOG_DB_PATH="$DB_PATH" \
   "$IMAGE" >/dev/null
-
-docker exec "$CONTAINER1" mkdir -p /app/data/imports
-docker cp "$FIXTURES_DIR/." "$CONTAINER1:/app/data/imports/"
 
 echo "==> Running PA spirits importer"
 docker exec "$CONTAINER1" sh -lc \
@@ -84,6 +82,7 @@ docker rm -f "$CONTAINER1" >/dev/null
 docker run -d --name "$CONTAINER2" \
   -v "$DATA_DIR:/data" \
   -v "$DATA_DIR:/app/data" \
+  -v "$FIXTURES_DIR:/app/data/imports:ro" \
   -e NODE_ENV=production \
   -e GOVERNMENT_CATALOG_DB_PATH="$DB_PATH" \
   "$IMAGE" >/dev/null
