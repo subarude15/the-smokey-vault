@@ -12,6 +12,8 @@ import { join } from "node:path";
  */
 const scratch = mkdtempSync(join(tmpdir(), "smokey-test-"));
 process.env.DB_PATH = join(scratch, `smokey-test-${Date.now()}.db`);
+/** Isolate government catalog from host/env imports during unit tests. */
+process.env.GOVERNMENT_CATALOG_DB_PATH = join(scratch, "government-catalog-test.sqlite");
 /** HTTP inject tests import the Fastify app; never bind a port or start workers during npm test. */
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
 

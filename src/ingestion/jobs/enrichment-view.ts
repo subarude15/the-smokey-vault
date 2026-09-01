@@ -22,6 +22,8 @@ import {
   type ProductFieldSource
 } from "../candidate/index.js";
 import { getFromCache } from "../catalogs/cola-cache-store.js";
+import { searchGovernmentByBarcode } from "../catalogs/government/lookup.js";
+import { applyGovernmentCatalogEvidence } from "../enrichment/government-evidence.js";
 import { planEnrichment } from "../enrichment/index.js";
 import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
@@ -54,6 +56,18 @@ export type ConfidenceBand = "very_high" | "high" | "medium" | "low" | "none";
 
 export type FieldViewStatus = "trusted" | "missing" | "low_confidence" | "review";
 
+export type FieldViewContributor = {
+  source: string;
+  sourceLabel: string;
+  confidence: number | null;
+  confidenceBand: ConfidenceBand;
+  confidenceLabel: string;
+  role: "confirmation" | "conflict";
+  value?: string | number | null;
+  sourceItemId?: string | null;
+  matchedCode?: string | null;
+};
+
 export type FieldView<T = string | number | null> = {
   value: T | null;
   source: string | null;
@@ -62,6 +76,12 @@ export type FieldView<T = string | number | null> = {
   confidenceBand: ConfidenceBand;
   confidenceLabel: string;
   status: FieldViewStatus;
+  /** Keeper-only supporting evidence (confirmations / conflicts). */
+  contributors?: FieldViewContributor[];
+  /** Optional secondary note, e.g. derived ABV from government proof. */
+  note?: string | null;
+  sourceItemId?: string | null;
+  matchedCode?: string | null;
 };
 
 export type ConflictView = {
@@ -139,8 +159,8 @@ const SOURCE_LABELS: Record<ProductFieldSource, string> = {
   barcode_cache: "Barcode cache",
   beer_cache: "Beer cache",
   cola_cache: "COLA cache",
-  plcb_spirits: "PA Spirits",
-  plcb_wines: "PA Wines",
+  plcb_spirits: "PLCB Spirits",
+  plcb_wines: "PLCB Wines",
   iowa: "Iowa",
   fwgs: "FWGS",
   cola: "COLA",
@@ -199,7 +219,7 @@ export function confidenceLabelForBand(band: ConfidenceBand): string {
 
 export function fieldViewFromProductField<T>(
   productField: ProductField<T> | null | undefined,
-  options: { inReview?: boolean } = {}
+  options: { inReview?: boolean; includeContributors?: boolean } = {}
 ): FieldView<T> {
   if (!productField || isUnresolvedField(productField)) {
     return {
@@ -216,7 +236,7 @@ export function fieldViewFromProductField<T>(
   let status: FieldViewStatus = "trusted";
   if (options.inReview) status = "review";
   else if (productField.confidence < TRUSTED_MIN) status = "low_confidence";
-  return {
+  const view: FieldView<T> = {
     value: productField.value,
     source: productField.source,
     sourceLabel: sourceLabel(productField.source),
@@ -225,6 +245,30 @@ export function fieldViewFromProductField<T>(
     confidenceLabel: confidenceLabelForBand(band),
     status
   };
+  if (options.includeContributors) {
+    if (productField.sourceItemId) view.sourceItemId = productField.sourceItemId;
+    if (productField.matchedCode) view.matchedCode = productField.matchedCode;
+    if (productField.contributors?.length) {
+      view.contributors = productField.contributors.map((c) => {
+        const cBand = confidenceBandForScore(c.confidence);
+        return {
+          source: c.source,
+          sourceLabel: sourceLabel(c.source),
+          confidence: c.confidence,
+          confidenceBand: cBand,
+          confidenceLabel: confidenceLabelForBand(cBand),
+          role: c.role,
+          value:
+            c.value == null || typeof c.value === "string" || typeof c.value === "number"
+              ? (c.value as string | number | null)
+              : String(c.value),
+          sourceItemId: c.sourceItemId ?? null,
+          matchedCode: c.matchedCode ?? null
+        };
+      });
+    }
+  }
+  return view;
 }
 
 /**
@@ -587,6 +631,24 @@ export function buildBottleEnrichmentView(options: {
 
   const candidate = candidateFromInventoryRow(entityType, row);
   const conflicts = options.conflicts ?? collectCacheConflicts(entityType, row);
+  const includeDiagnostics = options.includeDiagnostics === true;
+
+  // Keeper read model: overlay live government confirmations / conflicts without changing stored values.
+  if (includeDiagnostics && entityType !== "packaged_beer") {
+    const upc = String(row.upc ?? candidate.upc.value ?? "").trim();
+    if (upc) {
+      try {
+        const governmentLookup = searchGovernmentByBarcode(upc);
+        applyGovernmentCatalogEvidence(candidate, governmentLookup, {
+          lookupUpc: upc,
+          conflicts
+        });
+      } catch {
+        /* government DB optional at read time */
+      }
+    }
+  }
+
   const plan = planEnrichment(candidate, { conflicts });
   const reviewFields = new Set(plan.reviewConflicts.map((c) => c.field));
 
@@ -597,8 +659,22 @@ export function buildBottleEnrichmentView(options: {
 
   const fieldOpt = (name: BottleCandidateFieldName) =>
     fieldViewFromProductField(candidate[name] as ProductField<unknown>, {
-      inReview: reviewFields.has(name)
+      inReview: reviewFields.has(name),
+      includeContributors: includeDiagnostics
     });
+
+  const proofView = fieldOpt("proof") as FieldView<number>;
+  const abvView = fieldOpt("abv") as FieldView<number>;
+  if (
+    includeDiagnostics
+    && abvView.value != null
+    && proofView.value != null
+    && abvView.source
+    && abvView.source === proofView.source
+    && (abvView.source === "plcb_spirits" || abvView.source === "plcb_wines" || abvView.source === "iowa")
+  ) {
+    abvView.note = `Derived from ${sourceLabel(abvView.source)} proof`;
+  }
 
   return {
     entityType,
@@ -612,8 +688,8 @@ export function buildBottleEnrichmentView(options: {
     },
     metadata: {
       category: fieldOpt("category") as FieldView<string>,
-      abv: fieldOpt("abv") as FieldView<number>,
-      proof: fieldOpt("proof") as FieldView<number>,
+      abv: abvView,
+      proof: proofView,
       volumeMl: fieldOpt("volume_ml") as FieldView<number>,
       origin: fieldOpt("origin") as FieldView<string>,
       ttbId: fieldOpt("ttb_id") as FieldView<string>
@@ -628,7 +704,7 @@ export function buildBottleEnrichmentView(options: {
         candidate,
         content,
         image,
-        options.includeDiagnostics === true
+        includeDiagnostics
       ),
       conflicts: conflictViews(plan.reviewConflicts)
     },

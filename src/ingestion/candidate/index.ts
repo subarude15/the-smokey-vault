@@ -10,6 +10,8 @@ export {
   type BottleCandidateFields,
   type ConfidenceScore,
   type FieldConflict,
+  type FieldEvidence,
+  type FieldEvidenceRole,
   type MergeFieldResult,
   type ProductField,
   type ProductFieldSource

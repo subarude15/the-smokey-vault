@@ -43,10 +43,35 @@ export const CONFIDENCE = {
 
 export type ConfidenceScore = (typeof CONFIDENCE)[keyof typeof CONFIDENCE];
 
+/**
+ * Supporting evidence that did not become the canonical winner.
+ * Confirmations agree with the canonical value; conflicts disagree.
+ */
+export type FieldEvidenceRole = "confirmation" | "conflict";
+
+export type FieldEvidence = {
+  source: ProductFieldSource;
+  confidence: number;
+  role: FieldEvidenceRole;
+  /** Evidence value (useful for conflicts / audits). */
+  value?: unknown;
+  sourceItemId?: string | null;
+  matchedCode?: string | null;
+  extractedAt?: string | null;
+  importedAt?: string | null;
+};
+
 export type ProductField<T> = {
   value: T | null;
   source: ProductFieldSource;
   confidence: number;
+  /** Secondary sources that confirmed or conflicted with the canonical winner. */
+  contributors?: FieldEvidence[];
+  /** Optional audit metadata for the canonical winner (e.g. government source item). */
+  sourceItemId?: string | null;
+  matchedCode?: string | null;
+  extractedAt?: string | null;
+  importedAt?: string | null;
 };
 
 /** Identification fields used today — proof included because barcode_cache/inventory use it. */
@@ -81,4 +106,6 @@ export type MergeFieldResult<T> = {
   /** Set when both sides have non-null disagreeing values (incoming did not overwrite). */
   conflict?: FieldConflict<T>;
   overwritten: boolean;
+  /** True when incoming agreed with a stronger/equal existing value and was recorded as confirmation. */
+  confirmed?: boolean;
 };

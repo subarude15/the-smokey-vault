@@ -12,10 +12,42 @@ import {
   CONFIDENCE,
   type BottleCandidateFieldName,
   type FieldConflict,
+  type FieldEvidence,
   type MergeFieldResult,
   type ProductField,
   type ProductFieldSource
 } from "./types.js";
+
+function evidenceFromField<T>(
+  incoming: ProductField<T>,
+  role: FieldEvidence["role"]
+): FieldEvidence {
+  return {
+    source: incoming.source,
+    confidence: incoming.confidence,
+    role,
+    value: incoming.value,
+    sourceItemId: incoming.sourceItemId ?? null,
+    matchedCode: incoming.matchedCode ?? null,
+    extractedAt: incoming.extractedAt ?? null,
+    importedAt: incoming.importedAt ?? null
+  };
+}
+
+function withContributor<T>(
+  existing: ProductField<T>,
+  evidence: FieldEvidence
+): ProductField<T> {
+  const contributors = [...(existing.contributors ?? [])];
+  const duplicate = contributors.some(
+    (c) =>
+      c.source === evidence.source
+      && c.role === evidence.role
+      && String(c.value) === String(evidence.value)
+  );
+  if (!duplicate) contributors.push(evidence);
+  return { ...existing, contributors };
+}
 
 export function isUnresolvedValue(value: unknown): boolean {
   if (value == null) return true;
@@ -117,10 +149,19 @@ export function mergeField<T>(
     const conflict: FieldConflict<T> | undefined = fieldName
       ? { field: fieldName, existing, incoming }
       : { field: "name", existing, incoming };
-    return { field: existing, overwritten: false, conflict };
+    return {
+      field: withContributor(existing, evidenceFromField(incoming, "conflict")),
+      overwritten: false,
+      conflict
+    };
   }
 
-  return { field: existing, overwritten: false };
+  // Agreement with equal/weaker incoming: keep canonical winner, record confirmation.
+  return {
+    field: withContributor(existing, evidenceFromField(incoming, "confirmation")),
+    overwritten: false,
+    confirmed: true
+  };
 }
 
 function classificationIsGenericFamily(value: string): boolean {

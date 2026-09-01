@@ -24,9 +24,16 @@ import {
   isUnresolvedField,
   mergeField,
   type BottleCandidate,
+  type BottleCandidateFieldName,
   type FieldConflict,
   type ProductField
 } from "../candidate/index.js";
+import { searchGovernmentByBarcode } from "../catalogs/government/lookup.js";
+import type { GovernmentLookupResult } from "../catalogs/government/types.js";
+import {
+  applyGovernmentCatalogEvidence,
+  logGovernmentEvidenceOutcome
+} from "./government-evidence.js";
 import { TRUSTED_MIN } from "./rules.js";
 import {
   isWebSearchError,
@@ -98,21 +105,27 @@ export type MetadataEnrichmentDeps = {
   extractMetadata?: (request: MetadataExtractRequest) => Promise<MetadataExtractResult>;
   /** Optional authoritative page fetch for structured facts (JSON-LD / OG). */
   fetchPageHtml?: (url: string) => Promise<string | null>;
+  /** Optional government barcode search (defaults to local government catalog). */
+  searchGovernmentByBarcode?: (upc: string) => GovernmentLookupResult;
 };
 
 function cloneCandidate(candidate: BottleCandidate): BottleCandidate {
+  const cloneField = <T,>(f: ProductField<T>): ProductField<T> => ({
+    ...f,
+    contributors: f.contributors ? f.contributors.map((c) => ({ ...c })) : undefined
+  });
   return {
     primarySource: candidate.primarySource,
-    upc: { ...candidate.upc },
-    name: { ...candidate.name },
-    brand: { ...candidate.brand },
-    product_type: { ...candidate.product_type },
-    category: { ...candidate.category },
-    abv: { ...candidate.abv },
-    proof: { ...candidate.proof },
-    volume_ml: { ...candidate.volume_ml },
-    origin: { ...candidate.origin },
-    ttb_id: { ...candidate.ttb_id }
+    upc: cloneField(candidate.upc),
+    name: cloneField(candidate.name),
+    brand: cloneField(candidate.brand),
+    product_type: cloneField(candidate.product_type),
+    category: cloneField(candidate.category),
+    abv: cloneField(candidate.abv),
+    proof: cloneField(candidate.proof),
+    volume_ml: cloneField(candidate.volume_ml),
+    origin: cloneField(candidate.origin),
+    ttb_id: cloneField(candidate.ttb_id)
   };
 }
 
@@ -178,6 +191,10 @@ function applyMergeTracked(
   const merged = mergeField(existing, incoming, name);
   (candidate as unknown as Record<string, ProductField<unknown>>)[name] = merged.field as ProductField<unknown>;
   if (merged.conflict) conflicts.push(merged.conflict as FieldConflict);
+  if (merged.confirmed) {
+    // Agreement with stronger/equal evidence — not a rejection; confirmation is retained on the field.
+    return false;
+  }
   if (!merged.overwritten) {
     if (!isUnresolvedField(existing) && !valuesDiffer(existing, incoming)) {
       rejects.push({ field: name, reason: "same_value_already_present" });
@@ -455,6 +472,43 @@ export async function executeMetadataEnrichment(
         status: "error",
         provider: "catalog",
         reason: error instanceof Error ? error.message.slice(0, 120) : "catalog_error"
+      });
+    }
+
+    try {
+      // Dedicated government evidence pass (bypasses barcode_cache short-circuit in lookupProduct).
+      // Runs after catalog so stronger vault/cache winners stay canonical and government can confirm.
+      // Apply against all metadata fields (not only still-needed targets) so confirmations are visible.
+      const searchGov = deps.searchGovernmentByBarcode ?? searchGovernmentByBarcode;
+      const governmentLookup = searchGov(upc);
+      const government = applyGovernmentCatalogEvidence(candidate, governmentLookup, {
+        targets: [...METADATA_ENRICHMENT_FIELDS] as BottleCandidateFieldName[],
+        conflicts,
+        lookupUpc: upc
+      });
+      logGovernmentEvidenceOutcome(undefined, upc, government);
+      const governmentOk =
+        government.outcome === "hit_contributed"
+        || government.outcome === "hit_confirmed_existing"
+        || government.outcome === "hit_conflict";
+      stages.push({
+        stage: "government_catalog",
+        status: governmentOk ? "ok" : "no_result",
+        provider: government.dataset ?? "government",
+        acceptedCount: government.contributed.length,
+        confirmedCount: government.confirmed.length,
+        conflictCount: government.conflicts.length,
+        reason: government.outcome
+      });
+      if (government.contributed.length) {
+        diagnostics.accepted = [...(diagnostics.accepted ?? []), ...government.contributed];
+      }
+    } catch (error) {
+      stages.push({
+        stage: "government_catalog",
+        status: "error",
+        provider: "government",
+        reason: error instanceof Error ? error.message.slice(0, 120) : "government_catalog_error"
       });
     }
   }
