@@ -40,9 +40,16 @@ After copying source files into the container (or onto the mounted volume), run:
 
 ```bash
 # Paths below assume files were copied to /app/data/imports inside the container.
+# Import CLIs run compiled dist/ entrypoints (no tsx or src/ in the runtime image).
 docker exec -it smokey-vault sh -lc 'cd /app && npm run catalog:import:pa-spirits -- /app/data/imports/Wholesale_Spirits_Catalog_Full.xlsx'
 docker exec -it smokey-vault sh -lc 'cd /app && npm run catalog:import:pa-wines -- /app/data/imports/Wholesale_Wines_Catalog_Full.xlsx'
 docker exec -it smokey-vault sh -lc 'cd /app && npm run catalog:import:iowa -- /app/data/imports/iowa_liquor_products.csv'
+```
+
+To verify the runtime image locally (builds Docker, runs all three importers, checks persistence):
+
+```bash
+npm run verify:catalog-import-docker
 ```
 
 Confirm Keeper → Settings → Enrichment services shows the government catalog as Ready (or check `/api/admin/enrichment/health`). Override with `GOVERNMENT_CATALOG_DB_PATH` / `GOVERNMENT_CATALOG_DATA_DIR` if needed; importers and lookup honor the same resolver.

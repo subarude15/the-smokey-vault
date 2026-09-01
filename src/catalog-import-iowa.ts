@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CLI: npm run catalog:import:iowa -- file.csv
+ * CLI: npm run catalog:import:iowa -- file.csv  (production: node dist/catalog-import-iowa.js)
  */
 import { resolve } from "node:path";
 import {

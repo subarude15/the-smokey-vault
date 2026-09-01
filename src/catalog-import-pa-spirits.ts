@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CLI: npm run catalog:import:pa-spirits -- file.xlsx
+ * CLI: npm run catalog:import:pa-spirits -- file.xlsx  (production: node dist/catalog-import-pa-spirits.js)
  */
 import { resolve } from "node:path";
 import {
