@@ -132,6 +132,7 @@ export {
   ollamaBaseUrl,
   ollamaSafeHost,
   type EnrichmentHealthReport,
+  type GovernmentCatalogHealth,
   type ServiceHealthResult,
   type ServiceHealthStatus,
   type EnrichmentHealthDeps

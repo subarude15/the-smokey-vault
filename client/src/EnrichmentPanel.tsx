@@ -223,8 +223,13 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
       </div>
     );
   }
+  const alcoholMissing =
+    (label === "ABV" || label === "Proof")
+    && (field.value == null
+      || field.value === ""
+      || (typeof field.value === "number" && field.value === 0));
   const value =
-    field.value == null || field.value === ""
+    alcoholMissing || field.value == null || field.value === ""
       ? "—"
       : typeof field.value === "number"
         ? String(field.value)
@@ -238,7 +243,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
       <span className="enrichment-field-label">{label}</span>
       <strong className="enrichment-field-value">{value}</strong>
       <div className="enrichment-field-meta">
-        {field.status === "missing" || !field.status ? (
+        {alcoholMissing || field.status === "missing" || !field.status ? (
           <span className="chip static miss-chip">Missing</span>
         ) : (
           <>

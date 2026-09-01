@@ -1,7 +1,11 @@
 /**
- * Keeper-facing enrichment dependency health (SearXNG + Ollama).
+ * Keeper-facing enrichment dependency health (SearXNG + Ollama + government catalog).
  * Observability only — does not change queue/retry/enrichment behavior.
  */
+import {
+  getGovernmentCatalogHealth,
+  type GovernmentCatalogHealth
+} from "../catalogs/government/status.js";
 import {
   isWebSearchError,
   probeSearxngConnectivity,
@@ -21,6 +25,7 @@ export type ServiceHealthResult = {
 export type EnrichmentHealthReport = {
   searxng: ServiceHealthResult;
   ollama: ServiceHealthResult;
+  governmentCatalog: GovernmentCatalogHealth;
   checkedAt: string;
 };
 
@@ -28,7 +33,10 @@ export type EnrichmentHealthDeps = {
   fetch?: typeof fetch;
   probeSearxng?: typeof probeSearxngConnectivity;
   ollamaBaseUrl?: string;
+  governmentCatalogHealth?: () => GovernmentCatalogHealth;
 };
+
+export type { GovernmentCatalogHealth };
 
 /** Resolve Ollama base URL from the same env family enrichment extractors use. */
 export function ollamaBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -172,13 +180,16 @@ export async function checkOllamaHealth(
 export async function checkEnrichmentHealth(
   deps: EnrichmentHealthDeps = {}
 ): Promise<EnrichmentHealthReport> {
-  const [searxng, ollama] = await Promise.all([
+  const governmentProbe = deps.governmentCatalogHealth ?? getGovernmentCatalogHealth;
+  const [searxng, ollama, governmentCatalog] = await Promise.all([
     checkSearxngHealth(deps),
-    checkOllamaHealth(deps)
+    checkOllamaHealth(deps),
+    Promise.resolve().then(() => governmentProbe())
   ]);
   return {
     searxng,
     ollama,
+    governmentCatalog,
     checkedAt: new Date().toISOString()
   };
 }

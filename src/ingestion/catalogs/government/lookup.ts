@@ -22,6 +22,46 @@ export type GovernmentStageResult = {
   lookup: GovernmentLookupResult;
 };
 
+
+export type GovernmentLookupLog = {
+  info: (fields: Record<string, unknown>, message: string) => void;
+};
+
+const MAX_LOGGED_UPC = 32;
+
+function boundUpcForLog(upc: string): string {
+  const text = String(upc ?? "").trim();
+  if (text.length <= MAX_LOGGED_UPC) return text;
+  return `${text.slice(0, MAX_LOGGED_UPC)}…`;
+}
+
+/** Bounded structured log for government lookup outcomes (no catalog payloads). */
+const defaultGovernmentLookupLog: GovernmentLookupLog = {
+  info(fields, message) {
+    console.info(JSON.stringify({ level: "info", msg: message, ...fields }));
+  }
+};
+
+export function logGovernmentLookupOutcome(
+  logger: GovernmentLookupLog | undefined,
+  upc: string,
+  lookup: GovernmentLookupResult
+): void {
+  const sink = logger ?? defaultGovernmentLookupLog;
+  const winner = lookup.winner;
+  sink.info(
+    {
+      event: "government_catalog_lookup",
+      status: lookup.status,
+      upc: boundUpcForLog(upc),
+      source: winner?.dataset ?? null,
+      candidateCount: Math.min(lookup.candidates.length, 12)
+    },
+    "Government catalog lookup"
+  );
+}
+
+
 function mapProductRow(row: Record<string, unknown>): CatalogProductRecord {
   return {
     id: Number(row.id),
@@ -179,9 +219,11 @@ export async function tryGovernmentStage(options: {
   kindHint?: ImportKind;
   dbPath?: string;
   searchIowaFn?: IowaCatalogFn;
+  logger?: GovernmentLookupLog;
 }): Promise<GovernmentStageResult> {
   try {
     const lookup = searchGovernmentByBarcode(options.upc, { dbPath: options.dbPath });
+    logGovernmentLookupOutcome(options.logger, options.upc, lookup);
     if (lookup.status === "hit" && lookup.winner) {
       const schema = governmentProductToSchema(
         options.upc,
@@ -216,9 +258,11 @@ export async function tryGovernmentStage(options: {
 
     return { hit: null, lookup };
   } catch {
+    const lookup: GovernmentLookupResult = { status: "miss", candidates: [], winner: null };
+    logGovernmentLookupOutcome(options.logger, options.upc, lookup);
     return {
       hit: null,
-      lookup: { status: "miss", candidates: [], winner: null }
+      lookup
     };
   }
 }
