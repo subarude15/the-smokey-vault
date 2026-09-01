@@ -5,15 +5,19 @@ import { lookupProduct, type LookupCatalogs } from "../../lookup.js";
 
 /**
  * Explicit call-order guards for the catalog stages.
- * Spirits: FWGS → COLA → OFF → upcitemdb
- * Beer: OFF → upcitemdb → COLA (FWGS never)
+ * Spirits: Iowa → FWGS → COLA → OFF → upcitemdb
+ * Beer: OFF → upcitemdb → COLA (Iowa/FWGS never)
  */
-test("spirits catalogs are called FWGS then COLA then OFF then upcitemdb", async () => {
+test("spirits catalogs are called Iowa then FWGS then COLA then OFF then upcitemdb", async () => {
   const upc = "055566677788";
   db.prepare("DELETE FROM cola_cache WHERE upc=?").run(upc);
   db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
   const order: string[] = [];
   const catalogs: LookupCatalogs = {
+    searchIowa: async () => {
+      order.push("iowa");
+      return null;
+    },
     searchFwgs: async () => {
       order.push("fwgs");
       return null;
@@ -32,7 +36,7 @@ test("spirits catalogs are called FWGS then COLA then OFF then upcitemdb", async
     }
   };
   const result = await lookupProduct(upc, { kind: "spirits", catalogs });
-  assert.deepEqual(order, ["fwgs", "cola", "off", "upcitemdb"]);
+  assert.deepEqual(order, ["iowa", "fwgs", "cola", "off", "upcitemdb"]);
   assert.equal(result.reason, "cola_gap");
 });
 
@@ -43,6 +47,10 @@ test("beer catalogs skip FWGS and call OFF then upcitemdb then COLA", async () =
   db.prepare("DELETE FROM beer_cache WHERE upc=?").run(upc);
   const order: string[] = [];
   const catalogs: LookupCatalogs = {
+    searchIowa: async () => {
+      order.push("iowa");
+      return null;
+    },
     searchFwgs: async () => {
       order.push("fwgs");
       return null;
@@ -63,6 +71,7 @@ test("beer catalogs skip FWGS and call OFF then upcitemdb then COLA", async () =
   const result = await lookupProduct(upc, { kind: "beer", catalogs });
   assert.deepEqual(order, ["off", "upcitemdb", "cola"]);
   assert.ok(!order.includes("fwgs"));
+  assert.ok(!order.includes("iowa"));
   assert.equal(result.source, "not_found");
 });
 

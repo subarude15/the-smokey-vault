@@ -8,6 +8,7 @@ export const PRODUCT_FIELD_SOURCES = [
   "barcode_cache",
   "beer_cache",
   "cola_cache",
+  "iowa",
   "fwgs",
   "cola",
   "open_food_facts",

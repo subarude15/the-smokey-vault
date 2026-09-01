@@ -19,6 +19,7 @@ test("confidence bands are discrete plateaus keyed by source", () => {
   assert.equal(confidenceForSource("vault"), CONFIDENCE.VERY_HIGH);
   assert.equal(confidenceForSource("barcode_cache"), CONFIDENCE.VERY_HIGH);
   assert.equal(confidenceForSource("user"), CONFIDENCE.VERY_HIGH);
+  assert.equal(confidenceForSource("iowa"), CONFIDENCE.HIGH);
   assert.equal(confidenceForSource("fwgs"), CONFIDENCE.HIGH);
   assert.equal(confidenceForSource("cola"), CONFIDENCE.HIGH);
   assert.equal(confidenceForSource("vision"), CONFIDENCE.HIGH);
@@ -33,6 +34,7 @@ test("LookupSource chips map onto ProductFieldSource without inventing scores", 
   assert.equal(fieldSourceFromLookupSource("vault"), "vault");
   assert.equal(fieldSourceFromLookupSource("cache"), "cola_cache");
   assert.equal(fieldSourceFromLookupSource("beer_cache"), "beer_cache");
+  assert.equal(fieldSourceFromLookupSource("iowa"), "iowa");
   assert.equal(fieldSourceFromLookupSource("cola_cloud"), "cola");
   assert.equal(fieldSourceFromLookupSource("openfoodfacts"), "open_food_facts");
   assert.equal(fieldSourceFromLookupSource("label"), "vision");
