@@ -7,6 +7,10 @@ import {
   formatIowaImportSummary,
   importIowaCsv
 } from "./ingestion/catalogs/iowa-import.js";
+import {
+  importIowaGovernmentCsv,
+  printIowaGovernmentImportStats
+} from "./ingestion/catalogs/government/iowa-import.js";
 
 async function main() {
   const csvArg = process.argv[2];
@@ -17,6 +21,8 @@ async function main() {
   const csvPath = resolve(csvArg);
   const summary = await importIowaCsv(csvPath);
   console.log(formatIowaImportSummary(summary));
+  const gov = await importIowaGovernmentCsv(csvPath);
+  console.log("\nGovernment catalog:\n" + printIowaGovernmentImportStats(gov));
 }
 
 main().catch((error) => {

@@ -18,6 +18,8 @@ export const SOURCE_CONFIDENCE: Record<ProductFieldSource, number> = {
   user: CONFIDENCE.VERY_HIGH,
   beer_cache: CONFIDENCE.HIGH,
   cola_cache: CONFIDENCE.HIGH,
+  plcb_spirits: CONFIDENCE.HIGH,
+  plcb_wines: CONFIDENCE.HIGH,
   iowa: CONFIDENCE.HIGH,
   fwgs: CONFIDENCE.HIGH,
   cola: CONFIDENCE.HIGH,
@@ -48,6 +50,10 @@ export function fieldSourceFromLookupSource(source: LookupSource): ProductFieldS
     case "beer_cache":
     case "catalog_beer":
       return "beer_cache";
+    case "plcb_spirits":
+      return "plcb_spirits";
+    case "plcb_wines":
+      return "plcb_wines";
     case "iowa":
       return "iowa";
     case "fwgs":

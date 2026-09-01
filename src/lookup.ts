@@ -47,7 +47,7 @@ import {
   searchOpenFoodFactsByQuery,
   success,
   tryBarcodeCache,
-  tryIowaStage,
+  tryGovernmentStage,
   tryBeerCache,
   tryBeerColaStage,
   tryFwgsStage,
@@ -220,14 +220,14 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
     }
   }
 
-  // Iowa local catalog — spirits/wines only, before cola_cache / remote catalogs.
+  // Local government catalogs (PA PLCB + Iowa) — spirits/wines only, before cola_cache / remote.
   if (!beerPath && kind !== "mixers") {
-    const iowa = await tryIowaStage({
+    const government = await tryGovernmentStage({
       upc,
       kindHint,
       searchIowaFn: catalogs.searchIowa
     });
-    if (iowa.hit) return iowa.hit;
+    if (government.hit) return government.hit;
   }
 
   let staleFallback: ProductSchema | null = null;
