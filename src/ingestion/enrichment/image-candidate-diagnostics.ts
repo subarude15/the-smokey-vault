@@ -163,6 +163,8 @@ export type ImageSeedLike = {
   width?: number | null;
   height?: number | null;
   mimeType?: string | null;
+  /** Only Figranium FWGS PLCB-bound seeds — never SearXNG. */
+  identityMatched?: boolean;
 };
 
 function seedHasPageProvenance(seed: ImageSeedLike): boolean {
@@ -183,7 +185,11 @@ export function preferStrongerImageSeed(a: ImageSeedLike, b: ImageSeedLike): Ima
     sourceUrl: primary.sourceUrl ?? secondary.sourceUrl ?? null,
     width: primary.width ?? secondary.width ?? null,
     height: primary.height ?? secondary.height ?? null,
-    mimeType: primary.mimeType ?? secondary.mimeType ?? null
+    mimeType: primary.mimeType ?? secondary.mimeType ?? null,
+    identityMatched:
+      primary.identityMatched === true || secondary.identityMatched === true
+        ? true
+        : primary.identityMatched ?? secondary.identityMatched
   };
 }
 
@@ -669,8 +675,18 @@ export function buildImageScoreComponents(
     }
   }
 
+  if (candidate.identityMatched === true) {
+    components.identity_match = IMAGE_SCORE.exactIdentityMatch;
+  }
+
   if (vision) {
-    if (vision.correct_product) components.identity_match = IMAGE_SCORE.exactIdentityMatch;
+    if (vision.correct_product) {
+      // Keep max so we do not invent a new weight or double-count in diagnostics total.
+      components.identity_match = Math.max(
+        components.identity_match,
+        IMAGE_SCORE.exactIdentityMatch
+      );
+    }
     if (vision.clean_product_photo && vision.bottle_prominent) {
       components.clean_photo = IMAGE_SCORE.cleanProductPhoto;
     }

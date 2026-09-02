@@ -35,6 +35,8 @@ import {
 } from "./image-score.js";
 import {
   IMAGE_ACCEPTANCE_THRESHOLD,
+  IMAGE_MIN_HEIGHT,
+  IMAGE_MIN_WIDTH,
   IMAGE_MAX_VISION_CHECKS,
   IMAGE_VISION_CANDIDATE_FLOOR
 } from "./image-thresholds.js";
@@ -72,6 +74,7 @@ import {
 import {
   extractFwgsPlcbImages,
   fetchFwgsImageViaFigranium,
+  deriveFwgsImageRenditionUrl,
   filterValidatedFwgsImageUrls,
   fwgsPdpUrlForItem,
   isFwgsFigraniumConfigured,
@@ -93,7 +96,9 @@ export type ImageProbeDetail =
   | "direct_probe_timeout"
   | "figranium_fetch_fallback_attempted"
   | "figranium_fetch_fallback_ok"
-  | "figranium_fetch_fallback_failed";
+  | "figranium_fetch_fallback_failed"
+  | "fwgs_higher_res_rendition_attempted"
+  | "fwgs_higher_res_rendition_preferred";
 
 export type ImageMeta = {
   width: number | null;
@@ -106,6 +111,8 @@ export type ImageMeta = {
   httpStatus?: number | null;
   /** Decoded image bytes as base64 when obtained via Figranium fallback (for vision). */
   imageBase64?: string | null;
+  /** Final URL used after optional FWGS rendition upgrade. */
+  resolvedUrl?: string | null;
 };
 
 export type ImageEnrichmentDeps = {
@@ -138,6 +145,8 @@ export type ImageCandidateSeed = {
   width?: number | null;
   height?: number | null;
   mimeType?: string | null;
+  /** Set only for Figranium FWGS PLCB-bound seeds — never SearXNG. */
+  identityMatched?: boolean;
 };
 
 export type ImageEnrichmentResult = {
@@ -213,8 +222,9 @@ async function defaultProbe(url: string): Promise<ImageMeta> {
 }
 
 /**
- * Direct probe first. Only for validated FWGS URLs with a trusted PLCB item,
- * fall back to Figranium browser fetch when the direct probe fails.
+ * Direct probe first. For validated FWGS URLs with a trusted PLCB item:
+ * 1) Prefer a same-asset higher-res rendition (width/height=1200) when actual dims >= min.
+ * 2) Fall back to Figranium browser fetch when the direct probe fails.
  */
 export async function probeImageMetaWithFwgsFallback(
   url: string,
@@ -226,40 +236,74 @@ export async function probeImageMetaWithFwgsFallback(
     ) => Promise<FwgsImageFetchOutcome>;
   } = {}
 ): Promise<ImageMeta> {
-  const direct = await defaultProbe(url);
-  if (direct.reachable) return direct;
-
   const plcb = normalizePlcbItem(String(options.plcbItem ?? ""));
-  if (!plcb) return direct;
-  if (!validateFwgsImageUrl(url, plcb)) return direct;
-
   const fetchFn = options.fetchFwgsImageViaFigranium ?? fetchFwgsImageViaFigranium;
-  const canAttempt =
+  const canFigranium =
     Boolean(options.fetchFwgsImageViaFigranium) || isFwgsFigraniumImageFetchConfigured();
-  if (!canAttempt) return direct;
+  const fwgsValidated = Boolean(plcb && validateFwgsImageUrl(url, plcb));
 
-  const details: ImageProbeDetail[] = [
-    ...(direct.probeDetails ?? []),
-    "figranium_fetch_fallback_attempted"
-  ];
-  const fetched = await fetchFn(url, plcb);
-  if (!fetched.ok) {
+  const probeOne = async (targetUrl: string): Promise<ImageMeta> => {
+    const direct = await defaultProbe(targetUrl);
+    if (direct.reachable) {
+      return { ...direct, resolvedUrl: targetUrl };
+    }
+    if (!plcb || !validateFwgsImageUrl(targetUrl, plcb) || !canFigranium) {
+      return { ...direct, resolvedUrl: targetUrl };
+    }
+    const details: ImageProbeDetail[] = [
+      ...(direct.probeDetails ?? []),
+      "figranium_fetch_fallback_attempted"
+    ];
+    const fetched = await fetchFn(targetUrl, plcb);
+    if (!fetched.ok) {
+      return {
+        ...direct,
+        probeDetails: [...details, "figranium_fetch_fallback_failed"],
+        resolvedUrl: targetUrl
+      };
+    }
     return {
-      ...direct,
-      probeDetails: [...details, "figranium_fetch_fallback_failed"]
+      width: fetched.image.width,
+      height: fetched.image.height,
+      mimeType: fetched.image.contentType,
+      reachable: true,
+      dimensionsSource: fetched.image.width != null ? "image_header" : "unknown",
+      probeDetails: [...details, "figranium_fetch_fallback_ok"],
+      httpStatus: direct.httpStatus ?? null,
+      imageBase64: fetched.image.bytes.toString("base64"),
+      resolvedUrl: targetUrl
     };
+  };
+
+  const meetsMinResolution = (meta: ImageMeta): boolean =>
+    meta.width != null
+    && meta.height != null
+    && meta.width >= IMAGE_MIN_WIDTH
+    && meta.height >= IMAGE_MIN_HEIGHT;
+
+  if (fwgsValidated) {
+    const preferred = deriveFwgsImageRenditionUrl(url, plcb!, {
+      width: 1200,
+      height: 1200
+    });
+    if (preferred && preferred !== url) {
+      const preferredMeta = await probeOne(preferred);
+      const details: ImageProbeDetail[] = [
+        ...(preferredMeta.probeDetails ?? []),
+        "fwgs_higher_res_rendition_attempted"
+      ];
+      if (preferredMeta.reachable && meetsMinResolution(preferredMeta)) {
+        return {
+          ...preferredMeta,
+          probeDetails: [...details, "fwgs_higher_res_rendition_preferred"],
+          resolvedUrl: preferred
+        };
+      }
+      // Prefer failed or still below min — continue with the original asset URL.
+    }
   }
 
-  return {
-    width: fetched.image.width,
-    height: fetched.image.height,
-    mimeType: fetched.image.contentType,
-    reachable: true,
-    dimensionsSource: fetched.image.width != null ? "image_header" : "unknown",
-    probeDetails: [...details, "figranium_fetch_fallback_ok"],
-    httpStatus: direct.httpStatus ?? null,
-    imageBase64: fetched.image.bytes.toString("base64")
-  };
+  return probeOne(url);
 }
 
 function classifyVisionError(message: string): string {
@@ -297,7 +341,8 @@ function toCandidate(
     sourceType,
     width: seed.width ?? null,
     height: seed.height ?? null,
-    mimeType: seed.mimeType ?? null
+    mimeType: seed.mimeType ?? null,
+    identityMatched: seed.identityMatched === true ? true : undefined
   };
 }
 
@@ -499,7 +544,7 @@ export async function executeImageEnrichment(
 
   // Image-first FWGS path: when a PLCB item is known, extract + validate
   // Fine Wine & Good Spirits product images via Figranium (no metadata merge).
-  if (plcbItem && isFwgsFigraniumConfigured()) {
+  if (plcbItem && (Boolean(deps.extractFwgsPlcbImages) || isFwgsFigraniumConfigured())) {
     const knownPdp =
       selectedOfficialProductPageUrl
       && /^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
@@ -517,7 +562,8 @@ export async function executeImageEnrichment(
           seeds.push({
             url,
             sourceUrl: knownPdp || null,
-            mimeType: "image/jpeg"
+            mimeType: "image/jpeg",
+            identityMatched: true
           });
         }
         stages.push({
@@ -1114,7 +1160,8 @@ export async function executeImageEnrichment(
         dimensionsSource: dimsSource,
         probeDetails,
         httpStatus: probedMeta.httpStatus ?? null,
-        imageBase64: probedMeta.imageBase64 ?? null
+        imageBase64: probedMeta.imageBase64 ?? null,
+        resolvedUrl: probedMeta.resolvedUrl ?? seed.url
       };
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Image probe failed");
@@ -1143,8 +1190,12 @@ export async function executeImageEnrichment(
       });
       continue;
     }
+    const resolvedUrl =
+      typeof meta.resolvedUrl === "string" && meta.resolvedUrl.trim()
+        ? meta.resolvedUrl.trim()
+        : seed.url;
     if (typeof meta.imageBase64 === "string" && meta.imageBase64.trim()) {
-      figraniumImageBase64ByUrl.set(seed.url, meta.imageBase64.trim());
+      figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
     }
     if ((meta.probeDetails ?? []).includes("figranium_fetch_fallback_ok")) {
       fwgsFigraniumFetchOk += 1;
@@ -1155,6 +1206,7 @@ export async function executeImageEnrichment(
     const item = toCandidate(
       {
         ...seed,
+        url: resolvedUrl,
         width: meta.width,
         height: meta.height,
         mimeType: meta.mimeType

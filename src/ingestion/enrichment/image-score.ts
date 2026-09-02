@@ -19,6 +19,12 @@ export type ImageCandidate = {
   width: number | null;
   height: number | null;
   mimeType: string | null;
+  /**
+   * Deterministic PLCB-bound FWGS identity evidence.
+   * True only when trusted PLCB provenance + validateFwgsImageUrl bind.
+   * Never set for SearXNG / generic approved / fuzzy / name matches.
+   */
+  identityMatched?: boolean;
 };
 
 export type VisionVerification = {
@@ -96,6 +102,11 @@ export function scoreImageCandidateBase(candidate: ImageCandidate): number {
   else if (candidate.sourceType === "user") score += IMAGE_SCORE.officialSource;
   else score += IMAGE_SCORE.unknownSource;
 
+  // Reuse IMAGE_SCORE.exactIdentityMatch so pre-vision score can clear the vision floor.
+  if (candidate.identityMatched === true) {
+    score += IMAGE_SCORE.exactIdentityMatch;
+  }
+
   const { width, height } = candidate;
   if (width != null && height != null) {
     if (width < IMAGE_MIN_WIDTH || height < IMAGE_MIN_HEIGHT) {
@@ -109,9 +120,15 @@ export function scoreImageCandidateBase(candidate: ImageCandidate): number {
 }
 
 /** Apply vision verification adjustments. Identity match assumes verifier says correct_product. */
-export function applyVisionScoreAdjustments(baseScore: number, vision: VisionVerification): number {
+export function applyVisionScoreAdjustments(
+  baseScore: number,
+  vision: VisionVerification,
+  options: { identityAlreadyCounted?: boolean } = {}
+): number {
   let score = baseScore;
-  if (vision.correct_product) score += IMAGE_SCORE.exactIdentityMatch;
+  if (vision.correct_product && !options.identityAlreadyCounted) {
+    score += IMAGE_SCORE.exactIdentityMatch;
+  }
   if (vision.clean_product_photo && vision.bottle_prominent) score += IMAGE_SCORE.cleanProductPhoto;
   if (vision.contains_people) score += IMAGE_SCORE.personPresent;
   if (vision.meme_or_graphic) score += IMAGE_SCORE.memeOrGraphic;
@@ -156,7 +173,9 @@ export function evaluateCandidate(
   let score = scoreImageCandidateBase(candidate);
   let verified = false;
   if (vision) {
-    score = applyVisionScoreAdjustments(score, vision);
+    score = applyVisionScoreAdjustments(score, vision, {
+      identityAlreadyCounted: candidate.identityMatched === true
+    });
     verified = true;
     const visionReject = primaryVisionRejectionReason(vision, score);
     if (visionReject) {

@@ -208,6 +208,51 @@ export function validateFwgsImageUrl(url: string, plcbItem: string): boolean {
   return false;
 }
 
+/**
+ * Derive a same-asset FWGS ccstore rendition by changing only height/width query params.
+ * Does not alter hostname, source path, PLCB-bound filename, or asset version.
+ * Returns null unless the derived URL still passes validateFwgsImageUrl.
+ */
+export function deriveFwgsImageRenditionUrl(
+  url: string,
+  plcbItem: string,
+  size: { width: number; height: number }
+): string | null {
+  const code = normalizePlcbItem(plcbItem);
+  if (!code) return null;
+  if (!validateFwgsImageUrl(url, code)) return null;
+  const width = Math.floor(Number(size.width));
+  const height = Math.floor(Number(size.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(String(url).trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== FWGS_SITE_HOST) return null;
+
+  // Change ONLY height/width rendering params. Preserve source path encoding,
+  // param order, and asset version — do not re-serialize the full query string.
+  const raw = String(url).trim();
+  const qIndex = raw.indexOf("?");
+  if (qIndex < 0) return null;
+  const base = raw.slice(0, qIndex);
+  const query = raw.slice(qIndex + 1);
+  if (!/(?:^|&)width=\d+(?:&|$)/i.test(query) || !/(?:^|&)height=\d+(?:&|$)/i.test(query)) {
+    return null;
+  }
+  const replaced = query
+    .replace(/(^|&)(width=)\d+/i, `$1$2${width}`)
+    .replace(/(^|&)(height=)\d+/i, `$1$2${height}`);
+  const derived = `${base}?${replaced}`;
+  if (!validateFwgsImageUrl(derived, code)) return null;
+  return derived;
+}
+
 export function filterValidatedFwgsImageUrls(
   urls: Iterable<string | null | undefined>,
   plcbItem: string

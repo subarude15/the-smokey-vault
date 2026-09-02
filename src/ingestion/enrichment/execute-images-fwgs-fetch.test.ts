@@ -1,5 +1,5 @@
 /**
- * FWGS Figranium image-fetch fallback wiring for image enrichment.
+ * FWGS Figranium image-fetch fallback + PLCB identity scoring wiring.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -10,14 +10,30 @@ import {
   executeImageEnrichment,
   probeImageMetaWithFwgsFallback
 } from "./execute-images.js";
-import type { FwgsImageFetchOutcome } from "../../fwgs-figranium.js";
+import {
+  deriveFwgsImageRenditionUrl,
+  validateFwgsImageUrl,
+  type FwgsImageFetchOutcome
+} from "../../fwgs-figranium.js";
+import {
+  evaluateCandidate,
+  scoreImageCandidateBase,
+  type ImageCandidate
+} from "./image-score.js";
+import {
+  IMAGE_ACCEPTANCE_THRESHOLD,
+  IMAGE_MIN_HEIGHT,
+  IMAGE_MIN_WIDTH,
+  IMAGE_SCORE,
+  IMAGE_VISION_CANDIDATE_FLOOR
+} from "./image-thresholds.js";
 
 const PLCB = "000004766";
-const FWGS_F1 =
-  "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=475&width=475";
-const FWGS_WRONG =
-  "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000008865_F1.jpg&height=475&width=475";
+const FWGS_F1 = "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=475&width=475";
+const FWGS_F1_1200 = "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=1200&width=1200";
+const FWGS_WRONG = "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000008865_F1.jpg&height=475&width=475";
 const OTHER_HOST = "https://cdn.example.com/captain.png";
+const APPROVED_HOST = "https://www.totalwine.com/media/sys_master/twmmedia/captain.jpg";
 
 function crc32(buf: Buffer): number {
   let c = ~0;
@@ -57,13 +73,14 @@ function makePng(width: number, height: number): Buffer {
 function figraniumOk(
   png: Buffer,
   width = 1200,
-  height = 1200
+  height = 1200,
+  sourceUrl = FWGS_F1_1200
 ): FwgsImageFetchOutcome {
   return {
     ok: true,
     image: {
       plcbItem: PLCB,
-      sourceUrl: FWGS_F1,
+      sourceUrl,
       contentType: "image/png",
       bytes: png,
       width,
@@ -99,52 +116,83 @@ const cleanVision = {
   multiple_products: false
 };
 
-test("reachable FWGS image does not invoke Figranium fetch fallback", async () => {
-  const png = makePng(800, 800);
+const wrongVision = {
+  correct_product: false,
+  bottle_prominent: true,
+  contains_people: false,
+  meme_or_graphic: false,
+  clean_product_photo: true,
+  multiple_products: false
+};
+
+test("deriveFwgsImageRenditionUrl changes only height/width", () => {
+  const derived = deriveFwgsImageRenditionUrl(FWGS_F1, PLCB, {
+    width: 1200,
+    height: 1200
+  });
+  assert.equal(derived, FWGS_F1_1200);
+  assert.equal(validateFwgsImageUrl(derived!, PLCB), true);
+  assert.ok(derived!.includes("source=/file/v1/products/000004766_F1.jpg"));
+  assert.ok(!derived!.includes("%2F"));
+});
+
+test("reachable FWGS image prefers higher-res rendition without Figranium", async () => {
+  const png = makePng(1200, 1200);
   const originalFetch = globalThis.fetch;
-  let fetchCalls = 0;
-  globalThis.fetch = (async () =>
-    new Response(png, {
+  let figraniumCalls = 0;
+  const probedUrls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    probedUrls.push(String(input));
+    return new Response(png, {
       status: 200,
       headers: { "Content-Type": "image/png" }
-    })) as typeof fetch;
+    });
+  }) as typeof fetch;
   try {
     const ok = await probeImageMetaWithFwgsFallback(FWGS_F1, {
       plcbItem: PLCB,
       fetchFwgsImageViaFigranium: async () => {
-        fetchCalls += 1;
+        figraniumCalls += 1;
         return { ok: false, reason: "figranium_error" };
       }
     });
     assert.equal(ok.reachable, true);
-    assert.deepEqual(ok.probeDetails, ["direct_probe_ok"]);
-    assert.equal(fetchCalls, 0);
+    assert.equal(figraniumCalls, 0);
+    assert.equal(ok.resolvedUrl, FWGS_F1_1200);
+    assert.equal(ok.width, 1200);
+    assert.equal(ok.height, 1200);
+    assert.ok(ok.probeDetails?.includes("direct_probe_ok"));
+    assert.ok(ok.probeDetails?.includes("fwgs_higher_res_rendition_attempted"));
+    assert.ok(ok.probeDetails?.includes("fwgs_higher_res_rendition_preferred"));
+    assert.ok(probedUrls.includes(FWGS_F1_1200));
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("direct FWGS fetch failure invokes Figranium fallback", async () => {
+test("direct FWGS fetch failure invokes Figranium fallback on higher-res rendition", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
     new Response("denied", { status: 403 })) as typeof fetch;
   let fetchCalls = 0;
-  const png = makePng(800, 800);
+  const png = makePng(1200, 1200);
   try {
     const meta = await probeImageMetaWithFwgsFallback(FWGS_F1, {
       plcbItem: PLCB,
       fetchFwgsImageViaFigranium: async (imageUrl, plcbItem) => {
         fetchCalls += 1;
-        assert.equal(imageUrl, FWGS_F1);
+        assert.equal(imageUrl, FWGS_F1_1200);
         assert.equal(plcbItem, PLCB);
-        return figraniumOk(png, 800, 800);
+        return figraniumOk(png, 1200, 1200, imageUrl);
       }
     });
     assert.equal(fetchCalls, 1);
     assert.equal(meta.reachable, true);
+    assert.equal(meta.resolvedUrl, FWGS_F1_1200);
     assert.ok(meta.probeDetails?.includes("direct_probe_http_rejected"));
     assert.ok(meta.probeDetails?.includes("figranium_fetch_fallback_attempted"));
     assert.ok(meta.probeDetails?.includes("figranium_fetch_fallback_ok"));
+    assert.ok(meta.probeDetails?.includes("fwgs_higher_res_rendition_preferred"));
     assert.ok(meta.imageBase64);
   } finally {
     globalThis.fetch = originalFetch;
@@ -198,16 +246,13 @@ test("generic non-FWGS candidate cannot use browser fetch fallback", async () =>
     new Response("denied", { status: 403 })) as typeof fetch;
   let fetchCalls = 0;
   try {
-    const meta = await probeImageMetaWithFwgsFallback(
-      "https://www.totalwine.com/media/captain.jpg",
-      {
-        plcbItem: PLCB,
-        fetchFwgsImageViaFigranium: async () => {
-          fetchCalls += 1;
-          return { ok: false, reason: "figranium_error" };
-        }
+    const meta = await probeImageMetaWithFwgsFallback(APPROVED_HOST, {
+      plcbItem: PLCB,
+      fetchFwgsImageViaFigranium: async () => {
+        fetchCalls += 1;
+        return { ok: false, reason: "figranium_error" };
       }
-    );
+    });
     assert.equal(meta.reachable, false);
     assert.equal(fetchCalls, 0);
   } finally {
@@ -215,30 +260,141 @@ test("generic non-FWGS candidate cannot use browser fetch fallback", async () =>
   }
 });
 
-test("Captain Morgan regression: blocked direct probe + Figranium F1 bytes continue through scoring/verification", async () => {
+test("validated FWGS PLCB image receives exactIdentityMatch and clears vision floor", () => {
+  const candidate: ImageCandidate = {
+    url: FWGS_F1_1200,
+    sourceUrl: `https://www.finewineandgoodspirits.com/product/${PLCB}`,
+    sourceType: "approved",
+    width: 1200,
+    height: 1200,
+    mimeType: "image/jpeg",
+    identityMatched: true
+  };
+  const base = scoreImageCandidateBase(candidate);
+  assert.equal(
+    base,
+    IMAGE_SCORE.approvedSource + IMAGE_SCORE.exactIdentityMatch + IMAGE_SCORE.largeImage
+  );
+  assert.ok(base >= IMAGE_VISION_CANDIDATE_FLOOR);
+});
+
+test("ordinary approved image does NOT receive identity bonus", () => {
+  const candidate: ImageCandidate = {
+    url: APPROVED_HOST,
+    sourceUrl: null,
+    sourceType: "approved",
+    width: 1200,
+    height: 1200,
+    mimeType: "image/jpeg"
+  };
+  const base = scoreImageCandidateBase(candidate);
+  assert.equal(base, IMAGE_SCORE.approvedSource + IMAGE_SCORE.largeImage);
+  assert.ok(base < IMAGE_VISION_CANDIDATE_FLOOR);
+});
+
+test("SearXNG-style FWGS URL without identityMatched does not get identity bonus", () => {
+  const candidate: ImageCandidate = {
+    url: FWGS_F1_1200,
+    sourceUrl: null,
+    sourceType: "approved",
+    width: 800,
+    height: 800,
+    mimeType: "image/jpeg"
+  };
+  const base = scoreImageCandidateBase(candidate);
+  assert.equal(base, IMAGE_SCORE.approvedSource);
+  assert.ok(base < IMAGE_VISION_CANDIDATE_FLOOR);
+});
+
+test("wrong / partial PLCB must not validate or receive identityMatched scoring", () => {
+  assert.equal(validateFwgsImageUrl(FWGS_WRONG, PLCB), false);
+  assert.equal(
+    validateFwgsImageUrl(
+      `https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/00000476_F1.jpg&height=1200&width=1200`,
+      PLCB
+    ),
+    false
+  );
+  const candidate: ImageCandidate = {
+    url: FWGS_WRONG,
+    sourceUrl: null,
+    sourceType: "approved",
+    width: 1200,
+    height: 1200,
+    mimeType: "image/jpeg"
+  };
+  assert.equal(
+    scoreImageCandidateBase(candidate),
+    IMAGE_SCORE.approvedSource + IMAGE_SCORE.largeImage
+  );
+});
+
+test("global resolution and acceptance thresholds remain unchanged", () => {
+  assert.equal(IMAGE_MIN_WIDTH, 600);
+  assert.equal(IMAGE_MIN_HEIGHT, 600);
+  assert.equal(IMAGE_VISION_CANDIDATE_FLOOR, 40);
+  assert.equal(IMAGE_ACCEPTANCE_THRESHOLD, 75);
+  assert.equal(IMAGE_SCORE.exactIdentityMatch, 30);
+  assert.equal(IMAGE_SCORE.approvedSource, 15);
+});
+
+test("browser fallback success alone does not auto-accept; vision can still reject", () => {
+  const candidate: ImageCandidate = {
+    url: FWGS_F1_1200,
+    sourceUrl: `https://www.finewineandgoodspirits.com/product/${PLCB}`,
+    sourceType: "approved",
+    width: 1200,
+    height: 1200,
+    mimeType: "image/jpeg",
+    identityMatched: true
+  };
+  const rejected = evaluateCandidate(candidate, wrongVision);
+  assert.equal(rejected.rejected, true);
+  assert.equal(rejected.rejectionReason, "wrong_product");
+  const accepted = evaluateCandidate(candidate, cleanVision);
+  assert.equal(accepted.rejected, false);
+  assert.ok(accepted.score >= IMAGE_ACCEPTANCE_THRESHOLD);
+  assert.equal(
+    accepted.score,
+    IMAGE_SCORE.approvedSource
+      + IMAGE_SCORE.exactIdentityMatch
+      + IMAGE_SCORE.largeImage
+      + IMAGE_SCORE.cleanProductPhoto
+  );
+});
+
+test("Captain Morgan regression: blocked direct probe + higher-res Figranium bytes reach vision and can accept", async () => {
   const png = makePng(1200, 1200);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("finewineandgoodspirits.com")) {
+    if (url.includes("www.finewineandgoodspirits.com")) {
       return new Response("akamai deny", { status: 403 });
     }
     return new Response("missing", { status: 404 });
   }) as typeof fetch;
 
+  let visionSawBase64 = false;
   try {
     const result = await executeImageEnrichment(captainCandidate(), {
-      searchImageHits: async () => [
-        {
-          url: FWGS_F1,
-          sourceUrl: `https://www.finewineandgoodspirits.com/product/${PLCB}`,
-          mimeType: "image/jpeg"
-        }
-      ],
+      searchImageHits: async () => [],
       searchWebHits: async () => [],
       fetchPageHtml: async () => null,
-      fetchFwgsImageViaFigranium: async () => figraniumOk(png),
-      verifyImage: async () => cleanVision
+      extractFwgsPlcbImages: async () => ({
+        matched: true,
+        plcbItem: PLCB,
+        imageUrls: [FWGS_F1],
+        primaryImageUrl: FWGS_F1,
+        extractionSource: "embedded_json"
+      }),
+      fetchFwgsImageViaFigranium: async (imageUrl) => {
+        assert.equal(imageUrl, FWGS_F1_1200);
+        return figraniumOk(png, 1200, 1200, imageUrl);
+      },
+      verifyImage: async (req) => {
+        visionSawBase64 = Boolean(req.imageBase64 && req.imageBase64.length > 0);
+        return cleanVision;
+      }
     });
 
     const candidateStage = result.diagnostics.stages.find((s) => s.stage === "candidates");
@@ -252,18 +408,19 @@ test("Captain Morgan regression: blocked direct probe + Figranium F1 bytes conti
       || String(candidateStage?.reason ?? "").includes("fwgs_image_discovered_via_figranium")
     );
     assert.ok(result.evaluated.length > 0, "candidate should reach normal scoring");
-    const evaluated = result.evaluated.find((item) => item.url === FWGS_F1);
-    assert.ok(evaluated, "FWGS F1 should be evaluated");
+    const evaluated =
+      result.evaluated.find((item) => item.url === FWGS_F1_1200)
+      ?? result.evaluated.find((item) => item.url.includes("000004766_F1.jpg"));
+    assert.ok(evaluated, "FWGS F1 (preferably 1200 rendition) should be evaluated");
     assert.equal(evaluated?.width, 1200);
     assert.equal(evaluated?.height, 1200);
+    assert.equal(evaluated?.identityMatched, true);
     assert.notEqual(evaluated?.rejectionReason, "fetch_failed");
-    // Approved FWGS sources score below the vision floor today (15+10 < 40), so
-    // selection may still fail — this regression proves bytes were recovered and scored.
-    assert.ok(
-      evaluated?.rejectionReason === "below_vision_floor"
-      || evaluated?.rejectionReason === "score_below_threshold"
-      || result.selected?.url === FWGS_F1
-    );
+    assert.notEqual(evaluated?.rejectionReason, "low_resolution");
+    assert.notEqual(evaluated?.rejectionReason, "below_vision_floor");
+    assert.ok(visionSawBase64, "vision should receive recovered base64 bytes");
+    assert.equal(result.selected?.url, FWGS_F1_1200);
+    assert.ok((result.selected?.score ?? 0) >= IMAGE_ACCEPTANCE_THRESHOLD);
   } finally {
     globalThis.fetch = originalFetch;
   }
