@@ -85,13 +85,26 @@ export function isFwgsFigraniumConfigured(): boolean {
 
 /**
  * Accept only digit-only PLCB codes after trim.
- * Pads numeric codes to 9 digits. Rejects mixed text (returns "").
+ * Pads numeric codes to 9 digits. Rejects mixed text and >9-digit values.
  */
 export function normalizePlcbItem(plcbItem: string): string {
   const raw = String(plcbItem ?? "").trim();
   if (!raw) return "";
   if (!/^\d+$/.test(raw)) return "";
+  // PLCB item codes are at most 9 digits when canonical; reject longer digit strings.
+  if (raw.length > 9) return "";
   return raw.padStart(9, "0");
+}
+
+/**
+ * Bind a Figranium-returned PLCB code to the originally requested item.
+ * Both sides are normalized with digit-only rules; mismatch → false.
+ */
+export function validateReturnedPlcbItem(requested: string, returned: string): boolean {
+  const requestedCode = normalizePlcbItem(requested);
+  const returnedCode = normalizePlcbItem(returned);
+  if (!requestedCode || !returnedCode) return false;
+  return requestedCode === returnedCode;
 }
 
 /** Canonical short PDP URL for a zero-padded PLCB item code. */
@@ -159,33 +172,59 @@ export function filterValidatedFwgsImageUrls(
   return out;
 }
 
+/**
+ * Parse a product resolver payload and bind it to the requested PLCB item.
+ * Rejects when the returned `plcbItem` does not equal the requested code.
+ */
 export function parseFwgsFigraniumProduct(
   data: unknown,
-  _fallbackPlcbItem = ""
+  requestedPlcbItem: string
 ): FwgsFigraniumProduct | null {
+  const requested = normalizePlcbItem(requestedPlcbItem);
+  if (!requested) return null;
   const parsed = FwgsFigraniumProductSchema.safeParse(data);
-  return parsed.success ? parsed.data : null;
-}
-
-export function parseFwgsFigraniumImages(
-  data: unknown,
-  _fallbackPlcbItem = ""
-): FwgsFigraniumImageResult | null {
-  const parsed = FwgsFigraniumImageResultSchema.safeParse(data);
   if (!parsed.success) return null;
   const hit = parsed.data;
-  const plcbItem = normalizePlcbItem(hit.plcbItem) || normalizePlcbItem(_fallbackPlcbItem);
-  if (!plcbItem) return null;
+  if (!validateReturnedPlcbItem(requested, hit.plcbItem)) return null;
 
-  const imageUrls = filterValidatedFwgsImageUrls(hit.imageUrls, plcbItem);
+  const imageUrls = filterValidatedFwgsImageUrls(hit.imageUrls, requested);
   const primary =
-    hit.primaryImageUrl && validateFwgsImageUrl(hit.primaryImageUrl, plcbItem)
+    hit.primaryImageUrl && validateFwgsImageUrl(hit.primaryImageUrl, requested)
       ? hit.primaryImageUrl
       : imageUrls[0] ?? null;
 
   return {
     ...hit,
-    plcbItem,
+    plcbItem: requested,
+    imageUrls,
+    primaryImageUrl: primary
+  };
+}
+
+/**
+ * Parse an image extractor payload and bind it to the requested PLCB item.
+ * Image URLs are always validated against the requested code — never the returned one.
+ */
+export function parseFwgsFigraniumImages(
+  data: unknown,
+  requestedPlcbItem: string
+): FwgsFigraniumImageResult | null {
+  const requested = normalizePlcbItem(requestedPlcbItem);
+  if (!requested) return null;
+  const parsed = FwgsFigraniumImageResultSchema.safeParse(data);
+  if (!parsed.success) return null;
+  const hit = parsed.data;
+  if (!validateReturnedPlcbItem(requested, hit.plcbItem)) return null;
+
+  const imageUrls = filterValidatedFwgsImageUrls(hit.imageUrls, requested);
+  const primary =
+    hit.primaryImageUrl && validateFwgsImageUrl(hit.primaryImageUrl, requested)
+      ? hit.primaryImageUrl
+      : imageUrls[0] ?? null;
+
+  return {
+    ...hit,
+    plcbItem: requested,
     matched: Boolean(hit.matched) && (Boolean(primary) || imageUrls.length > 0),
     imageUrls,
     primaryImageUrl: primary
@@ -232,7 +271,7 @@ export async function resolveFwgsPlcbProduct(
     schema: FwgsFigraniumProductSchema
   });
   if (result.kind !== "success") return figraniumFailureNull(result);
-  return result.data;
+  return parseFwgsFigraniumProduct(result.data, code);
 }
 
 /** Extract FWGS PDP images for a known PLCB item via Figranium (image-first path). */
@@ -248,9 +287,7 @@ export async function extractFwgsPlcbImages(
     schema: FwgsFigraniumImageResultSchema
   });
   if (result.kind !== "success") return figraniumFailureNull(result);
-
-  const filtered = parseFwgsFigraniumImages(result.data, code);
-  return filtered;
+  return parseFwgsFigraniumImages(result.data, code);
 }
 
 /**
@@ -261,30 +298,32 @@ export async function resolveFwgsPlcbProductWithImages(
   plcbItem: string,
   pdpUrl?: string | null
 ): Promise<FwgsFigraniumProduct | null> {
-  const product = await resolveFwgsPlcbProduct(plcbItem, pdpUrl);
+  const requested = normalizePlcbItem(plcbItem);
+  if (!requested) return null;
+
+  const product = await resolveFwgsPlcbProduct(requested, pdpUrl);
   if (!product?.matched) return product;
 
   const validatedFromProduct = filterValidatedFwgsImageUrls(
     [product.primaryImageUrl, ...product.imageUrls],
-    product.plcbItem || plcbItem
+    requested
   );
   if (validatedFromProduct.length > 0) {
     return {
       ...product,
+      plcbItem: requested,
       imageUrls: validatedFromProduct,
       primaryImageUrl: validatedFromProduct[0] ?? null
     };
   }
 
-  const images = await extractFwgsPlcbImages(
-    product.plcbItem || plcbItem,
-    product.productUrl || pdpUrl
-  );
+  const images = await extractFwgsPlcbImages(requested, product.productUrl || pdpUrl);
   if (!images?.matched) {
-    return { ...product, imageUrls: [], primaryImageUrl: null };
+    return { ...product, plcbItem: requested, imageUrls: [], primaryImageUrl: null };
   }
   return {
     ...product,
+    plcbItem: requested,
     imageUrls: images.imageUrls,
     primaryImageUrl: images.primaryImageUrl
   };

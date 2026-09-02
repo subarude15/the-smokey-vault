@@ -16,7 +16,8 @@ import {
   parseFwgsFigraniumProduct,
   resolveFwgsPlcbProduct,
   resolveFwgsPlcbProductWithImages,
-  validateFwgsImageUrl
+  validateFwgsImageUrl,
+  validateReturnedPlcbItem
 } from "./fwgs-figranium.js";
 
 const originalFetch = globalThis.fetch;
@@ -68,9 +69,16 @@ test("normalizePlcbItem rejects malformed PLCB input", () => {
   assert.equal(normalizePlcbItem("4766x"), "");
   assert.equal(normalizePlcbItem("sku-4766"), "");
   assert.equal(normalizePlcbItem("000004766-extra"), "");
+  assert.equal(normalizePlcbItem("000000000004766"), "");
   assert.equal(fwgsPdpUrlForItem("sku-4766"), "");
 });
 
+test("validateReturnedPlcbItem binds returned identity to requested", () => {
+  assert.equal(validateReturnedPlcbItem("4766", "000004766"), true);
+  assert.equal(validateReturnedPlcbItem("000004766", "000004766"), true);
+  assert.equal(validateReturnedPlcbItem("000004766", "000008865"), false);
+  assert.equal(validateReturnedPlcbItem("000004766", "sku-000004766"), false);
+});
 test("isFwgsFigraniumConfigured requires base URL, API key, and image task ID", () => {
   stashEnv();
   delete process.env.FIGRANIUM_API_KEY;
@@ -104,7 +112,7 @@ test("parseFwgsFigraniumProduct maps resolver payload", () => {
     region: null,
     imageUrls: [],
     primaryImageUrl: null
-  });
+  }, "000004766");
   assert.ok(hit);
   assert.equal(hit.matched, true);
   assert.equal(hit.name, "Captain Morgan Original Spiced Rum");
@@ -115,10 +123,55 @@ test("parseFwgsFigraniumProduct maps resolver payload", () => {
   assert.equal(fwgs.volume_ml, 1750);
 });
 
+test("parseFwgsFigraniumProduct accepts leading-zero normalized returned identity", () => {
+  const hit = parseFwgsFigraniumProduct({
+    matched: true,
+    ambiguous: false,
+    notFound: false,
+    plcbItem: "000004766",
+    productUrl: "https://www.finewineandgoodspirits.com/product/000004766",
+    name: "Captain Morgan Original Spiced Rum",
+    brand: "Captain Morgan",
+    proof: 70,
+    abv: null,
+    volumeText: "1.75L",
+    category: "Rum",
+    subcategory: null,
+    country: "United States",
+    region: null,
+    imageUrls: [],
+    primaryImageUrl: null
+  }, "4766");
+  assert.ok(hit);
+  assert.equal(hit.plcbItem, "000004766");
+});
+
+test("parseFwgsFigraniumProduct rejects mismatched returned PLCB", () => {
+  const hit = parseFwgsFigraniumProduct({
+    matched: true,
+    ambiguous: false,
+    notFound: false,
+    plcbItem: "000008865",
+    productUrl: "https://www.finewineandgoodspirits.com/product/000008865",
+    name: "Wrong Product",
+    brand: "Wrong",
+    proof: 80,
+    abv: null,
+    volumeText: "750ml",
+    category: "Whiskey",
+    subcategory: null,
+    country: "United States",
+    region: null,
+    imageUrls: [],
+    primaryImageUrl: null
+  }, "000004766");
+  assert.equal(hit, null);
+});
+
 test("parseFwgsFigraniumProduct rejects malformed schema", () => {
-  assert.equal(parseFwgsFigraniumProduct({ matched: "yes" }), null);
-  assert.equal(parseFwgsFigraniumProduct({ matched: true, imageUrls: "nope" }), null);
-  assert.equal(parseFwgsFigraniumProduct(null), null);
+  assert.equal(parseFwgsFigraniumProduct({ matched: "yes" }, "000004766"), null);
+  assert.equal(parseFwgsFigraniumProduct({ matched: true, imageUrls: "nope" }, "000004766"), null);
+  assert.equal(parseFwgsFigraniumProduct(null, "000004766"), null);
 });
 
 test("parseFwgsFigraniumImages maps extractor payload and drops invalid hosts", () => {
@@ -132,10 +185,50 @@ test("parseFwgsFigraniumImages maps extractor payload and drops invalid hosts", 
       "https://cdn.example/F1.jpg"
     ],
     extractionSource: "embedded_json"
-  });
+  }, "000004766");
   assert.ok(hit);
   assert.equal(hit.imageUrls.length, 2);
   assert.match(hit.primaryImageUrl ?? "", /_F1\./);
+});
+
+test("parseFwgsFigraniumImages rejects mismatched PLCB even when images match returned item", () => {
+  const wrongImage =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000008865_F1.jpg&height=475&width=475";
+  const hit = parseFwgsFigraniumImages({
+    matched: true,
+    plcbItem: "000008865",
+    primaryImageUrl: wrongImage,
+    imageUrls: [wrongImage],
+    extractionSource: "embedded_json"
+  }, "000004766");
+  assert.equal(hit, null);
+});
+
+test("parseFwgsFigraniumImages rejects mismatched PLCB when image is consistent with returned item", () => {
+  const consistentWrong =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000008865_B1.jpg&height=475&width=475";
+  assert.equal(validateFwgsImageUrl(consistentWrong, "000008865"), true);
+  assert.equal(
+    parseFwgsFigraniumImages({
+      matched: true,
+      plcbItem: "000008865",
+      primaryImageUrl: consistentWrong,
+      imageUrls: [consistentWrong]
+    }, "000004766"),
+    null
+  );
+});
+
+test("parseFwgsFigraniumImages accepts leading-zero normalized returned identity", () => {
+  const hit = parseFwgsFigraniumImages({
+    matched: true,
+    plcbItem: "000004766",
+    primaryImageUrl: VALID_IMAGE,
+    imageUrls: [VALID_IMAGE]
+  }, "4766");
+  assert.ok(hit);
+  assert.equal(hit.plcbItem, "000004766");
+  assert.equal(hit.primaryImageUrl, VALID_IMAGE);
 });
 
 test("parseFwgsFigraniumImages rejects malformed schema", () => {
@@ -145,7 +238,7 @@ test("parseFwgsFigraniumImages rejects malformed schema", () => {
       plcbItem: "000004766",
       imageUrls: "not-an-array",
       primaryImageUrl: null
-    }),
+    }, "000004766"),
     null
   );
 });
@@ -332,6 +425,62 @@ test("extractFwgsPlcbImages validates image URLs from Figranium", async () => {
   assert.ok(images?.matched);
   assert.equal(images?.imageUrls.length, 2);
   assert.equal(images?.primaryImageUrl, VALID_IMAGE);
+});
+
+test("extractFwgsPlcbImages rejects mismatched returned PLCB identity", async () => {
+  stashEnv();
+  configureFwgsImageEnv();
+  const wrongImage =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000008865_F1.jpg&height=475&width=475";
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        outcome: "success",
+        data: {
+          matched: true,
+          plcbItem: "000008865",
+          primaryImageUrl: wrongImage,
+          imageUrls: [wrongImage]
+        }
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  const images = await extractFwgsPlcbImages("000004766");
+  assert.equal(images, null);
+});
+
+test("resolveFwgsPlcbProduct rejects mismatched returned PLCB identity", async () => {
+  stashEnv();
+  configureFwgsImageEnv();
+  process.env.FIGRANIUM_FWGS_RESOLVER_TASK_ID = "task_resolver";
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        outcome: "success",
+        data: {
+          matched: true,
+          ambiguous: false,
+          notFound: false,
+          plcbItem: "000008865",
+          productUrl: "https://www.finewineandgoodspirits.com/product/000008865",
+          name: "Wrong Product",
+          brand: "Wrong",
+          proof: 80,
+          abv: null,
+          volumeText: "750ml",
+          category: "Whiskey",
+          subcategory: null,
+          country: "United States",
+          region: null,
+          imageUrls: [],
+          primaryImageUrl: null
+        }
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  assert.equal(await resolveFwgsPlcbProduct("000004766"), null);
 });
 
 test("resolveFwgsPlcbProductWithImages fills images when resolver returns none", async () => {
