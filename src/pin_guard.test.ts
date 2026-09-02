@@ -66,12 +66,13 @@ test("expired entries are dropped so the map cannot grow forever", () => {
 test("unique spoofed IPs still hit the global PIN backstop", () => {
   const store = new Map<string, PinAttempts>();
   let now = 2_000_000;
-  for (let i = 0; i < PIN_GLOBAL_FREE_ATTEMPTS; i += 1) {
+  // Same rule as per-IP: N free failures still allow the next try; wait starts after that.
+  for (let i = 0; i <= PIN_GLOBAL_FREE_ATTEMPTS; i += 1) {
     const ip = `203.0.113.${i}`;
     assert.equal(unlockWaitMs(store, ip, now), 0, "each new address is free until the global cap");
     recordUnlockFailure(store, ip, now);
     now += 5;
   }
   assert.ok(unlockWaitMs(store, "198.51.100.9", now) > 0, "the next unique address must wait");
-  assert.equal(store.get(PIN_GLOBAL_KEY)?.fails, PIN_GLOBAL_FREE_ATTEMPTS);
+  assert.equal(store.get(PIN_GLOBAL_KEY)?.fails, PIN_GLOBAL_FREE_ATTEMPTS + 1);
 });
