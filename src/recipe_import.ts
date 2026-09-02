@@ -1,5 +1,10 @@
-import { isIP } from "node:net";
-import { lookup } from "node:dns/promises";
+import {
+  NetworkSafetyError,
+  isUnsafeIp,
+  parseSafeHttpUrl,
+  resolvePublicAddresses,
+  type LookupFn
+} from "./network_safety.js";
 
 export type ImportedRecipe = {
   name: string;
@@ -13,68 +18,40 @@ export type ImportedRecipe = {
   source_url: string;
 };
 
-const BLOCKED_HOSTS = new Set([
-  "localhost",
-  "localhost.localdomain",
-  "metadata.google.internal",
-  "metadata.internal"
-]);
-
 export class RecipeImportError extends Error {
   constructor(message: string, readonly statusCode = 400) {
     super(message);
   }
 }
 
+function toRecipeImportError(error: unknown): RecipeImportError {
+  if (error instanceof RecipeImportError) return error;
+  if (error instanceof NetworkSafetyError) {
+    if (error.reason === "invalid_url") return new RecipeImportError("That does not look like a web link.");
+    if (error.reason === "bad_scheme") return new RecipeImportError("Use an http or https recipe link.");
+    if (error.reason === "dns") return new RecipeImportError("Could not reach that site.");
+    return new RecipeImportError("That link cannot be opened.");
+  }
+  return new RecipeImportError("Could not reach that site.");
+}
+
 export function assertSafeHttpUrl(raw: string, base?: string): URL {
-  let parsed: URL;
   try {
-    parsed = new URL(raw.trim(), base);
-  } catch {
-    throw new RecipeImportError("That does not look like a web link.");
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new RecipeImportError("Use an http or https recipe link.");
-  }
-  if (parsed.username || parsed.password) {
-    throw new RecipeImportError("That link cannot be opened.");
-  }
-  const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (BLOCKED_HOSTS.has(host) || host.endsWith(".localhost") || host.endsWith(".local")) {
-    throw new RecipeImportError("That link cannot be opened.");
-  }
-  if (isIP(host) && isPrivateIp(host)) {
-    throw new RecipeImportError("That link cannot be opened.");
-  }
-  return parsed;
-}
-
-export function isPrivateIp(ip: string): boolean {
-  const value = ip.toLowerCase().replace(/^::ffff:/, "");
-  if (value === "::1" || value === "0:0:0:0:0:0:0:1") return true;
-  if (value.startsWith("fe80:") || value.startsWith("fc") || value.startsWith("fd")) return true;
-  const parts = value.split(".").map(Number);
-  if (parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
-    const [a, b] = parts;
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  }
-  return false;
-}
-
-export async function assertPublicHostname(hostname: string): Promise<void> {
-  const host = hostname.replace(/^\[|\]$/g, "");
-  if (isIP(host)) {
-    if (isPrivateIp(host)) throw new RecipeImportError("That link cannot be opened.");
-    return;
-  }
-  try {
-    const results = await lookup(host, { all: true });
-    if (!results.length || results.some((entry) => isPrivateIp(entry.address))) {
-      throw new RecipeImportError("That link cannot be opened.");
-    }
+    return parseSafeHttpUrl(raw, base);
   } catch (error) {
-    if (error instanceof RecipeImportError) throw error;
-    throw new RecipeImportError("Could not reach that site.");
+    throw toRecipeImportError(error);
+  }
+}
+
+export function isPrivateIp(ip: string) {
+  return isUnsafeIp(ip);
+}
+
+export async function assertPublicHostname(hostname: string, lookupFn?: LookupFn): Promise<void> {
+  try {
+    await resolvePublicAddresses(hostname, lookupFn);
+  } catch (error) {
+    throw toRecipeImportError(error);
   }
 }
 

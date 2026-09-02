@@ -1,14 +1,34 @@
-import { createHash } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
-import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { dbPath } from "./db.js";
+import {
+  MAX_SAFE_REDIRECTS,
+  NetworkSafetyError,
+  fetchSafeHttp,
+  headerValue,
+  parseSafeHttpUrl,
+  sanitizeUrlForLog,
+  type FetchSafeOptions,
+  type LookupFn,
+  type PinnedRequestFn
+} from "./network_safety.js";
 
 export const imagesDir = join(dirname(dbPath), "images");
 mkdirSync(imagesDir, { recursive: true });
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const IMAGE_FETCH_TIMEOUT_MS = 15_000;
+
+function positiveInt(raw: string | undefined, fallback: number) {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+/** Hard cap for remote image downloads. Env override: IMAGE_DOWNLOAD_MAX_BYTES. */
+export const IMAGE_DOWNLOAD_MAX_BYTES = positiveInt(process.env.IMAGE_DOWNLOAD_MAX_BYTES, MAX_IMAGE_BYTES);
+
 const ALLOWED_TYPES = new Set([
   "image/jpeg",
   "image/jpg",
@@ -18,20 +38,6 @@ const ALLOWED_TYPES = new Set([
   "image/heic",
   "image/heif"
 ]);
-
-const ALLOWED_HOST_HINTS = [
-  "colacloud",
-  "cloudfront.net",
-  "openfoodfacts",
-  "openfoodfacts.org",
-  "upcitemdb",
-  "amazonaws.com",
-  "brewfather.app",
-  "googleapis.com",
-  "finewineandgoodspirits.com",
-  "demandware.net",
-  "scene7.com"
-];
 
 function extensionFrom(url: string, contentType?: string | null) {
   const fromType = contentType?.match(/image\/(jpeg|jpg|png|webp|gif|heic|heif)/i)?.[1]?.toLowerCase();
@@ -76,7 +82,7 @@ function extensionForType(contentType: string, originalName?: string) {
 
 export function saveImageBuffer(buffer: Buffer, contentType?: string | null, originalName?: string) {
   if (!buffer.length) throw new Error("Image required");
-  if (buffer.length > MAX_IMAGE_BYTES) throw new Error("Image is too large (max 10 MB)");
+  if (buffer.length > MAX_IMAGE_BYTES) throw new Error(imageTooLargeMessage(MAX_IMAGE_BYTES));
   const sniffed = sniffImageType(buffer);
   const declared = (contentType ?? "").split(";")[0].trim().toLowerCase();
   const type = sniffed || declared;
@@ -96,16 +102,121 @@ export function isLocalImagePath(value?: string | null) {
   return Boolean(value && value.startsWith("/api/media/images/"));
 }
 
-export async function localizeImage(remoteUrl?: string | null): Promise<string | null> {
+export function isAllowedImageContentType(contentType?: string | null) {
+  const type = (contentType ?? "").split(";")[0].trim().toLowerCase();
+  return ALLOWED_TYPES.has(type);
+}
+
+export type LocalizeImageLog = {
+  hostname: string;
+  url: string;
+  outcome: "ok" | "skip" | "reject";
+  reason?: string;
+  status?: number;
+  bytes?: number;
+  contentType?: string;
+};
+
+export type LocalizeImageDeps = {
+  lookup?: LookupFn;
+  request?: PinnedRequestFn;
+  timeoutMs?: number;
+  maxBytes?: number;
+  maxRedirects?: number;
+  log?: (entry: LocalizeImageLog) => void;
+};
+
+function removeTemp(path: string) {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    // A leftover part file is cleaned on the next failure; do not throw from cleanup.
+  }
+}
+
+function imageTooLargeMessage(maxBytes: number) {
+  if (maxBytes >= 1024 * 1024 && maxBytes % (1024 * 1024) === 0) {
+    return `Image is too large (max ${maxBytes / (1024 * 1024)} MB)`;
+  }
+  return `Image is too large (max ${maxBytes} bytes)`;
+}
+
+async function writeLimitedStream(
+  source: Readable,
+  destPath: string,
+  maxBytes: number,
+  timeoutMs: number
+): Promise<number> {
+  let bytes = 0;
+  const out = createWriteStream(destPath);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        source.destroy();
+        out.destroy();
+        reject(error);
+      };
+      const armIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          fail(new NetworkSafetyError("Image download timed out.", "timeout"));
+        }, timeoutMs);
+      };
+      armIdle();
+      source.on("error", fail);
+      out.on("error", fail);
+      source.on("data", (chunk: Buffer | string) => {
+        armIdle();
+        const size = typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+        bytes += size;
+        if (bytes > maxBytes) {
+          fail(new NetworkSafetyError(imageTooLargeMessage(maxBytes), "too_large"));
+        }
+      });
+      out.on("finish", () => {
+        if (settled) return;
+        settled = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        resolve();
+      });
+      source.pipe(out);
+    });
+    return bytes;
+  } catch (error) {
+    removeTemp(destPath);
+    throw error;
+  }
+}
+
+export async function localizeImage(remoteUrl?: string | null, deps: LocalizeImageDeps = {}): Promise<string | null> {
   if (!remoteUrl) return null;
   if (isLocalImagePath(remoteUrl)) return remoteUrl;
+
+  const log = (entry: Omit<LocalizeImageLog, "url" | "hostname"> & { url?: string; hostname?: string }) => {
+    if (!deps.log) return;
+    let hostname = entry.hostname ?? "";
+    let url = entry.url ?? "";
+    try {
+      const parsed = new URL(remoteUrl);
+      hostname ||= parsed.hostname;
+      url ||= sanitizeUrlForLog(parsed);
+    } catch {
+      url ||= "invalid url";
+    }
+    deps.log({ ...entry, hostname, url });
+  };
+
   let parsed: URL;
   try {
-    parsed = new URL(remoteUrl);
+    parsed = parseSafeHttpUrl(remoteUrl);
   } catch {
     return remoteUrl;
   }
-  if (!/^https?:$/i.test(parsed.protocol)) return remoteUrl;
 
   const hash = createHash("sha256").update(remoteUrl).digest("hex").slice(0, 32);
   const existing = ["jpg", "jpeg", "png", "webp", "gif"]
@@ -115,23 +226,61 @@ export async function localizeImage(remoteUrl?: string | null): Promise<string |
     return `/api/media/images/${existing.split(/[/\\]/).pop()}`;
   }
 
+  const timeoutMs = deps.timeoutMs ?? IMAGE_FETCH_TIMEOUT_MS;
+  const maxBytes = deps.maxBytes ?? IMAGE_DOWNLOAD_MAX_BYTES;
+  const fetchOptions: FetchSafeOptions = {
+    timeoutMs,
+    maxRedirects: deps.maxRedirects ?? MAX_SAFE_REDIRECTS,
+    lookup: deps.lookup,
+    request: deps.request,
+    headers: { Accept: "image/*" }
+  };
+
+  const tempPath = join(imagesDir, `.tmp-${hash}-${randomBytes(8).toString("hex")}`);
   try {
-    const response = await fetch(remoteUrl, {
-      headers: { Accept: "image/*,*/*" },
-      signal: AbortSignal.timeout(20_000),
-      redirect: "follow"
-    });
-    if (!response.ok || !response.body) return remoteUrl;
-    const contentType = response.headers.get("content-type");
-    if (contentType && !contentType.startsWith("image/") && !ALLOWED_HOST_HINTS.some((hint) => parsed.hostname.includes(hint))) {
+    const response = await fetchSafeHttp(parsed, fetchOptions);
+    if (response.status < 200 || response.status >= 300 || !response.body) {
+      response.body?.destroy();
+      log({ outcome: "reject", reason: "http_status", status: response.status });
       return remoteUrl;
     }
-    const ext = extensionFrom(remoteUrl, contentType);
+
+    const contentType = headerValue(response.headers, "content-type");
+    if (contentType && !isAllowedImageContentType(contentType)) {
+      response.body.destroy();
+      log({ outcome: "reject", reason: "content_type", status: response.status, contentType: contentType.split(";")[0] });
+      return remoteUrl;
+    }
+
+    const declaredLength = Number(headerValue(response.headers, "content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      response.body.destroy();
+      log({ outcome: "reject", reason: "content_length", status: response.status, bytes: declaredLength, contentType: contentType.split(";")[0] });
+      return remoteUrl;
+    }
+
+    const bytes = await writeLimitedStream(response.body, tempPath, maxBytes, timeoutMs);
+    const sniffed = existsSync(tempPath) ? sniffImageType(readFileSync(tempPath).subarray(0, 16)) : "";
+    if (!isAllowedImageContentType(contentType) && !isAllowedImageContentType(sniffed)) {
+      removeTemp(tempPath);
+      log({ outcome: "reject", reason: "not_image", status: response.status, bytes, contentType: contentType.split(";")[0] });
+      return remoteUrl;
+    }
+
+    const ext = extensionFrom(remoteUrl, sniffed || contentType);
     const filename = `${hash}${ext}`;
     const target = join(imagesDir, filename);
-    await pipeline(Readable.fromWeb(response.body as never), createWriteStream(target));
+    if (existsSync(target)) {
+      removeTemp(tempPath);
+      return `/api/media/images/${filename}`;
+    }
+    renameSync(tempPath, target);
+    log({ outcome: "ok", status: response.status, bytes, contentType: (sniffed || contentType).split(";")[0] });
     return `/api/media/images/${filename}`;
-  } catch {
+  } catch (error) {
+    removeTemp(tempPath);
+    const reason = error instanceof NetworkSafetyError ? error.reason : "fetch_error";
+    log({ outcome: "reject", reason });
     return remoteUrl;
   }
 }
