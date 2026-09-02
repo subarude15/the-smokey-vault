@@ -7,7 +7,7 @@ import fastifyStatic from "@fastify/static";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession } from "./auth.js";
+import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession, resolveSessionSecret } from "./auth.js";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
 import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
@@ -63,7 +63,7 @@ import {
   startImportJob
 } from "./import_queue.js";
 import { buildAiFailoverChain, defaultAiBaseUrl, defaultAiModel, isRetryableAiStatus, resolveAiModel, type AiProviderConfig } from "./ai_providers.js";
-import { pruneAttempts, recordFailure, retryAfterMs, type PinAttempts } from "./pin_guard.js";
+import { recordUnlockFailure, recordUnlockSuccess, unlockWaitMs, type PinAttempts } from "./pin_guard.js";
 import {
   saveScanSessionBottle,
   undoScanSessionMutation,
@@ -100,7 +100,9 @@ import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
  */
 const trustProxy = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY?.trim() ?? "");
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024, trustProxy });
-const secret = process.env.SESSION_SECRET ?? `${dbPath}:smokey-vault`;
+const resolvedSecret = resolveSessionSecret(process.env.SESSION_SECRET, getSetting("sessionSecret"));
+if (resolvedSecret.persist) setSetting("sessionSecret", resolvedSecret.secret);
+const secret = resolvedSecret.secret;
 const tables = new Set(["spirits", "taps", "brews", "packaged_beer", "wines"]);
 const publicTables = new Set([...tables, "cocktails"]);
 const tableFields: Record<string, string[]> = {
@@ -190,7 +192,7 @@ app.post<{ Body: { pin?: string } }>("/api/auth/unlock", {
 }, async (request, reply) => {
   const now = Date.now();
   const who = request.ip || "unknown";
-  const wait = retryAfterMs(pinAttempts.get(who), now);
+  const wait = unlockWaitMs(pinAttempts, who, now);
   if (wait > 0) {
     const seconds = Math.ceil(wait / 1000);
     app.log.warn({ ip: who, seconds, fails: pinAttempts.get(who)?.fails }, "Throttled a PIN attempt");
@@ -200,13 +202,11 @@ app.post<{ Body: { pin?: string } }>("/api/auth/unlock", {
     });
   }
   if (!request.body.pin || !pinAccepted(request.body.pin)) {
-    const next = recordFailure(pinAttempts.get(who), now);
-    pinAttempts.set(who, next);
-    pruneAttempts(pinAttempts, now);
-    app.log.warn({ ip: who, fails: next.fails }, "Rejected a PIN attempt");
+    recordUnlockFailure(pinAttempts, who, now);
+    app.log.warn({ ip: who, fails: pinAttempts.get(who)?.fails }, "Rejected a PIN attempt");
     return reply.code(401).send({ error: "Incorrect PIN" });
   }
-  pinAttempts.delete(who);
+  recordUnlockSuccess(pinAttempts, who, now);
   return { token: token(), expiresIn: 900 };
 });
 
@@ -713,7 +713,7 @@ app.delete<{ Params: { id: string } }>("/api/restock/wanted/:id", async (request
 });
 
 async function handleBarcodeLookup(
-  request: { params: { code: string }; query: { enrich?: string; refresh?: string; force?: string; kind?: string } },
+  request: { params: { code: string }; query: { enrich?: string; refresh?: string; force?: string; kind?: string }; headers: { authorization?: string } },
   reply: { code: (n: number) => { send: (v: unknown) => unknown } }
 ) {
   const forceRefresh = request.query.refresh === "true" || request.query.refresh === "1"
@@ -723,7 +723,8 @@ async function handleBarcodeLookup(
     : undefined;
   try {
     const result = await identifyByBarcode(request.params.code, { forceRefresh, kind, mode: "live" });
-    if (!isReadyLookup(result)) queueLookupResult(result);
+    // Import Review is a keeper queue. Public GET lookups must not write it.
+    if (isAdmin(request.headers.authorization) && !isReadyLookup(result)) queueLookupResult(result);
     return result;
   } catch (error) {
     app.log.error({ error }, "Barcode lookup failed");
@@ -737,7 +738,7 @@ app.get<{ Querystring: { code?: string; upc?: string; enrich?: string; refresh?:
   async (request, reply) => {
     const code = String(request.query.code ?? request.query.upc ?? "").trim();
     if (!code) return reply.code(400).send({ error: "Pass ?code=<barcode>" });
-    return handleBarcodeLookup({ params: { code }, query: request.query }, reply);
+    return handleBarcodeLookup({ params: { code }, query: request.query, headers: request.headers }, reply);
   }
 );
 
@@ -1544,9 +1545,10 @@ app.post("/api/system/restart", {
 
 app.get("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
-  const rows = db.prepare("SELECT key,value,updated_at FROM settings WHERE key != 'pinHash'").all();
+  const rows = db.prepare("SELECT key,value,updated_at FROM settings WHERE key NOT IN ('pinHash','sessionSecret')").all();
   const settings = Object.fromEntries((rows as Array<{key:string;value:string}>).map((r) => [r.key, r.value]));
   delete settings.aiApiKey;
+  delete settings.sessionSecret;
   delete settings.aiProvider;
   delete settings.aiBaseUrl;
   delete settings.aiModel;
@@ -1641,6 +1643,12 @@ if (existsSync(root)) {
     if (request.url.startsWith("/api/")) return reply.code(404).send({ error: "Not found" });
     return reply.type("text/html").send(readFileSync(join(root, "index.html")));
   });
+}
+
+if (resolvedSecret.source === "generated") {
+  app.log.warn("SESSION_SECRET was empty or a placeholder; generated a random secret and stored it in the vault database");
+} else if (resolvedSecret.source === "stored") {
+  app.log.info("Using session secret stored in the vault database");
 }
 
 const bootAi = resolveAiConfig();

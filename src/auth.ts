@@ -2,8 +2,36 @@
  * Admin-session and PIN authorization helpers.
  * Inventory mutations and future enrichment mutations must use requireAdmin.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { verifyPin } from "./db.js";
+
+/** Values that must never be used as HMAC keys — they are public or empty. */
+const PLACEHOLDER_SESSION_SECRETS = new Set([
+  "",
+  "replace-with-a-long-random-value",
+  "change-this-on-your-server"
+]);
+
+export function isUsableSessionSecret(value: string | undefined | null): value is string {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 && !PLACEHOLDER_SESSION_SECRETS.has(trimmed);
+}
+
+/**
+ * Picks a signing secret that is not empty and not a documented placeholder.
+ * NAS compose sets SESSION_SECRET=${SESSION_SECRET:-}, which becomes "" when
+ * the key is missing from .env — `??` does not treat "" as missing, so the old
+ * `${dbPath}:smokey-vault` fallback never ran and tokens were HMAC'd with "".
+ */
+export function resolveSessionSecret(
+  envValue: string | undefined,
+  storedValue?: string | null,
+  generate: () => string = () => randomBytes(32).toString("hex")
+): { secret: string; persist: boolean; source: "env" | "stored" | "generated" } {
+  if (isUsableSessionSecret(envValue)) return { secret: envValue.trim(), persist: false, source: "env" };
+  if (isUsableSessionSecret(storedValue)) return { secret: storedValue.trim(), persist: false, source: "stored" };
+  return { secret: generate(), persist: true, source: "generated" };
+}
 
 export function createAdminToken(secret: string, exp = Date.now() + 15 * 60_000): string {
   const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");

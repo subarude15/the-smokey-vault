@@ -19,18 +19,18 @@ export const PIN_ATTEMPT_TTL_MS = 15 * 60_000;
  * Guessing all 10,000 four-digit PINs at a one-minute floor takes about a week, while
  * someone who simply mistyped waits a moment and gets in.
  */
-export function requiredWaitMs(fails: number) {
-  if (fails <= PIN_FREE_ATTEMPTS) return 0;
-  const doublings = fails - PIN_FREE_ATTEMPTS - 1;
+export function requiredWaitMs(fails: number, freeAttempts = PIN_FREE_ATTEMPTS) {
+  if (fails <= freeAttempts) return 0;
+  const doublings = fails - freeAttempts - 1;
   return Math.min(1000 * 2 ** doublings, PIN_MAX_WAIT_MS);
 }
 
 /** Milliseconds still to wait, or 0 when an attempt is allowed right now. */
-export function retryAfterMs(attempts: PinAttempts | undefined, now: number) {
+export function retryAfterMs(attempts: PinAttempts | undefined, now: number, freeAttempts = PIN_FREE_ATTEMPTS) {
   if (!attempts || !attempts.fails) return 0;
   if (now - attempts.lastFailAt >= PIN_ATTEMPT_TTL_MS) return 0;
   const elapsed = now - attempts.lastFailAt;
-  return Math.max(0, requiredWaitMs(attempts.fails) - elapsed);
+  return Math.max(0, requiredWaitMs(attempts.fails, freeAttempts) - elapsed);
 }
 
 /** Folds one more failure in, forgiving a stale streak first. */
@@ -45,4 +45,31 @@ export function pruneAttempts(store: Map<string, PinAttempts>, now: number) {
     if (now - attempts.lastFailAt >= PIN_ATTEMPT_TTL_MS) store.delete(key);
   }
   return store;
+}
+
+/**
+ * Shared bucket so TRUST_PROXY + a published port cannot be turned into a
+ * 10,000-PIN guessing machine by sending a unique X-Forwarded-For each try.
+ * Per-IP still applies first for ordinary fat-fingers.
+ */
+export const PIN_GLOBAL_KEY = "__global__";
+/** A party playing with the pad should not trip this; a script will. */
+export const PIN_GLOBAL_FREE_ATTEMPTS = 12;
+
+export function unlockWaitMs(store: Map<string, PinAttempts>, ip: string, now: number) {
+  return Math.max(
+    retryAfterMs(store.get(ip), now),
+    retryAfterMs(store.get(PIN_GLOBAL_KEY), now, PIN_GLOBAL_FREE_ATTEMPTS)
+  );
+}
+
+export function recordUnlockFailure(store: Map<string, PinAttempts>, ip: string, now: number) {
+  store.set(ip, recordFailure(store.get(ip), now));
+  store.set(PIN_GLOBAL_KEY, recordFailure(store.get(PIN_GLOBAL_KEY), now));
+  pruneAttempts(store, now);
+}
+
+export function recordUnlockSuccess(store: Map<string, PinAttempts>, ip: string, now: number) {
+  store.delete(ip);
+  pruneAttempts(store, now);
 }
