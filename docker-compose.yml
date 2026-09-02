@@ -16,6 +16,10 @@ services:
     env_file:
       - .env
     ports:
+      # Published on all interfaces. Combined with TRUST_PROXY=true, a client that
+      # hits :6616 directly can spoof X-Forwarded-For. The PIN unlock route now has
+      # a global backstop. If the Synology reverse proxy is the only entry, bind
+      # localhost instead: "127.0.0.1:6616:8080"
       - "6616:8080"
     volumes:
       # Vault DB lives at DB_PATH=/data/smokeyvault.db.

@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  PIN_ATTEMPT_TTL_MS, PIN_FREE_ATTEMPTS, PIN_MAX_WAIT_MS,
-  pruneAttempts, recordFailure, requiredWaitMs, retryAfterMs, type PinAttempts
+  PIN_ATTEMPT_TTL_MS, PIN_FREE_ATTEMPTS, PIN_GLOBAL_FREE_ATTEMPTS, PIN_GLOBAL_KEY, PIN_MAX_WAIT_MS,
+  pruneAttempts, recordFailure, recordUnlockFailure, requiredWaitMs, retryAfterMs,
+  unlockWaitMs, type PinAttempts
 } from "./pin_guard.js";
 
 test("the first couple of typos cost nothing", () => {
@@ -60,4 +61,17 @@ test("expired entries are dropped so the map cannot grow forever", () => {
   ]);
   pruneAttempts(store, now);
   assert.deepEqual([...store.keys()], ["2.2.2.2"]);
+});
+
+test("unique spoofed IPs still hit the global PIN backstop", () => {
+  const store = new Map<string, PinAttempts>();
+  let now = 2_000_000;
+  for (let i = 0; i < PIN_GLOBAL_FREE_ATTEMPTS; i += 1) {
+    const ip = `203.0.113.${i}`;
+    assert.equal(unlockWaitMs(store, ip, now), 0, "each new address is free until the global cap");
+    recordUnlockFailure(store, ip, now);
+    now += 5;
+  }
+  assert.ok(unlockWaitMs(store, "198.51.100.9", now) > 0, "the next unique address must wait");
+  assert.equal(store.get(PIN_GLOBAL_KEY)?.fails, PIN_GLOBAL_FREE_ATTEMPTS);
 });

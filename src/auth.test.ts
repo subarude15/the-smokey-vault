@@ -1,9 +1,35 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createAdminToken, isAdmin, pinAccepted, requireAdmin } from "./auth.js";
+import { createAdminToken, isAdmin, pinAccepted, requireAdmin, resolveSessionSecret } from "./auth.js";
 import { setPin, verifyPin } from "./db.js";
 
 const secret = "test-session-secret";
+
+test("resolveSessionSecret rejects empty and documented placeholders", () => {
+  const generated = resolveSessionSecret("", null, () => "generated-secret-value");
+  assert.equal(generated.source, "generated");
+  assert.equal(generated.persist, true);
+  assert.equal(generated.secret, "generated-secret-value");
+
+  const placeholder = resolveSessionSecret("replace-with-a-long-random-value", null, () => "generated-secret-value");
+  assert.equal(placeholder.source, "generated");
+  assert.equal(placeholder.secret, "generated-secret-value");
+
+  const composeDefault = resolveSessionSecret("change-this-on-your-server", "stored-secret");
+  assert.equal(composeDefault.source, "stored");
+  assert.equal(composeDefault.secret, "stored-secret");
+  assert.equal(composeDefault.persist, false);
+
+  const fromEnv = resolveSessionSecret("a-real-long-random-value", "stored-secret");
+  assert.equal(fromEnv.source, "env");
+  assert.equal(fromEnv.secret, "a-real-long-random-value");
+  assert.equal(fromEnv.persist, false);
+});
+
+test("a token signed with an empty secret is not an admin session for a real secret", () => {
+  const forged = createAdminToken("");
+  assert.equal(isAdmin(`Bearer ${forged}`, "a-real-long-random-value"), false);
+});
 
 test("createAdminToken + isAdmin round-trip", () => {
   const token = createAdminToken(secret);
