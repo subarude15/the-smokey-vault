@@ -69,6 +69,14 @@ import {
   type JobDiagnosticsPayload,
   type NoResultReason
 } from "./diagnostics.js";
+import {
+  extractFwgsPlcbImages,
+  filterValidatedFwgsImageUrls,
+  fwgsPdpUrlForItem,
+  isFwgsFigraniumConfigured,
+  plcbItemFromCandidate,
+  type FwgsFigraniumImageResult
+} from "../../fwgs-figranium.js";
 
 const MAX_PROBE_SEEDS = 20;
 const MAX_OFFICIAL_PAGE_ASSET_STAGES = 8;
@@ -93,6 +101,11 @@ export type ImageEnrichmentDeps = {
   }) => Promise<VisionVerification | null>;
   /** Previously persisted official product page (reuse; do not rediscover blindly). */
   knownOfficialProductPageUrl?: string | null;
+  /** Optional override for FWGS Figranium image extraction (tests). */
+  extractFwgsPlcbImages?: (
+    plcbItem: string,
+    pdpUrl?: string | null
+  ) => Promise<FwgsFigraniumImageResult | null>;
 };
 
 export type ImageCandidateSeed = {
@@ -367,10 +380,65 @@ export async function executeImageEnrichment(
   const probe = deps.probeImageMeta ?? defaultProbe;
   const fetchHtml = deps.fetchPageHtml ?? defaultFetchPageHtml;
   const verify = deps.verifyImage ?? ((req) => verifyProductImage(req));
+  const extractFwgsImages = deps.extractFwgsPlcbImages ?? extractFwgsPlcbImages;
   const errors: string[] = [];
   const seeds: ImageCandidateSeed[] = [];
   const stages: EnrichmentDiagnosticStage[] = [];
   const diagnostics = emptyImageDiagnostics();
+
+  let selectedOfficialProductPageUrl: string | null =
+    String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
+
+  // Image-first FWGS path: when a PLCB item is known, extract + validate
+  // Fine Wine & Good Spirits product images via Figranium (no metadata merge).
+  const plcbItem = plcbItemFromCandidate(candidate);
+  if (plcbItem && isFwgsFigraniumConfigured()) {
+    const knownPdp =
+      selectedOfficialProductPageUrl
+      && /^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+        ? selectedOfficialProductPageUrl
+        : fwgsPdpUrlForItem(plcbItem);
+    try {
+      if (knownPdp) selectedOfficialProductPageUrl = knownPdp;
+      const images = await extractFwgsImages(plcbItem, knownPdp);
+      const uniqueImageUrls = filterValidatedFwgsImageUrls(
+        [images?.primaryImageUrl, ...((images?.imageUrls ?? []))],
+        plcbItem
+      );
+      if (uniqueImageUrls.length) {
+        for (const url of uniqueImageUrls) {
+          seeds.push({
+            url,
+            sourceUrl: knownPdp || null,
+            width: 475,
+            height: 475,
+            mimeType: "image/jpeg"
+          });
+        }
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "ok",
+          candidateCount: uniqueImageUrls.length,
+          reason: images?.extractionSource?.trim() || "figranium",
+          sourceUrls: knownPdp ? [knownPdp] : uniqueImageUrls.slice(0, 1)
+        });
+      } else {
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "no_result",
+          reason: images ? "no_validated_images" : "no_images"
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "FWGS Figranium failed";
+      errors.push(message);
+      stages.push({
+        stage: "fwgs_figranium_images",
+        status: "error",
+        reason: message.slice(0, 120)
+      });
+    }
+  }
 
   const queryTiers = buildImageQueryTiers(identityFromCandidate(candidate));
   let discoveredDomains: string[] = [];
@@ -451,8 +519,6 @@ export async function executeImageEnrichment(
   let officialPagesFound = 0;
   let officialImagesFromMeta = 0;
   let officialPagesWithoutImageMeta = 0;
-  let selectedOfficialProductPageUrl: string | null =
-    String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
   try {
     const identity = identityFromCandidate(candidate);
     const webTiers = queryTiers.slice(0, 4);
