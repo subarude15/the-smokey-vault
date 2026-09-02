@@ -35,6 +35,7 @@ services:
       FIGRANIUM_TIMEOUT_MS: ${FIGRANIUM_TIMEOUT_MS:-}
       FIGRANIUM_FWGS_RESOLVER_TASK_ID: ${FIGRANIUM_FWGS_RESOLVER_TASK_ID:-}
       FIGRANIUM_FWGS_IMAGE_TASK_ID: ${FIGRANIUM_FWGS_IMAGE_TASK_ID:-}
+      FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID: ${FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID:-}
     volumes:
       # Same host ./data folder at /data (vault) and /app/data (government catalogs).
       - ./data:/data
