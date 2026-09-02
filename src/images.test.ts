@@ -212,6 +212,40 @@ test("localizeImage times out a stalled download and leaves no temp file", async
   assert.equal(leftoverTemps().length, 0);
 });
 
+test("localizeImage times out a body that stalls after the first chunk", async () => {
+  const remoteUrl = "https://cdn.example/stalled-body.png";
+  cleanupLocalized(remoteUrl);
+  let destroyed = false;
+  const body = new Readable({
+    read() {
+      if ((this as Readable & { sent?: boolean }).sent) return;
+      (this as Readable & { sent?: boolean }).sent = true;
+      this.push(png.subarray(0, 12));
+    }
+  });
+  body.on("close", () => {
+    destroyed = true;
+  });
+
+  const started = Date.now();
+  const result = await localizeImage(remoteUrl, {
+    lookup: PUBLIC_LOOKUP,
+    timeoutMs: 80,
+    request: async () => ({
+      status: 200,
+      headers: { "content-type": "image/png" },
+      body
+    })
+  });
+  const elapsed = Date.now() - started;
+
+  assert.equal(result, remoteUrl);
+  assert.ok(elapsed < 2000, `stalled body must not hang (took ${elapsed}ms)`);
+  assert.equal(destroyed, true);
+  assert.equal(existsSync(imageHashPath(remoteUrl)), false);
+  assert.equal(leftoverTemps().length, 0);
+});
+
 test("localizeImage rejects non-image content types", async () => {
   const remoteUrl = "https://cdn.example/page.html";
   const result = await localizeImage(remoteUrl, {

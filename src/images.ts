@@ -82,7 +82,7 @@ function extensionForType(contentType: string, originalName?: string) {
 
 export function saveImageBuffer(buffer: Buffer, contentType?: string | null, originalName?: string) {
   if (!buffer.length) throw new Error("Image required");
-  if (buffer.length > MAX_IMAGE_BYTES) throw new Error("Image is too large (max 10 MB)");
+  if (buffer.length > MAX_IMAGE_BYTES) throw new Error(imageTooLargeMessage(MAX_IMAGE_BYTES));
   const sniffed = sniffImageType(buffer);
   const declared = (contentType ?? "").split(";")[0].trim().toLowerCase();
   const type = sniffed || declared;
@@ -134,31 +134,54 @@ function removeTemp(path: string) {
   }
 }
 
-async function writeLimitedStream(source: Readable, destPath: string, maxBytes: number): Promise<number> {
+function imageTooLargeMessage(maxBytes: number) {
+  if (maxBytes >= 1024 * 1024 && maxBytes % (1024 * 1024) === 0) {
+    return `Image is too large (max ${maxBytes / (1024 * 1024)} MB)`;
+  }
+  return `Image is too large (max ${maxBytes} bytes)`;
+}
+
+async function writeLimitedStream(
+  source: Readable,
+  destPath: string,
+  maxBytes: number,
+  timeoutMs: number
+): Promise<number> {
   let bytes = 0;
   const out = createWriteStream(destPath);
   try {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const fail = (error: Error) => {
         if (settled) return;
         settled = true;
+        if (idleTimer) clearTimeout(idleTimer);
         source.destroy();
         out.destroy();
         reject(error);
       };
+      const armIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          fail(new NetworkSafetyError("Image download timed out.", "timeout"));
+        }, timeoutMs);
+      };
+      armIdle();
       source.on("error", fail);
       out.on("error", fail);
       source.on("data", (chunk: Buffer | string) => {
+        armIdle();
         const size = typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
         bytes += size;
         if (bytes > maxBytes) {
-          fail(new NetworkSafetyError("Image is too large (max 10 MB)", "too_large"));
+          fail(new NetworkSafetyError(imageTooLargeMessage(maxBytes), "too_large"));
         }
       });
       out.on("finish", () => {
         if (settled) return;
         settled = true;
+        if (idleTimer) clearTimeout(idleTimer);
         resolve();
       });
       source.pipe(out);
@@ -236,7 +259,7 @@ export async function localizeImage(remoteUrl?: string | null, deps: LocalizeIma
       return remoteUrl;
     }
 
-    const bytes = await writeLimitedStream(response.body, tempPath, maxBytes);
+    const bytes = await writeLimitedStream(response.body, tempPath, maxBytes, timeoutMs);
     const sniffed = existsSync(tempPath) ? sniffImageType(readFileSync(tempPath).subarray(0, 16)) : "";
     if (!isAllowedImageContentType(contentType) && !isAllowedImageContentType(sniffed)) {
       removeTemp(tempPath);
