@@ -1,211 +1,241 @@
 /**
- * Fine Wine & Good Spirits adapter over the self-hosted Figranium instance.
+ * Fine Wine & Good Spirits image adapter over self-hosted Figranium.
  *
- * Saved tasks (defaults match fig.thesmokeybarrelbar.com):
- * - FWGS PLCB Product Resolver — plcbItem + pdpUrl → product JSON
- * - FWGS PLCB Image Extractor — plcbItem + pdpUrl → primary/label images
+ * Image-first: extracts + validates FWGS product image URLs for a known PLCB item.
+ * Requires FIGRANIUM_BASE_URL, FIGRANIUM_API_KEY, and FIGRANIUM_FWGS_IMAGE_TASK_ID
+ * (resolver task ID is optional and only used by resolveFwgsPlcbProduct).
  */
+import { z } from "zod";
 import {
   figraniumRunTask,
   isFigraniumConfigured,
-  type FigraniumExecutionResult
+  type FigraniumRunResult
 } from "./figranium.js";
 import { parseVolumeMl } from "./cola_client.js";
 import type { FwgsProduct } from "./fwgs.js";
 import type { BottleCandidate, ProductField } from "./ingestion/candidate/types.js";
 
 export const FWGS_SITE_ORIGIN = "https://www.finewineandgoodspirits.com";
+export const FWGS_SITE_HOST = "www.finewineandgoodspirits.com";
 
-/** Live Figranium task ids on fig.thesmokeybarrelbar.com (overridable via env). */
-export const FWGS_FIGRANIUM_RESOLVER_TASK_ID_DEFAULT = "task_1788365630737";
-export const FWGS_FIGRANIUM_IMAGE_TASK_ID_DEFAULT = "task_1788378025198";
+const FwgsFigraniumDiagnosticsSchema = z
+  .object({
+    searchResultCount: z.number().nullable().optional(),
+    captchaSeen: z.boolean().optional(),
+    loginRequired: z.boolean().optional(),
+    selectorFailures: z.array(z.string()).optional(),
+    durationMs: z.number().nullable().optional()
+  })
+  .passthrough();
 
-export type FwgsFigraniumDiagnostics = {
-  searchResultCount?: number | null;
-  captchaSeen?: boolean;
-  loginRequired?: boolean;
-  selectorFailures?: string[];
-  durationMs?: number | null;
-};
+export const FwgsFigraniumProductSchema = z.object({
+  matched: z.boolean(),
+  ambiguous: z.boolean(),
+  notFound: z.boolean(),
+  plcbItem: z.string(),
+  productUrl: z.string().nullable(),
+  name: z.string().nullable(),
+  brand: z.string().nullable(),
+  proof: z.number().nullable(),
+  abv: z.number().nullable(),
+  volumeText: z.string().nullable(),
+  category: z.string().nullable(),
+  subcategory: z.string().nullable(),
+  country: z.string().nullable(),
+  region: z.string().nullable(),
+  imageUrls: z.array(z.string()),
+  primaryImageUrl: z.string().nullable(),
+  diagnostics: FwgsFigraniumDiagnosticsSchema.nullable().optional()
+});
 
-export type FwgsFigraniumProduct = {
-  matched: boolean;
-  ambiguous: boolean;
-  notFound: boolean;
-  plcbItem: string;
-  productUrl: string | null;
-  name: string | null;
-  brand: string | null;
-  proof: number | null;
-  abv: number | null;
-  volumeText: string | null;
-  category: string | null;
-  subcategory: string | null;
-  country: string | null;
-  region: string | null;
-  imageUrls: string[];
-  primaryImageUrl: string | null;
-  diagnostics?: FwgsFigraniumDiagnostics | null;
-};
+export const FwgsFigraniumImageResultSchema = z.object({
+  matched: z.boolean(),
+  plcbItem: z.string(),
+  imageUrls: z.array(z.string()),
+  primaryImageUrl: z.string().nullable(),
+  extractionSource: z.string().nullable().optional(),
+  candidateCount: z.number().optional(),
+  identityEvidence: z.record(z.string(), z.unknown()).nullable().optional(),
+  diagnostics: FwgsFigraniumDiagnosticsSchema.nullable().optional()
+});
 
-export type FwgsFigraniumImageResult = {
-  matched: boolean;
-  plcbItem: string;
-  imageUrls: string[];
-  primaryImageUrl: string | null;
-  extractionSource?: string | null;
-  candidateCount?: number;
-  identityEvidence?: Record<string, unknown> | null;
-  diagnostics?: FwgsFigraniumDiagnostics | null;
-};
+export type FwgsFigraniumDiagnostics = z.infer<typeof FwgsFigraniumDiagnosticsSchema>;
+export type FwgsFigraniumProduct = z.infer<typeof FwgsFigraniumProductSchema>;
+export type FwgsFigraniumImageResult = z.infer<typeof FwgsFigraniumImageResultSchema>;
 
 function trimEnv(value: string | undefined): string {
   return String(value ?? "").trim();
 }
 
-export function isFwgsFigraniumConfigured(): boolean {
-  return isFigraniumConfigured();
-}
-
 export function getFwgsResolverTaskId(): string {
-  return trimEnv(process.env.FIGRANIUM_FWGS_RESOLVER_TASK_ID) || FWGS_FIGRANIUM_RESOLVER_TASK_ID_DEFAULT;
+  return trimEnv(process.env.FIGRANIUM_FWGS_RESOLVER_TASK_ID);
 }
 
 export function getFwgsImageTaskId(): string {
-  return trimEnv(process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID) || FWGS_FIGRANIUM_IMAGE_TASK_ID_DEFAULT;
+  return trimEnv(process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID);
+}
+
+/**
+ * FWGS Figranium image path is enabled only when base URL, API key,
+ * and the image task ID are all configured (no implicit production defaults).
+ */
+export function isFwgsFigraniumConfigured(): boolean {
+  return isFigraniumConfigured() && Boolean(getFwgsImageTaskId());
+}
+
+/**
+ * Accept only digit-only PLCB codes after trim.
+ * Pads numeric codes to 9 digits. Rejects mixed text (returns "").
+ */
+export function normalizePlcbItem(plcbItem: string): string {
+  const raw = String(plcbItem ?? "").trim();
+  if (!raw) return "";
+  if (!/^\d+$/.test(raw)) return "";
+  return raw.padStart(9, "0");
 }
 
 /** Canonical short PDP URL for a zero-padded PLCB item code. */
 export function fwgsPdpUrlForItem(plcbItem: string): string {
   const code = normalizePlcbItem(plcbItem);
+  if (!code) return "";
   return `${FWGS_SITE_ORIGIN}/product/${code}`;
 }
 
-export function normalizePlcbItem(plcbItem: string): string {
-  const raw = String(plcbItem ?? "").trim();
-  if (!raw) return "";
-  const digits = raw.replace(/\D/g, "");
-  if (digits && /^\d+$/.test(digits)) return digits.padStart(9, "0");
-  return raw;
+/**
+ * Strict FWGS product-image URL gate.
+ * Accepts only https://www.finewineandgoodspirits.com assets whose path/query
+ * resolves to `/products/{PLCB}_...` or `/products/{PLCB}.ext` with a
+ * structurally bounded PLCB match (not a substring).
+ */
+export function validateFwgsImageUrl(url: string, plcbItem: string): boolean {
+  const code = normalizePlcbItem(plcbItem);
+  if (!code) return false;
+  const raw = String(url ?? "").trim();
+  if (!raw) return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.hostname !== FWGS_SITE_HOST) return false;
+
+  const candidates: string[] = [parsed.pathname];
+  const source = parsed.searchParams.get("source");
+  if (source) {
+    candidates.push(source);
+    try {
+      candidates.push(decodeURIComponent(source));
+    } catch {
+      // keep undecoded source only
+    }
+  }
+
+  // Bounded: /products/{PLCB}_... or /products/{PLCB}.ext (optional query after)
+  const productAsset = new RegExp(
+    String.raw`(?:^|/)products/${code}(?:_[A-Za-z0-9._-]+)?\.(?:jpe?g|png|webp)(?:$|[?#])`,
+    "i"
+  );
+
+  for (const candidate of candidates) {
+    const pathOnly = candidate.split("?")[0] ?? candidate;
+    if (productAsset.test(pathOnly) || productAsset.test(candidate)) return true;
+  }
+  return false;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function asString(value: unknown): string | null {
-  if (value == null) return null;
-  const text = String(value).trim();
-  return text || null;
-}
-
-function asNumber(value: unknown): number | null {
-  if (value == null || value === "") return null;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const n = Number(String(value).replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : null;
-}
-
-function asStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+export function filterValidatedFwgsImageUrls(
+  urls: Iterable<string | null | undefined>,
+  plcbItem: string
+): string[] {
   const out: string[] = [];
-  for (const entry of value) {
-    const text = asString(entry);
-    if (text && !out.includes(text)) out.push(text);
+  for (const entry of urls) {
+    const text = String(entry ?? "").trim();
+    if (!text || out.includes(text)) continue;
+    if (validateFwgsImageUrl(text, plcbItem)) out.push(text);
   }
   return out;
 }
 
-function runSucceeded(result: FigraniumExecutionResult | null): boolean {
-  if (!result) return false;
-  if (result.outcome === "success") return true;
-  if (result.success === true) return true;
-  return false;
-}
-
 export function parseFwgsFigraniumProduct(
   data: unknown,
-  fallbackPlcbItem = ""
+  _fallbackPlcbItem = ""
 ): FwgsFigraniumProduct | null {
-  const record = asRecord(data);
-  if (!record) return null;
-  const plcbItem = asString(record.plcbItem) || normalizePlcbItem(fallbackPlcbItem);
-  const imageUrls = asStringList(record.imageUrls);
-  const primaryImageUrl = asString(record.primaryImageUrl) || imageUrls[0] || null;
-  return {
-    matched: Boolean(record.matched),
-    ambiguous: Boolean(record.ambiguous),
-    notFound: Boolean(record.notFound),
-    plcbItem,
-    productUrl: asString(record.productUrl),
-    name: asString(record.name),
-    brand: asString(record.brand),
-    proof: asNumber(record.proof),
-    abv: asNumber(record.abv),
-    volumeText: asString(record.volumeText),
-    category: asString(record.category),
-    subcategory: asString(record.subcategory),
-    country: asString(record.country),
-    region: asString(record.region),
-    imageUrls,
-    primaryImageUrl,
-    diagnostics: asRecord(record.diagnostics) as FwgsFigraniumDiagnostics | null
-  };
+  const parsed = FwgsFigraniumProductSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
 }
 
 export function parseFwgsFigraniumImages(
   data: unknown,
-  fallbackPlcbItem = ""
+  _fallbackPlcbItem = ""
 ): FwgsFigraniumImageResult | null {
-  const record = asRecord(data);
-  if (!record) return null;
-  const plcbItem = asString(record.plcbItem) || normalizePlcbItem(fallbackPlcbItem);
-  const imageUrls = asStringList(record.imageUrls);
-  const primaryImageUrl = asString(record.primaryImageUrl) || imageUrls[0] || null;
+  const parsed = FwgsFigraniumImageResultSchema.safeParse(data);
+  if (!parsed.success) return null;
+  const hit = parsed.data;
+  const plcbItem = normalizePlcbItem(hit.plcbItem) || normalizePlcbItem(_fallbackPlcbItem);
+  if (!plcbItem) return null;
+
+  const imageUrls = filterValidatedFwgsImageUrls(hit.imageUrls, plcbItem);
+  const primary =
+    hit.primaryImageUrl && validateFwgsImageUrl(hit.primaryImageUrl, plcbItem)
+      ? hit.primaryImageUrl
+      : imageUrls[0] ?? null;
+
   return {
-    matched: Boolean(record.matched) || Boolean(primaryImageUrl) || imageUrls.length > 0,
+    ...hit,
     plcbItem,
+    matched: Boolean(hit.matched) && (Boolean(primary) || imageUrls.length > 0),
     imageUrls,
-    primaryImageUrl,
-    extractionSource: asString(record.extractionSource),
-    candidateCount: asNumber(record.candidateCount) ?? imageUrls.length,
-    identityEvidence: asRecord(record.identityEvidence),
-    diagnostics: asRecord(record.diagnostics) as FwgsFigraniumDiagnostics | null
+    primaryImageUrl: primary
   };
 }
 
 /** Map a Figranium product hit into the existing FWGS lookup product shape. */
 export function fwgsFigraniumProductToFwgs(hit: FwgsFigraniumProduct): FwgsProduct | null {
   if (!hit.matched || !hit.name?.trim()) return null;
+  const primary =
+    hit.primaryImageUrl && validateFwgsImageUrl(hit.primaryImageUrl, hit.plcbItem)
+      ? hit.primaryImageUrl
+      : filterValidatedFwgsImageUrls(hit.imageUrls, hit.plcbItem)[0] ?? null;
   return {
     name: hit.name.trim(),
     brand: hit.brand?.trim() || "",
     volume_ml: hit.volumeText != null ? parseVolumeMl(hit.volumeText) : null,
     price: "",
-    image_url: hit.primaryImageUrl
+    image_url: primary
   };
+}
+
+function figraniumFailureNull(
+  result: FigraniumRunResult<unknown>
+): null {
+  void result;
+  return null;
 }
 
 /**
  * Resolve a PLCB item against Fine Wine & Good Spirits via Figranium.
- * `pdpUrl` defaults to `/product/{plcbItem}` when omitted.
+ * Requires FIGRANIUM_FWGS_RESOLVER_TASK_ID in addition to base Figranium config.
  */
 export async function resolveFwgsPlcbProduct(
   plcbItem: string,
   pdpUrl?: string | null
 ): Promise<FwgsFigraniumProduct | null> {
   const code = normalizePlcbItem(plcbItem);
-  if (!code || !isFwgsFigraniumConfigured()) return null;
+  const taskId = getFwgsResolverTaskId();
+  if (!code || !isFigraniumConfigured() || !taskId) return null;
   const url = String(pdpUrl ?? "").trim() || fwgsPdpUrlForItem(code);
-  const result = await figraniumRunTask<unknown>(getFwgsResolverTaskId(), {
-    variables: { plcbItem: code, pdpUrl: url }
+  const result = await figraniumRunTask(taskId, {
+    variables: { plcbItem: code, pdpUrl: url },
+    schema: FwgsFigraniumProductSchema
   });
-  if (!runSucceeded(result)) return null;
-  return parseFwgsFigraniumProduct(result?.data, code);
+  if (result.kind !== "success") return figraniumFailureNull(result);
+  return result.data;
 }
 
-/** Extract FWGS PDP images for a known PLCB item via Figranium. */
+/** Extract FWGS PDP images for a known PLCB item via Figranium (image-first path). */
 export async function extractFwgsPlcbImages(
   plcbItem: string,
   pdpUrl?: string | null
@@ -213,15 +243,19 @@ export async function extractFwgsPlcbImages(
   const code = normalizePlcbItem(plcbItem);
   if (!code || !isFwgsFigraniumConfigured()) return null;
   const url = String(pdpUrl ?? "").trim() || fwgsPdpUrlForItem(code);
-  const result = await figraniumRunTask<unknown>(getFwgsImageTaskId(), {
-    variables: { plcbItem: code, pdpUrl: url }
+  const result = await figraniumRunTask(getFwgsImageTaskId(), {
+    variables: { plcbItem: code, pdpUrl: url },
+    schema: FwgsFigraniumImageResultSchema
   });
-  if (!runSucceeded(result)) return null;
-  return parseFwgsFigraniumImages(result?.data, code);
+  if (result.kind !== "success") return figraniumFailureNull(result);
+
+  const filtered = parseFwgsFigraniumImages(result.data, code);
+  return filtered;
 }
 
 /**
- * Resolve product metadata, then fill missing images from the image extractor.
+ * Image-first helper: resolve product only to fill missing images.
+ * Does not merge metadata into vault candidates.
  */
 export async function resolveFwgsPlcbProductWithImages(
   plcbItem: string,
@@ -229,13 +263,26 @@ export async function resolveFwgsPlcbProductWithImages(
 ): Promise<FwgsFigraniumProduct | null> {
   const product = await resolveFwgsPlcbProduct(plcbItem, pdpUrl);
   if (!product?.matched) return product;
-  if (product.primaryImageUrl || product.imageUrls.length > 0) return product;
+
+  const validatedFromProduct = filterValidatedFwgsImageUrls(
+    [product.primaryImageUrl, ...product.imageUrls],
+    product.plcbItem || plcbItem
+  );
+  if (validatedFromProduct.length > 0) {
+    return {
+      ...product,
+      imageUrls: validatedFromProduct,
+      primaryImageUrl: validatedFromProduct[0] ?? null
+    };
+  }
 
   const images = await extractFwgsPlcbImages(
     product.plcbItem || plcbItem,
     product.productUrl || pdpUrl
   );
-  if (!images?.matched) return product;
+  if (!images?.matched) {
+    return { ...product, imageUrls: [], primaryImageUrl: null };
+  }
   return {
     ...product,
     imageUrls: images.imageUrls,
@@ -249,14 +296,16 @@ function fieldPlcbItem(field: ProductField<unknown> | undefined): string | null 
     (field.source === "plcb_spirits" || field.source === "plcb_wines")
     && field.sourceItemId
   ) {
-    return normalizePlcbItem(String(field.sourceItemId));
+    const item = normalizePlcbItem(String(field.sourceItemId));
+    return item || null;
   }
   for (const evidence of field.contributors ?? []) {
     if (
       (evidence.source === "plcb_spirits" || evidence.source === "plcb_wines")
       && evidence.sourceItemId
     ) {
-      return normalizePlcbItem(String(evidence.sourceItemId));
+      const item = normalizePlcbItem(String(evidence.sourceItemId));
+      if (item) return item;
     }
   }
   return null;

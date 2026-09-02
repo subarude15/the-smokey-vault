@@ -3,15 +3,20 @@
  */
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { z } from "zod";
+import { figraniumRunTask } from "./figranium.js";
 import {
   extractFwgsPlcbImages,
+  filterValidatedFwgsImageUrls,
   fwgsFigraniumProductToFwgs,
   fwgsPdpUrlForItem,
+  isFwgsFigraniumConfigured,
   normalizePlcbItem,
   parseFwgsFigraniumImages,
   parseFwgsFigraniumProduct,
   resolveFwgsPlcbProduct,
-  resolveFwgsPlcbProductWithImages
+  resolveFwgsPlcbProductWithImages,
+  validateFwgsImageUrl
 } from "./fwgs-figranium.js";
 
 const originalFetch = globalThis.fetch;
@@ -22,6 +27,11 @@ const envKeys = [
   "FIGRANIUM_FWGS_IMAGE_TASK_ID"
 ] as const;
 const savedEnv = new Map<string, string | undefined>();
+
+const VALID_IMAGE =
+  "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=475&width=475";
+const VALID_IMAGE_B =
+  "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_B1.jpg&height=475&width=475";
 
 function stashEnv() {
   for (const key of envKeys) savedEnv.set(key, process.env[key]);
@@ -36,14 +46,44 @@ function restoreEnv() {
   globalThis.fetch = originalFetch;
 }
 
+function configureFwgsImageEnv() {
+  process.env.FIGRANIUM_API_KEY = "test-key";
+  process.env.FIGRANIUM_BASE_URL = "https://fig.example.com";
+  process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = "task_images";
+}
+
 afterEach(() => {
   restoreEnv();
 });
 
-test("normalizePlcbItem zero-pads numeric codes", () => {
+test("normalizePlcbItem zero-pads digit-only codes", () => {
   assert.equal(normalizePlcbItem("4766"), "000004766");
   assert.equal(normalizePlcbItem("000004766"), "000004766");
   assert.equal(fwgsPdpUrlForItem("4766"), "https://www.finewineandgoodspirits.com/product/000004766");
+});
+
+test("normalizePlcbItem rejects malformed PLCB input", () => {
+  assert.equal(normalizePlcbItem(""), "");
+  assert.equal(normalizePlcbItem("  "), "");
+  assert.equal(normalizePlcbItem("4766x"), "");
+  assert.equal(normalizePlcbItem("sku-4766"), "");
+  assert.equal(normalizePlcbItem("000004766-extra"), "");
+  assert.equal(fwgsPdpUrlForItem("sku-4766"), "");
+});
+
+test("isFwgsFigraniumConfigured requires base URL, API key, and image task ID", () => {
+  stashEnv();
+  delete process.env.FIGRANIUM_API_KEY;
+  delete process.env.FIGRANIUM_BASE_URL;
+  delete process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID;
+  assert.equal(isFwgsFigraniumConfigured(), false);
+
+  process.env.FIGRANIUM_API_KEY = "test-key";
+  process.env.FIGRANIUM_BASE_URL = "https://fig.example.com";
+  assert.equal(isFwgsFigraniumConfigured(), false);
+
+  process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = "task_images";
+  assert.equal(isFwgsFigraniumConfigured(), true);
 });
 
 test("parseFwgsFigraniumProduct maps resolver payload", () => {
@@ -75,14 +115,21 @@ test("parseFwgsFigraniumProduct maps resolver payload", () => {
   assert.equal(fwgs.volume_ml, 1750);
 });
 
-test("parseFwgsFigraniumImages maps extractor payload", () => {
+test("parseFwgsFigraniumProduct rejects malformed schema", () => {
+  assert.equal(parseFwgsFigraniumProduct({ matched: "yes" }), null);
+  assert.equal(parseFwgsFigraniumProduct({ matched: true, imageUrls: "nope" }), null);
+  assert.equal(parseFwgsFigraniumProduct(null), null);
+});
+
+test("parseFwgsFigraniumImages maps extractor payload and drops invalid hosts", () => {
   const hit = parseFwgsFigraniumImages({
     matched: true,
     plcbItem: "000004766",
-    primaryImageUrl: "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=475&width=475",
+    primaryImageUrl: VALID_IMAGE,
     imageUrls: [
-      "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=475&width=475",
-      "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_B1.jpg&height=475&width=475"
+      VALID_IMAGE,
+      VALID_IMAGE_B,
+      "https://cdn.example/F1.jpg"
     ],
     extractionSource: "embedded_json"
   });
@@ -91,9 +138,96 @@ test("parseFwgsFigraniumImages maps extractor payload", () => {
   assert.match(hit.primaryImageUrl ?? "", /_F1\./);
 });
 
+test("parseFwgsFigraniumImages rejects malformed schema", () => {
+  assert.equal(
+    parseFwgsFigraniumImages({
+      matched: true,
+      plcbItem: "000004766",
+      imageUrls: "not-an-array",
+      primaryImageUrl: null
+    }),
+    null
+  );
+});
+
+test("validateFwgsImageUrl accepts FWGS product asset URLs", () => {
+  assert.equal(validateFwgsImageUrl(VALID_IMAGE, "4766"), true);
+  assert.equal(
+    validateFwgsImageUrl(
+      "https://www.finewineandgoodspirits.com/file/v1/products/000004766.jpg",
+      "000004766"
+    ),
+    true
+  );
+});
+
+test("validateFwgsImageUrl rejects wrong image host", () => {
+  assert.equal(
+    validateFwgsImageUrl(
+      "https://cdn.example/products/000004766_F1.jpg",
+      "000004766"
+    ),
+    false
+  );
+  assert.equal(
+    validateFwgsImageUrl(
+      "http://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg",
+      "000004766"
+    ),
+    false
+  );
+});
+
+test("validateFwgsImageUrl rejects wrong PLCB image", () => {
+  assert.equal(
+    validateFwgsImageUrl(
+      "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000008865_F1.jpg&height=475&width=475",
+      "000004766"
+    ),
+    false
+  );
+});
+
+test("validateFwgsImageUrl rejects partial-number image mismatch", () => {
+  assert.equal(
+    validateFwgsImageUrl(
+      "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/0000047661_F1.jpg",
+      "000004766"
+    ),
+    false
+  );
+  assert.equal(
+    validateFwgsImageUrl(
+      "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/1000004766_F1.jpg",
+      "000004766"
+    ),
+    false
+  );
+  assert.equal(
+    validateFwgsImageUrl(
+      "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/foo000004766_F1.jpg",
+      "000004766"
+    ),
+    false
+  );
+});
+
+test("filterValidatedFwgsImageUrls keeps only valid URLs", () => {
+  const filtered = filterValidatedFwgsImageUrls(
+    [
+      VALID_IMAGE,
+      "https://evil.example/products/000004766_F1.jpg",
+      VALID_IMAGE_B,
+      VALID_IMAGE
+    ],
+    "000004766"
+  );
+  assert.deepEqual(filtered, [VALID_IMAGE, VALID_IMAGE_B]);
+});
+
 test("resolveFwgsPlcbProduct calls resolver task with padded item + pdpUrl", async () => {
   stashEnv();
-  process.env.FIGRANIUM_API_KEY = "test-key";
+  configureFwgsImageEnv();
   process.env.FIGRANIUM_FWGS_RESOLVER_TASK_ID = "task_resolver";
   let url = "";
   let body = "";
@@ -134,6 +268,26 @@ test("resolveFwgsPlcbProduct calls resolver task with padded item + pdpUrl", asy
   assert.equal(hit?.name, "Captain Morgan Original Spiced Rum");
 });
 
+test("figraniumRunTask rejects malformed task data schema", async () => {
+  stashEnv();
+  configureFwgsImageEnv();
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        outcome: "success",
+        data: { matched: true, plcbItem: 4766 }
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  const schema = z.object({
+    matched: z.boolean(),
+    plcbItem: z.string()
+  });
+  const result = await figraniumRunTask("task_images", { schema });
+  assert.equal(result.kind, "invalid_response");
+});
+
 test("plcbItemFromCandidate reads government provenance sourceItemId", async () => {
   const { plcbItemFromCandidate } = await import("./fwgs-figranium.js");
   const { field } = await import("./ingestion/candidate/index.js");
@@ -152,13 +306,38 @@ test("plcbItemFromCandidate reads government provenance sourceItemId", async () 
   };
   candidate.proof.sourceItemId = "4766";
   assert.equal(plcbItemFromCandidate(candidate), "000004766");
+
+  candidate.proof.sourceItemId = "sku-4766";
+  assert.equal(plcbItemFromCandidate(candidate), null);
+});
+
+test("extractFwgsPlcbImages validates image URLs from Figranium", async () => {
+  stashEnv();
+  configureFwgsImageEnv();
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        outcome: "success",
+        data: {
+          matched: true,
+          plcbItem: "000004766",
+          primaryImageUrl: VALID_IMAGE,
+          imageUrls: [VALID_IMAGE, "https://cdn.example/F1.jpg", VALID_IMAGE_B]
+        }
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )) as typeof fetch;
+
+  const images = await extractFwgsPlcbImages("000004766");
+  assert.ok(images?.matched);
+  assert.equal(images?.imageUrls.length, 2);
+  assert.equal(images?.primaryImageUrl, VALID_IMAGE);
 });
 
 test("resolveFwgsPlcbProductWithImages fills images when resolver returns none", async () => {
   stashEnv();
-  process.env.FIGRANIUM_API_KEY = "test-key";
+  configureFwgsImageEnv();
   process.env.FIGRANIUM_FWGS_RESOLVER_TASK_ID = "task_resolver";
-  process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = "task_images";
   let calls = 0;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     calls += 1;
@@ -195,8 +374,8 @@ test("resolveFwgsPlcbProductWithImages fills images when resolver returns none",
         data: {
           matched: true,
           plcbItem: "000004766",
-          primaryImageUrl: "https://cdn.example/F1.jpg",
-          imageUrls: ["https://cdn.example/F1.jpg", "https://cdn.example/B1.jpg"]
+          primaryImageUrl: VALID_IMAGE,
+          imageUrls: [VALID_IMAGE, VALID_IMAGE_B]
         }
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
@@ -205,9 +384,6 @@ test("resolveFwgsPlcbProductWithImages fills images when resolver returns none",
 
   const hit = await resolveFwgsPlcbProductWithImages("000004766");
   assert.equal(calls, 2);
-  assert.equal(hit?.primaryImageUrl, "https://cdn.example/F1.jpg");
+  assert.equal(hit?.primaryImageUrl, VALID_IMAGE);
   assert.equal(hit?.imageUrls.length, 2);
-
-  const imagesOnly = await extractFwgsPlcbImages("000004766");
-  assert.equal(imagesOnly?.primaryImageUrl, "https://cdn.example/F1.jpg");
 });

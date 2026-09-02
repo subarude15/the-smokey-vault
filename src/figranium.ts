@@ -1,24 +1,60 @@
 /**
  * Thin Figranium REST client (self-hosted browser automation).
- * No SDK dependency — matches cola/catalog.beer fetch style.
- *
- * Default host for this project: https://fig.thesmokeybarrelbar.com
+ * Enabled only when FIGRANIUM_BASE_URL + FIGRANIUM_API_KEY are set.
  */
+import { z } from "zod";
 
-export const FIGRANIUM_DEFAULT_BASE_URL = "https://fig.thesmokeybarrelbar.com";
 export const FIGRANIUM_TIMEOUT_MS = Number(process.env.FIGRANIUM_TIMEOUT_MS ?? 120_000);
 
-export type FigraniumExecutionResult<T = unknown> = {
-  outcome?: string | null;
-  success?: boolean;
-  final_url?: string | null;
-  logs?: string[];
-  data?: T;
-  html?: string | null;
-  screenshot_url?: string | null;
-  error?: string | null;
-  runId?: string | null;
-};
+export const FigraniumEnvelopeSchema = z
+  .object({
+    outcome: z.string().nullable().optional(),
+    success: z.boolean().optional(),
+    final_url: z.string().nullable().optional(),
+    logs: z.array(z.string()).optional(),
+    data: z.unknown().optional(),
+    html: z.string().nullable().optional(),
+    screenshot_url: z.string().nullable().optional(),
+    error: z.string().nullable().optional(),
+    runId: z.string().nullable().optional()
+  })
+  .passthrough();
+
+export type FigraniumEnvelope = z.infer<typeof FigraniumEnvelopeSchema>;
+
+export type FigraniumRunKind =
+  | "success"
+  | "unavailable"
+  | "auth_error"
+  | "retryable_error"
+  | "invalid_response";
+
+export type FigraniumRunResult<T = unknown> =
+  | {
+      kind: "success";
+      httpStatus: number;
+      envelope: FigraniumEnvelope;
+      data: T;
+    }
+  | {
+      kind: "unavailable";
+      message: string;
+    }
+  | {
+      kind: "auth_error";
+      httpStatus: number;
+      message: string;
+    }
+  | {
+      kind: "retryable_error";
+      httpStatus?: number;
+      message: string;
+    }
+  | {
+      kind: "invalid_response";
+      httpStatus?: number;
+      message: string;
+    };
 
 export type FigraniumRunOptions = {
   variables?: Record<string, string | number | boolean | null>;
@@ -34,16 +70,16 @@ function trimEnv(value: string | undefined): string {
 }
 
 export function getFigraniumBaseUrl(): string {
-  const raw = trimEnv(process.env.FIGRANIUM_BASE_URL) || FIGRANIUM_DEFAULT_BASE_URL;
-  return raw.replace(/\/+$/, "");
+  return trimEnv(process.env.FIGRANIUM_BASE_URL).replace(/\/+$/, "");
 }
 
 export function getFigraniumApiKey(): string {
   return trimEnv(process.env.FIGRANIUM_API_KEY);
 }
 
+/** Figranium HTTP client is usable only when both base URL and API key are set. */
 export function isFigraniumConfigured(): boolean {
-  return Boolean(getFigraniumApiKey());
+  return Boolean(getFigraniumBaseUrl() && getFigraniumApiKey());
 }
 
 function authHeaders(): Record<string, string> {
@@ -53,6 +89,63 @@ function authHeaders(): Record<string, string> {
     Authorization: `Bearer ${key}`,
     "x-api-key": key
   };
+}
+
+function isTimeoutOrAbort(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? String((error as { name?: unknown }).name ?? "") : "";
+  if (name === "TimeoutError" || name === "AbortError") return true;
+  const code = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return code === "ABORT_ERR" || code === "ETIMEDOUT";
+}
+
+function isNetworkReset(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  if (
+    code === "ECONNRESET"
+    || code === "ECONNREFUSED"
+    || code === "EPIPE"
+    || code === "ENOTFOUND"
+    || code === "EAI_AGAIN"
+    || code === "UND_ERR_CONNECT_TIMEOUT"
+    || code === "UND_ERR_SOCKET"
+  ) {
+    return true;
+  }
+  const message = "message" in error ? String((error as { message?: unknown }).message ?? "") : "";
+  return /fetch failed|network|socket|ECONNRESET|ECONNREFUSED/i.test(message);
+}
+
+function classifyHttpFailure(status: number): Extract<
+  FigraniumRunResult,
+  { kind: "auth_error" | "retryable_error" | "invalid_response" }
+> {
+  if (status === 401 || status === 403) {
+    return {
+      kind: "auth_error",
+      httpStatus: status,
+      message: `Figranium auth failed (${status})`
+    };
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return {
+      kind: "retryable_error",
+      httpStatus: status,
+      message: `Figranium temporarily unavailable (${status})`
+    };
+  }
+  return {
+    kind: "invalid_response",
+    httpStatus: status,
+    message: `Figranium HTTP ${status}`
+  };
+}
+
+function envelopeSucceeded(envelope: FigraniumEnvelope): boolean {
+  if (envelope.outcome === "success") return true;
+  if (envelope.success === true) return true;
+  return false;
 }
 
 async function figraniumFetch(
@@ -77,6 +170,7 @@ async function figraniumFetch(
 }
 
 export async function figraniumHealth(): Promise<{ ok: boolean; status?: string; raw?: unknown }> {
+  if (!isFigraniumConfigured()) return { ok: false };
   try {
     const response = await figraniumFetch("/api/health", { timeoutMs: 15_000 });
     const raw: unknown = await response.json().catch(() => null);
@@ -92,14 +186,16 @@ export async function figraniumHealth(): Promise<{ ok: boolean; status?: string;
 
 /**
  * Trigger a saved Figranium task (`POST /api/tasks/:id/api`).
- * Returns null when Figranium is not configured or the request fails hard.
+ * When `schema` is provided, `data` is parsed strictly; failure → `invalid_response`.
  */
 export async function figraniumRunTask<T = unknown>(
   taskId: string,
-  options: FigraniumRunOptions = {}
-): Promise<FigraniumExecutionResult<T> | null> {
+  options: FigraniumRunOptions & { schema?: z.ZodType<T> } = {}
+): Promise<FigraniumRunResult<T>> {
   const id = trimEnv(taskId);
-  if (!id || !isFigraniumConfigured()) return null;
+  if (!id || !isFigraniumConfigured()) {
+    return { kind: "unavailable", message: "Figranium is not configured" };
+  }
 
   const body: Record<string, unknown> = {};
   if (options.variables) body.variables = options.variables;
@@ -107,19 +203,72 @@ export async function figraniumRunTask<T = unknown>(
   if (options.statelessExecution != null) body.statelessExecution = options.statelessExecution;
   if (options.sessionId) body.sessionId = options.sessionId;
 
+  let response: Response;
   try {
-    const response = await figraniumFetch(`/api/tasks/${encodeURIComponent(id)}/api`, {
+    response = await figraniumFetch(`/api/tasks/${encodeURIComponent(id)}/api`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: options.signal,
       timeoutMs: options.timeoutMs ?? FIGRANIUM_TIMEOUT_MS
     });
-    if (!response.ok) return null;
-    const raw: unknown = await response.json().catch(() => null);
-    if (!raw || typeof raw !== "object") return null;
-    return raw as FigraniumExecutionResult<T>;
-  } catch {
-    return null;
+  } catch (error) {
+    if (isTimeoutOrAbort(error) || isNetworkReset(error)) {
+      return {
+        kind: "retryable_error",
+        message: "Figranium network/timeout failure"
+      };
+    }
+    return {
+      kind: "retryable_error",
+      message: "Figranium request failed"
+    };
   }
+
+  if (!response.ok) {
+    return classifyHttpFailure(response.status);
+  }
+
+  const raw: unknown = await response.json().catch(() => null);
+  const envelopeParsed = FigraniumEnvelopeSchema.safeParse(raw);
+  if (!envelopeParsed.success) {
+    return {
+      kind: "invalid_response",
+      httpStatus: response.status,
+      message: "Figranium response failed envelope schema validation"
+    };
+  }
+
+  const envelope = envelopeParsed.data;
+  if (!envelopeSucceeded(envelope)) {
+    return {
+      kind: "invalid_response",
+      httpStatus: response.status,
+      message: envelope.error?.trim() || "Figranium task did not succeed"
+    };
+  }
+
+  if (options.schema) {
+    const dataParsed = options.schema.safeParse(envelope.data);
+    if (!dataParsed.success) {
+      return {
+        kind: "invalid_response",
+        httpStatus: response.status,
+        message: "Figranium task data failed schema validation"
+      };
+    }
+    return {
+      kind: "success",
+      httpStatus: response.status,
+      envelope,
+      data: dataParsed.data
+    };
+  }
+
+  return {
+    kind: "success",
+    httpStatus: response.status,
+    envelope,
+    data: envelope.data as T
+  };
 }
