@@ -35,6 +35,8 @@ import {
 } from "./image-score.js";
 import {
   IMAGE_ACCEPTANCE_THRESHOLD,
+  IMAGE_MIN_HEIGHT,
+  IMAGE_MIN_WIDTH,
   IMAGE_MAX_VISION_CHECKS,
   IMAGE_VISION_CANDIDATE_FLOOR
 } from "./image-thresholds.js";
@@ -71,16 +73,32 @@ import {
 } from "./diagnostics.js";
 import {
   extractFwgsPlcbImages,
+  fetchFwgsImageViaFigranium,
+  deriveFwgsImageRenditionUrl,
   filterValidatedFwgsImageUrls,
   fwgsPdpUrlForItem,
   isFwgsFigraniumConfigured,
+  isFwgsFigraniumImageFetchConfigured,
+  normalizePlcbItem,
   plcbItemFromCandidate,
-  type FwgsFigraniumImageResult
+  validateFwgsImageUrl,
+  type FwgsFigraniumImageResult,
+  type FwgsImageFetchOutcome
 } from "../../fwgs-figranium.js";
 
 const MAX_PROBE_SEEDS = 20;
 const MAX_OFFICIAL_PAGE_ASSET_STAGES = 8;
 const MAX_OFFICIAL_PAGES_TO_FETCH = 4;
+
+export type ImageProbeDetail =
+  | "direct_probe_ok"
+  | "direct_probe_http_rejected"
+  | "direct_probe_timeout"
+  | "figranium_fetch_fallback_attempted"
+  | "figranium_fetch_fallback_ok"
+  | "figranium_fetch_fallback_failed"
+  | "fwgs_higher_res_rendition_attempted"
+  | "fwgs_higher_res_rendition_preferred";
 
 export type ImageMeta = {
   width: number | null;
@@ -88,6 +106,13 @@ export type ImageMeta = {
   mimeType: string | null;
   reachable: boolean;
   dimensionsSource?: "seed" | "image_header" | "unknown" | null;
+  /** Bounded probe diagnostic tokens (no secrets / unbounded URLs). */
+  probeDetails?: ImageProbeDetail[];
+  httpStatus?: number | null;
+  /** Decoded image bytes as base64 when obtained via Figranium fallback (for vision). */
+  imageBase64?: string | null;
+  /** Final URL used after optional FWGS rendition upgrade. */
+  resolvedUrl?: string | null;
 };
 
 export type ImageEnrichmentDeps = {
@@ -98,6 +123,7 @@ export type ImageEnrichmentDeps = {
   verifyImage?: (request: {
     candidate: BottleCandidate;
     imageUrl: string;
+    imageBase64?: string | null;
   }) => Promise<VisionVerification | null>;
   /** Previously persisted official product page (reuse; do not rediscover blindly). */
   knownOfficialProductPageUrl?: string | null;
@@ -106,6 +132,11 @@ export type ImageEnrichmentDeps = {
     plcbItem: string,
     pdpUrl?: string | null
   ) => Promise<FwgsFigraniumImageResult | null>;
+  /** Optional override for FWGS Figranium browser image fetch (tests). */
+  fetchFwgsImageViaFigranium?: (
+    imageUrl: string,
+    plcbItem: string
+  ) => Promise<FwgsImageFetchOutcome>;
 };
 
 export type ImageCandidateSeed = {
@@ -114,6 +145,8 @@ export type ImageCandidateSeed = {
   width?: number | null;
   height?: number | null;
   mimeType?: string | null;
+  /** Set only for Figranium FWGS PLCB-bound seeds — never SearXNG. */
+  identityMatched?: boolean;
 };
 
 export type ImageEnrichmentResult = {
@@ -146,7 +179,15 @@ async function defaultProbe(url: string): Promise<ImageMeta> {
     const mimeType = (response.headers.get("content-type") ?? "").split(";")[0].trim() || null;
     const reachable = response.ok || response.status === 206;
     if (!reachable) {
-      return { width: null, height: null, mimeType, reachable: false, dimensionsSource: null };
+      return {
+        width: null,
+        height: null,
+        mimeType,
+        reachable: false,
+        dimensionsSource: null,
+        probeDetails: ["direct_probe_http_rejected"],
+        httpStatus: response.status
+      };
     }
     const buf = Buffer.from(await response.arrayBuffer());
     const dims = readImageDimensionsFromHeader(buf);
@@ -155,11 +196,114 @@ async function defaultProbe(url: string): Promise<ImageMeta> {
       height: dims?.height ?? null,
       mimeType: mimeType?.startsWith("image/") ? mimeType : mimeType,
       reachable: true,
-      dimensionsSource: dims ? "image_header" : "unknown"
+      dimensionsSource: dims ? "image_header" : "unknown",
+      probeDetails: ["direct_probe_ok"],
+      httpStatus: response.status
     };
-  } catch {
-    return { width: null, height: null, mimeType: null, reachable: false, dimensionsSource: null };
+  } catch (error) {
+    const name =
+      error && typeof error === "object" && "name" in error
+        ? String((error as { name?: unknown }).name ?? "")
+        : "";
+    const detail: ImageProbeDetail =
+      name === "TimeoutError" || name === "AbortError"
+        ? "direct_probe_timeout"
+        : "direct_probe_http_rejected";
+    return {
+      width: null,
+      height: null,
+      mimeType: null,
+      reachable: false,
+      dimensionsSource: null,
+      probeDetails: [detail],
+      httpStatus: null
+    };
   }
+}
+
+/**
+ * Direct probe first. For validated FWGS URLs with a trusted PLCB item:
+ * 1) Prefer a same-asset higher-res rendition (width/height=1200) when actual dims >= min.
+ * 2) Fall back to Figranium browser fetch when the direct probe fails.
+ */
+export async function probeImageMetaWithFwgsFallback(
+  url: string,
+  options: {
+    plcbItem?: string | null;
+    fetchFwgsImageViaFigranium?: (
+      imageUrl: string,
+      plcbItem: string
+    ) => Promise<FwgsImageFetchOutcome>;
+  } = {}
+): Promise<ImageMeta> {
+  const plcb = normalizePlcbItem(String(options.plcbItem ?? ""));
+  const fetchFn = options.fetchFwgsImageViaFigranium ?? fetchFwgsImageViaFigranium;
+  const canFigranium =
+    Boolean(options.fetchFwgsImageViaFigranium) || isFwgsFigraniumImageFetchConfigured();
+  const fwgsValidated = Boolean(plcb && validateFwgsImageUrl(url, plcb));
+
+  const probeOne = async (targetUrl: string): Promise<ImageMeta> => {
+    const direct = await defaultProbe(targetUrl);
+    if (direct.reachable) {
+      return { ...direct, resolvedUrl: targetUrl };
+    }
+    if (!plcb || !validateFwgsImageUrl(targetUrl, plcb) || !canFigranium) {
+      return { ...direct, resolvedUrl: targetUrl };
+    }
+    const details: ImageProbeDetail[] = [
+      ...(direct.probeDetails ?? []),
+      "figranium_fetch_fallback_attempted"
+    ];
+    const fetched = await fetchFn(targetUrl, plcb);
+    if (!fetched.ok) {
+      return {
+        ...direct,
+        probeDetails: [...details, "figranium_fetch_fallback_failed"],
+        resolvedUrl: targetUrl
+      };
+    }
+    return {
+      width: fetched.image.width,
+      height: fetched.image.height,
+      mimeType: fetched.image.contentType,
+      reachable: true,
+      dimensionsSource: fetched.image.width != null ? "image_header" : "unknown",
+      probeDetails: [...details, "figranium_fetch_fallback_ok"],
+      httpStatus: direct.httpStatus ?? null,
+      imageBase64: fetched.image.bytes.toString("base64"),
+      resolvedUrl: targetUrl
+    };
+  };
+
+  const meetsMinResolution = (meta: ImageMeta): boolean =>
+    meta.width != null
+    && meta.height != null
+    && meta.width >= IMAGE_MIN_WIDTH
+    && meta.height >= IMAGE_MIN_HEIGHT;
+
+  if (fwgsValidated) {
+    const preferred = deriveFwgsImageRenditionUrl(url, plcb!, {
+      width: 1200,
+      height: 1200
+    });
+    if (preferred && preferred !== url) {
+      const preferredMeta = await probeOne(preferred);
+      const details: ImageProbeDetail[] = [
+        ...(preferredMeta.probeDetails ?? []),
+        "fwgs_higher_res_rendition_attempted"
+      ];
+      if (preferredMeta.reachable && meetsMinResolution(preferredMeta)) {
+        return {
+          ...preferredMeta,
+          probeDetails: [...details, "fwgs_higher_res_rendition_preferred"],
+          resolvedUrl: preferred
+        };
+      }
+      // Prefer failed or still below min — continue with the original asset URL.
+    }
+  }
+
+  return probeOne(url);
 }
 
 function classifyVisionError(message: string): string {
@@ -197,7 +341,8 @@ function toCandidate(
     sourceType,
     width: seed.width ?? null,
     height: seed.height ?? null,
-    mimeType: seed.mimeType ?? null
+    mimeType: seed.mimeType ?? null,
+    identityMatched: seed.identityMatched === true ? true : undefined
   };
 }
 
@@ -377,7 +522,14 @@ export async function executeImageEnrichment(
 ): Promise<ImageEnrichmentResult> {
   const searchWeb = deps.searchWebHits ?? searchWebHits;
   const searchImages = deps.searchImageHits ?? searchImageHits;
-  const probe = deps.probeImageMeta ?? defaultProbe;
+  const plcbItem = plcbItemFromCandidate(candidate);
+  const probe =
+    deps.probeImageMeta
+    ?? ((url: string) =>
+      probeImageMetaWithFwgsFallback(url, {
+        plcbItem,
+        fetchFwgsImageViaFigranium: deps.fetchFwgsImageViaFigranium
+      }));
   const fetchHtml = deps.fetchPageHtml ?? defaultFetchPageHtml;
   const verify = deps.verifyImage ?? ((req) => verifyProductImage(req));
   const extractFwgsImages = deps.extractFwgsPlcbImages ?? extractFwgsPlcbImages;
@@ -385,14 +537,14 @@ export async function executeImageEnrichment(
   const seeds: ImageCandidateSeed[] = [];
   const stages: EnrichmentDiagnosticStage[] = [];
   const diagnostics = emptyImageDiagnostics();
+  const figraniumImageBase64ByUrl = new Map<string, string>();
 
   let selectedOfficialProductPageUrl: string | null =
     String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
 
   // Image-first FWGS path: when a PLCB item is known, extract + validate
   // Fine Wine & Good Spirits product images via Figranium (no metadata merge).
-  const plcbItem = plcbItemFromCandidate(candidate);
-  if (plcbItem && isFwgsFigraniumConfigured()) {
+  if (plcbItem && (Boolean(deps.extractFwgsPlcbImages) || isFwgsFigraniumConfigured())) {
     const knownPdp =
       selectedOfficialProductPageUrl
       && /^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
@@ -410,9 +562,8 @@ export async function executeImageEnrichment(
           seeds.push({
             url,
             sourceUrl: knownPdp || null,
-            width: 475,
-            height: 475,
-            mimeType: "image/jpeg"
+            mimeType: "image/jpeg",
+            identityMatched: true
           });
         }
         stages.push({
@@ -962,6 +1113,9 @@ export async function executeImageEnrichment(
   const probed: ImageCandidate[] = [];
   const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
   let fetchFailed = 0;
+  let fwgsDirectBlocked = 0;
+  let fwgsFigraniumFetchOk = 0;
+  let fwgsFigraniumFetchFailed = 0;
   const diagStore = new ImageCandidateDiagnosticStore();
 
   for (const seed of probeSeeds) {
@@ -986,19 +1140,28 @@ export async function executeImageEnrichment(
       seed.width != null && seed.height != null ? "seed" : "unknown";
     try {
       const probedMeta = await probe(seed.url);
-      const width = seed.width ?? probedMeta.width;
-      const height = seed.height ?? probedMeta.height;
-      if (seed.width != null && seed.height != null) dimsSource = "seed";
-      else if (probedMeta.width != null && probedMeta.height != null) {
+      const probeDetails = Array.isArray(probedMeta.probeDetails)
+        ? probedMeta.probeDetails.filter((value): value is ImageProbeDetail => typeof value === "string")
+        : [];
+      // Prefer real probed header dims over seed hints (FWGS URL size params are not authoritative).
+      const width = probedMeta.width ?? seed.width ?? null;
+      const height = probedMeta.height ?? seed.height ?? null;
+      if (probedMeta.width != null && probedMeta.height != null) {
         dimsSource =
           probedMeta.dimensionsSource === "unknown" ? "unknown" : "image_header";
+      } else if (seed.width != null && seed.height != null) {
+        dimsSource = "seed";
       }
       meta = {
         width,
         height,
-        mimeType: seed.mimeType ?? probedMeta.mimeType,
+        mimeType: probedMeta.mimeType ?? seed.mimeType ?? null,
         reachable: probedMeta.reachable,
-        dimensionsSource: dimsSource
+        dimensionsSource: dimsSource,
+        probeDetails,
+        httpStatus: probedMeta.httpStatus ?? null,
+        imageBase64: probedMeta.imageBase64 ?? null,
+        resolvedUrl: probedMeta.resolvedUrl ?? seed.url
       };
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Image probe failed");
@@ -1007,6 +1170,13 @@ export async function executeImageEnrichment(
     if (!meta.reachable) {
       fetchFailed += 1;
       const failedCandidate = toCandidate(seed, brand, name, discoveredDomains);
+      const failDetails = Array.isArray(meta.probeDetails) ? meta.probeDetails : [];
+      if (failDetails.includes("direct_probe_http_rejected") || failDetails.includes("direct_probe_timeout")) {
+        fwgsDirectBlocked += 1;
+      }
+      if (failDetails.includes("figranium_fetch_fallback_failed")) {
+        fwgsFigraniumFetchFailed += 1;
+      }
       diagStore.markHardFilter({
         url: failedCandidate.url,
         sourceType: failedCandidate.sourceType,
@@ -1016,13 +1186,27 @@ export async function executeImageEnrichment(
         mimeType: failedCandidate.mimeType,
         dimensionsSource: null,
         fetchStatus: "failed",
-        reasons: ["fetch_failed"]
+        reasons: ["fetch_failed", ...failDetails].slice(0, 8)
       });
       continue;
+    }
+    const resolvedUrl =
+      typeof meta.resolvedUrl === "string" && meta.resolvedUrl.trim()
+        ? meta.resolvedUrl.trim()
+        : seed.url;
+    if (typeof meta.imageBase64 === "string" && meta.imageBase64.trim()) {
+      figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
+    }
+    if ((meta.probeDetails ?? []).includes("figranium_fetch_fallback_ok")) {
+      fwgsFigraniumFetchOk += 1;
+    }
+    if ((meta.probeDetails ?? []).includes("direct_probe_http_rejected") || (meta.probeDetails ?? []).includes("direct_probe_timeout")) {
+      fwgsDirectBlocked += 1;
     }
     const item = toCandidate(
       {
         ...seed,
+        url: resolvedUrl,
         width: meta.width,
         height: meta.height,
         mimeType: meta.mimeType
@@ -1035,13 +1219,28 @@ export async function executeImageEnrichment(
     probed.push(item);
   }
 
+  const candidateReasonParts: string[] = [];
+  if (!probed.length) {
+    candidateReasonParts.push(uniqueSeeds.length ? "fetch_failed" : "no_image_candidates");
+  }
+  if (fwgsDirectBlocked > 0) {
+    candidateReasonParts.push(`direct_fwgs_image_fetch_blocked:${fwgsDirectBlocked}`);
+  }
+  if (fwgsFigraniumFetchOk > 0) {
+    candidateReasonParts.push(`fwgs_image_discovered_via_figranium:${fwgsFigraniumFetchOk}`);
+    candidateReasonParts.push(`figranium_browser_fetch_succeeded:${fwgsFigraniumFetchOk}`);
+  }
+  if (fwgsFigraniumFetchFailed > 0) {
+    candidateReasonParts.push(`figranium_browser_fetch_failed:${fwgsFigraniumFetchFailed}`);
+  }
+
   stages.push({
     stage: "candidates",
     status: probed.length ? "ok" : "no_result",
     candidateCount: uniqueSeeds.length,
     acceptedCount: probed.length,
     rejectedCount: fetchFailed,
-    reason: probed.length ? undefined : (uniqueSeeds.length ? "fetch_failed" : "no_image_candidates"),
+    reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
     sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
   });
 
@@ -1155,7 +1354,11 @@ export async function executeImageEnrichment(
     let vision: VisionVerification | null = null;
     let visionError: string | null = null;
     try {
-      vision = await verify({ candidate, imageUrl: item.url });
+      vision = await verify({
+        candidate,
+        imageUrl: item.url,
+        imageBase64: figraniumImageBase64ByUrl.get(item.url) ?? null
+      });
       if (!vision) {
         visionError = "vision_parse_failed";
       }

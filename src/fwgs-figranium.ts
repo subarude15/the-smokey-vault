@@ -12,6 +12,8 @@ import {
   type FigraniumRunResult
 } from "./figranium.js";
 import { parseVolumeMl } from "./cola_client.js";
+import { IMAGE_DOWNLOAD_MAX_BYTES, sniffImageType } from "./images.js";
+import { readImageDimensionsFromHeader } from "./ingestion/enrichment/image-dimensions.js";
 import type { FwgsProduct } from "./fwgs.js";
 import type { BottleCandidate, ProductField } from "./ingestion/candidate/types.js";
 
@@ -63,6 +65,44 @@ export type FwgsFigraniumDiagnostics = z.infer<typeof FwgsFigraniumDiagnosticsSc
 export type FwgsFigraniumProduct = z.infer<typeof FwgsFigraniumProductSchema>;
 export type FwgsFigraniumImageResult = z.infer<typeof FwgsFigraniumImageResultSchema>;
 
+/** Payload from the dedicated FWGS PLCB Image Fetcher Figranium task. */
+export const FwgsFigraniumImageFetchResultSchema = z.object({
+  matched: z.boolean(),
+  plcbItem: z.string(),
+  sourceUrl: z.string(),
+  contentType: z.string(),
+  byteLength: z.number().int().nonnegative(),
+  base64: z.string().min(1)
+});
+
+export type FwgsFigraniumImageFetchResult = z.infer<typeof FwgsFigraniumImageFetchResultSchema>;
+
+export type FwgsFigraniumFetchedImage = {
+  plcbItem: string;
+  sourceUrl: string;
+  contentType: string;
+  bytes: Buffer;
+  width: number | null;
+  height: number | null;
+};
+
+export type FwgsImageFetchFailureReason =
+  | "not_configured"
+  | "invalid_request"
+  | "invalid_url"
+  | "plcb_mismatch"
+  | "figranium_error"
+  | "invalid_payload"
+  | "oversized"
+  | "non_image"
+  | "malformed_base64"
+  | "empty_payload";
+
+export type FwgsImageFetchOutcome =
+  | { ok: true; image: FwgsFigraniumFetchedImage }
+  | { ok: false; reason: FwgsImageFetchFailureReason };
+
+
 function trimEnv(value: string | undefined): string {
   return String(value ?? "").trim();
 }
@@ -75,12 +115,21 @@ export function getFwgsImageTaskId(): string {
   return trimEnv(process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID);
 }
 
+export function getFwgsImageFetchTaskId(): string {
+  return trimEnv(process.env.FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID);
+}
+
 /**
  * FWGS Figranium image path is enabled only when base URL, API key,
  * and the image task ID are all configured (no implicit production defaults).
  */
 export function isFwgsFigraniumConfigured(): boolean {
   return isFigraniumConfigured() && Boolean(getFwgsImageTaskId());
+}
+
+/** Browser image-fetch fallback requires its own saved Figranium task ID. */
+export function isFwgsFigraniumImageFetchConfigured(): boolean {
+  return isFigraniumConfigured() && Boolean(getFwgsImageFetchTaskId());
 }
 
 /**
@@ -157,6 +206,51 @@ export function validateFwgsImageUrl(url: string, plcbItem: string): boolean {
     if (productAsset.test(pathOnly) || productAsset.test(candidate)) return true;
   }
   return false;
+}
+
+/**
+ * Derive a same-asset FWGS ccstore rendition by changing only height/width query params.
+ * Does not alter hostname, source path, PLCB-bound filename, or asset version.
+ * Returns null unless the derived URL still passes validateFwgsImageUrl.
+ */
+export function deriveFwgsImageRenditionUrl(
+  url: string,
+  plcbItem: string,
+  size: { width: number; height: number }
+): string | null {
+  const code = normalizePlcbItem(plcbItem);
+  if (!code) return null;
+  if (!validateFwgsImageUrl(url, code)) return null;
+  const width = Math.floor(Number(size.width));
+  const height = Math.floor(Number(size.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(String(url).trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== FWGS_SITE_HOST) return null;
+
+  // Change ONLY height/width rendering params. Preserve source path encoding,
+  // param order, and asset version — do not re-serialize the full query string.
+  const raw = String(url).trim();
+  const qIndex = raw.indexOf("?");
+  if (qIndex < 0) return null;
+  const base = raw.slice(0, qIndex);
+  const query = raw.slice(qIndex + 1);
+  if (!/(?:^|&)width=\d+(?:&|$)/i.test(query) || !/(?:^|&)height=\d+(?:&|$)/i.test(query)) {
+    return null;
+  }
+  const replaced = query
+    .replace(/(^|&)(width=)\d+/i, `$1$2${width}`)
+    .replace(/(^|&)(height=)\d+/i, `$1$2${height}`);
+  const derived = `${base}?${replaced}`;
+  if (!validateFwgsImageUrl(derived, code)) return null;
+  return derived;
 }
 
 export function filterValidatedFwgsImageUrls(
@@ -326,6 +420,75 @@ export async function resolveFwgsPlcbProductWithImages(
     plcbItem: requested,
     imageUrls: images.imageUrls,
     primaryImageUrl: images.primaryImageUrl
+  };
+}
+
+
+/**
+ * Fetch a single already-validated FWGS product image through Figranium's browser
+ * session. Not a generic URL proxy — rejects anything that is not an https
+ * www.finewineandgoodspirits.com /products/{PLCB}_... asset for the requested item.
+ */
+export async function fetchFwgsImageViaFigranium(
+  imageUrl: string,
+  requestedPlcbItem: string
+): Promise<FwgsImageFetchOutcome> {
+  const requested = normalizePlcbItem(requestedPlcbItem);
+  if (!requested) return { ok: false, reason: "invalid_request" };
+  if (!isFwgsFigraniumImageFetchConfigured()) return { ok: false, reason: "not_configured" };
+  if (!validateFwgsImageUrl(imageUrl, requested)) return { ok: false, reason: "invalid_url" };
+
+  const result = await figraniumRunTask(getFwgsImageFetchTaskId(), {
+    variables: { plcbItem: requested, imageUrl: String(imageUrl).trim() },
+    schema: FwgsFigraniumImageFetchResultSchema
+  });
+  if (result.kind !== "success") return { ok: false, reason: "figranium_error" };
+
+  const payload = result.data;
+  if (!payload.matched) return { ok: false, reason: "invalid_payload" };
+  if (!validateReturnedPlcbItem(requested, payload.plcbItem)) {
+    return { ok: false, reason: "plcb_mismatch" };
+  }
+  if (!validateFwgsImageUrl(payload.sourceUrl, requested)) {
+    return { ok: false, reason: "invalid_url" };
+  }
+
+  const maxBytes = IMAGE_DOWNLOAD_MAX_BYTES;
+  if (payload.byteLength <= 0) return { ok: false, reason: "empty_payload" };
+  if (payload.byteLength > maxBytes) return { ok: false, reason: "oversized" };
+
+  const cleaned = String(payload.base64 ?? "").replace(/\s+/g, "");
+  if (!cleaned || /[^A-Za-z0-9+/]/.test(cleaned.replace(/=+$/, "")) || cleaned.length % 4 !== 0) {
+    return { ok: false, reason: "malformed_base64" };
+  }
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(cleaned, "base64");
+  } catch {
+    return { ok: false, reason: "malformed_base64" };
+  }
+  if (!bytes.length) return { ok: false, reason: "empty_payload" };
+  if (bytes.length > maxBytes) return { ok: false, reason: "oversized" };
+  if (bytes.length !== payload.byteLength) return { ok: false, reason: "invalid_payload" };
+
+  const sniffed = sniffImageType(bytes);
+  if (!sniffed || !sniffed.startsWith("image/")) return { ok: false, reason: "non_image" };
+  const declared = String(payload.contentType ?? "").split(";")[0].trim().toLowerCase();
+  if (declared && !declared.startsWith("image/") && declared !== "application/octet-stream") {
+    return { ok: false, reason: "non_image" };
+  }
+
+  const dims = readImageDimensionsFromHeader(bytes);
+  return {
+    ok: true,
+    image: {
+      plcbItem: requested,
+      sourceUrl: payload.sourceUrl,
+      contentType: sniffed,
+      bytes,
+      width: dims?.width ?? null,
+      height: dims?.height ?? null
+    }
   };
 }
 
