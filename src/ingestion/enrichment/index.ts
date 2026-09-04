@@ -148,6 +148,13 @@ export {
 } from "./health.js";
 
 export {
+  DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_OLLAMA_VISION_MODEL,
+  ollamaChatUrl,
+  ollamaVisionModel
+} from "./ollama-config.js";
+
+export {
   extractOfficialTastingNotes,
   generateHouseTastingProfile,
   formatHouseProfile,

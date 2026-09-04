@@ -12,6 +12,9 @@ import {
   safeHostFromUrl,
   searxngSafeHost
 } from "../web-search.js";
+import { ollamaBaseUrl } from "./ollama-config.js";
+
+export { ollamaBaseUrl } from "./ollama-config.js";
 
 export type ServiceHealthStatus = "connected" | "unreachable" | "degraded";
 
@@ -37,19 +40,6 @@ export type EnrichmentHealthDeps = {
 };
 
 export type { GovernmentCatalogHealth };
-
-/** Resolve Ollama base URL from the same env family enrichment extractors use. */
-export function ollamaBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const chat = String(
-    env.OLLAMA_CHAT_URL ?? env.SMOKEY_OLLAMA_CHAT_URL ?? ""
-  ).trim();
-  if (chat) {
-    return chat.replace(/\/api\/chat\/?$/i, "").replace(/\/$/, "") || chat;
-  }
-  const host = String(env.OLLAMA_HOST ?? env.SMOKEY_OLLAMA_HOST ?? "").trim();
-  if (host) return host.replace(/\/$/, "");
-  return "http://192.168.1.184:11434";
-}
 
 export function ollamaSafeHost(env: NodeJS.ProcessEnv = process.env): string {
   return safeHostFromUrl(ollamaBaseUrl(env));
