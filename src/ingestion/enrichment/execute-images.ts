@@ -512,615 +512,71 @@ async function ingestOfficialPageForImages(options: {
   return stats;
 }
 
+type EvaluateImageSeedsOptions = {
+  candidate: BottleCandidate;
+  seeds: ImageCandidateSeed[];
+  discoveredDomains: string[];
+  probe: (url: string) => Promise<ImageMeta>;
+  verify: (request: {
+    candidate: BottleCandidate;
+    imageUrl: string;
+    imageBase64?: string | null;
+  }) => Promise<VisionVerification | null>;
+  diagStore: ImageCandidateDiagnosticStore;
+  figraniumImageBase64ByUrl: Map<string, string>;
+  errors: string[];
+  /** Skip probe/vision for definitively unapproved sources (generic SERP stage). */
+  skipProbeForUnapprovedSources?: boolean;
+  /** Stage label prefix for progressive discovery diagnostics. */
+  evaluationStage?: string;
+  selectedStage?: string;
+  selectedReason?: string;
+};
+
+type EvaluateImageSeedsResult = {
+  selected: ScoredImageCandidate | null;
+  evaluated: ScoredImageCandidate[];
+  stages: EnrichmentDiagnosticStage[];
+  uniqueSeedCount: number;
+  probedCount: number;
+  /** Vision provider/system failures — do not widen discovery blindly. */
+  transientVisionFailure: boolean;
+};
+
 /**
- * Run image enrichment for an identified candidate.
- * Returns selected=null when nothing meets the acceptance threshold (success, not failure).
+ * Merge/dedupe seeds → hard-filter → probe → score → vision → select.
+ * Invoked progressively (FWGS → official → generic) so discovery can stop early.
  */
-export async function executeImageEnrichment(
-  candidate: BottleCandidate,
-  deps: ImageEnrichmentDeps = {}
-): Promise<ImageEnrichmentResult> {
-  const searchWeb = deps.searchWebHits ?? searchWebHits;
-  const searchImages = deps.searchImageHits ?? searchImageHits;
-  const plcbItem = plcbItemFromCandidate(candidate);
-  const probe =
-    deps.probeImageMeta
-    ?? ((url: string) =>
-      probeImageMetaWithFwgsFallback(url, {
-        plcbItem,
-        fetchFwgsImageViaFigranium: deps.fetchFwgsImageViaFigranium
-      }));
-  const fetchHtml = deps.fetchPageHtml ?? defaultFetchPageHtml;
-  const verify = deps.verifyImage ?? ((req) => verifyProductImage(req));
-  const extractFwgsImages = deps.extractFwgsPlcbImages ?? extractFwgsPlcbImages;
-  const errors: string[] = [];
-  const seeds: ImageCandidateSeed[] = [];
+export async function evaluateImageSeeds(
+  options: EvaluateImageSeedsOptions
+): Promise<EvaluateImageSeedsResult> {
+  const brand = options.candidate.brand.value;
+  const name = options.candidate.name.value;
   const stages: EnrichmentDiagnosticStage[] = [];
-  const diagnostics = emptyImageDiagnostics();
-  const figraniumImageBase64ByUrl = new Map<string, string>();
-
-  let selectedOfficialProductPageUrl: string | null =
-    String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
-
-  // Image-first FWGS path: when a PLCB item is known, extract + validate
-  // Fine Wine & Good Spirits product images via Figranium (no metadata merge).
-  if (plcbItem && (Boolean(deps.extractFwgsPlcbImages) || isFwgsFigraniumConfigured())) {
-    const knownPdp =
-      selectedOfficialProductPageUrl
-      && /^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
-        ? selectedOfficialProductPageUrl
-        : fwgsPdpUrlForItem(plcbItem);
-    try {
-      if (knownPdp) selectedOfficialProductPageUrl = knownPdp;
-      const images = await extractFwgsImages(plcbItem, knownPdp);
-      const uniqueImageUrls = filterValidatedFwgsImageUrls(
-        [images?.primaryImageUrl, ...((images?.imageUrls ?? []))],
-        plcbItem
-      );
-      if (uniqueImageUrls.length) {
-        for (const url of uniqueImageUrls) {
-          seeds.push({
-            url,
-            sourceUrl: knownPdp || null,
-            mimeType: "image/jpeg",
-            identityMatched: true
-          });
-        }
-        stages.push({
-          stage: "fwgs_figranium_images",
-          status: "ok",
-          candidateCount: uniqueImageUrls.length,
-          reason: images?.extractionSource?.trim() || "figranium",
-          sourceUrls: knownPdp ? [knownPdp] : uniqueImageUrls.slice(0, 1)
-        });
-      } else {
-        stages.push({
-          stage: "fwgs_figranium_images",
-          status: "no_result",
-          reason: images ? "no_validated_images" : "no_images"
-        });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "FWGS Figranium failed";
-      errors.push(message);
-      stages.push({
-        stage: "fwgs_figranium_images",
-        status: "error",
-        reason: message.slice(0, 120)
-      });
-    }
-  }
-
-  const queryTiers = buildImageQueryTiers(identityFromCandidate(candidate));
-  let discoveredDomains: string[] = [];
-  let imageSearchHadResults = false;
-  let primaryQuery = queryTiers[0]?.query ?? imageSearchQuery(candidate);
-
-  for (const tier of queryTiers.slice(0, 3)) {
-    try {
-      const imageSeeds = await searchImages(tier.query, 8);
-      if (imageSeeds.length) {
-        imageSearchHadResults = true;
-        seeds.push(...imageSeeds);
-        primaryQuery = tier.query;
-        stages.push({
-          stage: `query_tier_${tier.tier}`,
-          status: "ok",
-          query: tier.query,
-          provider: "searxng",
-          candidateCount: imageSeeds.length,
-          reason: `tier:${tier.label}`
-        });
-        // First successful image SERP is enough for candidate seeds.
-        break;
-      }
-      stages.push({
-        stage: `query_tier_${tier.tier}`,
-        status: "no_result",
-        query: tier.query,
-        provider: "searxng",
-        candidateCount: 0,
-        reason: "no_search_results"
-      });
-    } catch (error) {
-      const message = isWebSearchError(error)
-        ? `SearXNG ${error.code}: ${error.message}`
-        : error instanceof Error
-          ? error.message
-          : "Image search failed";
-      errors.push(message);
-      stages.push({
-        stage: `query_tier_${tier.tier}`,
-        status: "error",
-        query: tier.query,
-        provider: "searxng",
-        reason: message.slice(0, 120)
-      });
-      stages.push({
-        stage: "search",
-        status: "error",
-        query: tier.query,
-        provider: "searxng",
-        reason: message.slice(0, 120)
-      });
-      diagnostics.noResultReason = "provider_error";
-      diagnostics.summary = "Provider or network error";
-      diagnostics.stages = stages;
-      return {
-        selected: null,
-        evaluated: [],
-        errors,
-        diagnostics: sanitizeJobDiagnostics(diagnostics),
-        selectedOfficialProductPageUrl: null
-      };
-    }
-  }
-
-  stages.push({
-    stage: "search",
-    status: imageSearchHadResults ? "ok" : "no_result",
-    query: primaryQuery,
-    provider: "searxng",
-    candidateCount: seeds.length,
-    reason: imageSearchHadResults ? undefined : "no_search_results"
-  });
-
-  // Progressive web search for official pages; prefer product-detail pages for images.
-  let officialPagesScanned = 0;
-  let officialPagesFound = 0;
-  let officialImagesFromMeta = 0;
-  let officialPagesWithoutImageMeta = 0;
-  try {
-    const identity = identityFromCandidate(candidate);
-    const webTiers = queryTiers.slice(0, 4);
-    let allHits: WebSearchHit[] = [];
-    for (const tier of webTiers) {
-      const hits = await searchWeb(tier.query, 5);
-      stages.push({
-        stage: `page_query_tier_${tier.tier}`,
-        status: hits.length ? "ok" : "no_result",
-        query: tier.query,
-        provider: "searxng",
-        candidateCount: hits.length,
-        reason: hits.length ? `tier:${tier.label}` : "no_search_results"
-      });
-      allHits.push(...hits);
-      const discovery = discoverOfficialDomains(allHits, {
-        brand: candidate.brand.value,
-        name: candidate.name.value
-      });
-      if (discovery.domains.length) {
-        discoveredDomains = [...new Set([...discoveredDomains, ...discovery.domains])];
-        stages.push({
-          stage: "official_domain_discovered",
-          status: "ok",
-          reason: discovery.domains.join(",").slice(0, 160),
-          sourceUrls: discovery.sourceUrls
-        });
-      }
-      // IMAGE discovery: do not stop on a generic official homepage alone.
-      if (
-        discoveredDomains.length
-        && hasOfficialProductDetailHit(allHits, discoveredDomains, identity)
-      ) {
-        break;
-      }
-    }
-
-    // Dedup hits
-    const seenHit = new Set<string>();
-    allHits = allHits.filter((h) => {
-      if (!h.url || seenHit.has(h.url)) return false;
-      seenHit.add(h.url);
-      return true;
-    });
-
-    if (!discoveredDomains.length) {
-      const discovery = discoverOfficialDomains(allHits, {
-        brand: candidate.brand.value,
-        name: candidate.name.value
-      });
-      discoveredDomains = discovery.domains;
-      if (discovery.domains.length) {
-        stages.push({
-          stage: "official_domain_discovered",
-          status: "ok",
-          reason: discovery.domains.join(",").slice(0, 160),
-          sourceUrls: discovery.sourceUrls
-        });
-      }
-    }
-
-    // Step B: official product-page discovery.
-    // site: queries are optional — many SearXNG configs return zero for them.
-    // Always follow with broad search + code-side registered-domain filtering.
-    let expansionTokens = extractExpressionTokensFromHits(allHits, identity);
-    if (expansionTokens.length) {
-      stages.push({
-        stage: "official_product_search_learned",
-        status: "ok",
-        reason: `learned token: ${expansionTokens.join(", ")}`.slice(0, 160),
-        candidateCount: expansionTokens.length
-      });
-    }
-
-    // Optional site:-scoped tier (kept for engines that support it).
-    if (discoveredDomains.length) {
-      const siteQueries = buildOfficialProductPageQueries(
-        identity,
-        discoveredDomains,
-        expansionTokens
-      );
-      let siteHitCount = 0;
-      for (const pq of siteQueries) {
-        const hits = await searchWeb(pq.query, 5);
-        siteHitCount += hits.length;
-        for (const hit of hits) {
-          if (!hit.url || seenHit.has(hit.url)) continue;
-          seenHit.add(hit.url);
-          allHits.push(hit);
-        }
-        stages.push({
-          stage: "official_product_search",
-          status: hits.length ? "ok" : "no_result",
-          query: pq.query,
-          provider: "searxng",
-          candidateCount: hits.length,
-          reason: `domain:${pq.domain};${pq.label}`.slice(0, 160)
-        });
-      }
-      if (!siteQueries.length) {
-        stages.push({
-          stage: "official_product_search",
-          status: "skipped",
-          reason: "no_product_queries",
-          candidateCount: 0
-        });
-      } else if (siteHitCount === 0) {
-        stages.push({
-          stage: "official_product_search",
-          status: "no_result",
-          reason: "site_queries_empty_continuing_broad",
-          candidateCount: 0
-        });
-      }
-    }
-
-    // Broad fallback (does not use site:). Filter results by registered domain in code.
-    const needBroad =
-      !discoveredDomains.length
-      || !hasOfficialProductDetailHit(allHits, discoveredDomains, identity);
-    if (needBroad) {
-      const broadQueries = buildOfficialProductPageBroadQueries(identity, expansionTokens);
-      let broadRawCount = 0;
-      for (const bq of broadQueries) {
-        const hits = await searchWeb(bq.query, 8);
-        broadRawCount += hits.length;
-        stages.push({
-          stage: "official_product_search_broad",
-          status: hits.length ? "ok" : "no_result",
-          query: bq.query,
-          provider: "searxng",
-          candidateCount: hits.length,
-          reason: bq.label
-        });
-        for (const hit of hits) {
-          if (!hit.url || seenHit.has(hit.url)) continue;
-          seenHit.add(hit.url);
-          allHits.push(hit);
-        }
-      }
-
-      // Discover domains from broad hits when still unknown.
-      if (!discoveredDomains.length) {
-        const discovery = discoverOfficialDomains(allHits, {
-          brand: candidate.brand.value,
-          name: candidate.name.value
-        });
-        if (discovery.domains.length) {
-          discoveredDomains = discovery.domains;
-          stages.push({
-            stage: "official_domain_discovered",
-            status: "ok",
-            reason: discovery.domains.join(",").slice(0, 160),
-            sourceUrls: discovery.sourceUrls
-          });
-        }
-      }
-
-      // Re-learn expression tokens from richer SERP (e.g. Cask), then one expanded broad query.
-      const learnedMore = extractExpressionTokensFromHits(allHits, identity);
-      const newLearned = learnedMore.filter(
-        (t) => !expansionTokens.some((e) => e.toLowerCase() === t.toLowerCase())
-      );
-      if (newLearned.length) {
-        expansionTokens = [...expansionTokens, ...newLearned].slice(0, 3);
-        stages.push({
-          stage: "official_product_search_learned",
-          status: "ok",
-          reason: `learned token: ${expansionTokens.join(", ")}`.slice(0, 160),
-          candidateCount: expansionTokens.length
-        });
-        const followUps = buildOfficialProductPageBroadQueries(identity, expansionTokens).filter(
-          (q) => q.label.includes("expanded")
-        );
-        for (const fq of followUps.slice(0, 1)) {
-          const hits = await searchWeb(fq.query, 8);
-          broadRawCount += hits.length;
-          stages.push({
-            stage: "official_product_search_broad",
-            status: hits.length ? "ok" : "no_result",
-            query: fq.query,
-            provider: "searxng",
-            candidateCount: hits.length,
-            reason: `${fq.label};followup`
-          });
-          for (const hit of hits) {
-            if (!hit.url || seenHit.has(hit.url)) continue;
-            seenHit.add(hit.url);
-            allHits.push(hit);
-          }
-        }
-      }
-
-      if (discoveredDomains.length) {
-        const filtered = filterHitsByOfficialRegisteredDomain(allHits, discoveredDomains);
-        stages.push({
-          stage: "official_domain_filter",
-          status: filtered.length ? "ok" : "no_result",
-          candidateCount: Math.max(broadRawCount, allHits.length),
-          acceptedCount: filtered.length,
-          reason: filtered.length
-            ? `${filtered.length} official-domain results`
-            : "0 domain-filtered results"
-        });
-      }
-    }
-
-    // Prefer a previously persisted product page when still on an official domain.
-    if (
-      selectedOfficialProductPageUrl
-      && discoveredDomains.length
-      && !hostIsUnderOfficialDomain(selectedOfficialProductPageUrl, discoveredDomains)
-    ) {
-      selectedOfficialProductPageUrl = null;
-    }
-
-    let ranked = selectBestOfficialProductPage(allHits, identity, {
-      discoveredOfficialDomains: discoveredDomains,
-      minScore: 40
-    });
-
-    // Bounded sitemap / homepage-link discovery when search still lacks a product page.
-    if (!ranked && discoveredDomains.length) {
-      const knownHosts: string[] = [];
-      for (const hit of allHits) {
-        try {
-          const h = new URL(hit.url).hostname.toLowerCase();
-          if (hostIsUnderOfficialDomain(h, discoveredDomains)) knownHosts.push(h);
-        } catch {
-          /* skip */
-        }
-      }
-      const sitemap = await discoverOfficialProductUrlsFromSite({
-        trustedDomains: discoveredDomains,
-        knownHosts,
-        identity,
-        fetchText: fetchHtml
-      });
-      stages.push({
-        stage: "official_sitemap_discovery",
-        status: sitemap.urls.length ? "ok" : "no_result",
-        candidateCount: sitemap.urls.length,
-        acceptedCount: sitemap.urls.length ? 1 : 0,
-        reason: `${sitemap.reason};hosts:${sitemap.hostsTried.join(",")}`.slice(0, 160),
-        sourceUrls: sitemap.urls.slice(0, 4).map((u) => u.url)
-      });
-      for (const hit of sitemap.urls) {
-        if (!hit.url || seenHit.has(hit.url)) continue;
-        seenHit.add(hit.url);
-        allHits.push({
-          url: hit.url,
-          title: hit.title ?? "",
-          content: hit.content ?? ""
-        });
-      }
-      ranked = selectBestOfficialProductPage(allHits, identity, {
-        discoveredOfficialDomains: discoveredDomains,
-        minScore: 40
-      });
-    }
-
-    if (ranked) {
-      selectedOfficialProductPageUrl = ranked.hit.url;
-      stages.push({
-        stage: "official_product_page_selected",
-        status: "ok",
-        reason: `${safeOfficialPageDisplay(ranked.hit.url)} · score:${ranked.score.total}`.slice(0, 160),
-        sourceUrls: [ranked.hit.url],
-        acceptedCount: 1,
-        candidateCount: allHits.length
-      });
-    } else if (selectedOfficialProductPageUrl) {
-      stages.push({
-        stage: "official_product_page_selected",
-        status: "ok",
-        reason: `${safeOfficialPageDisplay(selectedOfficialProductPageUrl)} · reused`.slice(0, 160),
-        sourceUrls: [selectedOfficialProductPageUrl]
-      });
-    } else {
-      stages.push({
-        stage: "official_product_page_selected",
-        status: "no_result",
-        reason: discoveredDomains.length
-          ? "official_domain_known_but_no_product_page"
-          : "no_official_domain",
-        candidateCount: allHits.length
-      });
-    }
-
-    // Build ordered official page fetch list: selected product page first.
-    const officialPageUrls: string[] = [];
-    const pushPage = (url: string | null | undefined) => {
-      const u = String(url ?? "").trim();
-      if (!u || officialPageUrls.includes(u)) return;
-      if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u)) return;
-      officialPageUrls.push(u);
-    };
-    pushPage(selectedOfficialProductPageUrl);
-
-    for (const hit of allHits) {
-      if (!hit.url) continue;
-      const pageClass = classifySourceUrlWithDiscovery(hit.url, {
-        brand: candidate.brand.value,
-        name: candidate.name.value,
-        discoveredOfficialDomains: discoveredDomains
-      });
-      if (!isAuthoritativeSource(pageClass) && pageClass !== "unknown") continue;
-      const sourceType = classifyImageSource(hit.url, {
-        brand: candidate.brand.value,
-        name: candidate.name.value,
-        pageUrl: hit.url,
-        discoveredOfficialDomains: discoveredDomains
-      });
-      const pageLooksOfficial =
-        pageClass === "official"
-        || sourceType === "official"
-        || (discoveredDomains.length > 0
-          && classifySourceUrlWithDiscovery(hit.url, {
-            brand: candidate.brand.value,
-            name: candidate.name.value,
-            discoveredOfficialDomains: discoveredDomains
-          }) === "official");
-
-      if (pageLooksOfficial && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(hit.url)) {
-        seeds.push({ url: hit.url, sourceUrl: hit.url });
-        officialImagesFromMeta += 1;
-        officialPagesFound += 1;
-        continue;
-      }
-      if (pageLooksOfficial || sourceType === "licensed" || sourceType === "approved") {
-        if (pageLooksOfficial) pushPage(hit.url);
-      }
-    }
-
-    for (const pageUrl of officialPageUrls.slice(0, MAX_OFFICIAL_PAGES_TO_FETCH)) {
-      const pageClass = classifySourceUrlWithDiscovery(pageUrl, {
-        brand: candidate.brand.value,
-        name: candidate.name.value,
-        discoveredOfficialDomains: discoveredDomains
-      });
-      const pageLooksOfficial =
-        pageClass === "official"
-        || (discoveredDomains.length > 0
-          && hostIsUnderOfficialDomain(pageUrl, discoveredDomains));
-      if (!pageLooksOfficial && !isAuthoritativeSource(pageClass)) continue;
-
-      if (pageLooksOfficial) officialPagesFound += 1;
-      officialPagesScanned += 1;
-      const ingest = await ingestOfficialPageForImages({
-        pageUrl,
-        brand: candidate.brand.value,
-        name: candidate.name.value,
-        fetchHtml,
-        seeds,
-        stages
-      });
-      officialImagesFromMeta += ingest.imagesFromMeta;
-      officialPagesWithoutImageMeta += ingest.pagesWithoutImageMeta;
-    }
-
-    stages.push({
-      stage: "page_discovery",
-      status: officialPagesFound ? "ok" : "skipped",
-      candidateCount: allHits.length,
-      acceptedCount: officialPagesFound,
-      reason: selectedOfficialProductPageUrl
-        ? "official_product_page_preferred"
-        : officialPagesFound
-          ? "official_pages_scanned"
-          : discoveredDomains.length
-            ? "official_domain_but_no_pages"
-            : "no_official_pages"
-    });
-  } catch (error) {
-    const message = isWebSearchError(error)
-      ? `SearXNG ${error.code}: ${error.message}`
-      : error instanceof Error
-        ? error.message
-        : "Web search failed";
-    errors.push(message);
-    stages.push({
-      stage: "page_discovery",
-      status: "error",
-      provider: "searxng",
-      reason: message.slice(0, 120)
-    });
-  }
-
-  // Record distinct image diagnostic outcomes for keeper review.
-  const imgFallbackAccepted = stages.some(
-    (s) => s.stage === "official_page_img_candidate" && s.status === "ok"
-  );
-  if (!officialPagesFound) {
-    stages.push({
-      stage: "official_page_outcome",
-      status: "no_result",
-      reason: "no_official_page_discovered"
-    });
-  } else if (selectedOfficialProductPageUrl && officialImagesFromMeta) {
-    stages.push({
-      stage: "official_page_outcome",
-      status: "ok",
-      acceptedCount: officialImagesFromMeta,
-      reason: "official_product_page_image_metadata",
-      sourceUrls: [selectedOfficialProductPageUrl]
-    });
-  } else if (officialImagesFromMeta) {
-    stages.push({
-      stage: "official_page_outcome",
-      status: "ok",
-      acceptedCount: officialImagesFromMeta,
-      reason: "official_image_metadata_found"
-    });
-  } else if (imgFallbackAccepted) {
-    stages.push({
-      stage: "official_page_outcome",
-      status: "ok",
-      reason: "official_page_img_fallback"
-    });
-  } else if (officialPagesWithoutImageMeta) {
-    stages.push({
-      stage: "official_page_outcome",
-      status: "no_result",
-      reason: "official_page_discovered_but_no_image_metadata"
-    });
-  }
+  const evaluationStage = options.evaluationStage ?? "candidates";
 
   const seenSeeds = mergeImageSeedsByNormalizedUrl(
-    seeds.filter((s) => {
+    options.seeds.filter((s) => {
       const url = String(s.url ?? "").trim();
       return Boolean(url) && !isNonImageAssetUrl(url);
     })
   );
   const uniqueSeeds = seenSeeds.filter((s) => Boolean(String(s.url ?? "").trim()));
-  // Prefer official page-scoped seeds in the probe window so verification
-  // candidates are not starved by search junk / decorative insertion order.
   const probeSeeds = orderSeedsForProbe(uniqueSeeds).slice(0, MAX_PROBE_SEEDS);
 
-  const brand = candidate.brand.value;
-  const name = candidate.name.value;
   const probed: ImageCandidate[] = [];
   const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
   let fetchFailed = 0;
   let fwgsDirectBlocked = 0;
   let fwgsFigraniumFetchOk = 0;
   let fwgsFigraniumFetchFailed = 0;
-  const diagStore = new ImageCandidateDiagnosticStore();
+  let skippedUnapproved = 0;
+  let transientVisionFailure = false;
+  const preRejected: ScoredImageCandidate[] = [];
 
   for (const seed of probeSeeds) {
-    const preview = toCandidate(seed, brand, name, discoveredDomains);
-    diagStore.ensureDiscovered({
+    const preview = toCandidate(seed, brand, name, options.discoveredDomains);
+    options.diagStore.ensureDiscovered({
       url: seed.url,
       sourceType: preview.sourceType,
       sourceUrl: seed.sourceUrl,
@@ -1128,6 +584,32 @@ export async function executeImageEnrichment(
       height: seed.height,
       mimeType: seed.mimeType
     });
+
+    if (
+      options.skipProbeForUnapprovedSources
+      && (preview.sourceType === "unknown" || hardRejectCandidate(preview).reason === "unapproved_source")
+    ) {
+      skippedUnapproved += 1;
+      preRejected.push({
+        ...preview,
+        score: 0,
+        rejected: true,
+        rejectionReason: "unapproved_source",
+        verified: false
+      });
+      options.diagStore.markHardFilter({
+        url: preview.url,
+        sourceType: preview.sourceType,
+        sourceUrl: preview.sourceUrl,
+        width: preview.width,
+        height: preview.height,
+        mimeType: preview.mimeType,
+        dimensionsSource: null,
+        fetchStatus: "ok",
+        reasons: ["unapproved_source"]
+      });
+      continue;
+    }
 
     let meta: ImageMeta = {
       width: seed.width ?? null,
@@ -1139,11 +621,10 @@ export async function executeImageEnrichment(
     let dimsSource: "seed" | "image_header" | "unknown" =
       seed.width != null && seed.height != null ? "seed" : "unknown";
     try {
-      const probedMeta = await probe(seed.url);
+      const probedMeta = await options.probe(seed.url);
       const probeDetails = Array.isArray(probedMeta.probeDetails)
         ? probedMeta.probeDetails.filter((value): value is ImageProbeDetail => typeof value === "string")
         : [];
-      // Prefer real probed header dims over seed hints (FWGS URL size params are not authoritative).
       const width = probedMeta.width ?? seed.width ?? null;
       const height = probedMeta.height ?? seed.height ?? null;
       if (probedMeta.width != null && probedMeta.height != null) {
@@ -1164,12 +645,12 @@ export async function executeImageEnrichment(
         resolvedUrl: probedMeta.resolvedUrl ?? seed.url
       };
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Image probe failed");
+      options.errors.push(error instanceof Error ? error.message : "Image probe failed");
       meta.reachable = false;
     }
     if (!meta.reachable) {
       fetchFailed += 1;
-      const failedCandidate = toCandidate(seed, brand, name, discoveredDomains);
+      const failedCandidate = toCandidate(seed, brand, name, options.discoveredDomains);
       const failDetails = Array.isArray(meta.probeDetails) ? meta.probeDetails : [];
       if (failDetails.includes("direct_probe_http_rejected") || failDetails.includes("direct_probe_timeout")) {
         fwgsDirectBlocked += 1;
@@ -1177,7 +658,7 @@ export async function executeImageEnrichment(
       if (failDetails.includes("figranium_fetch_fallback_failed")) {
         fwgsFigraniumFetchFailed += 1;
       }
-      diagStore.markHardFilter({
+      options.diagStore.markHardFilter({
         url: failedCandidate.url,
         sourceType: failedCandidate.sourceType,
         sourceUrl: failedCandidate.sourceUrl,
@@ -1195,12 +676,15 @@ export async function executeImageEnrichment(
         ? meta.resolvedUrl.trim()
         : seed.url;
     if (typeof meta.imageBase64 === "string" && meta.imageBase64.trim()) {
-      figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
+      options.figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
     }
     if ((meta.probeDetails ?? []).includes("figranium_fetch_fallback_ok")) {
       fwgsFigraniumFetchOk += 1;
     }
-    if ((meta.probeDetails ?? []).includes("direct_probe_http_rejected") || (meta.probeDetails ?? []).includes("direct_probe_timeout")) {
+    if (
+      (meta.probeDetails ?? []).includes("direct_probe_http_rejected")
+      || (meta.probeDetails ?? []).includes("direct_probe_timeout")
+    ) {
       fwgsDirectBlocked += 1;
     }
     const item = toCandidate(
@@ -1213,7 +697,7 @@ export async function executeImageEnrichment(
       },
       brand,
       name,
-      discoveredDomains
+      options.discoveredDomains
     );
     dimensionSources.set(imageCandidateIdFromUrl(item.url), dimsSource);
     probed.push(item);
@@ -1221,7 +705,16 @@ export async function executeImageEnrichment(
 
   const candidateReasonParts: string[] = [];
   if (!probed.length) {
-    candidateReasonParts.push(uniqueSeeds.length ? "fetch_failed" : "no_image_candidates");
+    candidateReasonParts.push(
+      uniqueSeeds.length
+        ? skippedUnapproved && skippedUnapproved === uniqueSeeds.length
+          ? "unapproved_source"
+          : "fetch_failed"
+        : "no_image_candidates"
+    );
+  }
+  if (skippedUnapproved > 0) {
+    candidateReasonParts.push(`unapproved_source_skipped:${skippedUnapproved}`);
   }
   if (fwgsDirectBlocked > 0) {
     candidateReasonParts.push(`direct_fwgs_image_fetch_blocked:${fwgsDirectBlocked}`);
@@ -1235,32 +728,40 @@ export async function executeImageEnrichment(
   }
 
   stages.push({
-    stage: "candidates",
+    stage: evaluationStage,
     status: probed.length ? "ok" : "no_result",
     candidateCount: uniqueSeeds.length,
     acceptedCount: probed.length,
-    rejectedCount: fetchFailed,
+    rejectedCount: fetchFailed + skippedUnapproved,
     reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
     sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
   });
 
+  // Also emit a shared "candidates" stage for keeper continuity across progressive runs.
+  if (evaluationStage !== "candidates") {
+    stages.push({
+      stage: "candidates",
+      status: probed.length ? "ok" : "no_result",
+      candidateCount: uniqueSeeds.length,
+      acceptedCount: probed.length,
+      rejectedCount: fetchFailed + skippedUnapproved,
+      reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
+      sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
+    });
+  }
+
   if (!probed.length) {
-    diagnostics.noResultReason = uniqueSeeds.length ? "source_fetch_failed" : "no_image_candidates";
-    diagnostics.summary = uniqueSeeds.length
-      ? "Image candidates could not be fetched"
-      : "No image candidates found";
-    diagnostics.stages = stages;
-    diagnostics.imageCandidates = diagStore.toArray();
     return {
       selected: null,
-      evaluated: [],
-      errors,
-      diagnostics: sanitizeJobDiagnostics(diagnostics),
-      selectedOfficialProductPageUrl
+      evaluated: preRejected.slice(0, 20),
+      stages,
+      uniqueSeedCount: uniqueSeeds.length,
+      probedCount: 0,
+      transientVisionFailure: false
     };
   }
 
-  const scored: ScoredImageCandidate[] = [];
+  const scored: ScoredImageCandidate[] = [...preRejected];
   const visionQueue: ImageCandidate[] = [];
   const rejectionCounts: Record<string, number> = {};
 
@@ -1276,7 +777,7 @@ export async function executeImageEnrichment(
         rejectionReason: reason,
         verified: false
       });
-      diagStore.markHardFilter({
+      options.diagStore.markHardFilter({
         url: item.url,
         sourceType: item.sourceType,
         sourceUrl: item.sourceUrl,
@@ -1304,7 +805,7 @@ export async function executeImageEnrichment(
         rejectionReason: "below_vision_floor",
         verified: false
       });
-      diagStore.markHardFilter({
+      options.diagStore.markHardFilter({
         url: item.url,
         sourceType: item.sourceType,
         sourceUrl: item.sourceUrl,
@@ -1341,7 +842,7 @@ export async function executeImageEnrichment(
   for (const item of sentToVision) {
     visionCallsStarted += 1;
     const dimsSource = dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown";
-    diagStore.markVerificationStarted({
+    options.diagStore.markVerificationStarted({
       url: item.url,
       sourceType: item.sourceType,
       sourceUrl: item.sourceUrl,
@@ -1354,18 +855,21 @@ export async function executeImageEnrichment(
     let vision: VisionVerification | null = null;
     let visionError: string | null = null;
     try {
-      vision = await verify({
-        candidate,
+      vision = await options.verify({
+        candidate: options.candidate,
         imageUrl: item.url,
-        imageBase64: figraniumImageBase64ByUrl.get(item.url) ?? null
+        imageBase64: options.figraniumImageBase64ByUrl.get(item.url) ?? null
       });
       if (!vision) {
         visionError = "vision_parse_failed";
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Vision verify failed";
-      errors.push(message);
+      options.errors.push(message);
       visionError = classifyVisionError(message);
+      if (visionError === "vision_provider_error") {
+        transientVisionFailure = true;
+      }
     }
 
     if (visionError || !vision) {
@@ -1377,7 +881,7 @@ export async function executeImageEnrichment(
         rejectionReason: reason,
         verified: false
       });
-      diagStore.markVerificationResult({
+      options.diagStore.markVerificationResult({
         url: item.url,
         sourceType: item.sourceType,
         sourceUrl: item.sourceUrl,
@@ -1430,7 +934,7 @@ export async function executeImageEnrichment(
         ? "scoring"
         : "verification";
 
-    diagStore.markVerificationResult({
+    options.diagStore.markVerificationResult({
       url: item.url,
       sourceType: item.sourceType,
       sourceUrl: item.sourceUrl,
@@ -1460,7 +964,7 @@ export async function executeImageEnrichment(
       rejectionReason: "not_checked",
       verified: false
     });
-    diagStore.markVerificationResult({
+    options.diagStore.markVerificationResult({
       url: item.url,
       sourceType: item.sourceType,
       sourceUrl: item.sourceUrl,
@@ -1477,10 +981,8 @@ export async function executeImageEnrichment(
     });
   }
 
-  // Actual candidates that reached verification stage (calls started + overflow not_checked).
   const verificationCountFromStages = visionCallsStarted + notCheckedCount;
-  // Cap applied only AFTER verification updates on the full working map.
-  const workingDiags = diagStore.toArray();
+  const workingDiags = options.diagStore.toArray();
   const consistency = checkVerificationDiagnosticConsistency({
     verificationCountFromStages,
     diagnostics: workingDiags
@@ -1511,29 +1013,862 @@ export async function executeImageEnrichment(
     sourceUrls: scored.slice(0, 10).map((s) => s.url)
   });
 
-  let noResultReason: NoResultReason | null = null;
-  if (!selected) {
-    if (verificationRejected > 0 && scoreRejected === 0) noResultReason = "verification_rejected";
-    else if (scoreRejected > 0) noResultReason = "score_below_threshold";
-    else noResultReason = "all_image_candidates_rejected";
+  if (selected && options.selectedStage) {
+    stages.push({
+      stage: options.selectedStage,
+      status: "ok",
+      acceptedCount: 1,
+      reason: options.selectedReason ?? "selected",
+      sourceUrls: [selected.url]
+    });
   }
-
-  const boundedDiags = diagStore.toBoundedList();
-  diagnostics.noResultReason = noResultReason;
-  diagnostics.summary = summarizeImageCandidateDiagnostics(boundedDiags, {
-    selectedScore: selected?.score ?? null,
-    noResultReason
-  });
-  diagnostics.stages = stages;
-  diagnostics.accepted = selected ? ["image"] : [];
-  // Assign unbounded working set; sanitizeJobDiagnostics applies final cap.
-  diagnostics.imageCandidates = workingDiags;
 
   return {
     selected,
     evaluated: scored.slice(0, 20),
-    errors,
-    diagnostics: sanitizeJobDiagnostics(diagnostics),
-    selectedOfficialProductPageUrl
+    stages,
+    uniqueSeedCount: uniqueSeeds.length,
+    probedCount: probed.length,
+    transientVisionFailure
   };
+}
+
+function finalizeImageResult(options: {
+  selected: ScoredImageCandidate | null;
+  evaluated: ScoredImageCandidate[];
+  errors: string[];
+  stages: EnrichmentDiagnosticStage[];
+  diagStore: ImageCandidateDiagnosticStore;
+  selectedOfficialProductPageUrl: string | null;
+  forceNoResultReason?: NoResultReason | null;
+  forceSummary?: string | null;
+}): ImageEnrichmentResult {
+  const diagnostics = emptyImageDiagnostics();
+  let noResultReason: NoResultReason | null = options.forceNoResultReason ?? null;
+  if (!options.selected && noResultReason == null) {
+    const verifyStage = [...options.stages].reverse().find((s) => s.stage === "verify");
+    if (verifyStage?.reason === "verification_rejected") noResultReason = "verification_rejected";
+    else if (verifyStage?.reason === "score_below_threshold") noResultReason = "score_below_threshold";
+    else if (options.evaluated.length === 0) {
+      const hadSeeds = options.stages.some(
+        (s) =>
+          (s.stage === "candidates" || s.stage.endsWith("_evaluation"))
+          && (s.candidateCount ?? 0) > 0
+      );
+      noResultReason = hadSeeds ? "source_fetch_failed" : "no_image_candidates";
+    } else {
+      noResultReason = "all_image_candidates_rejected";
+    }
+  }
+
+  const workingDiags = options.diagStore.toArray();
+  const boundedDiags = options.diagStore.toBoundedList();
+  diagnostics.noResultReason = noResultReason;
+  diagnostics.summary =
+    options.forceSummary
+    ?? summarizeImageCandidateDiagnostics(boundedDiags, {
+      selectedScore: options.selected?.score ?? null,
+      noResultReason
+    });
+  diagnostics.stages = options.stages;
+  diagnostics.accepted = options.selected ? ["image"] : [];
+  diagnostics.imageCandidates = workingDiags;
+
+  return {
+    selected: options.selected,
+    evaluated: options.evaluated.slice(0, 20),
+    errors: options.errors,
+    diagnostics: sanitizeJobDiagnostics(diagnostics),
+    selectedOfficialProductPageUrl: options.selectedOfficialProductPageUrl
+  };
+}
+
+/**
+ * Run image enrichment for an identified candidate.
+ * Progressive discovery: FWGS → official product page → generic image SERP last.
+ * Returns selected=null when nothing meets the acceptance threshold (success, not failure).
+ */
+export async function executeImageEnrichment(
+  candidate: BottleCandidate,
+  deps: ImageEnrichmentDeps = {}
+): Promise<ImageEnrichmentResult> {
+  const searchWeb = deps.searchWebHits ?? searchWebHits;
+  const searchImages = deps.searchImageHits ?? searchImageHits;
+  const plcbItem = plcbItemFromCandidate(candidate);
+  const probe =
+    deps.probeImageMeta
+    ?? ((url: string) =>
+      probeImageMetaWithFwgsFallback(url, {
+        plcbItem,
+        fetchFwgsImageViaFigranium: deps.fetchFwgsImageViaFigranium
+      }));
+  const fetchHtml = deps.fetchPageHtml ?? defaultFetchPageHtml;
+  const verify = deps.verifyImage ?? ((req) => verifyProductImage(req));
+  const extractFwgsImages = deps.extractFwgsPlcbImages ?? extractFwgsPlcbImages;
+  const errors: string[] = [];
+  const stages: EnrichmentDiagnosticStage[] = [];
+  const figraniumImageBase64ByUrl = new Map<string, string>();
+  const diagStore = new ImageCandidateDiagnosticStore();
+  const allEvaluated: ScoredImageCandidate[] = [];
+  const seenEvaluatedUrls = new Set<string>();
+
+  let selectedOfficialProductPageUrl: string | null =
+    String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
+  let discoveredDomains: string[] = [];
+  let fwgsTransientError = false;
+  let fallbackReason: string | null = null;
+
+  const rememberEvaluated = (items: ScoredImageCandidate[]) => {
+    for (const item of items) {
+      const key = imageCandidateIdFromUrl(item.url);
+      if (seenEvaluatedUrls.has(key)) continue;
+      seenEvaluatedUrls.add(key);
+      allEvaluated.push(item);
+    }
+  };
+
+  // ── Stage 1: trusted PLCB / FWGS Figranium images ─────────────────────────
+  const fwgsSeeds: ImageCandidateSeed[] = [];
+  if (plcbItem && (Boolean(deps.extractFwgsPlcbImages) || isFwgsFigraniumConfigured())) {
+    const knownPdp =
+      selectedOfficialProductPageUrl
+      && /^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+        ? selectedOfficialProductPageUrl
+        : fwgsPdpUrlForItem(plcbItem);
+    try {
+      if (knownPdp) selectedOfficialProductPageUrl = knownPdp;
+      const images = await extractFwgsImages(plcbItem, knownPdp);
+      const uniqueImageUrls = filterValidatedFwgsImageUrls(
+        [images?.primaryImageUrl, ...((images?.imageUrls ?? []))],
+        plcbItem
+      );
+      if (uniqueImageUrls.length) {
+        for (const url of uniqueImageUrls) {
+          fwgsSeeds.push({
+            url,
+            sourceUrl: knownPdp || null,
+            mimeType: "image/jpeg",
+            identityMatched: true
+          });
+        }
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "ok",
+          candidateCount: uniqueImageUrls.length,
+          reason: images?.extractionSource?.trim() || "figranium",
+          sourceUrls: knownPdp ? [knownPdp] : uniqueImageUrls.slice(0, 1)
+        });
+      } else {
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "no_result",
+          reason: images ? "no_validated_images" : "no_images"
+        });
+        fallbackReason = "fallback_no_fwgs_image";
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "FWGS Figranium failed";
+      errors.push(message);
+      fwgsTransientError = true;
+      stages.push({
+        stage: "fwgs_figranium_images",
+        status: "error",
+        reason: message.slice(0, 120)
+      });
+    }
+  } else if (!plcbItem) {
+    fallbackReason = fallbackReason ?? "fallback_no_fwgs_image";
+  }
+
+  if (fwgsSeeds.length) {
+    const fwgsEval = await evaluateImageSeeds({
+      candidate,
+      seeds: fwgsSeeds,
+      discoveredDomains,
+      probe,
+      verify,
+      diagStore,
+      figraniumImageBase64ByUrl,
+      errors,
+      evaluationStage: "strong_source_evaluation",
+      selectedStage: "strong_source_selected",
+      selectedReason: "selected_from_fwgs"
+    });
+    stages.push(...fwgsEval.stages);
+    rememberEvaluated(fwgsEval.evaluated);
+
+    if (fwgsEval.selected) {
+      stages.push({
+        stage: "generic_image_search_skipped",
+        status: "skipped",
+        reason: "generic_search_not_needed"
+      });
+      return finalizeImageResult({
+        selected: fwgsEval.selected,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl
+      });
+    }
+
+    if (fwgsEval.transientVisionFailure) {
+      // Vision provider unavailable — preserve retry semantics; do not widen discovery.
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+
+    fallbackReason = "fallback_fwgs_rejected";
+  }
+
+  // Transient FWGS extract failure: try official pages, but never generic image SERP.
+  const blockGenericSearch = fwgsTransientError;
+
+  const queryTiers = buildImageQueryTiers(identityFromCandidate(candidate));
+
+  // ── Stage 2: official product-page images (before generic image SERP) ─────
+  const officialSeeds: ImageCandidateSeed[] = [];
+  let officialPagesFound = 0;
+  let officialImagesFromMeta = 0;
+  let officialPagesWithoutImageMeta = 0;
+
+  try {
+    const identity = identityFromCandidate(candidate);
+    const webTiers = queryTiers.slice(0, 4);
+    let allHits: WebSearchHit[] = [];
+    for (const tier of webTiers) {
+      const hits = await searchWeb(tier.query, 5);
+      stages.push({
+        stage: `page_query_tier_${tier.tier}`,
+        status: hits.length ? "ok" : "no_result",
+        query: tier.query,
+        provider: "searxng",
+        candidateCount: hits.length,
+        reason: hits.length ? `tier:${tier.label}` : "no_search_results"
+      });
+      allHits.push(...hits);
+      const discovery = discoverOfficialDomains(allHits, {
+        brand: candidate.brand.value,
+        name: candidate.name.value
+      });
+      if (discovery.domains.length) {
+        discoveredDomains = [...new Set([...discoveredDomains, ...discovery.domains])];
+        stages.push({
+          stage: "official_domain_discovered",
+          status: "ok",
+          reason: discovery.domains.join(",").slice(0, 160),
+          sourceUrls: discovery.sourceUrls
+        });
+      }
+      if (
+        discoveredDomains.length
+        && hasOfficialProductDetailHit(allHits, discoveredDomains, identity)
+      ) {
+        break;
+      }
+    }
+
+    const seenHit = new Set<string>();
+    allHits = allHits.filter((h) => {
+      if (!h.url || seenHit.has(h.url)) return false;
+      seenHit.add(h.url);
+      return true;
+    });
+
+    if (!discoveredDomains.length) {
+      const discovery = discoverOfficialDomains(allHits, {
+        brand: candidate.brand.value,
+        name: candidate.name.value
+      });
+      discoveredDomains = discovery.domains;
+      if (discovery.domains.length) {
+        stages.push({
+          stage: "official_domain_discovered",
+          status: "ok",
+          reason: discovery.domains.join(",").slice(0, 160),
+          sourceUrls: discovery.sourceUrls
+        });
+      }
+    }
+
+    let expansionTokens = extractExpressionTokensFromHits(allHits, identity);
+    if (expansionTokens.length) {
+      stages.push({
+        stage: "official_product_search_learned",
+        status: "ok",
+        reason: `learned token: ${expansionTokens.join(", ")}`.slice(0, 160),
+        candidateCount: expansionTokens.length
+      });
+    }
+
+    if (discoveredDomains.length) {
+      const siteQueries = buildOfficialProductPageQueries(
+        identity,
+        discoveredDomains,
+        expansionTokens
+      );
+      let siteHitCount = 0;
+      for (const pq of siteQueries) {
+        const hits = await searchWeb(pq.query, 5);
+        siteHitCount += hits.length;
+        for (const hit of hits) {
+          if (!hit.url || seenHit.has(hit.url)) continue;
+          seenHit.add(hit.url);
+          allHits.push(hit);
+        }
+        stages.push({
+          stage: "official_product_search",
+          status: hits.length ? "ok" : "no_result",
+          query: pq.query,
+          provider: "searxng",
+          candidateCount: hits.length,
+          reason: `domain:${pq.domain};${pq.label}`.slice(0, 160)
+        });
+      }
+      if (!siteQueries.length) {
+        stages.push({
+          stage: "official_product_search",
+          status: "skipped",
+          reason: "no_product_queries",
+          candidateCount: 0
+        });
+      } else if (siteHitCount === 0) {
+        stages.push({
+          stage: "official_product_search",
+          status: "no_result",
+          reason: "site_queries_empty_continuing_broad",
+          candidateCount: 0
+        });
+      }
+    }
+
+    const needBroad =
+      !discoveredDomains.length
+      || !hasOfficialProductDetailHit(allHits, discoveredDomains, identity);
+    if (needBroad) {
+      const broadQueries = buildOfficialProductPageBroadQueries(identity, expansionTokens);
+      let broadRawCount = 0;
+      for (const bq of broadQueries) {
+        const hits = await searchWeb(bq.query, 8);
+        broadRawCount += hits.length;
+        stages.push({
+          stage: "official_product_search_broad",
+          status: hits.length ? "ok" : "no_result",
+          query: bq.query,
+          provider: "searxng",
+          candidateCount: hits.length,
+          reason: bq.label
+        });
+        for (const hit of hits) {
+          if (!hit.url || seenHit.has(hit.url)) continue;
+          seenHit.add(hit.url);
+          allHits.push(hit);
+        }
+      }
+
+      if (!discoveredDomains.length) {
+        const discovery = discoverOfficialDomains(allHits, {
+          brand: candidate.brand.value,
+          name: candidate.name.value
+        });
+        if (discovery.domains.length) {
+          discoveredDomains = discovery.domains;
+          stages.push({
+            stage: "official_domain_discovered",
+            status: "ok",
+            reason: discovery.domains.join(",").slice(0, 160),
+            sourceUrls: discovery.sourceUrls
+          });
+        }
+      }
+
+      const learnedMore = extractExpressionTokensFromHits(allHits, identity);
+      const newLearned = learnedMore.filter(
+        (t) => !expansionTokens.some((e) => e.toLowerCase() === t.toLowerCase())
+      );
+      if (newLearned.length) {
+        expansionTokens = [...expansionTokens, ...newLearned].slice(0, 3);
+        stages.push({
+          stage: "official_product_search_learned",
+          status: "ok",
+          reason: `learned token: ${expansionTokens.join(", ")}`.slice(0, 160),
+          candidateCount: expansionTokens.length
+        });
+        const followUps = buildOfficialProductPageBroadQueries(identity, expansionTokens).filter(
+          (q) => q.label.includes("expanded")
+        );
+        for (const fq of followUps.slice(0, 1)) {
+          const hits = await searchWeb(fq.query, 8);
+          broadRawCount += hits.length;
+          stages.push({
+            stage: "official_product_search_broad",
+            status: hits.length ? "ok" : "no_result",
+            query: fq.query,
+            provider: "searxng",
+            candidateCount: hits.length,
+            reason: `${fq.label};followup`
+          });
+          for (const hit of hits) {
+            if (!hit.url || seenHit.has(hit.url)) continue;
+            seenHit.add(hit.url);
+            allHits.push(hit);
+          }
+        }
+      }
+
+      if (discoveredDomains.length) {
+        const filtered = filterHitsByOfficialRegisteredDomain(allHits, discoveredDomains);
+        stages.push({
+          stage: "official_domain_filter",
+          status: filtered.length ? "ok" : "no_result",
+          candidateCount: Math.max(broadRawCount, allHits.length),
+          acceptedCount: filtered.length,
+          reason: filtered.length
+            ? `${filtered.length} official-domain results`
+            : "0 domain-filtered results"
+        });
+      }
+    }
+
+    if (
+      selectedOfficialProductPageUrl
+      && discoveredDomains.length
+      && !hostIsUnderOfficialDomain(selectedOfficialProductPageUrl, discoveredDomains)
+      && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+    ) {
+      selectedOfficialProductPageUrl = null;
+    }
+
+    let ranked = selectBestOfficialProductPage(allHits, identity, {
+      discoveredOfficialDomains: discoveredDomains,
+      minScore: 40
+    });
+
+    if (!ranked && discoveredDomains.length) {
+      const knownHosts: string[] = [];
+      for (const hit of allHits) {
+        try {
+          const h = new URL(hit.url).hostname.toLowerCase();
+          if (hostIsUnderOfficialDomain(h, discoveredDomains)) knownHosts.push(h);
+        } catch {
+          /* skip */
+        }
+      }
+      const sitemap = await discoverOfficialProductUrlsFromSite({
+        trustedDomains: discoveredDomains,
+        knownHosts,
+        identity,
+        fetchText: fetchHtml
+      });
+      stages.push({
+        stage: "official_sitemap_discovery",
+        status: sitemap.urls.length ? "ok" : "no_result",
+        candidateCount: sitemap.urls.length,
+        acceptedCount: sitemap.urls.length ? 1 : 0,
+        reason: `${sitemap.reason};hosts:${sitemap.hostsTried.join(",")}`.slice(0, 160),
+        sourceUrls: sitemap.urls.slice(0, 4).map((u) => u.url)
+      });
+      for (const hit of sitemap.urls) {
+        if (!hit.url || seenHit.has(hit.url)) continue;
+        seenHit.add(hit.url);
+        allHits.push({
+          url: hit.url,
+          title: hit.title ?? "",
+          content: hit.content ?? ""
+        });
+      }
+      ranked = selectBestOfficialProductPage(allHits, identity, {
+        discoveredOfficialDomains: discoveredDomains,
+        minScore: 40
+      });
+    }
+
+    if (ranked) {
+      selectedOfficialProductPageUrl = ranked.hit.url;
+      stages.push({
+        stage: "official_product_page_selected",
+        status: "ok",
+        reason: `${safeOfficialPageDisplay(ranked.hit.url)} · score:${ranked.score.total}`.slice(0, 160),
+        sourceUrls: [ranked.hit.url],
+        acceptedCount: 1,
+        candidateCount: allHits.length
+      });
+    } else if (
+      selectedOfficialProductPageUrl
+      && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+    ) {
+      stages.push({
+        stage: "official_product_page_selected",
+        status: "ok",
+        reason: `${safeOfficialPageDisplay(selectedOfficialProductPageUrl)} · reused`.slice(0, 160),
+        sourceUrls: [selectedOfficialProductPageUrl]
+      });
+    } else if (!ranked) {
+      stages.push({
+        stage: "official_product_page_selected",
+        status: "no_result",
+        reason: discoveredDomains.length
+          ? "official_domain_known_but_no_product_page"
+          : "no_official_domain",
+        candidateCount: allHits.length
+      });
+    }
+
+    const officialPageUrls: string[] = [];
+    const pushPage = (url: string | null | undefined) => {
+      const u = String(url ?? "").trim();
+      if (!u || officialPageUrls.includes(u)) return;
+      if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u)) return;
+      // FWGS PDP is handled in stage 1; avoid re-fetching as "official manufacturer".
+      if (/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(u)) return;
+      officialPageUrls.push(u);
+    };
+    pushPage(selectedOfficialProductPageUrl);
+
+    for (const hit of allHits) {
+      if (!hit.url) continue;
+      const pageClass = classifySourceUrlWithDiscovery(hit.url, {
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        discoveredOfficialDomains: discoveredDomains
+      });
+      if (!isAuthoritativeSource(pageClass) && pageClass !== "unknown") continue;
+      const sourceType = classifyImageSource(hit.url, {
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        pageUrl: hit.url,
+        discoveredOfficialDomains: discoveredDomains
+      });
+      const pageLooksOfficial =
+        pageClass === "official"
+        || sourceType === "official"
+        || (discoveredDomains.length > 0
+          && classifySourceUrlWithDiscovery(hit.url, {
+            brand: candidate.brand.value,
+            name: candidate.name.value,
+            discoveredOfficialDomains: discoveredDomains
+          }) === "official");
+
+      if (pageLooksOfficial && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(hit.url)) {
+        if (!isNonImageAssetUrl(hit.url)) {
+          officialSeeds.push({ url: hit.url, sourceUrl: hit.url });
+          officialImagesFromMeta += 1;
+          officialPagesFound += 1;
+        }
+        continue;
+      }
+      if (pageLooksOfficial || sourceType === "licensed" || sourceType === "approved") {
+        if (pageLooksOfficial) pushPage(hit.url);
+      }
+    }
+
+    for (const pageUrl of officialPageUrls.slice(0, MAX_OFFICIAL_PAGES_TO_FETCH)) {
+      const pageClass = classifySourceUrlWithDiscovery(pageUrl, {
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        discoveredOfficialDomains: discoveredDomains
+      });
+      const pageLooksOfficial =
+        pageClass === "official"
+        || (discoveredDomains.length > 0
+          && hostIsUnderOfficialDomain(pageUrl, discoveredDomains));
+      if (!pageLooksOfficial && !isAuthoritativeSource(pageClass)) continue;
+
+      if (pageLooksOfficial) officialPagesFound += 1;
+      const ingest = await ingestOfficialPageForImages({
+        pageUrl,
+        brand: candidate.brand.value,
+        name: candidate.name.value,
+        fetchHtml,
+        seeds: officialSeeds,
+        stages
+      });
+      officialImagesFromMeta += ingest.imagesFromMeta;
+      officialPagesWithoutImageMeta += ingest.pagesWithoutImageMeta;
+    }
+
+    stages.push({
+      stage: "page_discovery",
+      status: officialPagesFound ? "ok" : "skipped",
+      candidateCount: allHits.length,
+      acceptedCount: officialPagesFound,
+      reason: selectedOfficialProductPageUrl
+        && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+        ? "official_product_page_preferred"
+        : officialPagesFound
+          ? "official_pages_scanned"
+          : discoveredDomains.length
+            ? "official_domain_but_no_pages"
+            : "no_official_pages"
+    });
+  } catch (error) {
+    const message = isWebSearchError(error)
+      ? `SearXNG ${error.code}: ${error.message}`
+      : error instanceof Error
+        ? error.message
+        : "Web search failed";
+    errors.push(message);
+    stages.push({
+      stage: "page_discovery",
+      status: "error",
+      provider: "searxng",
+      reason: message.slice(0, 120)
+    });
+  }
+
+  const imgFallbackAccepted = stages.some(
+    (s) => s.stage === "official_page_img_candidate" && s.status === "ok"
+  );
+  if (!officialPagesFound) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "no_result",
+      reason: "no_official_page_discovered"
+    });
+    if (!fallbackReason) {
+      fallbackReason = "fallback_no_official_image";
+    }
+  } else if (
+    selectedOfficialProductPageUrl
+    && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+    && officialImagesFromMeta
+  ) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "ok",
+      acceptedCount: officialImagesFromMeta,
+      reason: "official_product_page_image_metadata",
+      sourceUrls: [selectedOfficialProductPageUrl]
+    });
+  } else if (officialImagesFromMeta) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "ok",
+      acceptedCount: officialImagesFromMeta,
+      reason: "official_image_metadata_found"
+    });
+  } else if (imgFallbackAccepted) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "ok",
+      reason: "official_page_img_fallback"
+    });
+  } else if (officialPagesWithoutImageMeta) {
+    stages.push({
+      stage: "official_page_outcome",
+      status: "no_result",
+      reason: "official_page_discovered_but_no_image_metadata"
+    });
+    fallbackReason = "fallback_no_official_image";
+  }
+
+  if (officialSeeds.length) {
+    const officialEval = await evaluateImageSeeds({
+      candidate,
+      seeds: officialSeeds,
+      discoveredDomains,
+      probe,
+      verify,
+      diagStore,
+      figraniumImageBase64ByUrl,
+      errors,
+      evaluationStage: "official_image_evaluation",
+      selectedStage: "official_image_selected",
+      selectedReason: "selected_from_official"
+    });
+    stages.push(...officialEval.stages);
+    rememberEvaluated(officialEval.evaluated);
+
+    if (officialEval.selected) {
+      stages.push({
+        stage: "generic_image_search_skipped",
+        status: "skipped",
+        reason: "generic_search_not_needed"
+      });
+      return finalizeImageResult({
+        selected: officialEval.selected,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl
+      });
+    }
+
+    if (officialEval.transientVisionFailure) {
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+
+    fallbackReason = "fallback_no_official_image";
+  }
+
+  // ── Stage 3: generic SearXNG image-category search (last resort) ──────────
+  if (blockGenericSearch) {
+    stages.push({
+      stage: "generic_image_search_skipped",
+      status: "skipped",
+      reason: "fwgs_provider_error_no_generic_fallback"
+    });
+    return finalizeImageResult({
+      selected: null,
+      evaluated: allEvaluated,
+      errors,
+      stages,
+      diagStore,
+      selectedOfficialProductPageUrl,
+      forceNoResultReason: "provider_error",
+      forceSummary: "Provider or network error"
+    });
+  }
+
+  const genericSeeds: ImageCandidateSeed[] = [];
+  let imageSearchHadResults = false;
+  let primaryQuery = queryTiers[0]?.query ?? imageSearchQuery(candidate);
+
+  stages.push({
+    stage: "generic_image_search",
+    status: "ok",
+    reason: fallbackReason ?? "fallback_no_official_image",
+    query: primaryQuery,
+    provider: "searxng"
+  });
+
+  for (const tier of queryTiers.slice(0, 3)) {
+    try {
+      const imageSeeds = await searchImages(tier.query, 8);
+      if (imageSeeds.length) {
+        imageSearchHadResults = true;
+        for (const seed of imageSeeds) {
+          if (isNonImageAssetUrl(seed.url)) continue;
+          genericSeeds.push(seed);
+        }
+        primaryQuery = tier.query;
+        stages.push({
+          stage: `query_tier_${tier.tier}`,
+          status: "ok",
+          query: tier.query,
+          provider: "searxng",
+          candidateCount: imageSeeds.length,
+          reason: `tier:${tier.label}`
+        });
+        break;
+      }
+      stages.push({
+        stage: `query_tier_${tier.tier}`,
+        status: "no_result",
+        query: tier.query,
+        provider: "searxng",
+        candidateCount: 0,
+        reason: "no_search_results"
+      });
+    } catch (error) {
+      const message = isWebSearchError(error)
+        ? `SearXNG ${error.code}: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : "Image search failed";
+      errors.push(message);
+      stages.push({
+        stage: `query_tier_${tier.tier}`,
+        status: "error",
+        query: tier.query,
+        provider: "searxng",
+        reason: message.slice(0, 120)
+      });
+      stages.push({
+        stage: "search",
+        status: "error",
+        query: tier.query,
+        provider: "searxng",
+        reason: message.slice(0, 120)
+      });
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl: null,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+  }
+
+  stages.push({
+    stage: "search",
+    status: imageSearchHadResults ? "ok" : "no_result",
+    query: primaryQuery,
+    provider: "searxng",
+    candidateCount: genericSeeds.length,
+    reason: imageSearchHadResults ? undefined : "no_search_results"
+  });
+
+  if (genericSeeds.length) {
+    const genericEval = await evaluateImageSeeds({
+      candidate,
+      seeds: genericSeeds,
+      discoveredDomains,
+      probe,
+      verify,
+      diagStore,
+      figraniumImageBase64ByUrl,
+      errors,
+      skipProbeForUnapprovedSources: true,
+      evaluationStage: "generic_image_evaluation"
+    });
+    stages.push(...genericEval.stages);
+    rememberEvaluated(genericEval.evaluated);
+
+    if (genericEval.selected) {
+      return finalizeImageResult({
+        selected: genericEval.selected,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl
+      });
+    }
+
+    if (genericEval.transientVisionFailure) {
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+  }
+
+  return finalizeImageResult({
+    selected: null,
+    evaluated: allEvaluated,
+    errors,
+    stages,
+    diagStore,
+    selectedOfficialProductPageUrl
+  });
 }

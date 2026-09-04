@@ -227,6 +227,7 @@ export { readImageDimensionsFromHeader } from "./image-dimensions.js";
 
 export {
   executeImageEnrichment,
+  evaluateImageSeeds,
   searchImageHits,
   extractProductImageUrlsFromHtml,
   type ImageEnrichmentDeps,

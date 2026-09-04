@@ -52,17 +52,40 @@ export function imageCandidateIdFromUrl(url: string): string {
   return normalizeImageUrlForDedupe(url) || String(url ?? "").trim();
 }
 
-/** True when a URL is clearly a non-image asset (stylesheet, script, font, document). */
+/**
+ * True when a URL is clearly a non-product image asset:
+ * stylesheet / script / font / document / SVG chrome, or an obvious
+ * placeholder / spacer / missing-image filename.
+ * Conservative path/filename matching only — never blocks by TLD (e.g. .edu).
+ */
 export function isNonImageAssetUrl(url: string): boolean {
   try {
     const path = new URL(url).pathname.toLowerCase();
     // Stylesheet / script / font / document — not fetchable product photos.
     // Keep .svg out of image candidates (UI chrome); product photos are raster.
-    return /\.(css|js|mjs|cjs|map|json|html?|xml|woff2?|ttf|otf|eot)(\?|$)/i.test(path)
+    if (
+      /\.(css|js|mjs|cjs|map|json|html?|xml|woff2?|ttf|otf|eot)(\?|$)/i.test(path)
       || /\.svg(\?|$)/i.test(path)
-      || /\/(stylesheet|styles|theme)\.css$/i.test(path);
+      || /\/(stylesheet|styles|theme)\.css$/i.test(path)
+    ) {
+      return true;
+    }
+    // Obvious placeholder / non-product filenames (e.g. artic.edu/.../default.jpg).
+    const leaf = path.split("/").filter(Boolean).pop() ?? "";
+    if (
+      /^(default|placeholder)\.(jpe?g|png|gif|webp|bmp)$/i.test(leaf)
+      || /^no[-_]?image([._-].*)?\.(jpe?g|png|gif|webp|bmp)$/i.test(leaf)
+      || /^noimage([._-].*)?\.(jpe?g|png|gif|webp|bmp)$/i.test(leaf)
+      || /^image-not-found([._-].*)?\.(jpe?g|png|gif|webp|bmp)?$/i.test(leaf)
+      || /^missing[-_]?image([._-].*)?\.(jpe?g|png|gif|webp|bmp)?$/i.test(leaf)
+      || /^(spacer|blank|transparent|1x1|pixel)\.(jpe?g|png|gif|webp|bmp|gif)$/i.test(leaf)
+    ) {
+      return true;
+    }
+    return false;
   } catch {
-    return /\.(css|js|mjs|svg)(\?|$)/i.test(url);
+    return /\.(css|js|mjs|svg)(\?|$)/i.test(url)
+      || /\/(default|placeholder)\.(jpe?g|png)(\?|$)/i.test(url);
   }
 }
 
