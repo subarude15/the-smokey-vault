@@ -1136,7 +1136,7 @@ test("remaining budget still allows generic fallback", async () => {
   const result = await executeImageEnrichment(gilbeysCandidate(), {
     searchImageHits: async () => {
       imageSearchCalls += 1;
-      return [{ url: LICENSED_FALLBACK, sourceUrl: null, width: 1200, height: 1400 }];
+      return [{ url: OFFICIAL_IMAGE, sourceUrl: OFFICIAL_PAGE, width: 1200, height: 1400 }];
     },
     searchWebHits: async () => [],
     fetchPageHtml: async () => null,
@@ -1161,5 +1161,13 @@ test("remaining budget still allows generic fallback", async () => {
   });
 
   assert.ok(imageSearchCalls >= 1, "generic fallback should run while budget remains");
-  assert.equal(result.selected?.url, LICENSED_FALLBACK);
+  assert.ok(result.diagnostics.stages.some((s) => s.stage === "generic_image_search"));
+  assert.ok(
+    !result.diagnostics.stages.some(
+      (s) =>
+        s.stage === "generic_image_search_skipped"
+        && (s.reason === "vision_budget_exhausted" || s.reason === "probe_budget_exhausted")
+    )
+  );
+  assert.equal(result.selected?.url, OFFICIAL_IMAGE);
 });
