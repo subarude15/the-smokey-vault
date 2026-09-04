@@ -519,6 +519,11 @@ type ImageVisionBudget = {
   used: number;
 };
 
+type ImageProbeBudget = {
+  limit: number;
+  used: number;
+};
+
 type EvaluateImageSeedsOptions = {
   candidate: BottleCandidate;
   seeds: ImageCandidateSeed[];
@@ -534,6 +539,13 @@ type EvaluateImageSeedsOptions = {
   errors: string[];
   /** Shared per-execution vision budget (not per-stage). */
   visionBudget: ImageVisionBudget;
+  /** Shared per-execution network-probe budget (not per-stage). */
+  probeBudget: ImageProbeBudget;
+  /**
+   * Normalized candidate IDs already evaluated this execution.
+   * Later stages must not re-probe / re-vision the same asset.
+   */
+  evaluatedCandidateIds: Set<string>;
   /** Skip probe/vision for definitively unapproved sources (generic SERP stage). */
   skipProbeForUnapprovedSources?: boolean;
   /** Stage label prefix for progressive discovery diagnostics. */
@@ -548,9 +560,30 @@ type EvaluateImageSeedsResult = {
   stages: EnrichmentDiagnosticStage[];
   uniqueSeedCount: number;
   probedCount: number;
-  /** Vision provider/system failures — do not widen discovery blindly. */
-  transientVisionFailure: boolean;
+  /**
+   * Provider/system failures (Figranium, vision, verification fetch) —
+   * do not widen discovery blindly.
+   */
+  transientSystemFailure: boolean;
 };
+
+function isTransientVisionError(reason: string): boolean {
+  return (
+    reason === "vision_provider_error"
+    || reason === "vision_parse_failed"
+    || reason === "fetch_failed"
+  );
+}
+
+function markCandidateEvaluated(
+  evaluatedIds: Set<string>,
+  ...urls: Array<string | null | undefined>
+): void {
+  for (const raw of urls) {
+    const id = imageCandidateIdFromUrl(String(raw ?? ""));
+    if (id) evaluatedIds.add(id);
+  }
+}
 
 /**
  * Merge/dedupe seeds → hard-filter → probe → score → vision → select.
@@ -571,7 +604,8 @@ export async function evaluateImageSeeds(
     })
   );
   const uniqueSeeds = seenSeeds.filter((s) => Boolean(String(s.url ?? "").trim()));
-  const probeSeeds = orderSeedsForProbe(uniqueSeeds).slice(0, MAX_PROBE_SEEDS);
+  // Prefer page-scoped seeds; shared probeBudget limits actual network probes.
+  const probeSeeds = orderSeedsForProbe(uniqueSeeds);
 
   const probed: ImageCandidate[] = [];
   const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
@@ -580,10 +614,27 @@ export async function evaluateImageSeeds(
   let fwgsFigraniumFetchOk = 0;
   let fwgsFigraniumFetchFailed = 0;
   let skippedUnapproved = 0;
-  let transientVisionFailure = false;
+  let skippedAlreadyEvaluated = 0;
+  let skippedProbeBudget = 0;
+  let transientSystemFailure = false;
   const preRejected: ScoredImageCandidate[] = [];
 
   for (const seed of probeSeeds) {
+    const candidateId = imageCandidateIdFromUrl(seed.url);
+    if (candidateId && options.evaluatedCandidateIds.has(candidateId)) {
+      skippedAlreadyEvaluated += 1;
+      const preview = toCandidate(seed, brand, name, options.discoveredDomains);
+      options.diagStore.ensureDiscovered({
+        url: seed.url,
+        sourceType: preview.sourceType,
+        sourceUrl: seed.sourceUrl,
+        width: seed.width,
+        height: seed.height,
+        mimeType: seed.mimeType
+      });
+      continue;
+    }
+
     const preview = toCandidate(seed, brand, name, options.discoveredDomains);
     options.diagStore.ensureDiscovered({
       url: seed.url,
@@ -599,6 +650,7 @@ export async function evaluateImageSeeds(
       && (preview.sourceType === "unknown" || hardRejectCandidate(preview).reason === "unapproved_source")
     ) {
       skippedUnapproved += 1;
+      markCandidateEvaluated(options.evaluatedCandidateIds, seed.url);
       preRejected.push({
         ...preview,
         score: 0,
@@ -620,6 +672,30 @@ export async function evaluateImageSeeds(
       continue;
     }
 
+    if (options.probeBudget.used >= options.probeBudget.limit) {
+      skippedProbeBudget += 1;
+      markCandidateEvaluated(options.evaluatedCandidateIds, seed.url);
+      preRejected.push({
+        ...preview,
+        score: 0,
+        rejected: true,
+        rejectionReason: "not_checked",
+        verified: false
+      });
+      options.diagStore.markHardFilter({
+        url: preview.url,
+        sourceType: preview.sourceType,
+        sourceUrl: preview.sourceUrl,
+        width: preview.width,
+        height: preview.height,
+        mimeType: preview.mimeType,
+        dimensionsSource: null,
+        fetchStatus: "ok",
+        reasons: ["not_checked"]
+      });
+      continue;
+    }
+
     let meta: ImageMeta = {
       width: seed.width ?? null,
       height: seed.height ?? null,
@@ -630,6 +706,7 @@ export async function evaluateImageSeeds(
     let dimsSource: "seed" | "image_header" | "unknown" =
       seed.width != null && seed.height != null ? "seed" : "unknown";
     try {
+      options.probeBudget.used += 1;
       const probedMeta = await options.probe(seed.url);
       const probeDetails = Array.isArray(probedMeta.probeDetails)
         ? probedMeta.probeDetails.filter((value): value is ImageProbeDetail => typeof value === "string")
@@ -654,9 +731,27 @@ export async function evaluateImageSeeds(
         resolvedUrl: probedMeta.resolvedUrl ?? seed.url
       };
     } catch (error) {
+      if (isFwgsFigraniumProviderError(error)) {
+        options.errors.push(error.message);
+        transientSystemFailure = true;
+        markCandidateEvaluated(options.evaluatedCandidateIds, seed.url);
+        options.diagStore.markHardFilter({
+          url: preview.url,
+          sourceType: preview.sourceType,
+          sourceUrl: preview.sourceUrl,
+          width: preview.width,
+          height: preview.height,
+          mimeType: preview.mimeType,
+          dimensionsSource: null,
+          fetchStatus: "failed",
+          reasons: ["provider_error", error.kind].slice(0, 8)
+        });
+        break;
+      }
       options.errors.push(error instanceof Error ? error.message : "Image probe failed");
       meta.reachable = false;
     }
+    if (transientSystemFailure) break;
     if (!meta.reachable) {
       fetchFailed += 1;
       const failedCandidate = toCandidate(seed, brand, name, options.discoveredDomains);
@@ -667,6 +762,7 @@ export async function evaluateImageSeeds(
       if (failDetails.includes("figranium_fetch_fallback_failed")) {
         fwgsFigraniumFetchFailed += 1;
       }
+      markCandidateEvaluated(options.evaluatedCandidateIds, seed.url, meta.resolvedUrl);
       options.diagStore.markHardFilter({
         url: failedCandidate.url,
         sourceType: failedCandidate.sourceType,
@@ -708,6 +804,7 @@ export async function evaluateImageSeeds(
       name,
       options.discoveredDomains
     );
+    markCandidateEvaluated(options.evaluatedCandidateIds, seed.url, resolvedUrl);
     dimensionSources.set(imageCandidateIdFromUrl(item.url), dimsSource);
     probed.push(item);
   }
@@ -718,9 +815,17 @@ export async function evaluateImageSeeds(
       uniqueSeeds.length
         ? skippedUnapproved && skippedUnapproved === uniqueSeeds.length
           ? "unapproved_source"
-          : "fetch_failed"
+          : transientSystemFailure
+            ? "provider_error"
+            : "fetch_failed"
         : "no_image_candidates"
     );
+  }
+  if (skippedAlreadyEvaluated > 0) {
+    candidateReasonParts.push(`already_evaluated_skipped:${skippedAlreadyEvaluated}`);
+  }
+  if (skippedProbeBudget > 0) {
+    candidateReasonParts.push(`probe_budget_exhausted:${skippedProbeBudget}`);
   }
   if (skippedUnapproved > 0) {
     candidateReasonParts.push(`unapproved_source_skipped:${skippedUnapproved}`);
@@ -738,25 +843,35 @@ export async function evaluateImageSeeds(
 
   stages.push({
     stage: evaluationStage,
-    status: probed.length ? "ok" : "no_result",
+    status: probed.length ? "ok" : transientSystemFailure ? "error" : "no_result",
     candidateCount: uniqueSeeds.length,
     acceptedCount: probed.length,
-    rejectedCount: fetchFailed + skippedUnapproved,
+    rejectedCount: fetchFailed + skippedUnapproved + skippedProbeBudget,
     reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
     sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
   });
 
-  // Also emit a shared "candidates" stage for keeper continuity across progressive runs.
   if (evaluationStage !== "candidates") {
     stages.push({
       stage: "candidates",
-      status: probed.length ? "ok" : "no_result",
+      status: probed.length ? "ok" : transientSystemFailure ? "error" : "no_result",
       candidateCount: uniqueSeeds.length,
       acceptedCount: probed.length,
-      rejectedCount: fetchFailed + skippedUnapproved,
+      rejectedCount: fetchFailed + skippedUnapproved + skippedProbeBudget,
       reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
       sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
     });
+  }
+
+  if (transientSystemFailure) {
+    return {
+      selected: null,
+      evaluated: preRejected.slice(0, 20),
+      stages,
+      uniqueSeedCount: uniqueSeeds.length,
+      probedCount: probed.length,
+      transientSystemFailure: true
+    };
   }
 
   if (!probed.length) {
@@ -766,7 +881,7 @@ export async function evaluateImageSeeds(
       stages,
       uniqueSeedCount: uniqueSeeds.length,
       probedCount: 0,
-      transientVisionFailure: false
+      transientSystemFailure: false
     };
   }
 
@@ -852,7 +967,6 @@ export async function evaluateImageSeeds(
   const sentToVision = visionQueue.slice(0, remainingVisionSlots);
   let visionCallsStarted = 0;
 
-  // Stage-local consistency: only compare diagnostics created by THIS stage.
   const verificationDiagIdsBefore = new Set(
     options.diagStore
       .toArray()
@@ -890,9 +1004,6 @@ export async function evaluateImageSeeds(
       const message = error instanceof Error ? error.message : "Vision verify failed";
       options.errors.push(message);
       visionError = classifyVisionError(message);
-      if (visionError === "vision_provider_error") {
-        transientVisionFailure = true;
-      }
     }
 
     if (visionError || !vision) {
@@ -920,6 +1031,10 @@ export async function evaluateImageSeeds(
         rejectionReasons: [reason],
         stageReached: "verification"
       });
+      if (isTransientVisionError(reason)) {
+        transientSystemFailure = true;
+        break;
+      }
       verificationRejected += 1;
       continue;
     }
@@ -978,7 +1093,8 @@ export async function evaluateImageSeeds(
   }
 
   let notCheckedCount = 0;
-  for (const item of visionQueue.slice(remainingVisionSlots)) {
+  const visionHandled = visionCallsStarted;
+  for (const item of visionQueue.slice(visionHandled)) {
     notCheckedCount += 1;
     scored.push({
       ...item,
@@ -1027,17 +1143,19 @@ export async function evaluateImageSeeds(
 
   stages.push({
     stage: "verify",
-    status: selected ? "ok" : "no_result",
+    status: selected ? "ok" : transientSystemFailure ? "error" : "no_result",
     candidateCount: verificationCountFromStages,
     acceptedCount: selected ? 1 : 0,
     rejectedCount: verificationRejected + scoreRejected,
     reason: selected
       ? `accepted_score:${selected.score}`
-      : verificationRejected
-        ? "verification_rejected"
-        : scoreRejected
-          ? "score_below_threshold"
-          : "all_image_candidates_rejected",
+      : transientSystemFailure
+        ? "provider_error"
+        : verificationRejected
+          ? "verification_rejected"
+          : scoreRejected
+            ? "score_below_threshold"
+            : "all_image_candidates_rejected",
     sourceUrls: scored.slice(0, 10).map((s) => s.url)
   });
 
@@ -1052,14 +1170,15 @@ export async function evaluateImageSeeds(
   }
 
   return {
-    selected,
+    selected: transientSystemFailure ? null : selected,
     evaluated: scored.slice(0, 20),
     stages,
     uniqueSeedCount: uniqueSeeds.length,
     probedCount: probed.length,
-    transientVisionFailure
+    transientSystemFailure
   };
 }
+
 
 function finalizeImageResult(options: {
   selected: ScoredImageCandidate | null;
@@ -1143,6 +1262,11 @@ export async function executeImageEnrichment(
     limit: IMAGE_MAX_VISION_CHECKS,
     used: 0
   };
+  const probeBudget: ImageProbeBudget = {
+    limit: MAX_PROBE_SEEDS,
+    used: 0
+  };
+  const evaluatedCandidateIds = new Set<string>();
 
   let selectedOfficialProductPageUrl: string | null =
     String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
@@ -1233,6 +1357,8 @@ export async function executeImageEnrichment(
       figraniumImageBase64ByUrl,
       errors,
       visionBudget,
+      probeBudget,
+      evaluatedCandidateIds,
       evaluationStage: "strong_source_evaluation",
       selectedStage: "strong_source_selected",
       selectedReason: "selected_from_fwgs"
@@ -1256,8 +1382,8 @@ export async function executeImageEnrichment(
       });
     }
 
-    if (fwgsEval.transientVisionFailure) {
-      // Vision provider unavailable — preserve retry semantics; do not widen discovery.
+    if (fwgsEval.transientSystemFailure) {
+      // Vision/Figranium provider unavailable — preserve retry semantics; do not widen discovery.
       return finalizeImageResult({
         selected: null,
         evaluated: allEvaluated,
@@ -1725,6 +1851,8 @@ export async function executeImageEnrichment(
       figraniumImageBase64ByUrl,
       errors,
       visionBudget,
+      probeBudget,
+      evaluatedCandidateIds,
       evaluationStage: "official_image_evaluation",
       selectedStage: "official_image_selected",
       selectedReason: "selected_from_official"
@@ -1748,7 +1876,7 @@ export async function executeImageEnrichment(
       });
     }
 
-    if (officialEval.transientVisionFailure) {
+    if (officialEval.transientSystemFailure) {
       return finalizeImageResult({
         selected: null,
         evaluated: allEvaluated,
@@ -1877,6 +2005,8 @@ export async function executeImageEnrichment(
       figraniumImageBase64ByUrl,
       errors,
       visionBudget,
+      probeBudget,
+      evaluatedCandidateIds,
       skipProbeForUnapprovedSources: true,
       evaluationStage: "generic_image_evaluation"
     });
@@ -1894,7 +2024,7 @@ export async function executeImageEnrichment(
       });
     }
 
-    if (genericEval.transientVisionFailure) {
+    if (genericEval.transientSystemFailure) {
       return finalizeImageResult({
         selected: null,
         evaluated: allEvaluated,

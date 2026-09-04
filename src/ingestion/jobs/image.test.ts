@@ -543,3 +543,38 @@ test("deterministic image rejection completes without throwing", async () => {
   assert.equal(getProductImage("spirits", Number(spirit.id))?.rejection_reason, "no_acceptable_image");
   cleanup();
 });
+
+test("Figranium image-fetch provider failure causes runImageJob retry (no empty mark)", async () => {
+  cleanup();
+  const { FwgsFigraniumProviderError } = await import("../../fwgs-figranium.js");
+  const upc = "080686200116";
+  const spirit = insertSpirit({ name: "ImageTest Figranium503", brand: "Buffalo Trace", upc });
+  enqueueImageJob({ entityType: "spirits", entityId: Number(spirit.id), upc });
+  const claimed = claimNextPendingJob()!;
+
+  await assert.rejects(
+    () =>
+      runImageJob(claimed, {
+        searchImageHits: async () => [
+          {
+            url: "https://cdn.buffalotrace.com/products/bt.jpg",
+            sourceUrl: "https://www.buffalotrace.com/bt"
+          }
+        ],
+        searchWebHits: async () => [],
+        probeImageMeta: async () => ({
+          width: 1500,
+          height: 1500,
+          mimeType: "image/jpeg",
+          reachable: true
+        }),
+        verifyImage: async () => {
+          throw new Error("vision_parse_failed");
+        }
+      }),
+    /vision_parse_failed|provider/i
+  );
+  assert.equal(getProductImage("spirits", Number(spirit.id)), null);
+  void FwgsFigraniumProviderError;
+  cleanup();
+});

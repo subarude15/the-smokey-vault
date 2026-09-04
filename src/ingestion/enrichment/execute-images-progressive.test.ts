@@ -731,3 +731,255 @@ test("11. GILBEYS REGRESSION — FWGS success never reaches Dreamstime/random SE
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Figranium image-byte fetch 503 is provider_error — no generic search", async () => {
+  const { FwgsFigraniumProviderError } = await import("../../fwgs-figranium.js");
+  let imageSearchCalls = 0;
+  let probeCalls = 0;
+  const result = await executeImageEnrichment(captainCandidate(), {
+    searchImageHits: async () => {
+      imageSearchCalls += 1;
+      return [{ url: "https://thumbs.dreamstime.com/captain.jpg" }];
+    },
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: CAPTAIN_PLCB,
+      imageUrls: [CAPTAIN_FWGS],
+      primaryImageUrl: CAPTAIN_FWGS,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async () => {
+      probeCalls += 1;
+      // Simulate Akamai block → Figranium fetch throwing typed provider error.
+      throw new FwgsFigraniumProviderError(
+        "retryable_error",
+        "Figranium temporarily unavailable (503)",
+        503
+      );
+    },
+    verifyImage: async () => cleanVision
+  });
+
+  assert.ok(probeCalls >= 1);
+  assert.equal(imageSearchCalls, 0);
+  assert.equal(result.selected, null);
+  assert.equal(result.diagnostics.noResultReason, "provider_error");
+  assert.ok(
+    result.diagnostics.stages.some(
+      (s) =>
+        s.stage === "generic_image_search_skipped"
+        || (s.stage === "strong_source_evaluation" && s.status === "error")
+    )
+  );
+});
+
+test("REAL adapter: FWGS extractor ok + Image Fetcher 503 → provider_error, no generic SERP", async () => {
+  const previous = {
+    key: process.env.FIGRANIUM_API_KEY,
+    base: process.env.FIGRANIUM_BASE_URL,
+    imageTask: process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID,
+    fetchTask: process.env.FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID
+  };
+  process.env.FIGRANIUM_API_KEY = "test-key";
+  process.env.FIGRANIUM_BASE_URL = "https://fig.example.com";
+  process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = "task_images";
+  process.env.FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID = "task_image_fetch";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("fig.example.com") && url.includes("task_image_fetch")) {
+      return new Response("upstream unavailable", { status: 503 });
+    }
+    if (url.includes("www.finewineandgoodspirits.com")) {
+      return new Response("akamai deny", { status: 403 });
+    }
+    return new Response("missing", { status: 404 });
+  }) as typeof fetch;
+
+  let imageSearchCalls = 0;
+  try {
+    const result = await executeImageEnrichment(captainCandidate(), {
+      searchImageHits: async () => {
+        imageSearchCalls += 1;
+        return [{ url: "https://thumbs.dreamstime.com/captain.jpg" }];
+      },
+      searchWebHits: async () => [],
+      fetchPageHtml: async () => null,
+      extractFwgsPlcbImages: async () => ({
+        matched: true,
+        plcbItem: CAPTAIN_PLCB,
+        imageUrls: [CAPTAIN_FWGS],
+        primaryImageUrl: CAPTAIN_FWGS,
+        extractionSource: "embedded_json"
+      }),
+      // Use real probe path (Figranium fetch) — no probeImageMeta override.
+      verifyImage: async () => cleanVision
+    });
+
+    assert.equal(imageSearchCalls, 0);
+    assert.equal(result.selected, null);
+    assert.equal(result.diagnostics.noResultReason, "provider_error");
+    assert.ok(result.errors.some((e) => /Figranium|unavailable|503/i.test(e)));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.key === undefined) delete process.env.FIGRANIUM_API_KEY;
+    else process.env.FIGRANIUM_API_KEY = previous.key;
+    if (previous.base === undefined) delete process.env.FIGRANIUM_BASE_URL;
+    else process.env.FIGRANIUM_BASE_URL = previous.base;
+    if (previous.imageTask === undefined) delete process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID;
+    else process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = previous.imageTask;
+    if (previous.fetchTask === undefined) delete process.env.FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID;
+    else process.env.FIGRANIUM_FWGS_IMAGE_FETCH_TASK_ID = previous.fetchTask;
+  }
+});
+
+test("probe budget is shared across progressive stages", async () => {
+  const fwgsSeeds = Array.from({ length: 12 }, (_, i) => ({
+    url: `https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F${i + 1}.jpg&height=1200&width=1200`,
+    sourceUrl: `https://www.finewineandgoodspirits.com/product/${GILBEYS_PLCB}`,
+    mimeType: "image/jpeg",
+    identityMatched: true as const
+  }));
+  const officialSeeds = Array.from({ length: 12 }, (_, i) => ({
+    url: `https://cdn.gilbeys.com/products/official-${i}.jpg`,
+    sourceUrl: OFFICIAL_PAGE
+  }));
+  const genericSeeds = Array.from({ length: 12 }, (_, i) => ({
+    url: `https://cdn.gilbeys.com/products/generic-${i}.jpg`,
+    sourceUrl: OFFICIAL_PAGE
+  }));
+
+  let probeCalls = 0;
+  await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => genericSeeds,
+    searchWebHits: async () => [
+      {
+        title: "London Dry Gin | Gilbey's Official",
+        content: "Official product page for Gilbey's London Dry Gin",
+        url: OFFICIAL_PAGE
+      }
+    ],
+    fetchPageHtml: async (url) => {
+      if (url === OFFICIAL_PAGE) {
+        return `<html><head>
+          <meta property="og:type" content="product" />
+          <script type="application/ld+json">${JSON.stringify({
+            "@type": "Product",
+            name: "Gilbey's London Dry Gin",
+            image: officialSeeds.map((s) => s.url)
+          })}</script>
+        </head><body></body></html>`;
+      }
+      return null;
+    },
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: fwgsSeeds.map((s) => s.url),
+      primaryImageUrl: fwgsSeeds[0]!.url,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => {
+      probeCalls += 1;
+      return {
+        width: 1200,
+        height: 1400,
+        mimeType: "image/jpeg",
+        reachable: true,
+        resolvedUrl: url
+      };
+    },
+    verifyImage: async () => wrongVision
+  });
+
+  assert.ok(probeCalls <= 20, `expected <=20 probes, got ${probeCalls}`);
+  assert.ok(probeCalls >= 12, `expected FWGS probes to consume budget, got ${probeCalls}`);
+  // With 12+12+12 candidates available, progressive stages must not exceed the shared cap.
+  assert.ok(probeCalls < 36, "must not probe 20-per-stage independently");
+});
+
+test("already-evaluated normalized URL is not re-probed or re-visioned", async () => {
+  const shared =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=1200&width=1200";
+  const sharedAlt =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=475&width=475";
+  const freshOfficial = "https://cdn.gilbeys.com/products/fresh-official.jpg";
+
+  const probedUrls: string[] = [];
+  const visionUrls: string[] = [];
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => [
+      { url: sharedAlt, sourceUrl: null },
+      { url: freshOfficial, sourceUrl: OFFICIAL_PAGE }
+    ],
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: [shared],
+      primaryImageUrl: shared,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => {
+      probedUrls.push(url);
+      return {
+        width: 1200,
+        height: 1400,
+        mimeType: "image/jpeg",
+        reachable: true,
+        resolvedUrl: url.includes("475") ? shared : url
+      };
+    },
+    verifyImage: async ({ imageUrl }) => {
+      visionUrls.push(imageUrl);
+      if (imageUrl.includes("000005295")) return wrongVision;
+      return cleanVision;
+    }
+  });
+
+  // Shared FWGS asset probed once (possibly via rendition), never again from SERP.
+  const fwgsProbeCount = probedUrls.filter((u) => u.includes("000005295_F1.jpg")).length;
+  assert.equal(fwgsProbeCount, 1);
+  assert.equal(visionUrls.filter((u) => u.includes("000005295")).length, 1);
+  assert.ok(
+    !result.diagnostics.stages.some((s) => s.stage === "verification_diagnostic_mismatch")
+  );
+  // Fresh official/generic candidate still gets remaining budget.
+  assert.ok(probedUrls.some((u) => u.includes("fresh-official")));
+  assert.equal(result.selected?.url, freshOfficial);
+});
+
+test("vision_parse_failed is provider_error and does not widen to generic search", async () => {
+  let imageSearchCalls = 0;
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => {
+      imageSearchCalls += 1;
+      return [{ url: "https://cdn.gilbeys.com/should-not-run.jpg" }];
+    },
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: [GILBEYS_FWGS_1200],
+      primaryImageUrl: GILBEYS_FWGS_1200,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async () => ({
+      width: 1200,
+      height: 1400,
+      mimeType: "image/jpeg",
+      reachable: true,
+      resolvedUrl: GILBEYS_FWGS_1200
+    }),
+    verifyImage: async () => null
+  });
+
+  assert.equal(imageSearchCalls, 0);
+  assert.equal(result.selected, null);
+  assert.equal(result.diagnostics.noResultReason, "provider_error");
+});

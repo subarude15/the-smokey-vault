@@ -518,7 +518,11 @@ export async function fetchFwgsImageViaFigranium(
     variables: { plcbItem: requested, imageUrl: String(imageUrl).trim() },
     schema: FwgsFigraniumImageFetchResultSchema
   });
-  if (result.kind !== "success") return { ok: false, reason: "figranium_error" };
+  if (result.kind !== "success") {
+    // Configured provider/system failures must not look like a bad image asset.
+    throwIfFwgsFigraniumProviderFailure(result);
+    return { ok: false, reason: "not_configured" };
+  }
 
   const payload = result.data;
   if (!payload.matched) return { ok: false, reason: "invalid_payload" };
