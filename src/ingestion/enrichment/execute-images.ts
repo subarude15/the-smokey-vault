@@ -49,6 +49,7 @@ import {
   ImageCandidateDiagnosticStore,
   imageCandidateIdFromUrl,
   isNonImageAssetUrl,
+  isVerificationStageDiagnostic,
   mergeImageSeedsByNormalizedUrl,
   orderSeedsForProbe,
   safeImageUrlParts,
@@ -82,6 +83,7 @@ import {
   normalizePlcbItem,
   plcbItemFromCandidate,
   validateFwgsImageUrl,
+  isFwgsFigraniumProviderError,
   type FwgsFigraniumImageResult,
   type FwgsImageFetchOutcome
 } from "../../fwgs-figranium.js";
@@ -512,6 +514,11 @@ async function ingestOfficialPageForImages(options: {
   return stats;
 }
 
+type ImageVisionBudget = {
+  limit: number;
+  used: number;
+};
+
 type EvaluateImageSeedsOptions = {
   candidate: BottleCandidate;
   seeds: ImageCandidateSeed[];
@@ -525,6 +532,8 @@ type EvaluateImageSeedsOptions = {
   diagStore: ImageCandidateDiagnosticStore;
   figraniumImageBase64ByUrl: Map<string, string>;
   errors: string[];
+  /** Shared per-execution vision budget (not per-stage). */
+  visionBudget: ImageVisionBudget;
   /** Skip probe/vision for definitively unapproved sources (generic SERP stage). */
   skipProbeForUnapprovedSources?: boolean;
   /** Stage label prefix for progressive discovery diagnostics. */
@@ -836,11 +845,25 @@ export async function evaluateImageSeeds(
   let selected: ScoredImageCandidate | null = null;
   let verificationRejected = 0;
   let scoreRejected = 0;
-  const sentToVision = visionQueue.slice(0, IMAGE_MAX_VISION_CHECKS);
+  const remainingVisionSlots = Math.max(
+    0,
+    options.visionBudget.limit - options.visionBudget.used
+  );
+  const sentToVision = visionQueue.slice(0, remainingVisionSlots);
   let visionCallsStarted = 0;
+
+  // Stage-local consistency: only compare diagnostics created by THIS stage.
+  const verificationDiagIdsBefore = new Set(
+    options.diagStore
+      .toArray()
+      .filter(isVerificationStageDiagnostic)
+      .map((d) => d.candidateId)
+      .filter((id): id is string => Boolean(id))
+  );
 
   for (const item of sentToVision) {
     visionCallsStarted += 1;
+    options.visionBudget.used += 1;
     const dimsSource = dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown";
     options.diagStore.markVerificationStarted({
       url: item.url,
@@ -955,7 +978,7 @@ export async function evaluateImageSeeds(
   }
 
   let notCheckedCount = 0;
-  for (const item of visionQueue.slice(IMAGE_MAX_VISION_CHECKS)) {
+  for (const item of visionQueue.slice(remainingVisionSlots)) {
     notCheckedCount += 1;
     scored.push({
       ...item,
@@ -982,10 +1005,15 @@ export async function evaluateImageSeeds(
   }
 
   const verificationCountFromStages = visionCallsStarted + notCheckedCount;
-  const workingDiags = options.diagStore.toArray();
+  const stageVerificationDiags = options.diagStore.toArray().filter(
+    (d) =>
+      isVerificationStageDiagnostic(d)
+      && d.candidateId
+      && !verificationDiagIdsBefore.has(d.candidateId)
+  );
   const consistency = checkVerificationDiagnosticConsistency({
     verificationCountFromStages,
-    diagnostics: workingDiags
+    diagnostics: stageVerificationDiags
   });
   if (!consistency.ok && consistency.reason) {
     stages.push({
@@ -1111,6 +1139,10 @@ export async function executeImageEnrichment(
   const diagStore = new ImageCandidateDiagnosticStore();
   const allEvaluated: ScoredImageCandidate[] = [];
   const seenEvaluatedUrls = new Set<string>();
+  const visionBudget: ImageVisionBudget = {
+    limit: IMAGE_MAX_VISION_CHECKS,
+    used: 0
+  };
 
   let selectedOfficialProductPageUrl: string | null =
     String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
@@ -1167,14 +1199,24 @@ export async function executeImageEnrichment(
         fallbackReason = "fallback_no_fwgs_image";
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "FWGS Figranium failed";
-      errors.push(message);
-      fwgsTransientError = true;
-      stages.push({
-        stage: "fwgs_figranium_images",
-        status: "error",
-        reason: message.slice(0, 120)
-      });
+      if (isFwgsFigraniumProviderError(error)) {
+        errors.push(error.message);
+        fwgsTransientError = true;
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "error",
+          reason: `${error.kind}:${error.message}`.slice(0, 120)
+        });
+      } else {
+        const message = error instanceof Error ? error.message : "FWGS Figranium failed";
+        errors.push(message);
+        fwgsTransientError = true;
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "error",
+          reason: message.slice(0, 120)
+        });
+      }
     }
   } else if (!plcbItem) {
     fallbackReason = fallbackReason ?? "fallback_no_fwgs_image";
@@ -1190,6 +1232,7 @@ export async function executeImageEnrichment(
       diagStore,
       figraniumImageBase64ByUrl,
       errors,
+      visionBudget,
       evaluationStage: "strong_source_evaluation",
       selectedStage: "strong_source_selected",
       selectedReason: "selected_from_fwgs"
@@ -1681,6 +1724,7 @@ export async function executeImageEnrichment(
       diagStore,
       figraniumImageBase64ByUrl,
       errors,
+      visionBudget,
       evaluationStage: "official_image_evaluation",
       selectedStage: "official_image_selected",
       selectedReason: "selected_from_official"
@@ -1832,6 +1876,7 @@ export async function executeImageEnrichment(
       diagStore,
       figraniumImageBase64ByUrl,
       errors,
+      visionBudget,
       skipProbeForUnapprovedSources: true,
       evaluationStage: "generic_image_evaluation"
     });

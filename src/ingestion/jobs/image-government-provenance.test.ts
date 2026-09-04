@@ -104,8 +104,16 @@ test("Captain Morgan image job bridges government PLCB provenance into FWGS Figr
     }) as typeof fetch;
 
     let visionReceivedRecoveredBytes = false;
+    let imageSearchCalls = 0;
+    let visionCalls = 0;
     const result = await runImageJob(job!, {
-      searchImageHits: async () => [],
+      searchImageHits: async () => {
+        imageSearchCalls += 1;
+        return [
+          { url: "https://thumbs.dreamstime.com/junk.jpg" },
+          { url: "https://www.totalwine.com/media/captain.jpg" }
+        ];
+      },
       searchWebHits: async () => [],
       fetchPageHtml: async () => null,
       extractFwgsPlcbImages: async (plcbItem) => {
@@ -134,6 +142,7 @@ test("Captain Morgan image job bridges government PLCB provenance into FWGS Figr
         };
       },
       verifyImage: async (request) => {
+        visionCalls += 1;
         visionReceivedRecoveredBytes = Boolean(request.imageBase64);
         return {
           correct_product: true,
@@ -149,7 +158,15 @@ test("Captain Morgan image job bridges government PLCB provenance into FWGS Figr
     assert.equal(result.imageSaved, true);
     assert.equal(result.inventoryImageUrl, null);
     assert.equal(visionReceivedRecoveredBytes, true);
+    assert.equal(imageSearchCalls, 0, "generic SearXNG must not run after FWGS accept");
+    assert.ok(visionCalls <= 3);
+    assert.equal(visionCalls, 1);
     assert.equal(result.execution?.selected?.url, FWGS_IMAGE_1200);
+    assert.ok(
+      result.execution?.diagnostics.stages.some(
+        (s) => s.stage === "generic_image_search_skipped" && s.reason === "generic_search_not_needed"
+      )
+    );
     assert.equal(getProductImage("spirits", entityId)?.url, FWGS_IMAGE_1200);
     const inventory = db.prepare("SELECT image_url FROM spirits WHERE id=?").get(entityId) as {
       image_url: string;

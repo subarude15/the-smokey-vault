@@ -10,7 +10,7 @@ import { executeImageEnrichment } from "./execute-images.js";
 import { isNonImageAssetUrl } from "./image-candidate-diagnostics.js";
 import { classifyImageSource } from "./image-sources.js";
 import { hardRejectCandidate } from "./image-score.js";
-import { IMAGE_ACCEPTANCE_THRESHOLD } from "./image-thresholds.js";
+import { IMAGE_ACCEPTANCE_THRESHOLD, IMAGE_MAX_VISION_CHECKS } from "./image-thresholds.js";
 
 const CAPTAIN_PLCB = "000004766";
 const CAPTAIN_FWGS =
@@ -376,31 +376,214 @@ test("5. NO TRUSTED STRUCTURED SOURCE — generic image search still runs", asyn
   assert.equal(result.selected?.url, CRAFT_OFFICIAL_IMAGE);
 });
 
-test("6. TRANSIENT FWGS ERROR — does not silently fall back to generic image search", async () => {
+test("6. TRANSIENT FWGS ERROR — real adapter provider failure does not widen to generic search", async () => {
+  const previous = {
+    key: process.env.FIGRANIUM_API_KEY,
+    base: process.env.FIGRANIUM_BASE_URL,
+    task: process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID
+  };
+  process.env.FIGRANIUM_API_KEY = "test-key";
+  process.env.FIGRANIUM_BASE_URL = "https://fig.example.com";
+  process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = "task_images";
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("fig.example.com")) {
+      return new Response("upstream unavailable", { status: 503 });
+    }
+    return new Response("missing", { status: 404 });
+  }) as typeof fetch;
+
   let imageSearchCalls = 0;
-  const result = await executeImageEnrichment(captainCandidate(), {
-    searchImageHits: async () => {
-      imageSearchCalls += 1;
-      return [{ url: LICENSED_FALLBACK }];
+  try {
+    // Use the REAL extractFwgsPlcbImages adapter (no deps override) so a 503
+    // propagates as FwgsFigraniumProviderError instead of collapsing to null.
+    const result = await executeImageEnrichment(captainCandidate(), {
+      searchImageHits: async () => {
+        imageSearchCalls += 1;
+        return [{ url: LICENSED_FALLBACK }];
+      },
+      searchWebHits: async () => [],
+      fetchPageHtml: async () => null,
+      verifyImage: async () => cleanVision
+    });
+
+    assert.equal(imageSearchCalls, 0);
+    assert.equal(result.selected, null);
+    assert.equal(result.diagnostics.noResultReason, "provider_error");
+    assert.ok(result.errors.some((e) => /Figranium|temporarily unavailable|503/i.test(e)));
+    assert.ok(
+      result.diagnostics.stages.some(
+        (s) =>
+          s.stage === "generic_image_search_skipped"
+          && s.reason === "fwgs_provider_error_no_generic_fallback"
+      )
+    );
+    assert.ok(
+      result.diagnostics.stages.some(
+        (s) => s.stage === "fwgs_figranium_images" && s.status === "error" && /retryable_error/i.test(String(s.reason))
+      )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.key === undefined) delete process.env.FIGRANIUM_API_KEY;
+    else process.env.FIGRANIUM_API_KEY = previous.key;
+    if (previous.base === undefined) delete process.env.FIGRANIUM_BASE_URL;
+    else process.env.FIGRANIUM_BASE_URL = previous.base;
+    if (previous.task === undefined) delete process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID;
+    else process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID = previous.task;
+  }
+});
+
+test("vision budget is shared across progressive stages (max 3 total)", async () => {
+  const fwgsA =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=1200&width=1200";
+  const fwgsB =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_B1.jpg&height=1200&width=1200";
+  const officialA = "https://cdn.gilbeys.com/products/london-a.jpg";
+  const officialB = "https://cdn.gilbeys.com/products/london-b.jpg";
+  const genericA = "https://cdn.gilbeys.com/products/london-c.jpg";
+  const genericB = "https://cdn.gilbeys.com/products/london-d.jpg";
+
+  let visionCalls = 0;
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => [
+      { url: genericA, sourceUrl: OFFICIAL_PAGE },
+      { url: genericB, sourceUrl: OFFICIAL_PAGE }
+    ],
+    searchWebHits: async () => [
+      {
+        title: "London Dry Gin | Gilbey's Official",
+        content: "Official product page for Gilbey's London Dry Gin",
+        url: OFFICIAL_PAGE
+      }
+    ],
+    fetchPageHtml: async (url) => {
+      if (url === OFFICIAL_PAGE) {
+        return `<html><head>
+          <meta property="og:type" content="product" />
+          <script type="application/ld+json">${JSON.stringify({
+            "@type": "Product",
+            name: "Gilbey's London Dry Gin",
+            image: [officialA, officialB]
+          })}</script>
+        </head><body></body></html>`;
+      }
+      return null;
     },
-    searchWebHits: async () => [],
-    fetchPageHtml: async () => null,
-    extractFwgsPlcbImages: async () => {
-      throw new Error("Figranium temporary 503 timeout");
-    },
-    verifyImage: async () => cleanVision
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: [fwgsA, fwgsB],
+      primaryImageUrl: fwgsA,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => ({
+      width: 1200,
+      height: 1400,
+      mimeType: "image/jpeg",
+      reachable: true,
+      resolvedUrl: url
+    }),
+    verifyImage: async () => {
+      visionCalls += 1;
+      return wrongVision;
+    }
   });
 
-  assert.equal(imageSearchCalls, 0);
-  assert.equal(result.selected, null);
-  assert.equal(result.diagnostics.noResultReason, "provider_error");
-  assert.ok(result.errors.some((e) => /503|timeout|Figranium/i.test(e)));
+  assert.equal(IMAGE_MAX_VISION_CHECKS, 3);
   assert.ok(
-    result.diagnostics.stages.some(
-      (s) =>
-        s.stage === "generic_image_search_skipped"
-        && s.reason === "fwgs_provider_error_no_generic_fallback"
-    )
+    visionCalls <= IMAGE_MAX_VISION_CHECKS,
+    `expected <=${IMAGE_MAX_VISION_CHECKS} vision calls, got ${visionCalls}`
+  );
+  assert.equal(visionCalls, 3);
+  assert.equal(result.selected, null);
+  assert.ok(
+    (result.evaluated ?? []).some((c) => c.rejectionReason === "not_checked"),
+    "budget exhaustion should leave remaining candidates not_checked"
+  );
+});
+
+test("vision budget early accept still stops discovery", async () => {
+  let visionCalls = 0;
+  let imageSearchCalls = 0;
+  const png = makePng(1200, 1200);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(png, { status: 200, headers: { "Content-Type": "image/png" } })) as typeof fetch;
+  try {
+    const result = await executeImageEnrichment(gilbeysCandidate(), {
+      searchImageHits: async () => {
+        imageSearchCalls += 1;
+        return [{ url: "https://cdn.gilbeys.com/should-not-run.jpg" }];
+      },
+      searchWebHits: async () => [],
+      fetchPageHtml: async () => null,
+      extractFwgsPlcbImages: async () => ({
+        matched: true,
+        plcbItem: GILBEYS_PLCB,
+        imageUrls: [GILBEYS_FWGS],
+        primaryImageUrl: GILBEYS_FWGS,
+        extractionSource: "embedded_json"
+      }),
+      verifyImage: async () => {
+        visionCalls += 1;
+        return cleanVision;
+      }
+    });
+    assert.equal(imageSearchCalls, 0);
+    assert.equal(visionCalls, 1);
+    assert.ok(result.selected?.url.includes("000005295_F1.jpg"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("progressive stages do not emit verification_diagnostic_mismatch", async () => {
+  const fwgsUrl =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=1200&width=1200";
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => [],
+    searchWebHits: async () => [
+      {
+        title: "London Dry Gin | Gilbey's Official",
+        content: "Official product page for Gilbey's London Dry Gin",
+        url: OFFICIAL_PAGE
+      }
+    ],
+    fetchPageHtml: async (url) => {
+      if (url === OFFICIAL_PAGE) {
+        return `<html><head>
+          <meta property="og:image" content="${OFFICIAL_IMAGE}" />
+          <meta property="og:type" content="product" />
+        </head><body></body></html>`;
+      }
+      return null;
+    },
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: [fwgsUrl],
+      primaryImageUrl: fwgsUrl,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => ({
+      width: 1200,
+      height: 1400,
+      mimeType: "image/jpeg",
+      reachable: true,
+      resolvedUrl: url
+    }),
+    verifyImage: async ({ imageUrl }) => {
+      if (imageUrl.includes("000005295")) return wrongVision;
+      return cleanVision;
+    }
+  });
+
+  assert.equal(result.selected?.url, OFFICIAL_IMAGE);
+  assert.ok(
+    !result.diagnostics.stages.some((s) => s.stage === "verification_diagnostic_mismatch")
   );
 });
 
