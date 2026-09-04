@@ -18,6 +18,7 @@ import {
   markJobCompleted,
   previewEnrichmentBackfill,
   queueEnrichmentBackfill,
+  shouldScheduleImageEnrichment,
   upsertProductContent,
   upsertProductImage
 } from "./ingestion/jobs/index.js";
@@ -268,6 +269,58 @@ test("fully enriched bottle queues nothing", () => {
     assert.equal(result.queued.tasting_notes, 0);
     assert.equal(result.queued.image, 0);
     assert.ok(preview.alreadyComplete >= 1 || before === 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("accepted remote image remains backfill-schedulable for localization repair", () => {
+  cleanup();
+  const upc = `${PREFIX}000006b`;
+  const spirit = insertSpirit({ upc, abv: 45, volume_ml: 750, category: "Whiskey" });
+  const id = Number(spirit.id);
+  seedCompleteMetadataCaches(upc, String(spirit.name), String(spirit.brand), "Whiskey");
+  upsertProductContent({
+    entityType: "spirits",
+    entityId: id,
+    officialNotes: "Official notes.",
+    officialSourceUrl: "https://producer.example/x",
+    officialSourceType: "official",
+    houseProfile: "House profile."
+  });
+  upsertProductImage({
+    entityType: "spirits",
+    entityId: id,
+    url: "https://cdn.example/remote-accepted.jpg",
+    sourceType: "official",
+    sourceUrl: "https://producer.example/x",
+    score: 75,
+    verified: true
+  });
+  markJobCompleted(
+    enqueueMetadataJob({ entityType: "spirits", entityId: id, upc }).job.id,
+    {
+      requested: ["category", "abv", "proof", "volume_ml", "origin", "ttb_id"],
+      updated: ["category", "abv", "proof", "origin", "ttb_id"],
+      unresolved: []
+    }
+  );
+  markJobCompleted(
+    enqueueTastingNotesJob({ entityType: "spirits", entityId: id, upc }).job.id
+  );
+  markJobCompleted(
+    enqueueImageJob({ entityType: "spirits", entityId: id, upc }).job.id
+  );
+
+  try {
+    assert.equal(
+      shouldScheduleImageEnrichment({ entityType: "spirits", entityId: id, row: spirit }),
+      true
+    );
+    const preview = previewEnrichmentBackfill();
+    assert.ok(preview.images >= 1);
+    const result = queueEnrichmentBackfill({ types: ["image"] });
+    assert.ok(result.queued.image >= 1);
   } finally {
     cleanup();
   }

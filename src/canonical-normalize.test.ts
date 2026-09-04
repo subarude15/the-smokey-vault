@@ -328,7 +328,7 @@ test("maintenance preview counts actual complete vs no_result correctly", () => 
   upsertProductImage({
     entityType: "spirits",
     entityId: completeId,
-    url: "https://cdn.example/c.jpg",
+    url: "/api/media/images/preview-complete.jpg",
     sourceType: "official",
     sourceUrl: "https://producer.example/x",
     score: 91,
