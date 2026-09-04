@@ -5,8 +5,7 @@
 import { normalizeCanonicalTaxonomy } from "../../canonical-normalize.js";
 import type { BottleCandidate } from "../candidate/types.js";
 import type { VisionVerification } from "./image-score.js";
-
-const LOCAL_OLLAMA_CHAT_URL = "http://192.168.1.184:11434/api/chat";
+import { ollamaChatUrl, ollamaVisionModel } from "./ollama-config.js";
 
 export type ImageVerifyRequest = {
   candidate: BottleCandidate;
@@ -120,7 +119,7 @@ async function fetchImageBase64(url: string): Promise<string | null> {
   }
 }
 
-/** Default llama3.2-vision verifier. */
+/** Local Ollama vision verifier (endpoint + model from shared ollama-config). */
 export async function verifyProductImage(request: ImageVerifyRequest): Promise<VisionVerification | null> {
   const image =
     request.imageBase64?.trim() ||
@@ -129,14 +128,17 @@ export async function verifyProductImage(request: ImageVerifyRequest): Promise<V
     throw new Error("fetch_failed");
   }
 
+  const chatUrl = ollamaChatUrl();
+  const model = ollamaVisionModel();
+
   let response: Response;
   try {
-    response = await fetch(LOCAL_OLLAMA_CHAT_URL, {
+    response = await fetch(chatUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({
-        model: "llama3.2-vision",
+        model,
         stream: false,
         keep_alive: -1,
         format: VERIFY_FORMAT,
