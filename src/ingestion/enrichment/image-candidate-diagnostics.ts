@@ -128,6 +128,16 @@ const SIGNED_QUERY_RE =
 const RESIZE_QUERY_RE =
   /^(width|height|w|h|fit|crop|quality|q|format|fm|auto|dpr|device)$/i;
 
+/** FWGS ccstore image endpoint — `source=` is the asset path, not tracking. */
+const FWGS_DEDUPE_HOST = "www.finewineandgoodspirits.com";
+const FWGS_CCSTORE_IMAGES_PATH = "/ccstore/v1/images";
+
+function isFwgsCcstoreImageEndpoint(u: URL): boolean {
+  if (u.hostname.toLowerCase() !== FWGS_DEDUPE_HOST) return false;
+  const path = u.pathname.replace(/\/+$/, "") || "/";
+  return path === FWGS_CCSTORE_IMAGES_PATH;
+}
+
 /** Safe host + short path for UI (strips query/hash/tokens). */
 export function safeImageUrlParts(url: string | null | undefined): {
   host: string;
@@ -155,7 +165,9 @@ export function safeImageUrlParts(url: string | null | undefined): {
 
 /**
  * Normalize image URLs for duplicate detection only.
- * Strips tracking/cache-buster/signed query params; keeps path identity.
+ * Strips tracking/cache-buster/signed/resize query params; keeps path identity.
+ * On FWGS ccstore `/ccstore/v1/images/`, preserves `source=` (asset identity)
+ * while still stripping rendition-only params (`width`/`height`/…).
  * Does not mutate the fetch URL — callers keep the preferred original.
  */
 export function normalizeImageUrlForDedupe(url: string): string {
@@ -165,9 +177,16 @@ export function normalizeImageUrlForDedupe(url: string): string {
     const u = new URL(raw);
     u.hash = "";
     u.hostname = u.hostname.toLowerCase();
+    const preserveFwgsSource = isFwgsCcstoreImageEndpoint(u);
     const kept = new URLSearchParams();
     for (const [key, value] of u.searchParams.entries()) {
-      if (TRACKING_QUERY_RE.test(key)) continue;
+      const keyLower = key.toLowerCase();
+      if (
+        TRACKING_QUERY_RE.test(key)
+        && !(preserveFwgsSource && keyLower === "source")
+      ) {
+        continue;
+      }
       if (SIGNED_QUERY_RE.test(key)) continue;
       if (CACHE_BUSTER_RE.test(key) && /^\d+$/.test(value)) continue;
       if (RESIZE_QUERY_RE.test(key)) continue;

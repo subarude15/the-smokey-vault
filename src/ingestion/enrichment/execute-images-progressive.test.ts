@@ -983,3 +983,183 @@ test("vision_parse_failed is provider_error and does not widen to generic search
   assert.equal(result.selected, null);
   assert.equal(result.diagnostics.noResultReason, "provider_error");
 });
+
+test("FWGS F1 vision reject does not suppress B1 — B1 can accept without generic SERP", async () => {
+  const f1 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=475&width=475";
+  const f1_1200 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=1200&width=1200";
+  const b1 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_B1.jpg&height=475&width=475";
+  const b1_1200 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_B1.jpg&height=1200&width=1200";
+
+  let imageSearchCalls = 0;
+  const probed: string[] = [];
+  const visioned: string[] = [];
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => {
+      imageSearchCalls += 1;
+      return [{ url: "https://cdn.dreamstime.com/should-not-run.jpg" }];
+    },
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: [f1, b1],
+      primaryImageUrl: f1,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => {
+      probed.push(url);
+      const resolved = url.includes("_B1")
+        ? (url.includes("475") ? b1_1200 : url)
+        : (url.includes("475") ? f1_1200 : url);
+      return {
+        width: 1200,
+        height: 1400,
+        mimeType: "image/jpeg",
+        reachable: true,
+        resolvedUrl: resolved
+      };
+    },
+    verifyImage: async ({ imageUrl }) => {
+      visioned.push(imageUrl);
+      if (imageUrl.includes("_F1")) return wrongVision;
+      return cleanVision;
+    }
+  });
+
+  assert.ok(probed.some((u) => u.includes("_F1")), "F1 should be probed");
+  assert.ok(probed.some((u) => u.includes("_B1")), "B1 should get its own probe");
+  assert.ok(visioned.some((u) => u.includes("_F1")), "F1 should reach vision");
+  assert.ok(visioned.some((u) => u.includes("_B1")), "B1 should reach vision");
+  assert.equal(imageSearchCalls, 0, "generic SERP must not run after B1 accept");
+  assert.ok(result.selected?.url.includes("_B1"), "B1 should be accepted");
+  assert.ok(
+    !result.diagnostics.stages.some((s) => s.stage === "verification_diagnostic_mismatch")
+  );
+});
+
+test("vision budget exhausted skips generic image search", async () => {
+  const fwgsUrls = Array.from({ length: 4 }, (_, i) =>
+    `https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F${i + 1}.jpg&height=1200&width=1200`
+  );
+
+  let imageSearchCalls = 0;
+  let visionCalls = 0;
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => {
+      imageSearchCalls += 1;
+      return [{ url: "https://cdn.gilbeys.com/generic-should-not-run.jpg", sourceUrl: OFFICIAL_PAGE }];
+    },
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: fwgsUrls,
+      primaryImageUrl: fwgsUrls[0]!,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => ({
+      width: 1200,
+      height: 1400,
+      mimeType: "image/jpeg",
+      reachable: true,
+      resolvedUrl: url
+    }),
+    verifyImage: async () => {
+      visionCalls += 1;
+      return wrongVision;
+    }
+  });
+
+  assert.equal(visionCalls, IMAGE_MAX_VISION_CHECKS);
+  assert.equal(imageSearchCalls, 0);
+  assert.equal(result.selected, null);
+  assert.ok(
+    result.diagnostics.stages.some(
+      (s) => s.stage === "generic_image_search_skipped" && s.reason === "vision_budget_exhausted"
+    )
+  );
+});
+
+test("probe budget exhausted skips generic image search", async () => {
+  const fwgsUrls = Array.from({ length: 22 }, (_, i) =>
+    `https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_V${i + 1}.jpg&height=1200&width=1200`
+  );
+
+  let imageSearchCalls = 0;
+  let probeCalls = 0;
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => {
+      imageSearchCalls += 1;
+      return [{ url: "https://cdn.gilbeys.com/generic-should-not-run.jpg", sourceUrl: OFFICIAL_PAGE }];
+    },
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: fwgsUrls,
+      primaryImageUrl: fwgsUrls[0]!,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => {
+      probeCalls += 1;
+      // Mark unreachable so vision budget is not consumed — probe budget alone exhausts.
+      return {
+        width: null,
+        height: null,
+        mimeType: null,
+        reachable: false,
+        resolvedUrl: url
+      };
+    },
+    verifyImage: async () => cleanVision
+  });
+
+  assert.equal(probeCalls, 20);
+  assert.equal(imageSearchCalls, 0);
+  assert.equal(result.selected, null);
+  assert.ok(
+    result.diagnostics.stages.some(
+      (s) => s.stage === "generic_image_search_skipped" && s.reason === "probe_budget_exhausted"
+    )
+  );
+});
+
+test("remaining budget still allows generic fallback", async () => {
+  let imageSearchCalls = 0;
+  const result = await executeImageEnrichment(gilbeysCandidate(), {
+    searchImageHits: async () => {
+      imageSearchCalls += 1;
+      return [{ url: LICENSED_FALLBACK, sourceUrl: null, width: 1200, height: 1400 }];
+    },
+    searchWebHits: async () => [],
+    fetchPageHtml: async () => null,
+    extractFwgsPlcbImages: async () => ({
+      matched: true,
+      plcbItem: GILBEYS_PLCB,
+      imageUrls: [GILBEYS_FWGS_1200],
+      primaryImageUrl: GILBEYS_FWGS_1200,
+      extractionSource: "embedded_json"
+    }),
+    probeImageMeta: async (url) => ({
+      width: 1200,
+      height: 1400,
+      mimeType: "image/jpeg",
+      reachable: true,
+      resolvedUrl: url
+    }),
+    verifyImage: async ({ imageUrl }) => {
+      if (imageUrl.includes("000005295")) return wrongVision;
+      return cleanVision;
+    }
+  });
+
+  assert.ok(imageSearchCalls >= 1, "generic fallback should run while budget remains");
+  assert.equal(result.selected?.url, LICENSED_FALLBACK);
+});

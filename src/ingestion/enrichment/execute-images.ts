@@ -1911,6 +1911,27 @@ export async function executeImageEnrichment(
     });
   }
 
+  // No acceptance budget left — discovery cannot select a new candidate.
+  if (visionBudget.used >= visionBudget.limit || probeBudget.used >= probeBudget.limit) {
+    const budgetReason =
+      visionBudget.used >= visionBudget.limit
+        ? "vision_budget_exhausted"
+        : "probe_budget_exhausted";
+    stages.push({
+      stage: "generic_image_search_skipped",
+      status: "skipped",
+      reason: budgetReason
+    });
+    return finalizeImageResult({
+      selected: null,
+      evaluated: allEvaluated,
+      errors,
+      stages,
+      diagStore,
+      selectedOfficialProductPageUrl
+    });
+  }
+
   const genericSeeds: ImageCandidateSeed[] = [];
   let imageSearchHadResults = false;
   let primaryQuery = queryTiers[0]?.query ?? imageSearchQuery(candidate);

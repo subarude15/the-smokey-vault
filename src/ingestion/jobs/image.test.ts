@@ -544,11 +544,10 @@ test("deterministic image rejection completes without throwing", async () => {
   cleanup();
 });
 
-test("Figranium image-fetch provider failure causes runImageJob retry (no empty mark)", async () => {
+test("vision_parse_failed causes runImageJob retry (no empty mark)", async () => {
   cleanup();
-  const { FwgsFigraniumProviderError } = await import("../../fwgs-figranium.js");
   const upc = "080686200116";
-  const spirit = insertSpirit({ name: "ImageTest Figranium503", brand: "Buffalo Trace", upc });
+  const spirit = insertSpirit({ name: "ImageTest VisionParseFail", brand: "Buffalo Trace", upc });
   enqueueImageJob({ entityType: "spirits", entityId: Number(spirit.id), upc });
   const claimed = claimNextPendingJob()!;
 
@@ -575,6 +574,5 @@ test("Figranium image-fetch provider failure causes runImageJob retry (no empty 
     /vision_parse_failed|provider/i
   );
   assert.equal(getProductImage("spirits", Number(spirit.id)), null);
-  void FwgsFigraniumProviderError;
   cleanup();
 });
