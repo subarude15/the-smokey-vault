@@ -266,8 +266,9 @@ test("A/B/D/E/K. new FWGS accepted image is saved locally; inventory untouched; 
     assert.equal(result.imageSaved, true);
     assert.equal(result.inventoryImageUrl, null);
     assert.ok(figraniumCalls >= 1);
-    // Probe may call Figranium once; persistence must not require a second direct GET.
-    assert.equal(directFwgsGets >= 1, true); // probe attempts direct first
+    // Direct probe runs once for the already-1200 FWGS URL; Figranium supplies bytes.
+    // A second accidental direct FWGS GET would fail this assertion.
+    assert.equal(directFwgsGets, 1);
     const stored = getProductImage("spirits", entityId);
     assert.ok(stored);
     assert.ok(isLocalImagePath(stored!.url));
@@ -480,6 +481,227 @@ test("F. existing accepted remote FWGS image is repairable (not already_complete
       }
     }
   }
+});
+
+test("B. accepted FWGS remote without trusted PLCB does not use generic localizeImage", async () => {
+  // No government catalog → no trusted PLCB. Repair must refuse FWGS generic localize.
+  cleanupSpirits(JACQUIN_UPC);
+  const previousGovDbPath = process.env.GOVERNMENT_CATALOG_DB_PATH;
+  delete process.env.GOVERNMENT_CATALOG_DB_PATH;
+  resetGovernmentDbConnection();
+
+  const spirit = insertSpirit({
+    name: "Jacquin's Creme de Menthe White",
+    brand: "Jacquin's",
+    upc: JACQUIN_UPC,
+    image_url: ""
+  });
+  const entityId = Number(spirit.id);
+  upsertProductImage({
+    entityType: "spirits",
+    entityId,
+    url: JACQUIN_FWGS,
+    sourceType: "approved",
+    sourceUrl: JACQUIN_PDP,
+    width: 1200,
+    height: 1200,
+    mimeType: "image/jpeg",
+    score: 75,
+    verified: true,
+    rejectionReason: null
+  });
+
+  enqueueImageJob({ entityType: "spirits", entityId, upc: JACQUIN_UPC });
+  const job = claimNextPendingJob()!;
+
+  let localizeCalls = 0;
+  let figraniumCalls = 0;
+
+  try {
+    const result = await runImageJob(job, {
+      localizeImage: async () => {
+        localizeCalls += 1;
+        return "/api/media/images/should-not-localize-fwgs.jpg";
+      },
+      fetchFwgsImageViaFigranium: async () => {
+        figraniumCalls += 1;
+        return { ok: false, reason: "not_configured" };
+      },
+      extractFwgsPlcbImages: async () => null,
+      searchImageHits: async () => [],
+      searchWebHits: async () => [],
+      fetchPageHtml: async () => null
+    });
+
+    assert.equal(localizeCalls, 0, "FWGS URL must never use generic localizeImage");
+    assert.equal(figraniumCalls, 0, "Figranium requires trusted PLCB binding");
+    assert.notEqual(result.reason, "localized_existing");
+    const stored = getProductImage("spirits", entityId);
+    if (stored?.url && isLocalImagePath(stored.url)) {
+      assert.fail("FWGS without trusted PLCB must not create a local accepted image via repair");
+    }
+  } finally {
+    cleanupSpirits(JACQUIN_UPC);
+    resetGovernmentDbConnection();
+    if (previousGovDbPath === undefined) delete process.env.GOVERNMENT_CATALOG_DB_PATH;
+    else process.env.GOVERNMENT_CATALOG_DB_PATH = previousGovDbPath;
+  }
+});
+
+test("C. accepted FWGS remote with mismatched PLCB skips Figranium and generic localize", async () => {
+  const govDbPath = path.join(
+    os.tmpdir(),
+    `jacquin-mismatch-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`
+  );
+  const workbook = `${govDbPath}.xlsx`;
+  const previousGovDbPath = process.env.GOVERNMENT_CATALOG_DB_PATH;
+  process.env.GOVERNMENT_CATALOG_DB_PATH = govDbPath;
+  resetGovernmentDbConnection();
+  cleanupSpirits(JACQUIN_UPC);
+
+  // FWGS URL bound to Captain Morgan PLCB — will not validate against Jacquin PLCB.
+  const mismatchedFwgsUrl = CAPTAIN_FWGS;
+
+  try {
+    await writeJacquinWorkbook(workbook);
+    await importPaSpiritsWorkbook(workbook, { dbPath: govDbPath });
+
+    const spirit = insertSpirit({
+      name: "Jacquin's Creme de Menthe White",
+      brand: "Jacquin's",
+      upc: JACQUIN_UPC,
+      image_url: ""
+    });
+    const entityId = Number(spirit.id);
+    upsertProductImage({
+      entityType: "spirits",
+      entityId,
+      url: mismatchedFwgsUrl,
+      sourceType: "approved",
+      sourceUrl: JACQUIN_PDP,
+      width: 1200,
+      height: 1200,
+      mimeType: "image/jpeg",
+      score: 75,
+      verified: true,
+      rejectionReason: null
+    });
+
+    enqueueImageJob({ entityType: "spirits", entityId, upc: JACQUIN_UPC });
+    const job = claimNextPendingJob()!;
+
+    let localizeCalls = 0;
+    let figraniumCalls = 0;
+
+    const result = await runImageJob(job, {
+      localizeImage: async () => {
+        localizeCalls += 1;
+        return "/api/media/images/should-not-localize-mismatched-fwgs.jpg";
+      },
+      fetchFwgsImageViaFigranium: async () => {
+        figraniumCalls += 1;
+        return {
+          ok: true,
+          image: {
+            plcbItem: CAPTAIN_PLCB,
+            sourceUrl: mismatchedFwgsUrl,
+            contentType: "image/png",
+            bytes: makePng(8, 8, 1),
+            width: 8,
+            height: 8
+          }
+        };
+      },
+      extractFwgsPlcbImages: async () => null,
+      searchImageHits: async () => [],
+      searchWebHits: async () => [],
+      fetchPageHtml: async () => null
+    });
+
+    assert.equal(localizeCalls, 0, "mismatched FWGS URL must not use generic localizeImage");
+    assert.equal(figraniumCalls, 0, "mismatched PLCB must not call Figranium");
+    assert.notEqual(result.reason, "localized_existing");
+    const stored = getProductImage("spirits", entityId);
+    if (stored?.url && isLocalImagePath(stored.url)) {
+      assert.fail("mismatched FWGS URL must not create a local accepted image");
+    }
+    // Remote accepted row may remain or be cleared by rediscovery — either is fine.
+    if (stored?.url) {
+      assert.equal(isLocalImagePath(stored.url), false);
+    }
+  } finally {
+    cleanupSpirits(JACQUIN_UPC);
+    resetGovernmentDbConnection();
+    if (previousGovDbPath === undefined) delete process.env.GOVERNMENT_CATALOG_DB_PATH;
+    else process.env.GOVERNMENT_CATALOG_DB_PATH = previousGovDbPath;
+    for (const file of [govDbPath, `${govDbPath}-wal`, `${govDbPath}-shm`, workbook]) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        // ignore
+      }
+    }
+  }
+});
+
+test("D. existing accepted non-FWGS remote image still uses safe localizeImage", async () => {
+  cleanupSpirits("080686299011");
+  const spirit = insertSpirit({
+    name: "PersistTest NonFwgsRepair",
+    brand: "Buffalo Trace",
+    upc: "080686299011",
+    image_url: ""
+  });
+  const entityId = Number(spirit.id);
+  const remote = "https://cdn.buffalotrace.com/products/buffalo-trace-repair.jpg";
+  const local = "/api/media/images/non-fwgs-repaired.png";
+
+  upsertProductImage({
+    entityType: "spirits",
+    entityId,
+    url: remote,
+    sourceType: "official",
+    sourceUrl: "https://www.buffalotrace.com/products/buffalo-trace",
+    width: 1400,
+    height: 1400,
+    mimeType: "image/jpeg",
+    score: 80,
+    verified: true,
+    rejectionReason: null
+  });
+
+  enqueueImageJob({ entityType: "spirits", entityId, upc: "080686299011" });
+  const job = claimNextPendingJob()!;
+
+  let localizeCalls = 0;
+  let figraniumCalls = 0;
+
+  const result = await runImageJob(job, {
+    localizeImage: async (url) => {
+      localizeCalls += 1;
+      assert.equal(url, remote);
+      return local;
+    },
+    fetchFwgsImageViaFigranium: async () => {
+      figraniumCalls += 1;
+      throw new Error("Figranium must not run for non-FWGS repair");
+    },
+    searchImageHits: async () => {
+      throw new Error("rediscovery must not run after successful non-FWGS repair");
+    }
+  });
+
+  assert.equal(result.imageSaved, true);
+  assert.equal(result.reason, "localized_existing");
+  assert.equal(localizeCalls, 1);
+  assert.equal(figraniumCalls, 0);
+  assert.equal(getProductImage("spirits", entityId)?.url, local);
+  assert.equal(
+    (db.prepare("SELECT image_url FROM spirits WHERE id=?").get(entityId) as { image_url: string })
+      .image_url,
+    ""
+  );
+  cleanupSpirits("080686299011");
 });
 
 test("G. existing local accepted image is already_complete", async () => {

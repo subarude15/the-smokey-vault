@@ -15,6 +15,7 @@ import type { ScoredImageCandidate } from "../enrichment/image-score.js";
 import { searchGovernmentByBarcode } from "../catalogs/government/lookup.js";
 import { applyGovernmentCatalogEvidence } from "../enrichment/government-evidence.js";
 import {
+  FWGS_SITE_HOST,
   fetchFwgsImageViaFigranium,
   isFwgsFigraniumProviderError,
   plcbItemFromCandidate,
@@ -114,10 +115,23 @@ async function persistAcceptedImageLocally(options: {
   );
 }
 
+/** True when the URL is hosted on the exact FWGS site (not a PLCB-bound check). */
+function isFwgsHostedRemoteUrl(url: string): boolean {
+  try {
+    const parsed = new URL(String(url ?? "").trim());
+    return parsed.protocol === "https:" && parsed.hostname === FWGS_SITE_HOST;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Efficient repair for an already-accepted remote product_images row.
  * Returns the new local URL on success, null to fall through to rediscovery,
  * or throws on typed provider/system failures (queue retry).
+ *
+ * FWGS URLs never use generic localizeImage — they require trusted PLCB binding
+ * and Figranium only.
  */
 async function tryRepairRemoteAcceptedImage(options: {
   job: EnrichmentJob;
@@ -136,8 +150,13 @@ async function tryRepairRemoteAcceptedImage(options: {
   const fetchFwgs =
     options.deps.fetchFwgsImageViaFigranium ?? fetchFwgsImageViaFigranium;
 
-  const plcb = options.plcbItem?.trim() || null;
-  if (plcb && validateFwgsImageUrl(remoteUrl, plcb)) {
+  // FWGS trust boundary: never hotlink-repair via generic HTTP download.
+  if (isFwgsHostedRemoteUrl(remoteUrl)) {
+    const plcb = options.plcbItem?.trim() || null;
+    if (!plcb || !validateFwgsImageUrl(remoteUrl, plcb)) {
+      // Missing or mismatched PLCB — fall through to progressive rediscovery.
+      return null;
+    }
     try {
       const fetched = await fetchFwgs(remoteUrl, plcb);
       if (fetched.ok) {
