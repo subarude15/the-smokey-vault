@@ -9,6 +9,8 @@ import {
   type ImageEnrichmentResult
 } from "../enrichment/execute-images.js";
 import type { JobDiagnosticsPayload } from "../enrichment/diagnostics.js";
+import { searchGovernmentByBarcode } from "../catalogs/government/lookup.js";
+import { applyGovernmentCatalogEvidence } from "../enrichment/government-evidence.js";
 import { candidateFromInventoryRow, loadInventoryRow } from "./inventory.js";
 import {
   getProductImage,
@@ -96,6 +98,22 @@ export async function runImageJob(
       inventoryImageUrl,
       resultPayload: { imageSaved: false }
     };
+  }
+
+  // Inventory rows intentionally do not persist field-provenance internals. Reattach
+  // trusted, barcode-bound government evidence for this in-memory image run so the
+  // FWGS adapter can recover its PLCB identity. This never writes catalog metadata
+  // or changes inventory image semantics; misses/optional-catalog failures simply
+  // leave the existing generic image path unchanged.
+  const lookupUpc = before.upc.value?.trim() || job.upc.trim();
+  if (lookupUpc) {
+    try {
+      applyGovernmentCatalogEvidence(before, searchGovernmentByBarcode(lookupUpc), {
+        lookupUpc
+      });
+    } catch {
+      // The government catalog is optional for image enrichment.
+    }
   }
 
   const knownOfficial = getEnrichmentSource(
