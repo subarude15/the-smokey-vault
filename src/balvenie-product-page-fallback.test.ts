@@ -353,7 +353,8 @@ test("16. patrons do not receive diagnostics", async () => {
       mimeType: "image/webp",
       reachable: true
     }),
-    verifyImage: async () => acceptVision()
+    verifyImage: async () => acceptVision(),
+    localizeImage: async () => "/api/media/images/balvenie-fallback-localized.jpg"
   } as never);
   markJobCompleted(claimed.id, run.resultPayload);
 

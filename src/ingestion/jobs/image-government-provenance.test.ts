@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { deflateSync } from "node:zlib";
 import { db } from "../../db.js";
 import { writeExcelMatrix } from "../catalogs/government/excel-matrix.js";
 import { PA_EXPECTED_HEADERS } from "../catalogs/government/pa-columns.js";
@@ -27,6 +28,41 @@ const FWGS_IMAGE =
   "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=475&width=475";
 const FWGS_IMAGE_1200 =
   "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=1200&width=1200";
+
+function crc32(buf: Buffer): number {
+  let c = ~0;
+  for (let i = 0; i < buf.length; i++) {
+    c ^= buf[i]!;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const typeBuf = Buffer.from(type);
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])));
+  return Buffer.concat([len, typeBuf, data, crcBuf]);
+}
+
+function makePng(width: number, height: number): Buffer {
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const row = Buffer.alloc(1 + width * 3, 0);
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  return Buffer.concat([
+    sig,
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0))
+  ]);
+}
 
 async function writeCaptainMorganWorkbook(filePath: string): Promise<void> {
   const row: Record<string, unknown> & { upcs: string[] } = {
@@ -129,13 +165,14 @@ test("Captain Morgan image job bridges government PLCB provenance into FWGS Figr
       fetchFwgsImageViaFigranium: async (imageUrl, plcbItem) => {
         assert.equal(plcbItem, CAPTAIN_ITEM);
         assert.equal(imageUrl, FWGS_IMAGE_1200);
+        const bytes = makePng(64, 64);
         return {
           ok: true,
           image: {
             plcbItem,
             sourceUrl: imageUrl,
             contentType: "image/png",
-            bytes: Buffer.from("captain-morgan-product-image"),
+            bytes,
             width: 1200,
             height: 1200
           }
@@ -167,7 +204,11 @@ test("Captain Morgan image job bridges government PLCB provenance into FWGS Figr
         (s) => s.stage === "generic_image_search_skipped" && s.reason === "generic_search_not_needed"
       )
     );
-    assert.equal(getProductImage("spirits", entityId)?.url, FWGS_IMAGE_1200);
+    const stored = getProductImage("spirits", entityId);
+    assert.ok(stored?.url?.startsWith("/api/media/images/"));
+    assert.notEqual(stored?.url, FWGS_IMAGE_1200);
+    assert.ok(stored?.source_type !== "user");
+    assert.equal(stored?.verified, true);
     const inventory = db.prepare("SELECT image_url FROM spirits WHERE id=?").get(entityId) as {
       image_url: string;
     };

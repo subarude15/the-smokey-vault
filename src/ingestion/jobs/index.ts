@@ -60,7 +60,7 @@ export {
 
 export { runMetadataJob, type MetadataJobResult } from "./metadata-job.js";
 export { runTastingNotesJob, type TastingNotesJobResult } from "./tasting-notes-job.js";
-export { runImageJob, type ImageJobResult } from "./image-job.js";
+export { runImageJob, type ImageJobResult, type ImageJobDeps } from "./image-job.js";
 
 export {
   ensureEnrichmentSourcesTable,
@@ -78,6 +78,9 @@ export {
   inventoryHasUserImage,
   recordLookupImageFallback,
   hasAcceptedProductImage,
+  hasDurableAcceptedProductImage,
+  productImageNeedsLocalization,
+  isRemoteProductImageUrl,
   isAcceptedEnrichedProductImage,
   acceptedEnrichedImageUrl,
   resolveInventoryDisplayImageUrl,

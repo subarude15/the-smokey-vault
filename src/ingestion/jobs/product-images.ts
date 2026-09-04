@@ -223,6 +223,39 @@ export function hasAcceptedProductImage(
   return (row.score ?? 0) > 0;
 }
 
+/** True when a product image URL is a remote http(s) asset (not locally durable). */
+export function isRemoteProductImageUrl(url?: string | null): boolean {
+  const value = String(url ?? "").trim();
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+
+/**
+ * Accepted machine enrichment whose bytes are already persisted in the local
+ * media store. Distinct from mere acceptance — remote hotlinked URLs do not qualify.
+ */
+export function hasDurableAcceptedProductImage(
+  entityType: EnrichmentEntityType,
+  entityId: number
+): boolean {
+  const row = getProductImage(entityType, entityId);
+  if (!hasAcceptedProductImage(entityType, entityId) || !row?.url) return false;
+  return isLocalImagePath(row.url);
+}
+
+/**
+ * Accepted machine enrichment that still points at a remote http(s) URL and
+ * therefore needs local persistence / repair. Does not redefine acceptance.
+ */
+export function productImageNeedsLocalization(
+  entityType: EnrichmentEntityType,
+  entityId: number
+): boolean {
+  const row = getProductImage(entityType, entityId);
+  if (!hasAcceptedProductImage(entityType, entityId) || !row?.url) return false;
+  if (row.source_type === "user") return false;
+  return isRemoteProductImageUrl(row.url);
+}
+
 /**
  * Same acceptance gate enrichment uses for machine-selected display images.
  * Lookup / unverified / unapproved candidates do not qualify.

@@ -267,7 +267,8 @@ test("13-14. keeper UI gets candidate diagnostics; patrons do not", async () => 
       mimeType: "image/jpeg",
       reachable: true
     }),
-    verifyImage: async ({ imageUrl }) => visionForUrl(imageUrl)
+    verifyImage: async ({ imageUrl }) => visionForUrl(imageUrl),
+    localizeImage: async () => "/api/media/images/balvenie-verify-localized.jpg"
   } as never);
   markJobCompleted(claimed.id, run.resultPayload);
 

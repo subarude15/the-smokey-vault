@@ -14,7 +14,7 @@ import { runTastingNotesJob } from "./tasting-notes-job.js";
 import { runImageJob } from "./image-job.js";
 import type { MetadataEnrichmentDeps } from "../enrichment/index.js";
 import type { TastingNotesEnrichmentDeps } from "../enrichment/execute-tasting-notes.js";
-import type { ImageEnrichmentDeps } from "../enrichment/execute-images.js";
+import type { ImageJobDeps } from "./image-job.js";
 
 export type EnrichmentLogger = {
   info: (obj: Record<string, unknown>, msg: string) => void;
@@ -32,7 +32,7 @@ export type EnrichmentWorkerOptions = {
   idleMs?: number;
   metadataDeps?: MetadataEnrichmentDeps;
   tastingNotesDeps?: TastingNotesEnrichmentDeps;
-  imageDeps?: ImageEnrichmentDeps;
+  imageDeps?: ImageJobDeps;
   logger?: EnrichmentLogger;
   onCycle?: () => void;
 };
