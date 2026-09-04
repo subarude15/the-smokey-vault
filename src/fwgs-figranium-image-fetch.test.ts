@@ -219,16 +219,25 @@ test("fetchFwgsImageViaFigranium rejects oversized payloads", async () => {
   if (!result.ok) assert.equal(result.reason, "oversized");
 });
 
-test("fetchFwgsImageViaFigranium rejects Figranium failure", async () => {
+test("fetchFwgsImageViaFigranium throws typed provider error on Figranium 502/503", async () => {
   stashEnv();
   configureFetchEnv();
+  const { FwgsFigraniumProviderError, isFwgsFigraniumProviderError } = await import(
+    "./fwgs-figranium.js"
+  );
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ outcome: "error", error: "boom" }), {
-      status: 502,
+      status: 503,
       headers: { "Content-Type": "application/json" }
     })) as typeof fetch;
-  const result = await fetchFwgsImageViaFigranium(VALID_IMAGE, "000004766");
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.reason, "figranium_error");
+  await assert.rejects(
+    () => fetchFwgsImageViaFigranium(VALID_IMAGE, "000004766"),
+    (error: unknown) => {
+      assert.equal(isFwgsFigraniumProviderError(error), true);
+      assert.ok(error instanceof FwgsFigraniumProviderError);
+      assert.equal(error.kind, "retryable_error");
+      return true;
+    }
+  );
 });
 

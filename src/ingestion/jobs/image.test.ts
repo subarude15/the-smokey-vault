@@ -465,3 +465,114 @@ test("metadata/tasting-note jobs remain unchanged", () => {
   );
   cleanup();
 });
+
+test("provider_error with evaluated candidates still throws for queue retry", async () => {
+  cleanup();
+  const upc = "080686200114";
+  const spirit = insertSpirit({ name: "ImageTest ProviderFail", brand: "Buffalo Trace", upc });
+  enqueueImageJob({ entityType: "spirits", entityId: Number(spirit.id), upc });
+  const claimed = claimNextPendingJob()!;
+
+  await assert.rejects(
+    () =>
+      runImageJob(claimed, {
+        searchImageHits: async () => [
+          {
+            url: "https://cdn.buffalotrace.com/products/bt.jpg",
+            sourceUrl: "https://www.buffalotrace.com/bt",
+            width: 1500,
+            height: 1500,
+            mimeType: "image/jpeg"
+          }
+        ],
+        searchWebHits: async () => [],
+        probeImageMeta: async () => ({
+          width: 1500,
+          height: 1500,
+          mimeType: "image/jpeg",
+          reachable: true
+        }),
+        verifyImage: async () => {
+          throw new Error("vision_provider_error: Ollama returned 500");
+        }
+      }),
+    /vision_provider_error|Ollama|provider/i
+  );
+
+  // Must NOT mark as deterministic empty — job should retry instead.
+  assert.equal(getProductImage("spirits", Number(spirit.id)), null);
+  cleanup();
+});
+
+test("deterministic image rejection completes without throwing", async () => {
+  cleanup();
+  const upc = "080686200115";
+  const spirit = insertSpirit({ name: "ImageTest Deterministic", brand: "Buffalo Trace", upc });
+  enqueueImageJob({ entityType: "spirits", entityId: Number(spirit.id), upc });
+  const claimed = claimNextPendingJob()!;
+  const result = await runImageJob(claimed, {
+    searchImageHits: async () => [
+      {
+        url: "https://cdn.buffalotrace.com/products/bt.jpg",
+        sourceUrl: "https://www.buffalotrace.com/bt",
+        width: 1500,
+        height: 1500,
+        mimeType: "image/jpeg"
+      }
+    ],
+    searchWebHits: async () => [],
+    probeImageMeta: async () => ({
+      width: 1500,
+      height: 1500,
+      mimeType: "image/jpeg",
+      reachable: true
+    }),
+    verifyImage: async () => ({
+      correct_product: false,
+      bottle_prominent: true,
+      contains_people: false,
+      meme_or_graphic: false,
+      clean_product_photo: true,
+      multiple_products: false
+    })
+  });
+  assert.equal(result.skipped, false);
+  assert.equal(result.imageSaved, false);
+  assert.ok(result.execution?.evaluated.length);
+  assert.notEqual(result.execution?.diagnostics.noResultReason, "provider_error");
+  assert.equal(getProductImage("spirits", Number(spirit.id))?.rejection_reason, "no_acceptable_image");
+  cleanup();
+});
+
+test("vision_parse_failed causes runImageJob retry (no empty mark)", async () => {
+  cleanup();
+  const upc = "080686200116";
+  const spirit = insertSpirit({ name: "ImageTest VisionParseFail", brand: "Buffalo Trace", upc });
+  enqueueImageJob({ entityType: "spirits", entityId: Number(spirit.id), upc });
+  const claimed = claimNextPendingJob()!;
+
+  await assert.rejects(
+    () =>
+      runImageJob(claimed, {
+        searchImageHits: async () => [
+          {
+            url: "https://cdn.buffalotrace.com/products/bt.jpg",
+            sourceUrl: "https://www.buffalotrace.com/bt"
+          }
+        ],
+        searchWebHits: async () => [],
+        probeImageMeta: async () => ({
+          width: 1500,
+          height: 1500,
+          mimeType: "image/jpeg",
+          reachable: true
+        }),
+        verifyImage: async () => {
+          throw new Error("vision_parse_failed");
+        }
+      }),
+    /vision_parse_failed|provider/i
+  );
+  assert.equal(getProductImage("spirits", Number(spirit.id)), null);
+  cleanup();
+});

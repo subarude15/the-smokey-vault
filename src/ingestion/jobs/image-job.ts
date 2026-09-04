@@ -136,8 +136,18 @@ export async function runImageJob(
     });
   }
 
-  if (execution.errors.length > 0 && !execution.selected && execution.evaluated.length === 0) {
-    throw new Error(execution.errors.join("; ") || "image enrichment failed");
+  // Provider/system failures must retry via the enrichment queue — even when
+  // progressive evaluation already produced rejected candidates in `evaluated`.
+  // Deterministic rejections (wrong_product, score_below_threshold, etc.) complete.
+  if (!execution.selected) {
+    if (execution.diagnostics.noResultReason === "provider_error") {
+      throw new Error(
+        execution.errors.join("; ") || "image enrichment provider error"
+      );
+    }
+    if (execution.errors.length > 0 && execution.evaluated.length === 0) {
+      throw new Error(execution.errors.join("; ") || "image enrichment failed");
+    }
   }
 
   let imageSaved = false;

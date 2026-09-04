@@ -49,6 +49,7 @@ import {
   ImageCandidateDiagnosticStore,
   imageCandidateIdFromUrl,
   isNonImageAssetUrl,
+  isVerificationStageDiagnostic,
   mergeImageSeedsByNormalizedUrl,
   orderSeedsForProbe,
   safeImageUrlParts,
@@ -82,6 +83,7 @@ import {
   normalizePlcbItem,
   plcbItemFromCandidate,
   validateFwgsImageUrl,
+  isFwgsFigraniumProviderError,
   type FwgsFigraniumImageResult,
   type FwgsImageFetchOutcome
 } from "../../fwgs-figranium.js";
@@ -512,8 +514,725 @@ async function ingestOfficialPageForImages(options: {
   return stats;
 }
 
+type ImageVisionBudget = {
+  limit: number;
+  used: number;
+};
+
+type ImageProbeBudget = {
+  limit: number;
+  used: number;
+};
+
+type EvaluateImageSeedsOptions = {
+  candidate: BottleCandidate;
+  seeds: ImageCandidateSeed[];
+  discoveredDomains: string[];
+  probe: (url: string) => Promise<ImageMeta>;
+  verify: (request: {
+    candidate: BottleCandidate;
+    imageUrl: string;
+    imageBase64?: string | null;
+  }) => Promise<VisionVerification | null>;
+  diagStore: ImageCandidateDiagnosticStore;
+  figraniumImageBase64ByUrl: Map<string, string>;
+  errors: string[];
+  /** Shared per-execution vision budget (not per-stage). */
+  visionBudget: ImageVisionBudget;
+  /** Shared per-execution network-probe budget (not per-stage). */
+  probeBudget: ImageProbeBudget;
+  /**
+   * Normalized candidate IDs already evaluated this execution.
+   * Later stages must not re-probe / re-vision the same asset.
+   */
+  evaluatedCandidateIds: Set<string>;
+  /** Skip probe/vision for definitively unapproved sources (generic SERP stage). */
+  skipProbeForUnapprovedSources?: boolean;
+  /** Stage label prefix for progressive discovery diagnostics. */
+  evaluationStage?: string;
+  selectedStage?: string;
+  selectedReason?: string;
+};
+
+type EvaluateImageSeedsResult = {
+  selected: ScoredImageCandidate | null;
+  evaluated: ScoredImageCandidate[];
+  stages: EnrichmentDiagnosticStage[];
+  uniqueSeedCount: number;
+  probedCount: number;
+  /**
+   * Provider/system failures (Figranium, vision, verification fetch) —
+   * do not widen discovery blindly.
+   */
+  transientSystemFailure: boolean;
+};
+
+function isTransientVisionError(reason: string): boolean {
+  return (
+    reason === "vision_provider_error"
+    || reason === "vision_parse_failed"
+    || reason === "fetch_failed"
+  );
+}
+
+function markCandidateEvaluated(
+  evaluatedIds: Set<string>,
+  ...urls: Array<string | null | undefined>
+): void {
+  for (const raw of urls) {
+    const id = imageCandidateIdFromUrl(String(raw ?? ""));
+    if (id) evaluatedIds.add(id);
+  }
+}
+
+/**
+ * Merge/dedupe seeds → hard-filter → probe → score → vision → select.
+ * Invoked progressively (FWGS → official → generic) so discovery can stop early.
+ */
+export async function evaluateImageSeeds(
+  options: EvaluateImageSeedsOptions
+): Promise<EvaluateImageSeedsResult> {
+  const brand = options.candidate.brand.value;
+  const name = options.candidate.name.value;
+  const stages: EnrichmentDiagnosticStage[] = [];
+  const evaluationStage = options.evaluationStage ?? "candidates";
+
+  const seenSeeds = mergeImageSeedsByNormalizedUrl(
+    options.seeds.filter((s) => {
+      const url = String(s.url ?? "").trim();
+      return Boolean(url) && !isNonImageAssetUrl(url);
+    })
+  );
+  const uniqueSeeds = seenSeeds.filter((s) => Boolean(String(s.url ?? "").trim()));
+  // Prefer page-scoped seeds; shared probeBudget limits actual network probes.
+  const probeSeeds = orderSeedsForProbe(uniqueSeeds);
+
+  const probed: ImageCandidate[] = [];
+  const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
+  let fetchFailed = 0;
+  let fwgsDirectBlocked = 0;
+  let fwgsFigraniumFetchOk = 0;
+  let fwgsFigraniumFetchFailed = 0;
+  let skippedUnapproved = 0;
+  let skippedAlreadyEvaluated = 0;
+  let skippedProbeBudget = 0;
+  let transientSystemFailure = false;
+  const preRejected: ScoredImageCandidate[] = [];
+
+  for (const seed of probeSeeds) {
+    const candidateId = imageCandidateIdFromUrl(seed.url);
+    if (candidateId && options.evaluatedCandidateIds.has(candidateId)) {
+      skippedAlreadyEvaluated += 1;
+      const preview = toCandidate(seed, brand, name, options.discoveredDomains);
+      options.diagStore.ensureDiscovered({
+        url: seed.url,
+        sourceType: preview.sourceType,
+        sourceUrl: seed.sourceUrl,
+        width: seed.width,
+        height: seed.height,
+        mimeType: seed.mimeType
+      });
+      continue;
+    }
+
+    const preview = toCandidate(seed, brand, name, options.discoveredDomains);
+    options.diagStore.ensureDiscovered({
+      url: seed.url,
+      sourceType: preview.sourceType,
+      sourceUrl: seed.sourceUrl,
+      width: seed.width,
+      height: seed.height,
+      mimeType: seed.mimeType
+    });
+
+    if (
+      options.skipProbeForUnapprovedSources
+      && (preview.sourceType === "unknown" || hardRejectCandidate(preview).reason === "unapproved_source")
+    ) {
+      skippedUnapproved += 1;
+      markCandidateEvaluated(options.evaluatedCandidateIds, seed.url);
+      preRejected.push({
+        ...preview,
+        score: 0,
+        rejected: true,
+        rejectionReason: "unapproved_source",
+        verified: false
+      });
+      options.diagStore.markHardFilter({
+        url: preview.url,
+        sourceType: preview.sourceType,
+        sourceUrl: preview.sourceUrl,
+        width: preview.width,
+        height: preview.height,
+        mimeType: preview.mimeType,
+        dimensionsSource: null,
+        fetchStatus: "ok",
+        reasons: ["unapproved_source"]
+      });
+      continue;
+    }
+
+    if (options.probeBudget.used >= options.probeBudget.limit) {
+      skippedProbeBudget += 1;
+      markCandidateEvaluated(options.evaluatedCandidateIds, seed.url);
+      preRejected.push({
+        ...preview,
+        score: 0,
+        rejected: true,
+        rejectionReason: "not_checked",
+        verified: false
+      });
+      options.diagStore.markHardFilter({
+        url: preview.url,
+        sourceType: preview.sourceType,
+        sourceUrl: preview.sourceUrl,
+        width: preview.width,
+        height: preview.height,
+        mimeType: preview.mimeType,
+        dimensionsSource: null,
+        fetchStatus: "ok",
+        reasons: ["not_checked"]
+      });
+      continue;
+    }
+
+    let meta: ImageMeta = {
+      width: seed.width ?? null,
+      height: seed.height ?? null,
+      mimeType: seed.mimeType ?? null,
+      reachable: true,
+      dimensionsSource: seed.width != null && seed.height != null ? null : "unknown"
+    };
+    let dimsSource: "seed" | "image_header" | "unknown" =
+      seed.width != null && seed.height != null ? "seed" : "unknown";
+    try {
+      options.probeBudget.used += 1;
+      const probedMeta = await options.probe(seed.url);
+      const probeDetails = Array.isArray(probedMeta.probeDetails)
+        ? probedMeta.probeDetails.filter((value): value is ImageProbeDetail => typeof value === "string")
+        : [];
+      const width = probedMeta.width ?? seed.width ?? null;
+      const height = probedMeta.height ?? seed.height ?? null;
+      if (probedMeta.width != null && probedMeta.height != null) {
+        dimsSource =
+          probedMeta.dimensionsSource === "unknown" ? "unknown" : "image_header";
+      } else if (seed.width != null && seed.height != null) {
+        dimsSource = "seed";
+      }
+      meta = {
+        width,
+        height,
+        mimeType: probedMeta.mimeType ?? seed.mimeType ?? null,
+        reachable: probedMeta.reachable,
+        dimensionsSource: dimsSource,
+        probeDetails,
+        httpStatus: probedMeta.httpStatus ?? null,
+        imageBase64: probedMeta.imageBase64 ?? null,
+        resolvedUrl: probedMeta.resolvedUrl ?? seed.url
+      };
+    } catch (error) {
+      if (isFwgsFigraniumProviderError(error)) {
+        options.errors.push(error.message);
+        transientSystemFailure = true;
+        markCandidateEvaluated(options.evaluatedCandidateIds, seed.url);
+        options.diagStore.markHardFilter({
+          url: preview.url,
+          sourceType: preview.sourceType,
+          sourceUrl: preview.sourceUrl,
+          width: preview.width,
+          height: preview.height,
+          mimeType: preview.mimeType,
+          dimensionsSource: null,
+          fetchStatus: "failed",
+          reasons: ["provider_error", error.kind].slice(0, 8)
+        });
+        break;
+      }
+      options.errors.push(error instanceof Error ? error.message : "Image probe failed");
+      meta.reachable = false;
+    }
+    if (transientSystemFailure) break;
+    if (!meta.reachable) {
+      fetchFailed += 1;
+      const failedCandidate = toCandidate(seed, brand, name, options.discoveredDomains);
+      const failDetails = Array.isArray(meta.probeDetails) ? meta.probeDetails : [];
+      if (failDetails.includes("direct_probe_http_rejected") || failDetails.includes("direct_probe_timeout")) {
+        fwgsDirectBlocked += 1;
+      }
+      if (failDetails.includes("figranium_fetch_fallback_failed")) {
+        fwgsFigraniumFetchFailed += 1;
+      }
+      markCandidateEvaluated(options.evaluatedCandidateIds, seed.url, meta.resolvedUrl);
+      options.diagStore.markHardFilter({
+        url: failedCandidate.url,
+        sourceType: failedCandidate.sourceType,
+        sourceUrl: failedCandidate.sourceUrl,
+        width: failedCandidate.width,
+        height: failedCandidate.height,
+        mimeType: failedCandidate.mimeType,
+        dimensionsSource: null,
+        fetchStatus: "failed",
+        reasons: ["fetch_failed", ...failDetails].slice(0, 8)
+      });
+      continue;
+    }
+    const resolvedUrl =
+      typeof meta.resolvedUrl === "string" && meta.resolvedUrl.trim()
+        ? meta.resolvedUrl.trim()
+        : seed.url;
+    if (typeof meta.imageBase64 === "string" && meta.imageBase64.trim()) {
+      options.figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
+    }
+    if ((meta.probeDetails ?? []).includes("figranium_fetch_fallback_ok")) {
+      fwgsFigraniumFetchOk += 1;
+    }
+    if (
+      (meta.probeDetails ?? []).includes("direct_probe_http_rejected")
+      || (meta.probeDetails ?? []).includes("direct_probe_timeout")
+    ) {
+      fwgsDirectBlocked += 1;
+    }
+    const item = toCandidate(
+      {
+        ...seed,
+        url: resolvedUrl,
+        width: meta.width,
+        height: meta.height,
+        mimeType: meta.mimeType
+      },
+      brand,
+      name,
+      options.discoveredDomains
+    );
+    markCandidateEvaluated(options.evaluatedCandidateIds, seed.url, resolvedUrl);
+    dimensionSources.set(imageCandidateIdFromUrl(item.url), dimsSource);
+    probed.push(item);
+  }
+
+  const candidateReasonParts: string[] = [];
+  if (!probed.length) {
+    candidateReasonParts.push(
+      uniqueSeeds.length
+        ? skippedUnapproved && skippedUnapproved === uniqueSeeds.length
+          ? "unapproved_source"
+          : transientSystemFailure
+            ? "provider_error"
+            : "fetch_failed"
+        : "no_image_candidates"
+    );
+  }
+  if (skippedAlreadyEvaluated > 0) {
+    candidateReasonParts.push(`already_evaluated_skipped:${skippedAlreadyEvaluated}`);
+  }
+  if (skippedProbeBudget > 0) {
+    candidateReasonParts.push(`probe_budget_exhausted:${skippedProbeBudget}`);
+  }
+  if (skippedUnapproved > 0) {
+    candidateReasonParts.push(`unapproved_source_skipped:${skippedUnapproved}`);
+  }
+  if (fwgsDirectBlocked > 0) {
+    candidateReasonParts.push(`direct_fwgs_image_fetch_blocked:${fwgsDirectBlocked}`);
+  }
+  if (fwgsFigraniumFetchOk > 0) {
+    candidateReasonParts.push(`fwgs_image_discovered_via_figranium:${fwgsFigraniumFetchOk}`);
+    candidateReasonParts.push(`figranium_browser_fetch_succeeded:${fwgsFigraniumFetchOk}`);
+  }
+  if (fwgsFigraniumFetchFailed > 0) {
+    candidateReasonParts.push(`figranium_browser_fetch_failed:${fwgsFigraniumFetchFailed}`);
+  }
+
+  stages.push({
+    stage: evaluationStage,
+    status: probed.length ? "ok" : transientSystemFailure ? "error" : "no_result",
+    candidateCount: uniqueSeeds.length,
+    acceptedCount: probed.length,
+    rejectedCount: fetchFailed + skippedUnapproved + skippedProbeBudget,
+    reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
+    sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
+  });
+
+  if (evaluationStage !== "candidates") {
+    stages.push({
+      stage: "candidates",
+      status: probed.length ? "ok" : transientSystemFailure ? "error" : "no_result",
+      candidateCount: uniqueSeeds.length,
+      acceptedCount: probed.length,
+      rejectedCount: fetchFailed + skippedUnapproved + skippedProbeBudget,
+      reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
+      sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
+    });
+  }
+
+  if (transientSystemFailure) {
+    return {
+      selected: null,
+      evaluated: preRejected.slice(0, 20),
+      stages,
+      uniqueSeedCount: uniqueSeeds.length,
+      probedCount: probed.length,
+      transientSystemFailure: true
+    };
+  }
+
+  if (!probed.length) {
+    return {
+      selected: null,
+      evaluated: preRejected.slice(0, 20),
+      stages,
+      uniqueSeedCount: uniqueSeeds.length,
+      probedCount: 0,
+      transientSystemFailure: false
+    };
+  }
+
+  const scored: ScoredImageCandidate[] = [...preRejected];
+  const visionQueue: ImageCandidate[] = [];
+  const rejectionCounts: Record<string, number> = {};
+
+  for (const item of probed) {
+    const hard = hardRejectCandidate(item);
+    if (hard.rejected) {
+      const reason = hard.reason || "hard_reject";
+      rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1;
+      scored.push({
+        ...item,
+        score: 0,
+        rejected: true,
+        rejectionReason: reason,
+        verified: false
+      });
+      options.diagStore.markHardFilter({
+        url: item.url,
+        sourceType: item.sourceType,
+        sourceUrl: item.sourceUrl,
+        width: item.width,
+        height: item.height,
+        mimeType: item.mimeType,
+        dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
+        fetchStatus: "ok",
+        reasons: [reason]
+      });
+      continue;
+    }
+    if (item.sourceType === "unknown") {
+      rejectionCounts.unknown_source = (rejectionCounts.unknown_source ?? 0) + 1;
+    }
+    const base = scoreImageCandidateBase(item);
+    if (base >= IMAGE_VISION_CANDIDATE_FLOOR) {
+      visionQueue.push(item);
+    } else {
+      rejectionCounts.score_below_threshold = (rejectionCounts.score_below_threshold ?? 0) + 1;
+      scored.push({
+        ...item,
+        score: base,
+        rejected: true,
+        rejectionReason: "below_vision_floor",
+        verified: false
+      });
+      options.diagStore.markHardFilter({
+        url: item.url,
+        sourceType: item.sourceType,
+        sourceUrl: item.sourceUrl,
+        width: item.width,
+        height: item.height,
+        mimeType: item.mimeType,
+        dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
+        fetchStatus: "ok",
+        reasons: ["below_vision_floor"],
+        score: base
+      });
+    }
+  }
+
+  stages.push({
+    stage: "hard_filter",
+    status: visionQueue.length ? "ok" : "no_result",
+    candidateCount: probed.length,
+    acceptedCount: visionQueue.length,
+    rejectedCount: probed.length - visionQueue.length,
+    reason: Object.entries(rejectionCounts)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(",")
+      .slice(0, 160)
+  });
+
+  visionQueue.sort((a, b) => scoreImageCandidateBase(b) - scoreImageCandidateBase(a));
+  let selected: ScoredImageCandidate | null = null;
+  let verificationRejected = 0;
+  let scoreRejected = 0;
+  const remainingVisionSlots = Math.max(
+    0,
+    options.visionBudget.limit - options.visionBudget.used
+  );
+  const sentToVision = visionQueue.slice(0, remainingVisionSlots);
+  let visionCallsStarted = 0;
+
+  const verificationDiagIdsBefore = new Set(
+    options.diagStore
+      .toArray()
+      .filter(isVerificationStageDiagnostic)
+      .map((d) => d.candidateId)
+      .filter((id): id is string => Boolean(id))
+  );
+
+  for (const item of sentToVision) {
+    visionCallsStarted += 1;
+    options.visionBudget.used += 1;
+    const dimsSource = dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown";
+    options.diagStore.markVerificationStarted({
+      url: item.url,
+      sourceType: item.sourceType,
+      sourceUrl: item.sourceUrl,
+      width: item.width,
+      height: item.height,
+      mimeType: item.mimeType,
+      dimensionsSource: dimsSource
+    });
+
+    let vision: VisionVerification | null = null;
+    let visionError: string | null = null;
+    try {
+      vision = await options.verify({
+        candidate: options.candidate,
+        imageUrl: item.url,
+        imageBase64: options.figraniumImageBase64ByUrl.get(item.url) ?? null
+      });
+      if (!vision) {
+        visionError = "vision_parse_failed";
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Vision verify failed";
+      options.errors.push(message);
+      visionError = classifyVisionError(message);
+    }
+
+    if (visionError || !vision) {
+      const reason = visionError || "vision_parse_failed";
+      scored.push({
+        ...item,
+        score: scoreImageCandidateBase(item),
+        rejected: true,
+        rejectionReason: reason,
+        verified: false
+      });
+      options.diagStore.markVerificationResult({
+        url: item.url,
+        sourceType: item.sourceType,
+        sourceUrl: item.sourceUrl,
+        width: item.width,
+        height: item.height,
+        mimeType: item.mimeType,
+        dimensionsSource: dimsSource,
+        fetchStatus: reason === "fetch_failed" ? "failed" : "ok",
+        vision: null,
+        visionError: reason,
+        score: scoreImageCandidateBase(item),
+        accepted: false,
+        rejectionReasons: [reason],
+        stageReached: "verification"
+      });
+      if (isTransientVisionError(reason)) {
+        transientSystemFailure = true;
+        break;
+      }
+      verificationRejected += 1;
+      continue;
+    }
+
+    const evaluated = evaluateCandidate(item, vision);
+    if (!evaluated.rejected && !meetsAcceptanceThreshold(evaluated.score)) {
+      evaluated.rejected = true;
+      evaluated.rejectionReason = "score_below_threshold";
+      scoreRejected += 1;
+    } else if (evaluated.rejected) {
+      verificationRejected += 1;
+    } else {
+      selected = evaluated;
+    }
+    scored.push(evaluated);
+
+    const rejectionReasons = collectImageRejectionReasons({
+      hardReason: null,
+      vision,
+      visionError: null,
+      score: evaluated.score,
+      accepted: Boolean(selected && selected.url === evaluated.url),
+      verified: evaluated.verified
+    });
+    if (evaluated.rejected && evaluated.rejectionReason) {
+      if (!rejectionReasons.includes(evaluated.rejectionReason)) {
+        rejectionReasons.unshift(evaluated.rejectionReason);
+      }
+    }
+
+    const isAccepted = Boolean(selected && selected.url === evaluated.url && !evaluated.rejected);
+    const stageReached = isAccepted
+      ? "accepted"
+      : evaluated.rejectionReason === "score_below_threshold"
+        ? "scoring"
+        : "verification";
+
+    options.diagStore.markVerificationResult({
+      url: item.url,
+      sourceType: item.sourceType,
+      sourceUrl: item.sourceUrl,
+      width: item.width,
+      height: item.height,
+      mimeType: item.mimeType,
+      dimensionsSource: dimsSource,
+      vision,
+      visionError: null,
+      score: evaluated.score,
+      scoreComponents: buildImageScoreComponents(item, vision),
+      accepted: isAccepted,
+      rejectionReasons: evaluated.rejected ? rejectionReasons : [],
+      stageReached
+    });
+
+    if (selected) break;
+  }
+
+  let notCheckedCount = 0;
+  const visionHandled = visionCallsStarted;
+  for (const item of visionQueue.slice(visionHandled)) {
+    notCheckedCount += 1;
+    scored.push({
+      ...item,
+      score: scoreImageCandidateBase(item),
+      rejected: true,
+      rejectionReason: "not_checked",
+      verified: false
+    });
+    options.diagStore.markVerificationResult({
+      url: item.url,
+      sourceType: item.sourceType,
+      sourceUrl: item.sourceUrl,
+      width: item.width,
+      height: item.height,
+      mimeType: item.mimeType,
+      dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
+      vision: null,
+      visionError: "not_checked",
+      score: scoreImageCandidateBase(item),
+      accepted: false,
+      rejectionReasons: ["not_checked"],
+      stageReached: "verification"
+    });
+  }
+
+  const verificationCountFromStages = visionCallsStarted + notCheckedCount;
+  const stageVerificationDiags = options.diagStore.toArray().filter(
+    (d) =>
+      isVerificationStageDiagnostic(d)
+      && d.candidateId
+      && !verificationDiagIdsBefore.has(d.candidateId)
+  );
+  const consistency = checkVerificationDiagnosticConsistency({
+    verificationCountFromStages,
+    diagnostics: stageVerificationDiags
+  });
+  if (!consistency.ok && consistency.reason) {
+    stages.push({
+      stage: "verification_diagnostic_mismatch",
+      status: "error",
+      candidateCount: verificationCountFromStages,
+      acceptedCount: consistency.diagnosticCount,
+      reason: consistency.reason
+    });
+  }
+
+  stages.push({
+    stage: "verify",
+    status: selected ? "ok" : transientSystemFailure ? "error" : "no_result",
+    candidateCount: verificationCountFromStages,
+    acceptedCount: selected ? 1 : 0,
+    rejectedCount: verificationRejected + scoreRejected,
+    reason: selected
+      ? `accepted_score:${selected.score}`
+      : transientSystemFailure
+        ? "provider_error"
+        : verificationRejected
+          ? "verification_rejected"
+          : scoreRejected
+            ? "score_below_threshold"
+            : "all_image_candidates_rejected",
+    sourceUrls: scored.slice(0, 10).map((s) => s.url)
+  });
+
+  if (selected && options.selectedStage) {
+    stages.push({
+      stage: options.selectedStage,
+      status: "ok",
+      acceptedCount: 1,
+      reason: options.selectedReason ?? "selected",
+      sourceUrls: [selected.url]
+    });
+  }
+
+  return {
+    selected: transientSystemFailure ? null : selected,
+    evaluated: scored.slice(0, 20),
+    stages,
+    uniqueSeedCount: uniqueSeeds.length,
+    probedCount: probed.length,
+    transientSystemFailure
+  };
+}
+
+
+function finalizeImageResult(options: {
+  selected: ScoredImageCandidate | null;
+  evaluated: ScoredImageCandidate[];
+  errors: string[];
+  stages: EnrichmentDiagnosticStage[];
+  diagStore: ImageCandidateDiagnosticStore;
+  selectedOfficialProductPageUrl: string | null;
+  forceNoResultReason?: NoResultReason | null;
+  forceSummary?: string | null;
+}): ImageEnrichmentResult {
+  const diagnostics = emptyImageDiagnostics();
+  let noResultReason: NoResultReason | null = options.forceNoResultReason ?? null;
+  if (!options.selected && noResultReason == null) {
+    const verifyStage = [...options.stages].reverse().find((s) => s.stage === "verify");
+    if (verifyStage?.reason === "verification_rejected") noResultReason = "verification_rejected";
+    else if (verifyStage?.reason === "score_below_threshold") noResultReason = "score_below_threshold";
+    else if (options.evaluated.length === 0) {
+      const hadSeeds = options.stages.some(
+        (s) =>
+          (s.stage === "candidates" || s.stage.endsWith("_evaluation"))
+          && (s.candidateCount ?? 0) > 0
+      );
+      noResultReason = hadSeeds ? "source_fetch_failed" : "no_image_candidates";
+    } else {
+      noResultReason = "all_image_candidates_rejected";
+    }
+  }
+
+  const workingDiags = options.diagStore.toArray();
+  const boundedDiags = options.diagStore.toBoundedList();
+  diagnostics.noResultReason = noResultReason;
+  diagnostics.summary =
+    options.forceSummary
+    ?? summarizeImageCandidateDiagnostics(boundedDiags, {
+      selectedScore: options.selected?.score ?? null,
+      noResultReason
+    });
+  diagnostics.stages = options.stages;
+  diagnostics.accepted = options.selected ? ["image"] : [];
+  diagnostics.imageCandidates = workingDiags;
+
+  return {
+    selected: options.selected,
+    evaluated: options.evaluated.slice(0, 20),
+    errors: options.errors,
+    diagnostics: sanitizeJobDiagnostics(diagnostics),
+    selectedOfficialProductPageUrl: options.selectedOfficialProductPageUrl
+  };
+}
+
 /**
  * Run image enrichment for an identified candidate.
+ * Progressive discovery: FWGS → official product page → generic image SERP last.
  * Returns selected=null when nothing meets the acceptance threshold (success, not failure).
  */
 export async function executeImageEnrichment(
@@ -534,16 +1253,38 @@ export async function executeImageEnrichment(
   const verify = deps.verifyImage ?? ((req) => verifyProductImage(req));
   const extractFwgsImages = deps.extractFwgsPlcbImages ?? extractFwgsPlcbImages;
   const errors: string[] = [];
-  const seeds: ImageCandidateSeed[] = [];
   const stages: EnrichmentDiagnosticStage[] = [];
-  const diagnostics = emptyImageDiagnostics();
   const figraniumImageBase64ByUrl = new Map<string, string>();
+  const diagStore = new ImageCandidateDiagnosticStore();
+  const allEvaluated: ScoredImageCandidate[] = [];
+  const seenEvaluatedUrls = new Set<string>();
+  const visionBudget: ImageVisionBudget = {
+    limit: IMAGE_MAX_VISION_CHECKS,
+    used: 0
+  };
+  const probeBudget: ImageProbeBudget = {
+    limit: MAX_PROBE_SEEDS,
+    used: 0
+  };
+  const evaluatedCandidateIds = new Set<string>();
 
   let selectedOfficialProductPageUrl: string | null =
     String(deps.knownOfficialProductPageUrl ?? "").trim() || null;
+  let discoveredDomains: string[] = [];
+  let fwgsTransientError = false;
+  let fallbackReason: string | null = null;
 
-  // Image-first FWGS path: when a PLCB item is known, extract + validate
-  // Fine Wine & Good Spirits product images via Figranium (no metadata merge).
+  const rememberEvaluated = (items: ScoredImageCandidate[]) => {
+    for (const item of items) {
+      const key = imageCandidateIdFromUrl(item.url);
+      if (seenEvaluatedUrls.has(key)) continue;
+      seenEvaluatedUrls.add(key);
+      allEvaluated.push(item);
+    }
+  };
+
+  // ── Stage 1: trusted PLCB / FWGS Figranium images ─────────────────────────
+  const fwgsSeeds: ImageCandidateSeed[] = [];
   if (plcbItem && (Boolean(deps.extractFwgsPlcbImages) || isFwgsFigraniumConfigured())) {
     const knownPdp =
       selectedOfficialProductPageUrl
@@ -559,7 +1300,7 @@ export async function executeImageEnrichment(
       );
       if (uniqueImageUrls.length) {
         for (const url of uniqueImageUrls) {
-          seeds.push({
+          fwgsSeeds.push({
             url,
             sourceUrl: knownPdp || null,
             mimeType: "image/jpeg",
@@ -579,97 +1320,96 @@ export async function executeImageEnrichment(
           status: "no_result",
           reason: images ? "no_validated_images" : "no_images"
         });
+        fallbackReason = "fallback_no_fwgs_image";
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "FWGS Figranium failed";
-      errors.push(message);
+      if (isFwgsFigraniumProviderError(error)) {
+        errors.push(error.message);
+        fwgsTransientError = true;
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "error",
+          reason: `${error.kind}:${error.message}`.slice(0, 120)
+        });
+      } else {
+        const message = error instanceof Error ? error.message : "FWGS Figranium failed";
+        errors.push(message);
+        fwgsTransientError = true;
+        stages.push({
+          stage: "fwgs_figranium_images",
+          status: "error",
+          reason: message.slice(0, 120)
+        });
+      }
+    }
+  } else if (!plcbItem) {
+    fallbackReason = fallbackReason ?? "fallback_no_fwgs_image";
+  }
+
+  if (fwgsSeeds.length) {
+    const fwgsEval = await evaluateImageSeeds({
+      candidate,
+      seeds: fwgsSeeds,
+      discoveredDomains,
+      probe,
+      verify,
+      diagStore,
+      figraniumImageBase64ByUrl,
+      errors,
+      visionBudget,
+      probeBudget,
+      evaluatedCandidateIds,
+      evaluationStage: "strong_source_evaluation",
+      selectedStage: "strong_source_selected",
+      selectedReason: "selected_from_fwgs"
+    });
+    stages.push(...fwgsEval.stages);
+    rememberEvaluated(fwgsEval.evaluated);
+
+    if (fwgsEval.selected) {
       stages.push({
-        stage: "fwgs_figranium_images",
-        status: "error",
-        reason: message.slice(0, 120)
+        stage: "generic_image_search_skipped",
+        status: "skipped",
+        reason: "generic_search_not_needed"
+      });
+      return finalizeImageResult({
+        selected: fwgsEval.selected,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl
       });
     }
+
+    if (fwgsEval.transientSystemFailure) {
+      // Vision/Figranium provider unavailable — preserve retry semantics; do not widen discovery.
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+
+    fallbackReason = "fallback_fwgs_rejected";
   }
+
+  // Transient FWGS extract failure: try official pages, but never generic image SERP.
+  const blockGenericSearch = fwgsTransientError;
 
   const queryTiers = buildImageQueryTiers(identityFromCandidate(candidate));
-  let discoveredDomains: string[] = [];
-  let imageSearchHadResults = false;
-  let primaryQuery = queryTiers[0]?.query ?? imageSearchQuery(candidate);
 
-  for (const tier of queryTiers.slice(0, 3)) {
-    try {
-      const imageSeeds = await searchImages(tier.query, 8);
-      if (imageSeeds.length) {
-        imageSearchHadResults = true;
-        seeds.push(...imageSeeds);
-        primaryQuery = tier.query;
-        stages.push({
-          stage: `query_tier_${tier.tier}`,
-          status: "ok",
-          query: tier.query,
-          provider: "searxng",
-          candidateCount: imageSeeds.length,
-          reason: `tier:${tier.label}`
-        });
-        // First successful image SERP is enough for candidate seeds.
-        break;
-      }
-      stages.push({
-        stage: `query_tier_${tier.tier}`,
-        status: "no_result",
-        query: tier.query,
-        provider: "searxng",
-        candidateCount: 0,
-        reason: "no_search_results"
-      });
-    } catch (error) {
-      const message = isWebSearchError(error)
-        ? `SearXNG ${error.code}: ${error.message}`
-        : error instanceof Error
-          ? error.message
-          : "Image search failed";
-      errors.push(message);
-      stages.push({
-        stage: `query_tier_${tier.tier}`,
-        status: "error",
-        query: tier.query,
-        provider: "searxng",
-        reason: message.slice(0, 120)
-      });
-      stages.push({
-        stage: "search",
-        status: "error",
-        query: tier.query,
-        provider: "searxng",
-        reason: message.slice(0, 120)
-      });
-      diagnostics.noResultReason = "provider_error";
-      diagnostics.summary = "Provider or network error";
-      diagnostics.stages = stages;
-      return {
-        selected: null,
-        evaluated: [],
-        errors,
-        diagnostics: sanitizeJobDiagnostics(diagnostics),
-        selectedOfficialProductPageUrl: null
-      };
-    }
-  }
-
-  stages.push({
-    stage: "search",
-    status: imageSearchHadResults ? "ok" : "no_result",
-    query: primaryQuery,
-    provider: "searxng",
-    candidateCount: seeds.length,
-    reason: imageSearchHadResults ? undefined : "no_search_results"
-  });
-
-  // Progressive web search for official pages; prefer product-detail pages for images.
-  let officialPagesScanned = 0;
+  // ── Stage 2: official product-page images (before generic image SERP) ─────
+  const officialSeeds: ImageCandidateSeed[] = [];
   let officialPagesFound = 0;
   let officialImagesFromMeta = 0;
   let officialPagesWithoutImageMeta = 0;
+
   try {
     const identity = identityFromCandidate(candidate);
     const webTiers = queryTiers.slice(0, 4);
@@ -698,7 +1438,6 @@ export async function executeImageEnrichment(
           sourceUrls: discovery.sourceUrls
         });
       }
-      // IMAGE discovery: do not stop on a generic official homepage alone.
       if (
         discoveredDomains.length
         && hasOfficialProductDetailHit(allHits, discoveredDomains, identity)
@@ -707,7 +1446,6 @@ export async function executeImageEnrichment(
       }
     }
 
-    // Dedup hits
     const seenHit = new Set<string>();
     allHits = allHits.filter((h) => {
       if (!h.url || seenHit.has(h.url)) return false;
@@ -731,9 +1469,6 @@ export async function executeImageEnrichment(
       }
     }
 
-    // Step B: official product-page discovery.
-    // site: queries are optional — many SearXNG configs return zero for them.
-    // Always follow with broad search + code-side registered-domain filtering.
     let expansionTokens = extractExpressionTokensFromHits(allHits, identity);
     if (expansionTokens.length) {
       stages.push({
@@ -744,7 +1479,6 @@ export async function executeImageEnrichment(
       });
     }
 
-    // Optional site:-scoped tier (kept for engines that support it).
     if (discoveredDomains.length) {
       const siteQueries = buildOfficialProductPageQueries(
         identity,
@@ -786,7 +1520,6 @@ export async function executeImageEnrichment(
       }
     }
 
-    // Broad fallback (does not use site:). Filter results by registered domain in code.
     const needBroad =
       !discoveredDomains.length
       || !hasOfficialProductDetailHit(allHits, discoveredDomains, identity);
@@ -811,7 +1544,6 @@ export async function executeImageEnrichment(
         }
       }
 
-      // Discover domains from broad hits when still unknown.
       if (!discoveredDomains.length) {
         const discovery = discoverOfficialDomains(allHits, {
           brand: candidate.brand.value,
@@ -828,7 +1560,6 @@ export async function executeImageEnrichment(
         }
       }
 
-      // Re-learn expression tokens from richer SERP (e.g. Cask), then one expanded broad query.
       const learnedMore = extractExpressionTokensFromHits(allHits, identity);
       const newLearned = learnedMore.filter(
         (t) => !expansionTokens.some((e) => e.toLowerCase() === t.toLowerCase())
@@ -877,11 +1608,11 @@ export async function executeImageEnrichment(
       }
     }
 
-    // Prefer a previously persisted product page when still on an official domain.
     if (
       selectedOfficialProductPageUrl
       && discoveredDomains.length
       && !hostIsUnderOfficialDomain(selectedOfficialProductPageUrl, discoveredDomains)
+      && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
     ) {
       selectedOfficialProductPageUrl = null;
     }
@@ -891,7 +1622,6 @@ export async function executeImageEnrichment(
       minScore: 40
     });
 
-    // Bounded sitemap / homepage-link discovery when search still lacks a product page.
     if (!ranked && discoveredDomains.length) {
       const knownHosts: string[] = [];
       for (const hit of allHits) {
@@ -941,14 +1671,17 @@ export async function executeImageEnrichment(
         acceptedCount: 1,
         candidateCount: allHits.length
       });
-    } else if (selectedOfficialProductPageUrl) {
+    } else if (
+      selectedOfficialProductPageUrl
+      && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+    ) {
       stages.push({
         stage: "official_product_page_selected",
         status: "ok",
         reason: `${safeOfficialPageDisplay(selectedOfficialProductPageUrl)} · reused`.slice(0, 160),
         sourceUrls: [selectedOfficialProductPageUrl]
       });
-    } else {
+    } else if (!ranked) {
       stages.push({
         stage: "official_product_page_selected",
         status: "no_result",
@@ -959,12 +1692,13 @@ export async function executeImageEnrichment(
       });
     }
 
-    // Build ordered official page fetch list: selected product page first.
     const officialPageUrls: string[] = [];
     const pushPage = (url: string | null | undefined) => {
       const u = String(url ?? "").trim();
       if (!u || officialPageUrls.includes(u)) return;
       if (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(u)) return;
+      // FWGS PDP is handled in stage 1; avoid re-fetching as "official manufacturer".
+      if (/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(u)) return;
       officialPageUrls.push(u);
     };
     pushPage(selectedOfficialProductPageUrl);
@@ -994,9 +1728,11 @@ export async function executeImageEnrichment(
           }) === "official");
 
       if (pageLooksOfficial && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(hit.url)) {
-        seeds.push({ url: hit.url, sourceUrl: hit.url });
-        officialImagesFromMeta += 1;
-        officialPagesFound += 1;
+        if (!isNonImageAssetUrl(hit.url)) {
+          officialSeeds.push({ url: hit.url, sourceUrl: hit.url });
+          officialImagesFromMeta += 1;
+          officialPagesFound += 1;
+        }
         continue;
       }
       if (pageLooksOfficial || sourceType === "licensed" || sourceType === "approved") {
@@ -1017,13 +1753,12 @@ export async function executeImageEnrichment(
       if (!pageLooksOfficial && !isAuthoritativeSource(pageClass)) continue;
 
       if (pageLooksOfficial) officialPagesFound += 1;
-      officialPagesScanned += 1;
       const ingest = await ingestOfficialPageForImages({
         pageUrl,
         brand: candidate.brand.value,
         name: candidate.name.value,
         fetchHtml,
-        seeds,
+        seeds: officialSeeds,
         stages
       });
       officialImagesFromMeta += ingest.imagesFromMeta;
@@ -1036,6 +1771,7 @@ export async function executeImageEnrichment(
       candidateCount: allHits.length,
       acceptedCount: officialPagesFound,
       reason: selectedOfficialProductPageUrl
+        && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
         ? "official_product_page_preferred"
         : officialPagesFound
           ? "official_pages_scanned"
@@ -1058,7 +1794,6 @@ export async function executeImageEnrichment(
     });
   }
 
-  // Record distinct image diagnostic outcomes for keeper review.
   const imgFallbackAccepted = stages.some(
     (s) => s.stage === "official_page_img_candidate" && s.status === "ok"
   );
@@ -1068,7 +1803,14 @@ export async function executeImageEnrichment(
       status: "no_result",
       reason: "no_official_page_discovered"
     });
-  } else if (selectedOfficialProductPageUrl && officialImagesFromMeta) {
+    if (!fallbackReason) {
+      fallbackReason = "fallback_no_official_image";
+    }
+  } else if (
+    selectedOfficialProductPageUrl
+    && !/^https:\/\/www\.finewineandgoodspirits\.com\//i.test(selectedOfficialProductPageUrl)
+    && officialImagesFromMeta
+  ) {
     stages.push({
       stage: "official_page_outcome",
       status: "ok",
@@ -1095,445 +1837,234 @@ export async function executeImageEnrichment(
       status: "no_result",
       reason: "official_page_discovered_but_no_image_metadata"
     });
+    fallbackReason = "fallback_no_official_image";
   }
 
-  const seenSeeds = mergeImageSeedsByNormalizedUrl(
-    seeds.filter((s) => {
-      const url = String(s.url ?? "").trim();
-      return Boolean(url) && !isNonImageAssetUrl(url);
-    })
-  );
-  const uniqueSeeds = seenSeeds.filter((s) => Boolean(String(s.url ?? "").trim()));
-  // Prefer official page-scoped seeds in the probe window so verification
-  // candidates are not starved by search junk / decorative insertion order.
-  const probeSeeds = orderSeedsForProbe(uniqueSeeds).slice(0, MAX_PROBE_SEEDS);
-
-  const brand = candidate.brand.value;
-  const name = candidate.name.value;
-  const probed: ImageCandidate[] = [];
-  const dimensionSources = new Map<string, "seed" | "image_header" | "unknown">();
-  let fetchFailed = 0;
-  let fwgsDirectBlocked = 0;
-  let fwgsFigraniumFetchOk = 0;
-  let fwgsFigraniumFetchFailed = 0;
-  const diagStore = new ImageCandidateDiagnosticStore();
-
-  for (const seed of probeSeeds) {
-    const preview = toCandidate(seed, brand, name, discoveredDomains);
-    diagStore.ensureDiscovered({
-      url: seed.url,
-      sourceType: preview.sourceType,
-      sourceUrl: seed.sourceUrl,
-      width: seed.width,
-      height: seed.height,
-      mimeType: seed.mimeType
-    });
-
-    let meta: ImageMeta = {
-      width: seed.width ?? null,
-      height: seed.height ?? null,
-      mimeType: seed.mimeType ?? null,
-      reachable: true,
-      dimensionsSource: seed.width != null && seed.height != null ? null : "unknown"
-    };
-    let dimsSource: "seed" | "image_header" | "unknown" =
-      seed.width != null && seed.height != null ? "seed" : "unknown";
-    try {
-      const probedMeta = await probe(seed.url);
-      const probeDetails = Array.isArray(probedMeta.probeDetails)
-        ? probedMeta.probeDetails.filter((value): value is ImageProbeDetail => typeof value === "string")
-        : [];
-      // Prefer real probed header dims over seed hints (FWGS URL size params are not authoritative).
-      const width = probedMeta.width ?? seed.width ?? null;
-      const height = probedMeta.height ?? seed.height ?? null;
-      if (probedMeta.width != null && probedMeta.height != null) {
-        dimsSource =
-          probedMeta.dimensionsSource === "unknown" ? "unknown" : "image_header";
-      } else if (seed.width != null && seed.height != null) {
-        dimsSource = "seed";
-      }
-      meta = {
-        width,
-        height,
-        mimeType: probedMeta.mimeType ?? seed.mimeType ?? null,
-        reachable: probedMeta.reachable,
-        dimensionsSource: dimsSource,
-        probeDetails,
-        httpStatus: probedMeta.httpStatus ?? null,
-        imageBase64: probedMeta.imageBase64 ?? null,
-        resolvedUrl: probedMeta.resolvedUrl ?? seed.url
-      };
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Image probe failed");
-      meta.reachable = false;
-    }
-    if (!meta.reachable) {
-      fetchFailed += 1;
-      const failedCandidate = toCandidate(seed, brand, name, discoveredDomains);
-      const failDetails = Array.isArray(meta.probeDetails) ? meta.probeDetails : [];
-      if (failDetails.includes("direct_probe_http_rejected") || failDetails.includes("direct_probe_timeout")) {
-        fwgsDirectBlocked += 1;
-      }
-      if (failDetails.includes("figranium_fetch_fallback_failed")) {
-        fwgsFigraniumFetchFailed += 1;
-      }
-      diagStore.markHardFilter({
-        url: failedCandidate.url,
-        sourceType: failedCandidate.sourceType,
-        sourceUrl: failedCandidate.sourceUrl,
-        width: failedCandidate.width,
-        height: failedCandidate.height,
-        mimeType: failedCandidate.mimeType,
-        dimensionsSource: null,
-        fetchStatus: "failed",
-        reasons: ["fetch_failed", ...failDetails].slice(0, 8)
-      });
-      continue;
-    }
-    const resolvedUrl =
-      typeof meta.resolvedUrl === "string" && meta.resolvedUrl.trim()
-        ? meta.resolvedUrl.trim()
-        : seed.url;
-    if (typeof meta.imageBase64 === "string" && meta.imageBase64.trim()) {
-      figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
-    }
-    if ((meta.probeDetails ?? []).includes("figranium_fetch_fallback_ok")) {
-      fwgsFigraniumFetchOk += 1;
-    }
-    if ((meta.probeDetails ?? []).includes("direct_probe_http_rejected") || (meta.probeDetails ?? []).includes("direct_probe_timeout")) {
-      fwgsDirectBlocked += 1;
-    }
-    const item = toCandidate(
-      {
-        ...seed,
-        url: resolvedUrl,
-        width: meta.width,
-        height: meta.height,
-        mimeType: meta.mimeType
-      },
-      brand,
-      name,
-      discoveredDomains
-    );
-    dimensionSources.set(imageCandidateIdFromUrl(item.url), dimsSource);
-    probed.push(item);
-  }
-
-  const candidateReasonParts: string[] = [];
-  if (!probed.length) {
-    candidateReasonParts.push(uniqueSeeds.length ? "fetch_failed" : "no_image_candidates");
-  }
-  if (fwgsDirectBlocked > 0) {
-    candidateReasonParts.push(`direct_fwgs_image_fetch_blocked:${fwgsDirectBlocked}`);
-  }
-  if (fwgsFigraniumFetchOk > 0) {
-    candidateReasonParts.push(`fwgs_image_discovered_via_figranium:${fwgsFigraniumFetchOk}`);
-    candidateReasonParts.push(`figranium_browser_fetch_succeeded:${fwgsFigraniumFetchOk}`);
-  }
-  if (fwgsFigraniumFetchFailed > 0) {
-    candidateReasonParts.push(`figranium_browser_fetch_failed:${fwgsFigraniumFetchFailed}`);
-  }
-
-  stages.push({
-    stage: "candidates",
-    status: probed.length ? "ok" : "no_result",
-    candidateCount: uniqueSeeds.length,
-    acceptedCount: probed.length,
-    rejectedCount: fetchFailed,
-    reason: candidateReasonParts.length ? candidateReasonParts.join(",").slice(0, 160) : undefined,
-    sourceUrls: uniqueSeeds.slice(0, 10).map((s) => s.url)
-  });
-
-  if (!probed.length) {
-    diagnostics.noResultReason = uniqueSeeds.length ? "source_fetch_failed" : "no_image_candidates";
-    diagnostics.summary = uniqueSeeds.length
-      ? "Image candidates could not be fetched"
-      : "No image candidates found";
-    diagnostics.stages = stages;
-    diagnostics.imageCandidates = diagStore.toArray();
-    return {
-      selected: null,
-      evaluated: [],
+  if (officialSeeds.length) {
+    const officialEval = await evaluateImageSeeds({
+      candidate,
+      seeds: officialSeeds,
+      discoveredDomains,
+      probe,
+      verify,
+      diagStore,
+      figraniumImageBase64ByUrl,
       errors,
-      diagnostics: sanitizeJobDiagnostics(diagnostics),
-      selectedOfficialProductPageUrl
-    };
+      visionBudget,
+      probeBudget,
+      evaluatedCandidateIds,
+      evaluationStage: "official_image_evaluation",
+      selectedStage: "official_image_selected",
+      selectedReason: "selected_from_official"
+    });
+    stages.push(...officialEval.stages);
+    rememberEvaluated(officialEval.evaluated);
+
+    if (officialEval.selected) {
+      stages.push({
+        stage: "generic_image_search_skipped",
+        status: "skipped",
+        reason: "generic_search_not_needed"
+      });
+      return finalizeImageResult({
+        selected: officialEval.selected,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl
+      });
+    }
+
+    if (officialEval.transientSystemFailure) {
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+
+    fallbackReason = "fallback_no_official_image";
   }
 
-  const scored: ScoredImageCandidate[] = [];
-  const visionQueue: ImageCandidate[] = [];
-  const rejectionCounts: Record<string, number> = {};
-
-  for (const item of probed) {
-    const hard = hardRejectCandidate(item);
-    if (hard.rejected) {
-      const reason = hard.reason || "hard_reject";
-      rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1;
-      scored.push({
-        ...item,
-        score: 0,
-        rejected: true,
-        rejectionReason: reason,
-        verified: false
-      });
-      diagStore.markHardFilter({
-        url: item.url,
-        sourceType: item.sourceType,
-        sourceUrl: item.sourceUrl,
-        width: item.width,
-        height: item.height,
-        mimeType: item.mimeType,
-        dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
-        fetchStatus: "ok",
-        reasons: [reason]
-      });
-      continue;
-    }
-    if (item.sourceType === "unknown") {
-      rejectionCounts.unknown_source = (rejectionCounts.unknown_source ?? 0) + 1;
-    }
-    const base = scoreImageCandidateBase(item);
-    if (base >= IMAGE_VISION_CANDIDATE_FLOOR) {
-      visionQueue.push(item);
-    } else {
-      rejectionCounts.score_below_threshold = (rejectionCounts.score_below_threshold ?? 0) + 1;
-      scored.push({
-        ...item,
-        score: base,
-        rejected: true,
-        rejectionReason: "below_vision_floor",
-        verified: false
-      });
-      diagStore.markHardFilter({
-        url: item.url,
-        sourceType: item.sourceType,
-        sourceUrl: item.sourceUrl,
-        width: item.width,
-        height: item.height,
-        mimeType: item.mimeType,
-        dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
-        fetchStatus: "ok",
-        reasons: ["below_vision_floor"],
-        score: base
-      });
-    }
-  }
-
-  stages.push({
-    stage: "hard_filter",
-    status: visionQueue.length ? "ok" : "no_result",
-    candidateCount: probed.length,
-    acceptedCount: visionQueue.length,
-    rejectedCount: probed.length - visionQueue.length,
-    reason: Object.entries(rejectionCounts)
-      .map(([k, v]) => `${k}:${v}`)
-      .join(",")
-      .slice(0, 160)
-  });
-
-  visionQueue.sort((a, b) => scoreImageCandidateBase(b) - scoreImageCandidateBase(a));
-  let selected: ScoredImageCandidate | null = null;
-  let verificationRejected = 0;
-  let scoreRejected = 0;
-  const sentToVision = visionQueue.slice(0, IMAGE_MAX_VISION_CHECKS);
-  let visionCallsStarted = 0;
-
-  for (const item of sentToVision) {
-    visionCallsStarted += 1;
-    const dimsSource = dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown";
-    diagStore.markVerificationStarted({
-      url: item.url,
-      sourceType: item.sourceType,
-      sourceUrl: item.sourceUrl,
-      width: item.width,
-      height: item.height,
-      mimeType: item.mimeType,
-      dimensionsSource: dimsSource
-    });
-
-    let vision: VisionVerification | null = null;
-    let visionError: string | null = null;
-    try {
-      vision = await verify({
-        candidate,
-        imageUrl: item.url,
-        imageBase64: figraniumImageBase64ByUrl.get(item.url) ?? null
-      });
-      if (!vision) {
-        visionError = "vision_parse_failed";
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Vision verify failed";
-      errors.push(message);
-      visionError = classifyVisionError(message);
-    }
-
-    if (visionError || !vision) {
-      const reason = visionError || "vision_parse_failed";
-      scored.push({
-        ...item,
-        score: scoreImageCandidateBase(item),
-        rejected: true,
-        rejectionReason: reason,
-        verified: false
-      });
-      diagStore.markVerificationResult({
-        url: item.url,
-        sourceType: item.sourceType,
-        sourceUrl: item.sourceUrl,
-        width: item.width,
-        height: item.height,
-        mimeType: item.mimeType,
-        dimensionsSource: dimsSource,
-        fetchStatus: reason === "fetch_failed" ? "failed" : "ok",
-        vision: null,
-        visionError: reason,
-        score: scoreImageCandidateBase(item),
-        accepted: false,
-        rejectionReasons: [reason],
-        stageReached: "verification"
-      });
-      verificationRejected += 1;
-      continue;
-    }
-
-    const evaluated = evaluateCandidate(item, vision);
-    if (!evaluated.rejected && !meetsAcceptanceThreshold(evaluated.score)) {
-      evaluated.rejected = true;
-      evaluated.rejectionReason = "score_below_threshold";
-      scoreRejected += 1;
-    } else if (evaluated.rejected) {
-      verificationRejected += 1;
-    } else {
-      selected = evaluated;
-    }
-    scored.push(evaluated);
-
-    const rejectionReasons = collectImageRejectionReasons({
-      hardReason: null,
-      vision,
-      visionError: null,
-      score: evaluated.score,
-      accepted: Boolean(selected && selected.url === evaluated.url),
-      verified: evaluated.verified
-    });
-    if (evaluated.rejected && evaluated.rejectionReason) {
-      if (!rejectionReasons.includes(evaluated.rejectionReason)) {
-        rejectionReasons.unshift(evaluated.rejectionReason);
-      }
-    }
-
-    const isAccepted = Boolean(selected && selected.url === evaluated.url && !evaluated.rejected);
-    const stageReached = isAccepted
-      ? "accepted"
-      : evaluated.rejectionReason === "score_below_threshold"
-        ? "scoring"
-        : "verification";
-
-    diagStore.markVerificationResult({
-      url: item.url,
-      sourceType: item.sourceType,
-      sourceUrl: item.sourceUrl,
-      width: item.width,
-      height: item.height,
-      mimeType: item.mimeType,
-      dimensionsSource: dimsSource,
-      vision,
-      visionError: null,
-      score: evaluated.score,
-      scoreComponents: buildImageScoreComponents(item, vision),
-      accepted: isAccepted,
-      rejectionReasons: evaluated.rejected ? rejectionReasons : [],
-      stageReached
-    });
-
-    if (selected) break;
-  }
-
-  let notCheckedCount = 0;
-  for (const item of visionQueue.slice(IMAGE_MAX_VISION_CHECKS)) {
-    notCheckedCount += 1;
-    scored.push({
-      ...item,
-      score: scoreImageCandidateBase(item),
-      rejected: true,
-      rejectionReason: "not_checked",
-      verified: false
-    });
-    diagStore.markVerificationResult({
-      url: item.url,
-      sourceType: item.sourceType,
-      sourceUrl: item.sourceUrl,
-      width: item.width,
-      height: item.height,
-      mimeType: item.mimeType,
-      dimensionsSource: dimensionSources.get(imageCandidateIdFromUrl(item.url)) ?? "unknown",
-      vision: null,
-      visionError: "not_checked",
-      score: scoreImageCandidateBase(item),
-      accepted: false,
-      rejectionReasons: ["not_checked"],
-      stageReached: "verification"
-    });
-  }
-
-  // Actual candidates that reached verification stage (calls started + overflow not_checked).
-  const verificationCountFromStages = visionCallsStarted + notCheckedCount;
-  // Cap applied only AFTER verification updates on the full working map.
-  const workingDiags = diagStore.toArray();
-  const consistency = checkVerificationDiagnosticConsistency({
-    verificationCountFromStages,
-    diagnostics: workingDiags
-  });
-  if (!consistency.ok && consistency.reason) {
+  // ── Stage 3: generic SearXNG image-category search (last resort) ──────────
+  if (blockGenericSearch) {
     stages.push({
-      stage: "verification_diagnostic_mismatch",
-      status: "error",
-      candidateCount: verificationCountFromStages,
-      acceptedCount: consistency.diagnosticCount,
-      reason: consistency.reason
+      stage: "generic_image_search_skipped",
+      status: "skipped",
+      reason: "fwgs_provider_error_no_generic_fallback"
+    });
+    return finalizeImageResult({
+      selected: null,
+      evaluated: allEvaluated,
+      errors,
+      stages,
+      diagStore,
+      selectedOfficialProductPageUrl,
+      forceNoResultReason: "provider_error",
+      forceSummary: "Provider or network error"
     });
   }
 
-  stages.push({
-    stage: "verify",
-    status: selected ? "ok" : "no_result",
-    candidateCount: verificationCountFromStages,
-    acceptedCount: selected ? 1 : 0,
-    rejectedCount: verificationRejected + scoreRejected,
-    reason: selected
-      ? `accepted_score:${selected.score}`
-      : verificationRejected
-        ? "verification_rejected"
-        : scoreRejected
-          ? "score_below_threshold"
-          : "all_image_candidates_rejected",
-    sourceUrls: scored.slice(0, 10).map((s) => s.url)
-  });
-
-  let noResultReason: NoResultReason | null = null;
-  if (!selected) {
-    if (verificationRejected > 0 && scoreRejected === 0) noResultReason = "verification_rejected";
-    else if (scoreRejected > 0) noResultReason = "score_below_threshold";
-    else noResultReason = "all_image_candidates_rejected";
+  // No acceptance budget left — discovery cannot select a new candidate.
+  if (visionBudget.used >= visionBudget.limit || probeBudget.used >= probeBudget.limit) {
+    const budgetReason =
+      visionBudget.used >= visionBudget.limit
+        ? "vision_budget_exhausted"
+        : "probe_budget_exhausted";
+    stages.push({
+      stage: "generic_image_search_skipped",
+      status: "skipped",
+      reason: budgetReason
+    });
+    return finalizeImageResult({
+      selected: null,
+      evaluated: allEvaluated,
+      errors,
+      stages,
+      diagStore,
+      selectedOfficialProductPageUrl
+    });
   }
 
-  const boundedDiags = diagStore.toBoundedList();
-  diagnostics.noResultReason = noResultReason;
-  diagnostics.summary = summarizeImageCandidateDiagnostics(boundedDiags, {
-    selectedScore: selected?.score ?? null,
-    noResultReason
-  });
-  diagnostics.stages = stages;
-  diagnostics.accepted = selected ? ["image"] : [];
-  // Assign unbounded working set; sanitizeJobDiagnostics applies final cap.
-  diagnostics.imageCandidates = workingDiags;
+  const genericSeeds: ImageCandidateSeed[] = [];
+  let imageSearchHadResults = false;
+  let primaryQuery = queryTiers[0]?.query ?? imageSearchQuery(candidate);
 
-  return {
-    selected,
-    evaluated: scored.slice(0, 20),
+  stages.push({
+    stage: "generic_image_search",
+    status: "ok",
+    reason: fallbackReason ?? "fallback_no_official_image",
+    query: primaryQuery,
+    provider: "searxng"
+  });
+
+  for (const tier of queryTiers.slice(0, 3)) {
+    try {
+      const imageSeeds = await searchImages(tier.query, 8);
+      if (imageSeeds.length) {
+        imageSearchHadResults = true;
+        for (const seed of imageSeeds) {
+          if (isNonImageAssetUrl(seed.url)) continue;
+          genericSeeds.push(seed);
+        }
+        primaryQuery = tier.query;
+        stages.push({
+          stage: `query_tier_${tier.tier}`,
+          status: "ok",
+          query: tier.query,
+          provider: "searxng",
+          candidateCount: imageSeeds.length,
+          reason: `tier:${tier.label}`
+        });
+        break;
+      }
+      stages.push({
+        stage: `query_tier_${tier.tier}`,
+        status: "no_result",
+        query: tier.query,
+        provider: "searxng",
+        candidateCount: 0,
+        reason: "no_search_results"
+      });
+    } catch (error) {
+      const message = isWebSearchError(error)
+        ? `SearXNG ${error.code}: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : "Image search failed";
+      errors.push(message);
+      stages.push({
+        stage: `query_tier_${tier.tier}`,
+        status: "error",
+        query: tier.query,
+        provider: "searxng",
+        reason: message.slice(0, 120)
+      });
+      stages.push({
+        stage: "search",
+        status: "error",
+        query: tier.query,
+        provider: "searxng",
+        reason: message.slice(0, 120)
+      });
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl: null,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+  }
+
+  stages.push({
+    stage: "search",
+    status: imageSearchHadResults ? "ok" : "no_result",
+    query: primaryQuery,
+    provider: "searxng",
+    candidateCount: genericSeeds.length,
+    reason: imageSearchHadResults ? undefined : "no_search_results"
+  });
+
+  if (genericSeeds.length) {
+    const genericEval = await evaluateImageSeeds({
+      candidate,
+      seeds: genericSeeds,
+      discoveredDomains,
+      probe,
+      verify,
+      diagStore,
+      figraniumImageBase64ByUrl,
+      errors,
+      visionBudget,
+      probeBudget,
+      evaluatedCandidateIds,
+      skipProbeForUnapprovedSources: true,
+      evaluationStage: "generic_image_evaluation"
+    });
+    stages.push(...genericEval.stages);
+    rememberEvaluated(genericEval.evaluated);
+
+    if (genericEval.selected) {
+      return finalizeImageResult({
+        selected: genericEval.selected,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl
+      });
+    }
+
+    if (genericEval.transientSystemFailure) {
+      return finalizeImageResult({
+        selected: null,
+        evaluated: allEvaluated,
+        errors,
+        stages,
+        diagStore,
+        selectedOfficialProductPageUrl,
+        forceNoResultReason: "provider_error",
+        forceSummary: "Provider or network error"
+      });
+    }
+  }
+
+  return finalizeImageResult({
+    selected: null,
+    evaluated: allEvaluated,
     errors,
-    diagnostics: sanitizeJobDiagnostics(diagnostics),
+    stages,
+    diagStore,
     selectedOfficialProductPageUrl
-  };
+  });
 }

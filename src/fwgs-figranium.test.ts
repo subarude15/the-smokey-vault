@@ -450,6 +450,36 @@ test("extractFwgsPlcbImages rejects mismatched returned PLCB identity", async ()
   assert.equal(images, null);
 });
 
+test("extractFwgsPlcbImages throws typed provider error on Figranium 503 (does not collapse to null)", async () => {
+  stashEnv();
+  configureFwgsImageEnv();
+  const { FwgsFigraniumProviderError, isFwgsFigraniumProviderError } = await import(
+    "./fwgs-figranium.js"
+  );
+  globalThis.fetch = (async () =>
+    new Response("upstream unavailable", { status: 503 })) as typeof fetch;
+
+  await assert.rejects(
+    () => extractFwgsPlcbImages("000004766"),
+    (error: unknown) => {
+      assert.equal(isFwgsFigraniumProviderError(error), true);
+      assert.ok(error instanceof FwgsFigraniumProviderError);
+      assert.equal(error.kind, "retryable_error");
+      assert.ok(/unavailable|Figranium/i.test(error.message));
+      return true;
+    }
+  );
+});
+
+test("extractFwgsPlcbImages returns null when Figranium is not configured", async () => {
+  stashEnv();
+  delete process.env.FIGRANIUM_API_KEY;
+  delete process.env.FIGRANIUM_BASE_URL;
+  delete process.env.FIGRANIUM_FWGS_IMAGE_TASK_ID;
+  const images = await extractFwgsPlcbImages("000004766");
+  assert.equal(images, null);
+});
+
 test("resolveFwgsPlcbProduct rejects mismatched returned PLCB identity", async () => {
   stashEnv();
   configureFwgsImageEnv();

@@ -102,6 +102,76 @@ export type FwgsImageFetchOutcome =
   | { ok: true; image: FwgsFigraniumFetchedImage }
   | { ok: false; reason: FwgsImageFetchFailureReason };
 
+/** Provider/system failures distinct from legitimate "no FWGS image". */
+export type FwgsFigraniumProviderFailureKind =
+  | "auth_error"
+  | "retryable_error"
+  | "invalid_response";
+
+/**
+ * Thrown when Figranium was expected to run (configured) but the provider
+ * failed. Callers must not treat this as "no image found".
+ * Never carries secrets, cookies, raw HTML, or unbounded payloads.
+ */
+export class FwgsFigraniumProviderError extends Error {
+  readonly kind: FwgsFigraniumProviderFailureKind;
+  readonly httpStatus?: number;
+
+  constructor(
+    kind: FwgsFigraniumProviderFailureKind,
+    message: string,
+    httpStatus?: number
+  ) {
+    super(String(message ?? "Figranium provider error").slice(0, 200));
+    this.name = "FwgsFigraniumProviderError";
+    this.kind = kind;
+    if (httpStatus != null) this.httpStatus = httpStatus;
+  }
+}
+
+export function isFwgsFigraniumProviderError(
+  error: unknown
+): error is FwgsFigraniumProviderError {
+  return error instanceof FwgsFigraniumProviderError;
+}
+
+/**
+ * Map a non-success Figranium result into either legitimate absence (return)
+ * or a typed provider error to throw.
+ * `unavailable` = feature not configured → return (caller may fall back).
+ */
+export function throwIfFwgsFigraniumProviderFailure(
+  result: Exclude<FigraniumRunResult<unknown>, { kind: "success" }>
+): void {
+  switch (result.kind) {
+    case "unavailable":
+      // Not configured / feature off — legitimate absence, not a provider outage.
+      return;
+    case "auth_error":
+      throw new FwgsFigraniumProviderError(
+        "auth_error",
+        result.message || "Figranium authentication failed",
+        result.httpStatus
+      );
+    case "retryable_error":
+      throw new FwgsFigraniumProviderError(
+        "retryable_error",
+        result.message || "Figranium temporarily unavailable",
+        result.httpStatus
+      );
+    case "invalid_response":
+      throw new FwgsFigraniumProviderError(
+        "invalid_response",
+        result.message || "Figranium returned an invalid response",
+        result.httpStatus
+      );
+    default: {
+      const _exhaustive: never = result;
+      void _exhaustive;
+    }
+  }
+}
+
 
 function trimEnv(value: string | undefined): string {
   return String(value ?? "").trim();
@@ -344,6 +414,8 @@ export function fwgsFigraniumProductToFwgs(hit: FwgsFigraniumProduct): FwgsProdu
 function figraniumFailureNull(
   result: FigraniumRunResult<unknown>
 ): null {
+  // Resolver / optional paths still collapse failures to null.
+  // Image extraction uses fwgsFigraniumResultOrThrow instead.
   void result;
   return null;
 }
@@ -380,7 +452,11 @@ export async function extractFwgsPlcbImages(
     variables: { plcbItem: code, pdpUrl: url },
     schema: FwgsFigraniumImageResultSchema
   });
-  if (result.kind !== "success") return figraniumFailureNull(result);
+  if (result.kind !== "success") {
+    // Propagate provider/system failures; only "unavailable"/not-configured → null.
+    throwIfFwgsFigraniumProviderFailure(result);
+    return null;
+  }
   return parseFwgsFigraniumImages(result.data, code);
 }
 
@@ -442,7 +518,11 @@ export async function fetchFwgsImageViaFigranium(
     variables: { plcbItem: requested, imageUrl: String(imageUrl).trim() },
     schema: FwgsFigraniumImageFetchResultSchema
   });
-  if (result.kind !== "success") return { ok: false, reason: "figranium_error" };
+  if (result.kind !== "success") {
+    // Configured provider/system failures must not look like a bad image asset.
+    throwIfFwgsFigraniumProviderFailure(result);
+    return { ok: false, reason: "not_configured" };
+  }
 
   const payload = result.data;
   if (!payload.matched) return { ok: false, reason: "invalid_payload" };

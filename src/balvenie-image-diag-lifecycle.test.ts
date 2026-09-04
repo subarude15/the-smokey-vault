@@ -353,6 +353,40 @@ test("10. official-page distinct variant remains independently visible if keys d
   assert.equal(merged.find((s) => s.url === b)?.sourceUrl, OFFICIAL_PAGE);
 });
 
+test("FWGS ccstore source= is asset identity — F1 475 and F1 1200 dedupe", () => {
+  const f1_475 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_1003007_F1.jpg&height=475&width=475";
+  const f1_1200 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_1003007_F1.jpg&height=1200&width=1200";
+  assert.equal(normalizeImageUrlForDedupe(f1_475), normalizeImageUrlForDedupe(f1_1200));
+  assert.equal(imageCandidateIdFromUrl(f1_475), imageCandidateIdFromUrl(f1_1200));
+  assert.match(normalizeImageUrlForDedupe(f1_475), /source=/);
+  assert.doesNotMatch(normalizeImageUrlForDedupe(f1_475), /height=|width=/);
+});
+
+test("FWGS ccstore source= keeps F1 and B1 as distinct candidates", () => {
+  const f1 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_1003007_F1.jpg&height=475&width=475";
+  const b1 =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_1003007_B1.jpg&height=475&width=475";
+  assert.notEqual(normalizeImageUrlForDedupe(f1), normalizeImageUrlForDedupe(b1));
+  assert.notEqual(imageCandidateIdFromUrl(f1), imageCandidateIdFromUrl(b1));
+});
+
+test("FWGS ccstore source= keeps different PLCB assets distinct", () => {
+  const captain =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000004766_F1.jpg&height=1200&width=1200";
+  const gilbeys =
+    "https://www.finewineandgoodspirits.com/ccstore/v1/images/?source=/file/v1/products/000005295_F1.jpg&height=1200&width=1200";
+  assert.notEqual(normalizeImageUrlForDedupe(captain), normalizeImageUrlForDedupe(gilbeys));
+});
+
+test("non-FWGS source= tracking param continues to strip", () => {
+  const withTracking = "https://example.com/image.jpg?source=google&utm_campaign=x";
+  const bare = "https://example.com/image.jpg";
+  assert.equal(normalizeImageUrlForDedupe(withTracking), bare);
+});
+
 test("11. stylesheet URL itself is not treated as image candidate", async () => {
   assert.equal(
     isNonImageAssetUrl("https://cdn.thebalvenie.com/cdn/shop/t/12/assets/theme.css"),

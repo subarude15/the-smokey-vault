@@ -52,17 +52,40 @@ export function imageCandidateIdFromUrl(url: string): string {
   return normalizeImageUrlForDedupe(url) || String(url ?? "").trim();
 }
 
-/** True when a URL is clearly a non-image asset (stylesheet, script, font, document). */
+/**
+ * True when a URL is clearly a non-product image asset:
+ * stylesheet / script / font / document / SVG chrome, or an obvious
+ * placeholder / spacer / missing-image filename.
+ * Conservative path/filename matching only — never blocks by TLD (e.g. .edu).
+ */
 export function isNonImageAssetUrl(url: string): boolean {
   try {
     const path = new URL(url).pathname.toLowerCase();
     // Stylesheet / script / font / document — not fetchable product photos.
     // Keep .svg out of image candidates (UI chrome); product photos are raster.
-    return /\.(css|js|mjs|cjs|map|json|html?|xml|woff2?|ttf|otf|eot)(\?|$)/i.test(path)
+    if (
+      /\.(css|js|mjs|cjs|map|json|html?|xml|woff2?|ttf|otf|eot)(\?|$)/i.test(path)
       || /\.svg(\?|$)/i.test(path)
-      || /\/(stylesheet|styles|theme)\.css$/i.test(path);
+      || /\/(stylesheet|styles|theme)\.css$/i.test(path)
+    ) {
+      return true;
+    }
+    // Obvious placeholder / non-product filenames (e.g. artic.edu/.../default.jpg).
+    const leaf = path.split("/").filter(Boolean).pop() ?? "";
+    if (
+      /^(default|placeholder)\.(jpe?g|png|gif|webp|bmp)$/i.test(leaf)
+      || /^no[-_]?image([._-].*)?\.(jpe?g|png|gif|webp|bmp)$/i.test(leaf)
+      || /^noimage([._-].*)?\.(jpe?g|png|gif|webp|bmp)$/i.test(leaf)
+      || /^image-not-found([._-].*)?\.(jpe?g|png|gif|webp|bmp)?$/i.test(leaf)
+      || /^missing[-_]?image([._-].*)?\.(jpe?g|png|gif|webp|bmp)?$/i.test(leaf)
+      || /^(spacer|blank|transparent|1x1|pixel)\.(jpe?g|png|gif|webp|bmp|gif)$/i.test(leaf)
+    ) {
+      return true;
+    }
+    return false;
   } catch {
-    return /\.(css|js|mjs|svg)(\?|$)/i.test(url);
+    return /\.(css|js|mjs|svg)(\?|$)/i.test(url)
+      || /\/(default|placeholder)\.(jpe?g|png)(\?|$)/i.test(url);
   }
 }
 
@@ -105,6 +128,16 @@ const SIGNED_QUERY_RE =
 const RESIZE_QUERY_RE =
   /^(width|height|w|h|fit|crop|quality|q|format|fm|auto|dpr|device)$/i;
 
+/** FWGS ccstore image endpoint — `source=` is the asset path, not tracking. */
+const FWGS_DEDUPE_HOST = "www.finewineandgoodspirits.com";
+const FWGS_CCSTORE_IMAGES_PATH = "/ccstore/v1/images";
+
+function isFwgsCcstoreImageEndpoint(u: URL): boolean {
+  if (u.hostname.toLowerCase() !== FWGS_DEDUPE_HOST) return false;
+  const path = u.pathname.replace(/\/+$/, "") || "/";
+  return path === FWGS_CCSTORE_IMAGES_PATH;
+}
+
 /** Safe host + short path for UI (strips query/hash/tokens). */
 export function safeImageUrlParts(url: string | null | undefined): {
   host: string;
@@ -132,7 +165,9 @@ export function safeImageUrlParts(url: string | null | undefined): {
 
 /**
  * Normalize image URLs for duplicate detection only.
- * Strips tracking/cache-buster/signed query params; keeps path identity.
+ * Strips tracking/cache-buster/signed/resize query params; keeps path identity.
+ * On FWGS ccstore `/ccstore/v1/images/`, preserves `source=` (asset identity)
+ * while still stripping rendition-only params (`width`/`height`/…).
  * Does not mutate the fetch URL — callers keep the preferred original.
  */
 export function normalizeImageUrlForDedupe(url: string): string {
@@ -142,9 +177,16 @@ export function normalizeImageUrlForDedupe(url: string): string {
     const u = new URL(raw);
     u.hash = "";
     u.hostname = u.hostname.toLowerCase();
+    const preserveFwgsSource = isFwgsCcstoreImageEndpoint(u);
     const kept = new URLSearchParams();
     for (const [key, value] of u.searchParams.entries()) {
-      if (TRACKING_QUERY_RE.test(key)) continue;
+      const keyLower = key.toLowerCase();
+      if (
+        TRACKING_QUERY_RE.test(key)
+        && !(preserveFwgsSource && keyLower === "source")
+      ) {
+        continue;
+      }
       if (SIGNED_QUERY_RE.test(key)) continue;
       if (CACHE_BUSTER_RE.test(key) && /^\d+$/.test(value)) continue;
       if (RESIZE_QUERY_RE.test(key)) continue;
