@@ -1,6 +1,7 @@
 /**
  * Discover, score, and verify product image candidates for an identified bottle.
- * Persists provenance only — does not rehost third-party images in this PR.
+ * May attach transient selected image bytes for local persistence by the image job.
+ * Never serializes binary payloads into diagnostics.
  */
 import type { BottleCandidate } from "../candidate/types.js";
 import {
@@ -113,8 +114,19 @@ export type ImageMeta = {
   httpStatus?: number | null;
   /** Decoded image bytes as base64 when obtained via Figranium fallback (for vision). */
   imageBase64?: string | null;
+  /**
+   * Transient decoded image bytes from Figranium (in-memory only).
+   * Used so the image job can persist the same bytes without a second FWGS fetch.
+   */
+  imageBytes?: Buffer | null;
   /** Final URL used after optional FWGS rendition upgrade. */
   resolvedUrl?: string | null;
+};
+
+/** In-memory-only selected image payload — never put in diagnostics or result_json. */
+export type SelectedImageAsset = {
+  bytes: Buffer;
+  contentType: string;
 };
 
 export type ImageEnrichmentDeps = {
@@ -153,6 +165,11 @@ export type ImageCandidateSeed = {
 
 export type ImageEnrichmentResult = {
   selected: ScoredImageCandidate | null;
+  /**
+   * Transient trusted bytes for the selected candidate when already fetched
+   * (e.g. FWGS via Figranium). In-memory only — never serialize.
+   */
+  selectedAsset?: SelectedImageAsset | null;
   evaluated: ScoredImageCandidate[];
   errors: string[];
   diagnostics: JobDiagnosticsPayload;
@@ -273,6 +290,7 @@ export async function probeImageMetaWithFwgsFallback(
       probeDetails: [...details, "figranium_fetch_fallback_ok"],
       httpStatus: direct.httpStatus ?? null,
       imageBase64: fetched.image.bytes.toString("base64"),
+      imageBytes: fetched.image.bytes,
       resolvedUrl: targetUrl
     };
   };
@@ -535,7 +553,8 @@ type EvaluateImageSeedsOptions = {
     imageBase64?: string | null;
   }) => Promise<VisionVerification | null>;
   diagStore: ImageCandidateDiagnosticStore;
-  figraniumImageBase64ByUrl: Map<string, string>;
+  /** Figranium-fetched assets keyed by resolved image URL (bytes stay in memory). */
+  figraniumImageAssetByUrl: Map<string, SelectedImageAsset>;
   errors: string[];
   /** Shared per-execution vision budget (not per-stage). */
   visionBudget: ImageVisionBudget;
@@ -556,6 +575,8 @@ type EvaluateImageSeedsOptions = {
 
 type EvaluateImageSeedsResult = {
   selected: ScoredImageCandidate | null;
+  /** Trusted bytes for `selected` when obtained via Figranium (in-memory only). */
+  selectedAsset: SelectedImageAsset | null;
   evaluated: ScoredImageCandidate[];
   stages: EnrichmentDiagnosticStage[];
   uniqueSeedCount: number;
@@ -728,6 +749,7 @@ export async function evaluateImageSeeds(
         probeDetails,
         httpStatus: probedMeta.httpStatus ?? null,
         imageBase64: probedMeta.imageBase64 ?? null,
+        imageBytes: probedMeta.imageBytes ?? null,
         resolvedUrl: probedMeta.resolvedUrl ?? seed.url
       };
     } catch (error) {
@@ -780,8 +802,20 @@ export async function evaluateImageSeeds(
       typeof meta.resolvedUrl === "string" && meta.resolvedUrl.trim()
         ? meta.resolvedUrl.trim()
         : seed.url;
-    if (typeof meta.imageBase64 === "string" && meta.imageBase64.trim()) {
-      options.figraniumImageBase64ByUrl.set(resolvedUrl, meta.imageBase64.trim());
+    if (
+      (meta.imageBytes && meta.imageBytes.length > 0)
+      || (typeof meta.imageBase64 === "string" && meta.imageBase64.trim())
+    ) {
+      const bytes =
+        meta.imageBytes && meta.imageBytes.length > 0
+          ? meta.imageBytes
+          : Buffer.from(String(meta.imageBase64).trim(), "base64");
+      if (bytes.length > 0) {
+        options.figraniumImageAssetByUrl.set(resolvedUrl, {
+          bytes,
+          contentType: meta.mimeType?.trim() || "application/octet-stream"
+        });
+      }
     }
     if ((meta.probeDetails ?? []).includes("figranium_fetch_fallback_ok")) {
       fwgsFigraniumFetchOk += 1;
@@ -866,6 +900,7 @@ export async function evaluateImageSeeds(
   if (transientSystemFailure) {
     return {
       selected: null,
+      selectedAsset: null,
       evaluated: preRejected.slice(0, 20),
       stages,
       uniqueSeedCount: uniqueSeeds.length,
@@ -877,6 +912,7 @@ export async function evaluateImageSeeds(
   if (!probed.length) {
     return {
       selected: null,
+      selectedAsset: null,
       evaluated: preRejected.slice(0, 20),
       stages,
       uniqueSeedCount: uniqueSeeds.length,
@@ -995,7 +1031,7 @@ export async function evaluateImageSeeds(
       vision = await options.verify({
         candidate: options.candidate,
         imageUrl: item.url,
-        imageBase64: options.figraniumImageBase64ByUrl.get(item.url) ?? null
+        imageBase64: options.figraniumImageAssetByUrl.get(item.url)?.bytes.toString("base64") ?? null
       });
       if (!vision) {
         visionError = "vision_parse_failed";
@@ -1171,6 +1207,10 @@ export async function evaluateImageSeeds(
 
   return {
     selected: transientSystemFailure ? null : selected,
+    selectedAsset:
+      !transientSystemFailure && selected
+        ? options.figraniumImageAssetByUrl.get(selected.url) ?? null
+        : null,
     evaluated: scored.slice(0, 20),
     stages,
     uniqueSeedCount: uniqueSeeds.length,
@@ -1182,6 +1222,7 @@ export async function evaluateImageSeeds(
 
 function finalizeImageResult(options: {
   selected: ScoredImageCandidate | null;
+  selectedAsset?: SelectedImageAsset | null;
   evaluated: ScoredImageCandidate[];
   errors: string[];
   stages: EnrichmentDiagnosticStage[];
@@ -1223,6 +1264,7 @@ function finalizeImageResult(options: {
 
   return {
     selected: options.selected,
+    selectedAsset: options.selected ? (options.selectedAsset ?? null) : null,
     evaluated: options.evaluated.slice(0, 20),
     errors: options.errors,
     diagnostics: sanitizeJobDiagnostics(diagnostics),
@@ -1254,7 +1296,7 @@ export async function executeImageEnrichment(
   const extractFwgsImages = deps.extractFwgsPlcbImages ?? extractFwgsPlcbImages;
   const errors: string[] = [];
   const stages: EnrichmentDiagnosticStage[] = [];
-  const figraniumImageBase64ByUrl = new Map<string, string>();
+  const figraniumImageAssetByUrl = new Map<string, SelectedImageAsset>();
   const diagStore = new ImageCandidateDiagnosticStore();
   const allEvaluated: ScoredImageCandidate[] = [];
   const seenEvaluatedUrls = new Set<string>();
@@ -1354,7 +1396,7 @@ export async function executeImageEnrichment(
       probe,
       verify,
       diagStore,
-      figraniumImageBase64ByUrl,
+      figraniumImageAssetByUrl,
       errors,
       visionBudget,
       probeBudget,
@@ -1374,6 +1416,7 @@ export async function executeImageEnrichment(
       });
       return finalizeImageResult({
         selected: fwgsEval.selected,
+        selectedAsset: fwgsEval.selectedAsset,
         evaluated: allEvaluated,
         errors,
         stages,
@@ -1848,7 +1891,7 @@ export async function executeImageEnrichment(
       probe,
       verify,
       diagStore,
-      figraniumImageBase64ByUrl,
+      figraniumImageAssetByUrl,
       errors,
       visionBudget,
       probeBudget,
@@ -1868,6 +1911,7 @@ export async function executeImageEnrichment(
       });
       return finalizeImageResult({
         selected: officialEval.selected,
+        selectedAsset: officialEval.selectedAsset,
         evaluated: allEvaluated,
         errors,
         stages,
@@ -2023,7 +2067,7 @@ export async function executeImageEnrichment(
       probe,
       verify,
       diagStore,
-      figraniumImageBase64ByUrl,
+      figraniumImageAssetByUrl,
       errors,
       visionBudget,
       probeBudget,
@@ -2037,6 +2081,7 @@ export async function executeImageEnrichment(
     if (genericEval.selected) {
       return finalizeImageResult({
         selected: genericEval.selected,
+        selectedAsset: genericEval.selectedAsset,
         evaluated: allEvaluated,
         errors,
         stages,

@@ -190,11 +190,11 @@ function isUnresolvedFieldOrNull(field: { value: unknown; confidence: number }) 
   return field.value == null || field.confidence === 0;
 }
 
-test("accepted image means complete availability", () => {
+test("accepted remote image is partial until locally durable", () => {
   cleanup();
   const result = db.prepare(`
     INSERT INTO spirits (name, brand, category, abv, volume_ml, upc, image_url)
-    VALUES ('Img Complete', 'Brand', 'Whiskey', 45, 750, ?, '')
+    VALUES ('Img Complete Remote', 'Brand', 'Whiskey', 45, 750, ?, '')
   `).run(`${PREFIX}0001`);
   const id = Number(result.lastInsertRowid);
   const row = db.prepare("SELECT * FROM spirits WHERE id=?").get(id) as Record<string, unknown>;
@@ -202,6 +202,27 @@ test("accepted image means complete availability", () => {
     entityType: "spirits",
     entityId: id,
     url: "https://cdn.example/ok.jpg",
+    sourceType: "official",
+    sourceUrl: "https://producer.example/x",
+    score: 90,
+    verified: true
+  });
+  assert.equal(imageEnrichmentAvailability({ entityType: "spirits", entityId: id, row }), "partial");
+  cleanup();
+});
+
+test("accepted local image means complete availability", () => {
+  cleanup();
+  const result = db.prepare(`
+    INSERT INTO spirits (name, brand, category, abv, volume_ml, upc, image_url)
+    VALUES ('Img Complete Local', 'Brand', 'Whiskey', 45, 750, ?, '')
+  `).run(`${PREFIX}0001b`);
+  const id = Number(result.lastInsertRowid);
+  const row = db.prepare("SELECT * FROM spirits WHERE id=?").get(id) as Record<string, unknown>;
+  upsertProductImage({
+    entityType: "spirits",
+    entityId: id,
+    url: "/api/media/images/ok-local.jpg",
     sourceType: "official",
     sourceUrl: "https://producer.example/x",
     score: 90,

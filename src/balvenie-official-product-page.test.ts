@@ -482,7 +482,8 @@ test("16-17. patrons lack diagnostics; scan-session untouched smoke via job pers
       mimeType: "image/webp",
       reachable: true
     }),
-    verifyImage: async () => acceptVision()
+    verifyImage: async () => acceptVision(),
+    localizeImage: async () => "/api/media/images/balvenie-official-localized.jpg"
   } as never);
   markJobCompleted(claimed.id, run.resultPayload);
 

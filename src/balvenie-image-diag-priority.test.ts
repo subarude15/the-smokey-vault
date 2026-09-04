@@ -321,7 +321,8 @@ test("12-13. patrons do not receive diagnostics; metadata path untouched smoke",
       meme_or_graphic: false,
       clean_product_photo: true,
       multiple_products: false
-    })
+    }),
+    localizeImage: async () => "/api/media/images/balvenie-diag-localized.jpg"
   } as never);
   markJobCompleted(claimed.id, run.resultPayload);
 

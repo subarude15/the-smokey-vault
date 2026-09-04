@@ -10,8 +10,9 @@ import {
   productContentFullyPopulated
 } from "./product-content.js";
 import {
-  hasAcceptedProductImage,
-  inventoryHasUserImage
+  hasDurableAcceptedProductImage,
+  inventoryHasUserImage,
+  productImageNeedsLocalization
 } from "./product-images.js";
 import { metadataOutcomeFromState } from "./metadata-outcome.js";
 import type { BottleCandidate } from "../candidate/index.js";
@@ -76,9 +77,11 @@ export function imageEnrichmentAvailability(options: {
   row: Record<string, unknown>;
 }): EnrichmentAvailability {
   const { entityType, entityId, row } = options;
-  if (inventoryHasUserImage(row) || hasAcceptedProductImage(entityType, entityId)) {
+  if (inventoryHasUserImage(row) || hasDurableAcceptedProductImage(entityType, entityId)) {
     return "complete";
   }
+  // Accepted remote hotlink still needs local persistence — not fully complete.
+  if (productImageNeedsLocalization(entityType, entityId)) return "partial";
   if (hasActiveEnrichmentJob(entityType, entityId, "image")) return "active";
   if (hasFailedEnrichmentJob(entityType, entityId, "image")) return "failed";
   if (hasCompletedJob(entityType, entityId, "image")) return "no_result";

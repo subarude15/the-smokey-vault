@@ -260,12 +260,13 @@ test("correct clean bottle image passes verification", async () => {
       mimeType: "image/jpeg",
       reachable: true
     }),
-    verifyImage: async () => cleanVision
+    verifyImage: async () => cleanVision,
+    localizeImage: async () => "/api/media/images/bt-localized-test.jpg"
   });
   assert.equal(result.skipped, false);
   assert.equal(result.imageSaved, true);
   const stored = getProductImage("spirits", Number(spirit.id));
-  assert.ok(stored?.url?.includes("buffalotrace.com"));
+  assert.ok(stored?.url?.startsWith("/api/media/images/"));
   assert.equal(stored?.verified, true);
   assert.ok((stored?.score ?? 0) >= IMAGE_ACCEPTANCE_THRESHOLD);
   markJobCompleted(claimed.id);
@@ -406,7 +407,8 @@ test("worker continues processing later jobs after image job failure", async () 
         mimeType: "image/jpeg",
         reachable: true
       }),
-      verifyImage: async () => cleanVision
+      verifyImage: async () => cleanVision,
+      localizeImage: async () => "/api/media/images/worker-localized-b.jpg"
     }
   });
 

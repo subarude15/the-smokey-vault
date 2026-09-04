@@ -239,7 +239,7 @@ test("fully enriched bottle queues nothing", () => {
   upsertProductImage({
     entityType: "spirits",
     entityId: id,
-    url: "https://cdn.example/bottle.jpg",
+    url: "/api/media/images/fully-enriched-bottle.jpg",
     sourceType: "official",
     sourceUrl: "https://producer.example/x",
     score: 92,
