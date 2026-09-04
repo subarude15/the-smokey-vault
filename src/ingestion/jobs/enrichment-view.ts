@@ -36,8 +36,11 @@ import {
   unresolvedMetadataFields
 } from "./metadata-outcome.js";
 import { getProductContent, readPersonalNotes } from "./product-content.js";
-import { getProductImage, inventoryHasUserImage } from "./product-images.js";
-import { isAcceptableImageSource } from "../enrichment/image-sources.js";
+import {
+  getProductImage,
+  inventoryHasUserImage,
+  isAcceptedEnrichedProductImage
+} from "./product-images.js";
 import { getLatestCompletedJobResult, listJobsForEntity } from "./store.js";
 import {
   friendlyDiagnosticSummary,
@@ -568,14 +571,7 @@ function resolveDisplayImage(options: {
   }
 
   // 2. Verified enriched official/licensed/approved image.
-  const enrichedAccepted =
-    Boolean(image?.url)
-    && Boolean(image?.verified)
-    && image?.source_type != null
-    && image.source_type !== "lookup"
-    && isAcceptableImageSource(image.source_type);
-
-  if (enrichedAccepted && image?.url) {
+  if (isAcceptedEnrichedProductImage(image) && image?.url) {
     return {
       displayUrl: image.url,
       enrichedUrl: image.url,

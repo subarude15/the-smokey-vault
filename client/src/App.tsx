@@ -1934,7 +1934,12 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       <button className="secondary back-button" onClick={onBack}><ArrowLeft size={17}/> Back to {module.label}</button>
       <div className="bottle-detail-hero">
         <div className="bottle-detail-image">
-          {item.image_url ? <img src={String(item.image_url)} alt={String(item[module.primary] ?? "")}/> : <module.icon size={64}/>}
+          {(() => {
+            const heroImage = String(item.display_image_url ?? item.image_url ?? "").trim();
+            return heroImage
+              ? <img src={heroImage} alt={String(item[module.primary] ?? "")}/>
+              : <module.icon size={64}/>;
+          })()}
         </div>
         <div>
           <span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.makerKey] ?? item[module.secondary] ?? item.category ?? item.style ?? module.label)}</span>
@@ -2022,7 +2027,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           table={module.id}
           itemId={item.id}
           hasPersonalNotes={Boolean(String(item.tasting_notes ?? "").trim())}
-          hasShelfImage={Boolean(String(item.image_url ?? "").trim())}
+          hasShelfImage={Boolean(String(item.display_image_url ?? item.image_url ?? "").trim())}
         />
       ) : null}
       {!(module.id === "taps" && isTapEmpty(item)) && <GuestReviews table={module.id} itemId={item.id} admin={admin}/>}

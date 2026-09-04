@@ -30,6 +30,7 @@ import {
   identifyByLocalLabelImage
 } from "./ingestion/bottle-orchestrator.js";
 import {
+  attachInventoryDisplayImageUrl,
   buildBottleEnrichmentView,
   enrichmentJobCounts,
   maybeEnqueueMetadataEnrichment,
@@ -284,15 +285,31 @@ app.post<{ Body: ScanSessionUndo }>("/api/admin/inventory/scan-session/undo", {
   return undoScanSessionMutation(undo);
 });
 
+function withInventoryDisplayFields(
+  table: string,
+  row: Record<string, unknown>
+): Record<string, unknown> {
+  return attachInventoryDisplayImageUrl(table, row);
+}
+
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
   if (!publicTables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
   const table = request.params.table;
   const rows = db.prepare(`SELECT * FROM ${table} ORDER BY ${table === "taps" ? "tap_number ASC" : "id DESC"}`).all() as Array<Record<string, unknown>>;
-  if (!VOTE_TABLES.has(table)) return rows;
+  if (!VOTE_TABLES.has(table)) {
+    return rows.map((row) => withInventoryDisplayFields(table, row));
+  }
   const tallies = voteTallies(table);
   return rows.map((row) => {
     const tally = tallies[Number(row.id)] ?? summarizeVotes(0, 0);
-    return { ...row, vote_up: tally.up, vote_down: tally.down, vote_net: tally.net, vote_total: tally.total, vote_score: tally.score };
+    return withInventoryDisplayFields(table, {
+      ...row,
+      vote_up: tally.up,
+      vote_down: tally.down,
+      vote_net: tally.net,
+      vote_total: tally.total,
+      vote_score: tally.score
+    });
   });
 });
 
@@ -389,7 +406,7 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
     .run(...values.map((field) => body[field] as never));
   const created = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid) as Record<string, unknown>;
   queueBackgroundEnrichmentSafe(table, Number(created.id), created);
-  return reply.code(201).send(created);
+  return reply.code(201).send(withInventoryDisplayFields(table, created));
 });
 
 app.post<{ Body: unknown }>("/api/inventory/import-batch", {
@@ -488,7 +505,7 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   const updated = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id) as Record<string, unknown>;
   maybeInventoryPour(table, existing, updated);
   queueBackgroundEnrichmentSafe(table, Number(updated.id), updated);
-  return updated;
+  return withInventoryDisplayFields(table, updated);
 });
 
 app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id", async (request, reply) => {
