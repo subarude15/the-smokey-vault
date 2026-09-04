@@ -4,8 +4,11 @@
  */
 import { db } from "../../db.js";
 import { isLocalImagePath } from "../../images.js";
-import type { EnrichmentEntityType } from "./types.js";
-import type { ImageSourceType } from "../enrichment/image-sources.js";
+import {
+  isAcceptableImageSource,
+  type ImageSourceType
+} from "../enrichment/image-sources.js";
+import { isEnrichmentEntityType, type EnrichmentEntityType } from "./types.js";
 
 export type ProductImageRecord = {
   entity_type: EnrichmentEntityType;
@@ -218,4 +221,60 @@ export function hasAcceptedProductImage(
   if (!row?.url || !row.verified) return false;
   if (row.source_type === "lookup") return false;
   return (row.score ?? 0) > 0;
+}
+
+/**
+ * Same acceptance gate enrichment uses for machine-selected display images.
+ * Lookup / unverified / unapproved candidates do not qualify.
+ */
+export function isAcceptedEnrichedProductImage(
+  image: ProductImageRecord | null | undefined
+): boolean {
+  return Boolean(image?.url)
+    && Boolean(image?.verified)
+    && image?.source_type != null
+    && image.source_type !== "lookup"
+    && isAcceptableImageSource(image.source_type);
+}
+
+/** URL of the currently accepted enriched product image, if any. */
+export function acceptedEnrichedImageUrl(
+  entityType: EnrichmentEntityType,
+  entityId: number
+): string | null {
+  const image = getProductImage(entityType, entityId);
+  if (!isAcceptedEnrichedProductImage(image) || !image?.url) return null;
+  return image.url;
+}
+
+/**
+ * Public UI display image for an inventory row.
+ * Precedence: user/shelf inventory image → accepted enriched image → null.
+ * Does not mutate inventory.image_url and does not promote lookup candidates.
+ */
+export function resolveInventoryDisplayImageUrl(
+  entityType: EnrichmentEntityType,
+  entityId: number,
+  row: Record<string, unknown>
+): string | null {
+  const shelf = String(row.image_url ?? "").trim();
+  if (inventoryHasUserImage(row, entityType, entityId) && shelf) return shelf;
+  return acceptedEnrichedImageUrl(entityType, entityId);
+}
+
+/**
+ * Attach derived `display_image_url` for enrichment inventory tables.
+ * Safe for public inventory responses (URL only — no diagnostics).
+ */
+export function attachInventoryDisplayImageUrl(
+  entityType: string,
+  row: Record<string, unknown>
+): Record<string, unknown> {
+  if (!isEnrichmentEntityType(entityType)) return row;
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || id <= 0) return { ...row, display_image_url: null };
+  return {
+    ...row,
+    display_image_url: resolveInventoryDisplayImageUrl(entityType, id, row)
+  };
 }

@@ -78,6 +78,10 @@ export {
   inventoryHasUserImage,
   recordLookupImageFallback,
   hasAcceptedProductImage,
+  isAcceptedEnrichedProductImage,
+  acceptedEnrichedImageUrl,
+  resolveInventoryDisplayImageUrl,
+  attachInventoryDisplayImageUrl,
   clearProductImagesForTests,
   markProductImageEmpty,
   type ProductImageRecord
