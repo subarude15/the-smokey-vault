@@ -28,6 +28,12 @@ import {
   type ParsedBeerQuery
 } from "./beer_search_query.js";
 import {
+  breweryHintBonus,
+  breweryResolutionNeeded,
+  resolveBreweryHints,
+  type BreweryResolverHit
+} from "./open_brewery_db.js";
+import {
   catalogBeerToInventoryFields,
   isCatalogBeerConfigured,
   isCatalogBeerQuotaExhausted,
@@ -539,8 +545,46 @@ export async function searchBottles(query: string, options?: { table?: string })
     }
   }
 
-  const ranked = beerParsed ? rankBeerSearchHits(results, beerParsed) : results;
+  let breweryHints: BreweryResolverHit[] = [];
+  // Skip OBDB when Vault/beer_cache already establish a strong brewery identity.
+  if (beerParsed && breweryResolutionNeeded(results, beerParsed)) {
+    const candidateBreweries = collectCandidateBreweries(results);
+    try {
+      breweryHints = await resolveBreweryHints({
+        parsed: beerParsed,
+        candidateBreweries
+      });
+    } catch {
+      // Open Brewery DB is optional — never fail beer search.
+      breweryHints = [];
+    }
+  }
+
+  const ranked = beerParsed
+    ? rankBeerSearchHits(results, beerParsed, {
+        breweryHints,
+        breweryHintBonus
+      })
+    : results;
   return { results: ranked.slice(0, 20), quota: getLastQuota() };
+}
+
+/** Collect distinct brewery strings from existing beer hits (never invents products). */
+function collectCandidateBreweries(hits: BottleSearchHit[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    const brewery = String(
+      hit.product.brewery ?? hit.product.brand ?? hit.product.producer ?? ""
+    ).trim();
+    if (!brewery) continue;
+    const key = brewery.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(brewery);
+    if (out.length >= 4) break;
+  }
+  return out;
 }
 
 function hitKey(hit: BottleSearchHit) {
