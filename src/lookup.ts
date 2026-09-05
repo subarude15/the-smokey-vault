@@ -21,6 +21,13 @@ import {
   searchBeerCache
 } from "./beer_cache.js";
 import {
+  matchesBeerQuery,
+  parseBeerQuery,
+  rankBeerSearchHits,
+  scoreBeerHit,
+  type ParsedBeerQuery
+} from "./beer_search_query.js";
+import {
   catalogBeerToInventoryFields,
   isCatalogBeerConfigured,
   isCatalogBeerQuotaExhausted,
@@ -368,9 +375,14 @@ function productForSearch(table: SearchTable, row: Record<string, unknown>): Rec
   };
 }
 
-export function searchVault(query: string, table?: SearchTable | SearchTable[]): BottleSearchHit[] {
+export function searchVault(
+  query: string,
+  table?: SearchTable | SearchTable[],
+  options?: { beerParsed?: ParsedBeerQuery }
+): BottleSearchHit[] {
   const tokens = queryTokens(query);
-  if (!tokens.length) return [];
+  const beerParsed = options?.beerParsed;
+  if (!beerParsed && !tokens.length) return [];
   const tables: SearchTable[] = table
     ? (Array.isArray(table) ? table : [table])
     : ["spirits", "packaged_beer", "wines"];
@@ -383,17 +395,18 @@ export function searchVault(query: string, table?: SearchTable | SearchTable[]):
   const hits: Array<BottleSearchHit & { score: number }> = [];
   for (const next of tables) {
     const rows = db.prepare(`SELECT * FROM ${next}`).all() as Record<string, unknown>[];
-    hits.push(
-      ...rows.filter((row) => matchesQuery(row, query))
-        .map((row) => ({
-          source: "vault" as const,
-          table: next,
-          product: productForSearch(next, row),
-          score: scoreHit(row, tokens)
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limits[next])
-    );
+    const scored = rows.flatMap((row) => {
+      const product = productForSearch(next, row);
+      const matched = beerParsed ? matchesBeerQuery(product, beerParsed) : matchesQuery(row, query);
+      if (!matched) return [];
+      return [{
+        source: "vault" as const,
+        table: next,
+        product,
+        score: beerParsed ? scoreBeerHit(product, beerParsed, "vault") : scoreHit(row, tokens)
+      }];
+    });
+    hits.push(...scored.sort((a, b) => b.score - a.score).slice(0, limits[next]));
   }
   return hits.sort((a, b) => b.score - a.score).map((hit) => ({
     source: hit.source,
@@ -408,8 +421,13 @@ export async function searchBottles(query: string, options?: { table?: string })
   const vaultTables = searchTablesForModule(options?.table);
   const moduleTable = searchTableForModule(options?.table);
   const beerSearch = isBeerSearchModule(options?.table);
+  const beerParsed = beerSearch ? parseBeerQuery(q) : null;
 
-  const results: BottleSearchHit[] = searchVault(q, vaultTables);
+  const results: BottleSearchHit[] = searchVault(
+    q,
+    vaultTables,
+    beerParsed ? { beerParsed } : undefined
+  );
   const seen = new Set(results.map(hitKey));
 
   const addHit = (hit: BottleSearchHit) => {
@@ -421,7 +439,7 @@ export async function searchBottles(query: string, options?: { table?: string })
   };
 
   if (beerSearch) {
-    for (const entry of searchBeerCache(q, 8)) {
+    for (const entry of searchBeerCache(q, 8, beerParsed ? { beerParsed } : undefined)) {
       const hit: BottleSearchHit = {
         source: "beer_cache",
         table: "packaged_beer",
@@ -436,6 +454,7 @@ export async function searchBottles(query: string, options?: { table?: string })
 
     // Catalog.beer is a fallback — skip when local vault + beer_cache already cover the query.
     // Count unique brewery+name identities (seen), not raw inventory/cache rows.
+    // Still a single remote query (no alias fan-out) when the gate opens.
     const localUniqueCount = seen.size;
     const needsCatalogBeer = localUniqueCount < LOCAL_BEER_SUFFICIENCY_THRESHOLD;
     if (needsCatalogBeer && isCatalogBeerConfigured() && !isCatalogBeerQuotaExhausted()) {
@@ -520,7 +539,8 @@ export async function searchBottles(query: string, options?: { table?: string })
     }
   }
 
-  return { results: results.slice(0, 20), quota: getLastQuota() };
+  const ranked = beerParsed ? rankBeerSearchHits(results, beerParsed) : results;
+  return { results: ranked.slice(0, 20), quota: getLastQuota() };
 }
 
 function hitKey(hit: BottleSearchHit) {

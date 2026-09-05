@@ -6,6 +6,11 @@ import {
   upcAForm,
   type ProductSchema
 } from "./cola_client.js";
+import {
+  matchesBeerQuery,
+  scoreBeerHit,
+  type ParsedBeerQuery
+} from "./beer_search_query.js";
 
 export const BEER_CACHE_TTL_SECONDS = 86400 * 90;
 
@@ -303,23 +308,32 @@ export function beerCacheToInventoryFields(entry: BeerCacheEntry) {
   };
 }
 
-export function searchBeerCache(query: string, limit = 8) {
+export function searchBeerCache(
+  query: string,
+  limit = 8,
+  options?: { beerParsed?: ParsedBeerQuery }
+) {
+  const beerParsed = options?.beerParsed;
   const tokens = foldBeerSearch(query).split(/[^a-z0-9]+/).filter(Boolean);
-  if (!tokens.length) return [];
+  if (!beerParsed && !tokens.length) return [];
   const rows = db.prepare("SELECT * FROM beer_cache").all() as BeerCacheRow[];
   return rows
-    .filter((row) => {
+    .flatMap((row) => {
+      const entry = row as BeerCacheEntry;
+      const product = beerCacheToInventoryFields(entry);
+      if (beerParsed) {
+        if (!matchesBeerQuery(product, beerParsed)) return [];
+        return [{ entry, score: scoreBeerHit(product, beerParsed, "beer_cache") }];
+      }
       const hay = foldBeerSearch(`${row.name} ${row.brewery} ${row.style} ${row.upc}`);
-      return tokens.every((token) => hay.includes(token));
-    })
-    .map((row) => {
+      if (!tokens.every((token) => hay.includes(token))) return [];
       const name = foldBeerSearch(row.name);
       const brewery = foldBeerSearch(row.brewery);
       let score = 0;
       if (tokens.every((token) => name.includes(token))) score += 8;
       if (tokens[0] && name.split(/[^a-z0-9]+/).some((part) => part.startsWith(tokens[0]!))) score += 4;
       if (tokens[0] && brewery.split(/[^a-z0-9]+/).some((part) => part.startsWith(tokens[0]!))) score += 3;
-      return { entry: row as BeerCacheEntry, score: score + 2 };
+      return [{ entry, score: score + 2 }];
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
