@@ -20,6 +20,13 @@ import {
   type LookupFn,
   type PinnedRequestFn
 } from "./network_safety.js";
+import {
+  OFFICIAL_BEER_BROWSER_MAX_PAGES,
+  isOfficialBeerBrowserConfigured,
+  renderOfficialBreweryBeerPage,
+  type OfficialBeerBrowserDeps,
+  type OfficialBeerBrowserOutcome
+} from "./official_brewery_beer_browser.js";
 
 export type OfficialBeerDiscoveryInput = {
   breweryName: string;
@@ -136,6 +143,21 @@ export type OfficialBeerDiscoveryDeps = {
   lookup?: LookupFn;
   /** Injected into fetchSafeHttp for SSRF / redirect tests. */
   request?: PinnedRequestFn;
+  /**
+   * Optional Figranium render hook for JS-dependent official sites.
+   * Tests inject stubs; production uses renderOfficialBreweryBeerPage when configured.
+   */
+  renderOfficialPage?: (
+    input: {
+      url: string;
+      breweryName: string;
+      beerName: string;
+      registeredDomain: string;
+    }
+  ) => Promise<OfficialBeerBrowserOutcome>;
+  /** Override browser enablement (tests). Default: FIGRANIUM_OFFICIAL_BEER_TASK_ID configured. */
+  browserFallbackEnabled?: boolean;
+  browserDeps?: OfficialBeerBrowserDeps;
 };
 
 function emptyFields(): OfficialBeerExtractedFields {
@@ -572,6 +594,259 @@ function sameOfficialDomain(candidateUrl: string, domain: string): boolean {
   }
 }
 
+/** Public domain lock for browser/static callers. */
+export function urlBelongsToOfficialDomain(url: string, registeredDomainName: string): boolean {
+  return sameOfficialDomain(url, registeredDomainName);
+}
+
+/**
+ * Positive evidence that static HTML is an app shell / JS-rendered page
+ * rather than a useful product document.
+ */
+export function htmlLooksLikeJsAppShell(html: string): boolean {
+  const raw = String(html || "");
+  if (!raw) return true;
+  const text = stripTags(raw).replace(/\s+/g, " ").trim();
+  const scriptCount = (raw.match(/<script\b/gi) || []).length;
+  const hasRoot = /id=["'](?:root|app|__next|__nuxt)["']/i.test(raw);
+  const hasFramework =
+    /__NEXT_DATA__|data-reactroot|ng-version|__NUXT__|webpackJsonp|vite\/client|data-server-rendered/i.test(
+      raw
+    );
+  if (text.length < 80 && scriptCount >= 1) return true;
+  if (text.length < 200 && (scriptCount >= 3 || hasRoot || hasFramework)) return true;
+  if (hasRoot && text.length < 400 && scriptCount >= 2) return true;
+  return false;
+}
+
+export type ScoredOfficialBeerHtml = {
+  match: OfficialBeerPageMatch;
+  fields: OfficialBeerExtractedFields;
+  productPageUrl: string;
+  finalUrl: string;
+};
+
+/** Score already-rendered official-domain HTML with PR103 match + extract rules. */
+export function scoreOfficialBeerHtmlPage(args: {
+  html: string;
+  pageUrl: string;
+  beerName: string;
+  breweryName: string;
+  registeredDomain: string;
+}): ScoredOfficialBeerHtml | null {
+  if (!sameOfficialDomain(args.pageUrl, args.registeredDomain)) return null;
+  try {
+    if (pathLooksRejected(new URL(args.pageUrl).pathname)) return null;
+  } catch {
+    return null;
+  }
+  const fields = extractOfficialBeerMetadata({
+    html: args.html,
+    pageUrl: args.pageUrl,
+    beerName: args.beerName,
+    breweryName: args.breweryName
+  });
+  const title = extractTitle(args.html);
+  const h1 = extractH1(args.html);
+  const match = classifyOfficialBeerPageMatch({
+    beerName: args.beerName,
+    breweryName: args.breweryName,
+    title,
+    h1,
+    productName: fields.productName,
+    pageUrl: args.pageUrl,
+    pageText: stripTags(args.html)
+  });
+  const acceptedCanonical =
+    fields.canonicalUrl && sameOfficialDomain(fields.canonicalUrl, args.registeredDomain)
+      ? fields.canonicalUrl
+      : null;
+  const trustedFields: OfficialBeerExtractedFields = {
+    ...fields,
+    canonicalUrl: acceptedCanonical
+  };
+  return {
+    match,
+    fields: trustedFields,
+    productPageUrl: acceptedCanonical || args.pageUrl,
+    finalUrl: args.pageUrl
+  };
+}
+
+function defaultSeedIndexUrls(origin: string): string[] {
+  return [
+    `${origin}/`,
+    `${origin}/beers`,
+    `${origin}/beer`,
+    `${origin}/our-beers`,
+    `${origin}/beer-finder`,
+    `${origin}/products`
+  ];
+}
+
+async function tryOfficialBeerBrowserFallback(args: {
+  input: OfficialBeerDiscoveryInput;
+  domain: string;
+  origin: string;
+  beerName: string;
+  breweryName: string;
+  pagesFetched: number;
+  hintUrls: string[];
+  jsShellEvidence: boolean;
+  staticStatus: "unsupported_static_site" | "not_found";
+  deps: OfficialBeerDiscoveryDeps;
+}): Promise<OfficialBeerDiscoveryResult | null> {
+  const enabled =
+    args.deps.browserFallbackEnabled ?? isOfficialBeerBrowserConfigured();
+  if (!enabled) {
+    logDiscovery("official_beer_browser_skip", {
+      domain: args.domain,
+      reason: "browser_unconfigured"
+    });
+    return null;
+  }
+  if (args.staticStatus === "not_found" && !args.jsShellEvidence) {
+    logDiscovery("official_beer_browser_skip", {
+      domain: args.domain,
+      reason: "no_js_shell_evidence"
+    });
+    return null;
+  }
+
+  const render =
+    args.deps.renderOfficialPage ??
+    ((input) => renderOfficialBreweryBeerPage(input, args.deps.browserDeps));
+
+  const seed = prioritizeUrls(
+    [
+      ...args.hintUrls,
+      ...defaultSeedIndexUrls(args.origin)
+    ].filter((url) => sameOfficialDomain(url, args.domain)),
+    args.domain,
+    args.beerName
+  );
+
+  const queue: string[] = [];
+  const seen = new Set<string>();
+  for (const url of seed) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    queue.push(url);
+    if (queue.length >= 4) break;
+  }
+  if (queue.length === 0) queue.push(`${args.origin}/`);
+
+  let browserPages = 0;
+  let transientFailure = false;
+
+  while (queue.length > 0 && browserPages < OFFICIAL_BEER_BROWSER_MAX_PAGES) {
+    const url = queue.shift()!;
+    browserPages += 1;
+    let outcome: OfficialBeerBrowserOutcome;
+    try {
+      outcome = await render({
+        url,
+        breweryName: args.breweryName,
+        beerName: args.beerName,
+        registeredDomain: args.domain
+      });
+    } catch (error) {
+      transientFailure = true;
+      logDiscovery("official_beer_browser_error", {
+        domain: args.domain,
+        reason: error instanceof Error ? error.message.slice(0, 120) : "error"
+      });
+      continue;
+    }
+
+    if (outcome.status === "timeout" || outcome.status === "error" || outcome.status === "unavailable") {
+      if (outcome.status === "timeout" || outcome.status === "error") transientFailure = true;
+      continue;
+    }
+    if (outcome.status === "off_domain" || outcome.status === "invalid_result") {
+      continue;
+    }
+    if (outcome.status !== "ok") {
+      continue;
+    }
+
+    const page = outcome.page;
+    if (!sameOfficialDomain(page.finalUrl, args.domain)) {
+      logDiscovery("official_beer_browser_off_domain", { domain: args.domain });
+      continue;
+    }
+
+    if (page.html && page.html.trim()) {
+      const scored = scoreOfficialBeerHtmlPage({
+        html: page.html,
+        pageUrl: page.finalUrl,
+        beerName: args.beerName,
+        breweryName: args.breweryName,
+        registeredDomain: args.domain
+      });
+      if (scored && (scored.match === "exact_name" || scored.match === "strong_name")) {
+        logDiscovery("official_beer_browser_match", {
+          domain: args.domain,
+          match: scored.match,
+          url: scored.productPageUrl
+        });
+        return {
+          status: "matched",
+          match: scored.match,
+          productPageUrl: scored.productPageUrl,
+          registeredDomain: args.domain,
+          fields: {
+            ...scored.fields,
+            productPageUrl: scored.productPageUrl,
+            canonicalUrl: scored.fields.canonicalUrl || scored.productPageUrl
+          },
+          pagesFetched: args.pagesFetched + browserPages,
+          reason: "browser_matched"
+        };
+      }
+    }
+
+    const linkUrls = page.links.map((l: { href: string }) => l.href);
+    if (page.html) {
+      linkUrls.push(
+        ...extractSameDomainLinks(page.html, page.finalUrl, args.domain)
+      );
+    }
+    const ranked = prioritizeUrls(linkUrls, args.domain, args.beerName).slice(0, 6);
+    for (const link of ranked) {
+      if (seen.has(link)) continue;
+      seen.add(link);
+      queue.push(link);
+    }
+  }
+
+  logDiscovery("official_beer_browser_not_found", {
+    domain: args.domain,
+    browserPages,
+    transientFailure
+  });
+  if (transientFailure) {
+    return {
+      status: args.staticStatus,
+      match: "none",
+      productPageUrl: null,
+      registeredDomain: args.domain,
+      fields: emptyFields(),
+      pagesFetched: args.pagesFetched + browserPages,
+      reason: "browser_transient_failure"
+    };
+  }
+  return {
+    status: args.staticStatus === "unsupported_static_site" ? "unsupported_static_site" : "not_found",
+    match: "none",
+    productPageUrl: null,
+    registeredDomain: args.domain,
+    fields: emptyFields(),
+    pagesFetched: args.pagesFetched + browserPages,
+    reason: "browser_no_strong_match"
+  };
+}
+
 async function readBodyLimited(body: Readable, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
@@ -969,6 +1244,9 @@ export async function discoverOfficialBeerProductPage(
 
     let best: EvaluatedPage | null = null;
 
+    let jsShellEvidence = false;
+    const hintUrls: string[] = [];
+
     while (queue.length > 0 && budget.pagesFetched < maxPages) {
       const next = queue.shift()!;
       const evaluated = await evaluateCandidatePage(
@@ -980,17 +1258,24 @@ export async function discoverOfficialBeerProductPage(
       );
       if (!evaluated) continue;
 
+      if (htmlLooksLikeJsAppShell(evaluated.html)) {
+        jsShellEvidence = true;
+      }
+      hintUrls.push(evaluated.finalUrl);
+      const pageLinks = extractSameDomainLinks(
+        evaluated.html,
+        evaluated.finalUrl,
+        originInfo.domain
+      );
+      hintUrls.push(...pageLinks.slice(0, 8));
+
       if (evaluated.match === "exact_name" || evaluated.match === "strong_name") {
         best = evaluated;
         if (evaluated.match === "exact_name") break;
       }
 
       if (next.depth >= maxDepth) continue;
-      const links = prioritizeUrls(
-        extractSameDomainLinks(evaluated.html, evaluated.finalUrl, originInfo.domain),
-        originInfo.domain,
-        beerName
-      ).slice(0, 12);
+      const links = prioritizeUrls(pageLinks, originInfo.domain, beerName).slice(0, 12);
       for (const link of links) {
         if (seen.has(link)) continue;
         seen.add(link);
@@ -1004,14 +1289,50 @@ export async function discoverOfficialBeerProductPage(
         beer: beerName,
         pagesFetched: budget.pagesFetched
       });
+      const staticStatus =
+        budget.pagesFetched <= 2 ? "unsupported_static_site" : "not_found";
+      const browserResult = await tryOfficialBeerBrowserFallback({
+        input: { ...input, beerName, breweryName },
+        domain: originInfo.domain,
+        origin: originInfo.origin,
+        beerName,
+        breweryName,
+        pagesFetched: budget.pagesFetched,
+        hintUrls,
+        jsShellEvidence: jsShellEvidence || staticStatus === "unsupported_static_site",
+        staticStatus,
+        deps
+      });
+      if (browserResult) {
+        if (browserResult.status === "matched") {
+          discoveryCache.set(key, {
+            result: browserResult,
+            expiresAt: now + POSITIVE_CACHE_TTL_MS
+          });
+          return browserResult;
+        }
+        // Transient browser failures: do not cache long; return static status.
+        if (browserResult.reason === "browser_transient_failure") {
+          return {
+            ...browserResult,
+            status: staticStatus,
+            reason: staticStatus
+          };
+        }
+        discoveryCache.set(key, {
+          result: browserResult,
+          expiresAt: now + NOT_FOUND_CACHE_TTL_MS
+        });
+        return browserResult;
+      }
       const result: OfficialBeerDiscoveryResult = {
-        status: budget.pagesFetched <= 2 ? "unsupported_static_site" : "not_found",
+        status: staticStatus,
         match: "none",
         productPageUrl: null,
         registeredDomain: originInfo.domain,
         fields: emptyFields(),
         pagesFetched: budget.pagesFetched,
-        reason: budget.pagesFetched <= 2 ? "unsupported_static_site" : "no_strong_match"
+        reason: staticStatus === "unsupported_static_site" ? "unsupported_static_site" : "no_strong_match"
       };
       discoveryCache.set(key, { result, expiresAt: now + NOT_FOUND_CACHE_TTL_MS });
       return result;
