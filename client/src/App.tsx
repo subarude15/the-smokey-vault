@@ -1830,9 +1830,9 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
             {module.id === "brews" && parseList(item.hops).slice(0,3).map((value) => <span key={`hop-${value}`}>{value}</span>)}
             {module.id === "brews" && parseList(item.flavors).slice(0,3).map((value) => <span key={`flavor-${value}`}>{value}</span>)}
             {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
-            {item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
-            {module.id === "spirits" ? <span>{spiritStockLabel(item.stock_count)}</span> : null}
-            {module.id === "packaged_beer" ? <span>{packagedStockLabel(item.count, item.vessel)}</span> : item.count != null ? <span>{item.count} packaged</span> : null}
+            {item.bottle_count != null && module.id !== "packaged_beer" ? <span className="stock-chip">{item.bottle_count} bottles</span> : null}
+            {module.id === "spirits" ? <span className="stock-chip">{spiritStockLabel(item.stock_count)}</span> : null}
+            {module.id === "packaged_beer" ? <span className="stock-chip">{packagedStockLabel(item.count, item.vessel)}</span> : item.count != null ? <span className="stock-chip">{item.count} packaged</span> : null}
             {item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
