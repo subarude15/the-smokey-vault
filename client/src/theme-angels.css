@@ -1,0 +1,878 @@
+/* =============================================================================
+   ANGEL'S SHARE — theme layer for The Smokey Vault
+   -----------------------------------------------------------------------------
+   Concept: the basement at 11pm, read on one thumb.
+   A single warm lamp over charred oak. Names are set in a soft label serif
+   (Fraunces), every fact is set in mono (IBM Plex Mono), and every number that
+   can run out gets a brass gauge — shown to guests, not just the keeper.
+
+   Rules of the house:
+   1. Nothing here leaks into another theme. Every selector is scoped to
+      html[data-theme="angels"] (guest layout also to [data-mode="guest"]).
+   2. Palette tokens live in `themePresets.angels` (App.tsx) because applyTheme()
+      writes them as inline styles. Anything below is a *derived* token.
+   3. 44px+ touch targets, 16px inputs (no iOS zoom-on-focus), thumb-first dock.
+   4. Two accents only: brass = available/actionable, ember = running short.
+      Red is reserved for destructive. No traffic-light palettes.
+   5. Motion is a dimmer switch, not a light show; prefers-reduced-motion kills it.
+
+   Registered surfaces this file re-skins: chrome (topbar/dock/drawer/more-sheet),
+   the guest Tonight board, inventory + recipe cards, gauges, chips/filters,
+   forms/modals, the unlock pad, and every small label in the app.
+   ============================================================================= */
+
+/* ---------------------------------------------------------------- 1. tokens */
+html[data-theme="angels"]{
+  --display:"Fraunces","Playfair Display",Georgia,serif;
+  --body:"Instrument Sans","Outfit",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --brass:#c6a15b;
+  --brass-lit:#e9cf95;
+  --brass-deep:#7d6023;
+  --ember:#c9713a;
+  --char:#0c0d0b;
+
+  --radius:12px;
+  --radius-sm:9px;
+  --radius-lg:20px;
+  --radius-pill:999px;
+
+  --rule:color-mix(in srgb,var(--line) 72%,var(--brass) 28%);
+  --hair:color-mix(in srgb,var(--line) 82%,transparent);
+  --plate:linear-gradient(180deg,color-mix(in srgb,#fff 4.5%,transparent),transparent 38%),var(--surface);
+  --plate-lit:linear-gradient(180deg,color-mix(in srgb,var(--brass) 9%,transparent),transparent 44%),var(--surface);
+  --edge:inset 0 1px 0 color-mix(in srgb,#fff 6%,transparent);
+  --lift:0 16px 34px -24px #000;
+  --chrome-h:72px;
+  color-scheme:dark;
+}
+
+/* Settings swatch (visible from every theme, so it is not scoped to this one). */
+.theme-swatch.angels{background:linear-gradient(135deg,#191b19 50%,#c6a15b 50%)}
+
+/* ------------------------------------------------------- 2. type foundation */
+html[data-theme="angels"] body{
+  font-family:var(--body);
+  font-size:15.5px;
+  letter-spacing:.004em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+/* Display voice: bottle-label serif, softened and slightly wonky. */
+html[data-theme="angels"] :is(
+  .brand strong,.hero-wordmark,.hero-greeting,.page-title h1,.section-heading h2,
+  .stat-card span,.card-content h3,.inventory-card .card-content h3,.recipe-card h3,
+  .favorite-card strong,.ticket-card h3,.overview-tap strong,.overview-brew strong,.overview-low strong,
+  .feature-card h2,.modal-header h2,.recipe-modal .modal-header h2,.unlock-modal h2,.scan-session-header h2,
+  .generated-heading h2,.legend-banner h2,.bartender-body h2,.crew-body h3,.lab-body h3,.wanted-card h2,
+  .event-card h3,.merch-card h3,.next-main strong,.empty h3,.settings-card h3,.scan-landing-single h3,
+  .mixologist h2,.patron-row strong,.topbar-title,.app-error-boundary h2
+){
+  font-family:var(--display);
+  font-weight:500;
+  font-variation-settings:"SOFT" 45,"WONK" 1;
+  letter-spacing:-.015em;
+  line-height:1.1;
+  text-wrap:balance;
+}
+/* Data voice: mono for anything you read as a fact, not as prose. */
+html[data-theme="angels"] :is(
+  .eyebrow,.nav-label,.guest-badge,.status,.season-tag,.fav-tag,.more-sheet-kicker,.stock-chip,.tap-badge,
+  .meta span,.stat-card small,.stat-hint,.overview-tap small,.overview-brew small,.overview-low small,
+  .fill small,.recipe-card p,.recipe-card small,.recipe-details span,.recipe-details strong,.quota-stat span,
+  .merch-price,.vote-score,.next-vote small,.message-meta,.patron-visits,.lab-stage-days,.gallery-stamp,
+  .enrichment-health-name,.field-hint,.scanner-status,.scan-session-meta
+){
+  font-family:var(--mono);
+  font-variant-numeric:tabular-nums;
+}
+html[data-theme="angels"] .eyebrow{
+  font-size:10px;
+  letter-spacing:.17em;
+  font-weight:500;
+  color:color-mix(in srgb,var(--muted) 70%,var(--brass));
+}
+/* Italics only where emphasis carries meaning: the greeting, and competing
+   values inside the enrichment review panel. */
+html[data-theme="angels"] :is(.hero-greeting em,.enrichment-conflict em,.enrichment-note-house em){color:var(--brass-lit);font-style:italic}
+html[data-theme="angels"] ::selection{background:color-mix(in srgb,var(--brass) 30%,var(--char));color:var(--text)}
+html[data-theme="angels"] :is(a,button,input,select,textarea):focus-visible{
+  outline:2px solid var(--brass-lit);
+  outline-offset:2px;
+}
+html[data-theme="angels"] *{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+html[data-theme="angels"] ::-webkit-scrollbar{width:8px;height:8px}
+html[data-theme="angels"] ::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+html[data-theme="angels"] ::-webkit-scrollbar-track{background:transparent}
+
+/* -------------------------------------------------------------- 3. the room */
+html[data-theme="angels"] body{
+  background:
+    radial-gradient(126% 54% at 50% -14%, color-mix(in srgb,var(--brass) 13%,transparent), transparent 62%),
+    radial-gradient(74% 42% at 92% 4%, color-mix(in srgb,var(--brass-lit) 6%,transparent), transparent 58%),
+    radial-gradient(66% 40% at 2% 98%, color-mix(in srgb,var(--ember) 8%,transparent), transparent 60%),
+    var(--bg);
+  background-attachment:fixed;
+}
+/* Warm grain instead of the default neutral noise, kept barely there. */
+html[data-theme="angels"] body::after{
+  opacity:.045;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0.35'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:170px 170px;
+}
+/* The sidebar is the oak wall; the main column is the lit bar top. */
+html[data-theme="angels"] .app-shell{background:none}
+html[data-theme="angels"] .sidebar{
+  background:
+    linear-gradient(180deg,color-mix(in srgb,#fff 3%,transparent),transparent 26%),
+    linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--surface) 88%,var(--char)));
+  border-right:1px solid var(--rule);
+}
+html[data-theme="angels"] .brand{padding-bottom:22px}
+html[data-theme="angels"] .brand-mark{
+  transform:none;
+  border-radius:50%;
+  border-color:color-mix(in srgb,var(--brass) 55%,transparent);
+  background:radial-gradient(circle at 34% 28%, color-mix(in srgb,var(--brass) 28%,transparent), transparent 62%);
+  box-shadow:var(--edge),inset 0 0 0 1px color-mix(in srgb,var(--brass) 22%,transparent);
+}
+html[data-theme="angels"] .brand-mark svg{transform:none;color:var(--brass-lit)}
+html[data-theme="angels"] .brand strong{font-size:16px;line-height:1.15}
+html[data-theme="angels"] .brand span,html[data-theme="angels"] .nav-label{
+  color:color-mix(in srgb,var(--muted) 76%,var(--brass));
+  letter-spacing:.2em;
+}
+html[data-theme="angels"] .sidebar nav button{
+  border:1px solid transparent;
+  border-radius:var(--radius-sm);
+  padding:12px;
+  min-height:44px;
+  font-size:14.5px;
+}
+html[data-theme="angels"] .sidebar nav button:hover,
+html[data-theme="angels"] .sidebar nav button.active{
+  background:linear-gradient(90deg,color-mix(in srgb,var(--brass) 15%,transparent),transparent 78%);
+  border-color:color-mix(in srgb,var(--brass) 16%,transparent);
+}
+html[data-theme="angels"] .sidebar nav button.active{
+  box-shadow:inset 2px 0 0 var(--brass);
+  color:var(--brass-lit);
+}
+html[data-theme="angels"] .sidebar-footer button{min-height:48px}
+
+/* ------------------------------------------------------- 4. chrome & topbar */
+html[data-theme="angels"] .topbar{
+  height:var(--chrome-h);
+  border-bottom:1px solid var(--rule);
+  background:color-mix(in srgb,var(--bg) 80%,transparent);
+  backdrop-filter:blur(22px) saturate(1.25);
+  box-shadow:0 1px 0 color-mix(in srgb,#fff 5%,transparent);
+}
+html[data-theme="angels"] .topbar-title{
+  display:block;
+  position:relative;
+  padding-left:17px;
+  font-size:16px;
+  max-width:min(46vw,260px);
+  color:color-mix(in srgb,var(--text) 92%,var(--brass-lit));
+}
+/* The lit dot: the bar is open. Cheap, characterful, and it also reads as status. */
+html[data-theme="angels"] .topbar-title::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:50%;
+  translate:0 -50%;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--brass-lit);
+  box-shadow:0 0 12px color-mix(in srgb,var(--brass) 70%,transparent);
+  animation:angels-lamp 3.6s ease-in-out infinite;
+}
+@keyframes angels-lamp{0%,100%{opacity:.95}50%{opacity:.42}}
+html[data-theme="angels"] .icon-button{
+  border-radius:var(--radius-sm);
+  border-color:var(--line);
+  background:color-mix(in srgb,var(--surface) 90%,var(--char));
+}
+html[data-theme="angels"] .icon-button:hover{border-color:color-mix(in srgb,var(--brass) 55%,transparent);color:var(--brass-lit)}
+html[data-theme="angels"] :is(.primary,.secondary,.scan-button,.more-topbar,.numpad-enter){
+  min-height:44px;
+  padding:0 16px;
+  border-radius:var(--radius-sm);
+  border-color:color-mix(in srgb,var(--brass) 22%,var(--line));
+  background:color-mix(in srgb,var(--surface) 94%,var(--char));
+  color:color-mix(in srgb,var(--text) 84%,var(--brass-lit));
+  font-family:var(--mono);
+  font-size:11.5px;
+  font-weight:600;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+}
+html[data-theme="angels"] .primary{
+  border-color:transparent;
+  background:linear-gradient(180deg,var(--brass-lit),var(--brass) 52%,color-mix(in srgb,var(--brass) 86%,#000));
+  color:#181508;
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),0 10px 24px -12px color-mix(in srgb,var(--brass) 60%,transparent);
+}
+html[data-theme="angels"] .primary:hover{
+  background:linear-gradient(180deg,color-mix(in srgb,var(--brass-lit) 88%,#fff),var(--brass-lit) 55%,var(--brass));
+}
+html[data-theme="angels"] .secondary:hover,html[data-theme="angels"] .scan-button:hover{
+  border-color:color-mix(in srgb,var(--brass) 52%,transparent);
+  background:var(--plate-lit);
+  color:var(--brass-lit);
+}
+html[data-theme="angels"] :is(.primary,.secondary,.scan-button,.stat-card,.inventory-card,.recipe-card,.favorite-card,.overview-tap,.icon-button,.chip,.season-filters button):active{
+  transform:translateY(1px) scale(.99);
+}
+html[data-theme="angels"] .primary:disabled{opacity:.42;box-shadow:none}
+html[data-theme="angels"] .backup-banner{
+  border-bottom-color:color-mix(in srgb,var(--ember) 48%,var(--line));
+  background:color-mix(in srgb,var(--ember) 13%,var(--surface));
+}
+html[data-theme="angels"] .backup-banner svg,html[data-theme="angels"] .backup-banner strong{color:var(--brass-lit)}
+html[data-theme="angels"] .guest-badge{
+  border-radius:var(--radius-pill);
+  border-color:color-mix(in srgb,var(--brass) 34%,var(--line));
+  color:color-mix(in srgb,var(--muted) 70%,var(--brass-lit));
+  background:color-mix(in srgb,var(--brass) 8%,transparent);
+  letter-spacing:.14em;
+}
+html[data-theme="angels"] .nav-hint-banner{
+  border:1px solid var(--rule);
+  border-radius:var(--radius);
+  background:var(--plate-lit);
+}
+
+/* ------------------------------------------------------- 5. the dock (rail) */
+@media(max-width:1050px) and (orientation:portrait){
+  html[data-theme="angels"] .mobile-bottom-nav{
+    left:8px;
+    right:8px;
+    bottom:calc(8px + env(safe-area-inset-bottom));
+    padding:5px 5px;
+    gap:2px;
+    border:1px solid var(--rule);
+    border-radius:var(--radius-lg);
+    background:color-mix(in srgb,var(--surface) 86%,transparent);
+    backdrop-filter:blur(26px) saturate(1.35);
+    box-shadow:var(--edge),0 -10px 34px #0008,0 22px 44px -30px #000;
+  }
+  html[data-theme="angels"] .mobile-bottom-nav button{
+    min-height:56px;
+    border-radius:15px;
+    gap:5px;
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:.09em;
+    text-transform:uppercase;
+    color:color-mix(in srgb,var(--muted) 84%,transparent);
+    transition:color .2s var(--ease-out),background .2s var(--ease-out),transform .18s var(--ease-spring);
+  }
+  html[data-theme="angels"] .mobile-bottom-nav button svg{transition:translate .2s var(--ease-spring)}
+  html[data-theme="angels"] .mobile-bottom-nav button:active svg{translate:0 -2px}
+  html[data-theme="angels"] .mobile-bottom-nav button.active{
+    color:var(--brass-lit);
+    background:color-mix(in srgb,var(--brass) 12%,transparent);
+    box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--brass) 22%,transparent);
+  }
+  html[data-theme="angels"] .mobile-bottom-nav button.active::after{
+    content:"";
+    position:absolute;
+    bottom:6px;
+    left:50%;
+    translate:-50% 0;
+    width:15px;
+    height:2px;
+    border-radius:2px;
+    background:var(--brass);
+    box-shadow:0 0 10px color-mix(in srgb,var(--brass) 80%,transparent);
+  }
+  html[data-theme="angels"] .mobile-nav-badge{background:var(--ember);color:#1a1109}
+  html[data-theme="angels"] .has-mobile-nav .page{padding-bottom:calc(104px + env(safe-area-inset-bottom))}
+  html[data-theme="angels"] .more-sheet-overlay{bottom:calc(74px + env(safe-area-inset-bottom))}
+  html[data-theme="angels"] .more-sheet{
+    bottom:calc(74px + env(safe-area-inset-bottom));
+    padding:10px 14px 14px;
+    border:1px solid var(--rule);
+    border-bottom:0;
+    border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+    background:linear-gradient(180deg,var(--surface-2),var(--surface) 46%);
+    box-shadow:0 -22px 60px #000b;
+  }
+  html[data-theme="angels"] .more-sheet-handle{background:color-mix(in srgb,var(--brass) 45%,var(--line));height:3px;width:42px}
+  html[data-theme="angels"] .more-sheet-kicker{color:color-mix(in srgb,var(--muted) 72%,var(--brass))}
+  html[data-theme="angels"] .more-sheet-item{
+    min-height:50px;
+    border:1px solid transparent;
+    border-bottom-color:var(--hair);
+    border-radius:var(--radius-sm);
+    font-size:15px;
+  }
+  html[data-theme="angels"] .more-sheet-item.active{
+    background:linear-gradient(90deg,color-mix(in srgb,var(--brass) 16%,transparent),transparent 80%);
+    border-color:color-mix(in srgb,var(--brass) 24%,transparent);
+    color:var(--brass-lit);
+  }
+  html[data-theme="angels"] .more-sheet-lock{
+    min-height:54px;
+    border-color:color-mix(in srgb,var(--brass) 30%,var(--line));
+    background:var(--plate-lit);
+    border-radius:var(--radius);
+  }
+}
+
+/* ---------------------------------------------------------- 6. the Tonight board */
+html[data-theme="angels"] .page{padding-top:26px}
+html[data-theme="angels"] .hero{
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:"copy orbit" "lede lede";
+  align-items:center;
+  gap:8px 16px;
+  min-height:0;
+  margin:0 0 26px;
+  padding:2px 0 20px;
+  border-bottom:1px solid var(--rule);
+  animation:angels-rise .45s var(--ease-out) both;
+}
+html[data-theme="angels"] .hero-wordmark{font-size:clamp(29px,7.6vw,46px);margin:5px 0 3px}
+html[data-theme="angels"] .hero-greeting{font-size:14.5px;margin:0;max-width:34ch}
+html[data-theme="angels"] .hero-lede{font-size:13.5px;line-height:1.6;margin-top:10px;max-width:58ch;color:color-mix(in srgb,var(--muted) 82%,var(--text))}
+html[data-theme="angels"] .hero-orbit{
+  width:76px;height:76px;
+  border-color:color-mix(in srgb,var(--brass) 42%,var(--line));
+  background:radial-gradient(circle at 38% 32%, color-mix(in srgb,var(--brass-lit) 22%,transparent), transparent 58%),var(--char);
+  box-shadow:var(--edge),0 10px 26px -14px color-mix(in srgb,var(--brass) 60%,transparent);
+}
+html[data-theme="angels"] .hero-orbit:before{inset:7px;border-color:color-mix(in srgb,var(--brass) 20%,transparent)}
+html[data-theme="angels"] .hero-orbit:after{inset:17px;border-color:color-mix(in srgb,var(--brass) 34%,transparent)}
+html[data-theme="angels"] .hero-orbit svg{width:30px;height:30px;opacity:.16}
+html[data-theme="angels"] .hero-orbit span{font-family:var(--display);font-size:21px;font-variation-settings:"SOFT" 60,"WONK" 0}
+html[data-theme="angels"] .hero-orbit small{font-family:var(--mono);font-size:7.5px;letter-spacing:.14em}
+html[data-theme="angels"] .section-heading{
+  gap:14px;
+  margin-bottom:14px;
+  padding-bottom:9px;
+  border-bottom:1px solid var(--rule);
+  align-items:baseline;
+}
+html[data-theme="angels"] .section-heading h2{font-size:clamp(20px,5.4vw,26px);margin:5px 0 0}
+html[data-theme="angels"] .overview-board,html[data-theme="angels"] .favorite-board,html[data-theme="angels"] .ticket-board{margin-bottom:34px}
+html[data-theme="angels"] .page-title{margin-bottom:22px}
+html[data-theme="angels"] .page-title h1{font-size:clamp(30px,7vw,44px);margin:6px 0 8px}
+html[data-theme="angels"] .page-title p{font-size:14px;line-height:1.6;color:color-mix(in srgb,var(--muted) 84%,var(--text))}
+html[data-theme="angels"] .stat-card{
+  min-height:124px;
+  padding:14px 15px;
+  gap:0;
+  background:var(--plate);
+}
+html[data-theme="angels"] .stat-card>svg:first-child{width:19px;color:color-mix(in srgb,var(--brass) 76%,var(--text))}
+html[data-theme="angels"] .stat-card span{font-size:31px;margin-top:14px;letter-spacing:-.03em}
+html[data-theme="angels"] .stat-card small{display:block;margin-top:2px;font-size:9px;letter-spacing:.14em;color:color-mix(in srgb,var(--muted) 76%,var(--brass))}
+html[data-theme="angels"] .stat-hint{font-size:11px;font-family:var(--body);letter-spacing:0;color:var(--muted)}
+html[data-theme="angels"] .stat-card>svg:last-child{top:15px;right:13px;opacity:.55}
+html[data-theme="angels"] .feature-grid,html[data-theme="angels"] .feature-card{border-radius:var(--radius)}
+
+/* The guest call-to-action is the loudest thing on the screen, because it is the
+   answer to "so what can I drink?" — brass cap for the primary, ghost for the rest. */
+html[data-theme="angels"] .tonight-cta{margin:-2px 0 26px;gap:8px}
+html[data-theme="angels"] .tonight-cta>button{
+  min-height:56px;
+  border-radius:var(--radius);
+  font-size:11.5px;
+  letter-spacing:.13em;
+  box-shadow:var(--edge),var(--lift);
+}
+html[data-theme="angels"] .tonight-cta .primary{
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),0 18px 34px -20px color-mix(in srgb,var(--brass) 80%,transparent);
+}
+html[data-theme="angels"] .tonight-cta .primary svg{color:#181508}
+/* Guest-only layout: the shelf becomes something you swipe, not something you read. */
+html[data-theme="angels"] [data-page="dashboard"][data-mode="guest"] .page{padding-top:16px}
+html[data-theme="angels"] [data-mode="guest"] .stat-grid.guest-stats{
+  display:flex;
+  gap:10px;
+  margin:0 -16px;
+  padding:2px 16px 12px;
+  overflow-x:auto;
+  overscroll-behavior-x:contain;
+  scroll-snap-type:x proximity;
+  scrollbar-width:none;
+}
+html[data-theme="angels"] [data-mode="guest"] .stat-grid.guest-stats::-webkit-scrollbar{display:none}
+html[data-theme="angels"] [data-mode="guest"] .stat-grid.guest-stats .stat-card{
+  flex:0 0 auto;
+  width:min(52vw,208px);
+  scroll-snap-align:start;
+}
+html[data-theme="angels"] [data-mode="guest"] .hero-lede{
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+html[data-theme="angels"] [data-mode="guest"] .section-heading .secondary{min-height:38px;padding:0 12px;font-size:10px}
+
+/* ---------------------------------------------------------------- 7. gauges */
+/* The signature: a brass dipstick in a notched trough. One component for a
+   bottle's fill, a keg's remaining liters, and the tap cards on Tonight.
+   Range scales (wine sweetness, brew status) keep their own gradients — those
+   read as a spectrum, not a level — so they only pick up marker + plate work. */
+html[data-theme="angels"] :is(.fill,.tap-fill,.overview-tap-fill){
+  position:relative;
+  height:8px;
+  border-radius:3px;
+  background:
+    repeating-linear-gradient(90deg,transparent 0 calc(25% - 1px),color-mix(in srgb,var(--line) 88%,transparent) calc(25% - 1px) 25%),
+    var(--char);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--line) 76%,transparent),inset 0 1px 2px #000a;
+}
+html[data-theme="angels"] :is(.fill>span,.tap-fill>span,.overview-tap-fill>span){
+  display:block;
+  height:100%;
+  border-radius:3px;
+  background:linear-gradient(90deg,var(--brass-deep),var(--brass) 58%,var(--brass-lit));
+  box-shadow:0 0 14px -2px color-mix(in srgb,var(--brass) 55%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 40%,transparent);
+  transition:width .6s var(--ease-out);
+}
+html[data-theme="angels"] .fill{margin-top:14px}
+html[data-theme="angels"] .fill small{
+  display:block;
+  margin-top:6px;
+  font-size:9px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:color-mix(in srgb,var(--muted) 72%,var(--brass));
+}
+html[data-theme="angels"] .overview-tap-fill{margin-top:auto;height:7px}
+html[data-theme="angels"] .wine-scale-track{box-shadow:inset 0 1px 3px #0008,0 0 0 1px color-mix(in srgb,var(--line) 70%,transparent)}
+html[data-theme="angels"] .wine-scale-marker{
+  background:var(--brass-lit);
+  border-color:var(--char);
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--brass) 60%,transparent),0 0 14px color-mix(in srgb,var(--brass) 55%,transparent);
+}
+html[data-theme="angels"] .wine-scale-stop{
+  border-radius:var(--radius-sm);
+  background:color-mix(in srgb,var(--surface) 90%,var(--char));
+  font-family:var(--mono);
+  font-size:9.5px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+html[data-theme="angels"] .wine-scale-stop.active{
+  border-color:color-mix(in srgb,var(--brass) 46%,transparent);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--brass) 26%,var(--surface)),color-mix(in srgb,var(--brass) 12%,var(--surface)));
+  color:var(--brass-lit);
+}
+html[data-theme="angels"] .brew-pipeline span.done{background:color-mix(in srgb,var(--brass) 72%,transparent)}
+html[data-theme="angels"] .brew-pipeline span.current{background:var(--brass-lit);box-shadow:0 0 10px color-mix(in srgb,var(--brass) 60%,transparent)}
+html[data-theme="angels"] .substitute-fill{color:var(--brass-lit);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+html[data-theme="angels"] .substitute-fill.low{color:#eab88e}
+
+/* ------------------------------------------------------ 8. tap / brew / pour */
+html[data-theme="angels"] .overview-taps{gap:10px}
+html[data-theme="angels"] .overview-tap,
+html[data-theme="angels"] .overview-brew,
+html[data-theme="angels"] .overview-low{
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--plate);
+  box-shadow:var(--edge);
+  padding:13px 14px;
+  min-height:150px;
+  gap:5px;
+  transition:transform .2s var(--ease-spring),border-color .2s var(--ease-out),box-shadow .24s var(--ease-out);
+}
+html[data-theme="angels"] .overview-tap .eyebrow{letter-spacing:.16em;color:color-mix(in srgb,var(--muted) 60%,var(--brass))}
+html[data-theme="angels"] .overview-tap strong{font-size:17px;text-transform:none;white-space:normal;line-height:1.15}
+html[data-theme="angels"] .overview-tap small,.overview-brew small{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase}
+html[data-theme="angels"] .overview-tap.empty{
+  min-height:96px;
+  opacity:.72;
+  border-style:dashed;
+  border-color:color-mix(in srgb,var(--line) 80%,transparent);
+  background:none;
+  box-shadow:none;
+}
+html[data-theme="angels"] .overview-tap.empty strong{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+html[data-theme="angels"] :is(.overview-tap,.overview-brew,.overview-low,.favorite-card,.ticket-card,.stat-card,.inventory-card,.recipe-card):hover{
+  border-color:color-mix(in srgb,var(--brass) 46%,var(--line));
+  box-shadow:var(--edge),var(--lift);
+}
+html[data-theme="angels"] .ticket-card h3{font-size:18px;margin:2px 0 0}
+html[data-theme="angels"] .overview-brew strong,.overview-low strong{font-size:16px}
+
+/* ------------------------------------------------------- 9. cards: the label */
+html[data-theme="angels"] :is(
+  .inventory-card,.recipe-card,.find-drink-card,.favorite-card,.ticket-card,.feature-card,.settings-card,
+  .event-card,.merch-card,.lab-card,.crew-card,.patron-row,.next-row,.next-add,.wanted-card,.tip-jar-card,
+  .bartender-card,.review-card,.rsvp-card,.scan-landing-single,.enrichment-note-card,.gallery-tile,.mixologist,.scan-session-result
+){
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--plate);
+  box-shadow:var(--edge),var(--lift);
+}
+html[data-theme="angels"] .inventory-card{
+  padding:14px 15px;
+  gap:14px;
+  border-left:2px solid color-mix(in srgb,var(--brass) 38%,var(--line));
+  transition:transform .2s var(--ease-spring),border-color .2s var(--ease-out),box-shadow .24s var(--ease-out);
+}
+html[data-theme="angels"] .inventory-card.out-of-stock,
+html[data-theme="angels"] .inventory-card.blocked-bottle{border-left-color:color-mix(in srgb,var(--ember) 60%,transparent)}
+html[data-theme="angels"] .inventory-card.out-of-stock{opacity:.72}
+html[data-theme="angels"] .inventory-card .card-icon{
+  width:64px;height:88px;
+  padding:6px;
+  border:1px solid var(--hair);
+  border-radius:10px;
+  background:radial-gradient(circle at 50% 12%, color-mix(in srgb,var(--brass) 12%,transparent), transparent 62%),var(--char);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 7%,transparent);
+}
+html[data-theme="angels"] .inventory-card .card-icon svg{opacity:.5;color:var(--brass)}
+html[data-theme="angels"] .inventory-card .card-content h3{font-size:18.5px;margin:3px 0 7px;letter-spacing:-.018em}
+html[data-theme="angels"] .inventory-card .eyebrow{font-size:9px;letter-spacing:.16em}
+html[data-theme="angels"] .meta{gap:5px;row-gap:5px}
+html[data-theme="angels"] .meta span{
+  font-size:9.5px;
+  letter-spacing:.05em;
+  padding:3px 7px;
+  border-radius:var(--radius-pill);
+  border-color:var(--hair);
+  background:color-mix(in srgb,var(--char) 45%,transparent);
+  color:color-mix(in srgb,var(--muted) 88%,var(--text));
+}
+html[data-theme="angels"] .inventory-card .meta span.stock-chip{
+  color:var(--brass-lit);
+  border-color:color-mix(in srgb,var(--brass) 34%,transparent);
+  background:color-mix(in srgb,var(--brass) 10%,transparent);
+}
+html[data-theme="angels"] .blocked-ribbon{
+  border-radius:var(--radius-pill);
+  background:color-mix(in srgb,var(--ember) 22%,var(--surface));
+  border-color:color-mix(in srgb,var(--ember) 50%,transparent);
+  color:#f0c6a8;
+  font-family:var(--mono);
+  letter-spacing:.1em;
+}
+html[data-theme="angels"] .card-actions{opacity:1}
+html[data-theme="angels"] .card-actions .icon-button{width:34px;height:34px}
+
+/* --------------------------------------------------- 10. finding a drink */
+html[data-theme="angels"] .toolbar{align-items:center;gap:10px;margin-bottom:12px}
+html[data-theme="angels"] .search{
+  height:50px;
+  max-width:none;
+  padding:0 15px;
+  border-radius:var(--radius-pill);
+  border-color:color-mix(in srgb,var(--line) 88%,var(--brass));
+  background:color-mix(in srgb,var(--char) 55%,var(--surface));
+  transition:border-color .2s var(--ease-out),box-shadow .2s var(--ease-out);
+}
+html[data-theme="angels"] .search svg{width:18px;color:color-mix(in srgb,var(--brass) 80%,var(--text))}
+html[data-theme="angels"] .search input{font-size:16px;font-family:var(--body)}
+html[data-theme="angels"] .search input::placeholder{
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:color-mix(in srgb,var(--muted) 72%,transparent);
+}
+html[data-theme="angels"] .search:focus-within{
+  border-color:color-mix(in srgb,var(--brass) 62%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brass) 12%,transparent);
+}
+/* Stays under the thumb while the list scrolls: the filter row is the tool. */
+html[data-theme="angels"] [data-mode="guest"] :is(.cocktail-toolbar,.cocktail-search,.toolbar){
+  position:sticky;
+  top:calc(var(--chrome-h) - 1px);
+  z-index:14;
+  padding:9px 12px;
+  margin:0 -12px 10px;
+  border-radius:var(--radius);
+  background:color-mix(in srgb,var(--bg) 90%,transparent);
+  backdrop-filter:blur(16px) saturate(1.2);
+}
+html[data-theme="angels"] .segmented{
+  padding:3px;
+  border-radius:var(--radius-pill);
+  border:1px solid var(--hair);
+  background:color-mix(in srgb,var(--char) 60%,var(--surface-2));
+}
+html[data-theme="angels"] .segmented button{
+  min-height:42px;
+  border-radius:var(--radius-pill);
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+html[data-theme="angels"] .segmented button.active{
+  background:linear-gradient(180deg,var(--brass-lit),var(--brass));
+  color:#181508;
+  box-shadow:0 6px 16px -8px color-mix(in srgb,var(--brass) 70%,transparent);
+}
+html[data-theme="angels"] :is(.filter-row select,.chip,.season-filters button,.restock-stops .chip){
+  min-height:42px;
+  border-radius:var(--radius-pill);
+  border-color:var(--line);
+  background:color-mix(in srgb,var(--surface) 92%,var(--char));
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:color-mix(in srgb,var(--muted) 88%,var(--text));
+}
+html[data-theme="angels"] .filter-row{gap:7px;margin-bottom:16px}
+html[data-theme="angels"] .filter-row select{min-width:0;flex:1 1 auto;padding:0 24px 0 12px}
+html[data-theme="angels"] :is(.chip.active,.chip.static,.season-filters button.active){
+  border-color:color-mix(in srgb,var(--brass) 40%,transparent);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--brass) 26%,var(--surface)),color-mix(in srgb,var(--brass) 12%,var(--surface)));
+  color:var(--brass-lit);
+}
+html[data-theme="angels"] .surprise-button{
+  border-color:transparent;
+  background:linear-gradient(180deg,var(--brass-lit),var(--brass) 52%,color-mix(in srgb,var(--brass) 86%,#000));
+  color:#181508;
+  min-height:48px;
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 42%,transparent),0 12px 26px -14px color-mix(in srgb,var(--brass) 70%,transparent);
+}
+html[data-theme="angels"] .recipe-grid{gap:12px}
+html[data-theme="angels"] .recipe-card{
+  padding:16px;
+  border-radius:var(--radius);
+  background:
+    radial-gradient(120% 60% at 0% 0%, color-mix(in srgb,var(--brass) 10%,transparent), transparent 60%),
+    var(--surface);
+  transition:transform .2s var(--ease-spring),border-color .2s var(--ease-out),box-shadow .24s var(--ease-out);
+}
+html[data-theme="angels"] .recipe-card h3{font-size:21px;margin:11px 0 4px}
+html[data-theme="angels"] .recipe-card p{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 10px}
+html[data-theme="angels"] .recipe-thumb{border-radius:10px;border:1px solid var(--hair)}
+html[data-theme="angels"] .status{
+  border-radius:var(--radius-pill);
+  padding:4px 9px;
+  font-size:9px;
+  letter-spacing:.11em;
+  border:1px solid transparent;
+}
+html[data-theme="angels"] .status.ready{background:color-mix(in srgb,var(--brass) 18%,transparent);color:var(--brass-lit);border-color:color-mix(in srgb,var(--brass) 34%,transparent)}
+html[data-theme="angels"] .status.almost{background:color-mix(in srgb,var(--ember) 16%,transparent);color:#eab88e;border-color:color-mix(in srgb,var(--ember) 36%,transparent)}
+html[data-theme="angels"] .status.missing{background:transparent;color:var(--muted);border-color:var(--line);border-style:dashed}
+html[data-theme="angels"] :is(.fav-tag,.season-tag){font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:color-mix(in srgb,var(--muted) 70%,var(--brass))}
+/* Ingredient ledger: a filled dot means the shelf has it, a hollow one means it does not.
+   Color is never the only signal, so it survives color-blindness and bright sunlight. */
+html[data-theme="angels"] .ingredient-preview{list-style:none;padding-left:0;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.45}
+html[data-theme="angels"] .ingredient-preview li{
+  position:relative;
+  padding-left:19px;
+  color:var(--muted);
+}
+html[data-theme="angels"] .ingredient-preview li::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:.52em;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  border:1px solid color-mix(in srgb,var(--muted) 60%,transparent);
+}
+html[data-theme="angels"] .ingredient-preview li.have{color:color-mix(in srgb,var(--text) 92%,var(--brass-lit))}
+html[data-theme="angels"] .ingredient-list li{font-size:15px}
+html[data-theme="angels"] .ingredient-list .mark{width:auto;color:var(--brass-lit)}
+html[data-theme="angels"] .ingredient-list .substitute .mark{color:var(--brass)}
+html[data-theme="angels"] .ingredient-list .missing .mark{color:#e0a173}
+html[data-theme="angels"] .ingredient-list li.have>span:last-child{color:color-mix(in srgb,var(--text) 94%,var(--brass-lit))}
+html[data-theme="angels"] .ingredient-list li.missing>span:last-child{color:var(--muted)}
+html[data-theme="angels"] .ingredient-preview li.have::before{
+  background:var(--brass);
+  border-color:var(--brass-lit);
+  box-shadow:0 0 9px color-mix(in srgb,var(--brass) 55%,transparent);
+}
+html[data-theme="angels"] .ingredient-preview li.pantry::before{background:color-mix(in srgb,var(--muted) 55%,transparent);border-color:transparent}
+html[data-theme="angels"] .ingredient-preview li.missing::before{border-color:color-mix(in srgb,var(--ember) 75%,transparent)}
+html[data-theme="angels"] .ingredient-preview li.matched-bottle{
+  border-left:2px solid var(--brass);
+  padding-left:11px;
+  margin-left:-14px;
+}
+html[data-theme="angels"] .recipe-modal{
+  background:radial-gradient(120% 50% at 0% 0%, color-mix(in srgb,var(--brass) 14%,transparent), transparent 58%),var(--surface);
+  border-color:var(--rule);
+}
+html[data-theme="angels"] .recipe-details div{border-bottom-color:var(--hair)}
+html[data-theme="angels"] .recipe-details span{color:color-mix(in srgb,var(--muted) 66%,var(--brass));letter-spacing:.16em}
+html[data-theme="angels"] .recipe-details strong{font-size:13px}
+html[data-theme="angels"] .recipe-warning{border-color:color-mix(in srgb,var(--ember) 42%,transparent);background:color-mix(in srgb,var(--ember) 12%,transparent);color:#eab88e}
+
+/* ---------------------------------------------------- 11. modals, forms, PIN */
+html[data-theme="angels"] .modal-backdrop{background:color-mix(in srgb,var(--char) 76%,transparent);backdrop-filter:blur(10px) saturate(.9)}
+html[data-theme="angels"] .modal{
+  border:1px solid var(--rule);
+  border-radius:var(--radius-lg);
+  background:linear-gradient(180deg,color-mix(in srgb,#fff 3.5%,transparent),transparent 22%),var(--surface);
+  box-shadow:0 30px 90px #000c,inset 0 1px 0 color-mix(in srgb,#fff 7%,transparent);
+  padding:22px;
+}
+html[data-theme="angels"] .modal-header{margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--hair)}
+html[data-theme="angels"] .modal-header h2{font-size:26px}
+html[data-theme="angels"] :is(input,select,textarea){
+  min-height:46px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--line);
+  background:color-mix(in srgb,var(--char) 55%,var(--surface-2));
+  font-size:16px;
+  transition:border-color .18s var(--ease-out),box-shadow .18s var(--ease-out);
+}
+html[data-theme="angels"] textarea{font-size:15px;min-height:96px}
+html[data-theme="angels"] :is(input,select,textarea):focus{
+  border-color:color-mix(in srgb,var(--brass) 58%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brass) 12%,transparent);
+}
+html[data-theme="angels"] .form-grid label>span,html[data-theme="angels"] .settings-card label>span{
+  font-family:var(--mono);
+  font-size:9.5px;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:color-mix(in srgb,var(--muted) 76%,var(--brass));
+}
+html[data-theme="angels"] .unlock-modal{text-align:center}
+html[data-theme="angels"] .lock-seal{
+  border-color:color-mix(in srgb,var(--brass) 55%,transparent);
+  background:radial-gradient(circle at 40% 30%, color-mix(in srgb,var(--brass) 26%,transparent), transparent 62%);
+  color:var(--brass-lit);
+  box-shadow:0 0 40px -8px color-mix(in srgb,var(--brass) 45%,transparent),var(--edge);
+}
+html[data-theme="angels"] .numpad-btn{
+  min-height:62px;
+  border:1px solid var(--line);
+  border-radius:50%;
+  background:radial-gradient(circle at 50% 24%, color-mix(in srgb,#fff 8%,transparent), transparent 58%),var(--surface);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 8%,transparent),0 8px 18px -12px #000;
+  font-family:var(--display);
+  font-size:24px;
+  font-variation-settings:"SOFT" 60,"WONK" 0;
+}
+html[data-theme="angels"] .numpad-btn:active{
+  border-color:var(--brass);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--brass) 26%,var(--surface)),var(--surface));
+  transform:scale(.96);
+}
+html[data-theme="angels"] .pin-dot{width:11px;height:11px;background:color-mix(in srgb,var(--line) 82%,transparent);border:0}
+html[data-theme="angels"] .pin-dot.filled{background:var(--brass-lit);box-shadow:0 0 12px color-mix(in srgb,var(--brass) 70%,transparent)}
+html[data-theme="angels"] .kiosk-lock{
+  border:1px solid color-mix(in srgb,var(--brass) 30%,var(--line));
+  border-radius:var(--radius-sm);
+  min-height:40px;
+  padding:0 12px;
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+/* --------------------------------------------------- 12. keeper-facing detail */
+html[data-theme="angels"] .bottle-detail-hero{border-bottom:1px solid var(--rule);padding-bottom:20px}
+html[data-theme="angels"] .bottle-detail-image{border:1px solid var(--hair);border-radius:var(--radius);background:var(--char)}
+html[data-theme="angels"] .bottle-detail-grid>div{border-bottom-color:var(--hair)}
+html[data-theme="angels"] .availability-line{
+  border:1px solid color-mix(in srgb,var(--brass) 26%,var(--line));
+  border-radius:var(--radius-sm);
+  background:var(--plate-lit);
+  padding:12px 13px;
+}
+html[data-theme="angels"] .availability-line span{color:color-mix(in srgb,var(--muted) 66%,var(--brass));letter-spacing:.14em}
+html[data-theme="angels"] .availability-line strong{font-family:var(--display);font-size:19px;font-variation-settings:"SOFT" 50,"WONK" 1}
+html[data-theme="angels"] .enrichment-panel,html[data-theme="angels"] .enrichment-note-card{border-color:var(--line)}
+html[data-theme="angels"] .ai-loading strong,html[data-theme="angels"] .ai-error strong{font-family:var(--display);font-size:17px}
+html[data-theme="angels"] .ai-error{border-color:color-mix(in srgb,var(--ember) 40%,var(--line));background:color-mix(in srgb,var(--ember) 10%,var(--surface))}
+html[data-theme="angels"] .toast,html[data-theme="angels"] .notice-toast{
+  background:var(--surface-2);
+  color:var(--text);
+  border:1px solid var(--rule);
+  border-radius:var(--radius-pill);
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.05em;
+  box-shadow:var(--lift),var(--edge);
+}
+html[data-theme="angels"] .gallery-tile{border-radius:var(--radius-sm);border-color:var(--hair);background:var(--char)}
+html[data-theme="angels"] .guest-footer{border-top-color:var(--rule);margin-top:28px}
+html[data-theme="angels"] .guest-footer button{
+  min-height:54px;
+  border-radius:var(--radius);
+  border-color:color-mix(in srgb,var(--brass) 26%,var(--line));
+  background:var(--plate-lit);
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+}
+html[data-theme="angels"] .guest-footer button:hover{color:var(--brass-lit);border-color:var(--brass)}
+html[data-theme="angels"] .empty{
+  border:1px dashed color-mix(in srgb,var(--brass) 26%,var(--line));
+  border-radius:var(--radius-lg);
+  background:color-mix(in srgb,var(--surface) 55%,transparent);
+}
+html[data-theme="angels"] .empty svg{color:color-mix(in srgb,var(--brass) 70%,var(--text));opacity:.7}
+html[data-theme="angels"] .mixologist{padding:22px;border-radius:var(--radius-lg);background:radial-gradient(120% 46% at 0% 0%, color-mix(in srgb,var(--brass) 13%,transparent), transparent 58%),var(--surface)}
+@media(max-width:700px){
+  html[data-theme="angels"] .empty{min-height:236px;padding:26px 18px}
+  html[data-theme="angels"] .modal{padding:18px;border-radius:16px}
+  html[data-theme="angels"] .recipe-card{padding:14px}
+}
+
+/* ------------------------------------------------------------- 13. entrances */
+@keyframes angels-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+html[data-theme="angels"] .page>section,html[data-theme="angels"] .page>.hero{animation:angels-rise .5s var(--ease-out) both}
+html[data-theme="angels"] .page>section:nth-of-type(2){animation-delay:.05s}
+html[data-theme="angels"] .page>section:nth-of-type(3){animation-delay:.1s}
+html[data-theme="angels"] .page>section:nth-of-type(4){animation-delay:.15s}
+html[data-theme="angels"] :is(.favorite-row,.overview-taps,.overview-brew-row,.overview-low-row,.ticket-row)>*{animation:angels-rise .45s var(--ease-out) both}
+html[data-theme="angels"] :is(.favorite-row,.overview-taps,.overview-brew-row,.ticket-row)>:nth-child(2){animation-delay:.04s}
+html[data-theme="angels"] :is(.favorite-row,.overview-taps,.overview-brew-row,.ticket-row)>:nth-child(3){animation-delay:.08s}
+html[data-theme="angels"] :is(.favorite-row,.overview-taps,.overview-brew-row,.ticket-row)>:nth-child(4){animation-delay:.12s}
+html[data-theme="angels"] .inventory-grid>*{animation:angels-rise .34s var(--ease-out) both}
+html[data-theme="angels"] .inventory-grid>:nth-child(n+7){animation:none}
+
+/* Landscapes/tablets get the gauge-forward grid back; phones get breathing room. */
+@media(min-width:701px){
+  html[data-theme="angels"] .page{padding:38px clamp(20px,4vw,64px) 84px}
+  html[data-theme="angels"] .recipe-card h3{font-size:23px}
+}
+@media(max-width:700px){
+  html[data-theme="angels"] .page{padding:16px 15px 96px}
+  html[data-theme="angels"] .inventory-grid{grid-template-columns:1fr;gap:11px}
+  html[data-theme="angels"] .stat-card{min-height:112px}
+  html[data-theme="angels"] .stat-card span{font-size:28px}
+  html[data-theme="angels"] .toolbar{flex-direction:column;align-items:stretch}
+  html[data-theme="angels"] .toolbar .search{width:100%;max-width:none}
+  html[data-theme="angels"] .filter-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-inline:-15px;padding-inline:15px;scrollbar-width:none}
+  html[data-theme="angels"] .filter-row::-webkit-scrollbar{display:none}
+  html[data-theme="angels"] .filter-row select{flex:0 0 auto;min-width:118px;white-space:nowrap}
+  html[data-theme="angels"] .recipe-grid{grid-template-columns:1fr;gap:11px}
+}
+@media(max-width:380px){
+  html[data-theme="angels"] .hero-wordmark{font-size:26px}
+  html[data-theme="angels"] .mobile-bottom-nav button{font-size:8.5px;letter-spacing:.06em}
+}
+
+/* Respect the user's motion preference, and never rely on color alone. */
+@media(prefers-reduced-motion:reduce){
+  html[data-theme="angels"] *,html[data-theme="angels"] *::before,html[data-theme="angels"] *::after{
+    animation-duration:.001ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.001ms!important;
+    scroll-behavior:auto!important;
+  }
+}
+@media(prefers-contrast:more){
+  html[data-theme="angels"]{--line:#5b615a;--muted:#c3c8bf;--brass:#e3c686}
+}

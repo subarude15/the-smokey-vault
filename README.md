@@ -67,6 +67,10 @@ Frontend: `http://localhost:5173`
 API: `http://localhost:8080`  
 OpenAPI: `http://localhost:8080/api/docs`
 
+## Appearance
+
+Four skins share one layout: Light, Dark, Punk, and **Angel's Share** — the phone-first, dim-room build where names are set in a label serif, facts in mono, and every gauge (bottle fill, keg remaining, wine counts) is visible to guests. Pick it in `Settings → Appearance`, tap the moon icon in the top bar until it lands, or open `/?theme=angels` on a phone to jump straight in. Theme tokens live in `themePresets` (`client/src/App.tsx`); the Angel's Share layer is `client/src/theme-angels.css` and is scoped to `html[data-theme="angels"]`, so it cannot leak into the other three. Concept, audit, and measured contrast: `docs/design/angels-share-theme.md`.
+
 ## Production build
 
 ```bash
