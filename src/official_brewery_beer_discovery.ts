@@ -831,6 +831,16 @@ async function evaluateCandidatePage(
     pageText: stripTags(page.html)
   });
 
+  // Only treat same-registered-domain canonicals as authoritative official URLs.
+  const acceptedCanonical =
+    fields.canonicalUrl && sameOfficialDomain(fields.canonicalUrl, domain)
+      ? fields.canonicalUrl
+      : null;
+  const trustedFields: OfficialBeerExtractedFields = {
+    ...fields,
+    canonicalUrl: acceptedCanonical
+  };
+
   if (match === "exact_name" || match === "strong_name") {
     logDiscovery("official_beer_product_match", {
       url: page.finalUrl,
@@ -845,8 +855,8 @@ async function evaluateCandidatePage(
     });
     return {
       match,
-      url: fields.canonicalUrl || page.finalUrl,
-      fields,
+      url: acceptedCanonical || page.finalUrl,
+      fields: trustedFields,
       html: page.html,
       finalUrl: page.finalUrl
     };
@@ -855,7 +865,7 @@ async function evaluateCandidatePage(
   return {
     match,
     url: page.finalUrl,
-    fields,
+    fields: trustedFields,
     html: page.html,
     finalUrl: page.finalUrl
   };
