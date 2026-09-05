@@ -68,7 +68,9 @@ test("E. Safe fallback uses natural collection, never Dashboard", () => {
 });
 
 test("F. Explicit nav overrides detail — Home uses navigate/setPage", () => {
-  assert.match(appSrc, /const navigate = \(next: string\) => \{\s*setPage\(next\);/s);
+  // navigate may alias legacy mixologist → cocktails, but still always ends in setPage(...).
+  assert.match(appSrc, /const navigate = \(next: string\) => \{/);
+  assert.match(appSrc, /setPage\((?:next|"cocktails")\)/);
   assert.match(appSrc, /ensureCollection=\{\(\) => navigate\(module\.id\)\}/);
   assert.match(appSrc, /navigate\("dashboard"\)|navigate\(item\.id\)/);
 });
