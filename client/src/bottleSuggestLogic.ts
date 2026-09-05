@@ -141,3 +141,26 @@ export function mapSuggestKey(
       return { type: "none" };
   }
 }
+
+/**
+ * Popup layout contract for a11y: manual-add is never a listbox option.
+ * Keep results/status inside the listbox; place custom-add as a sibling below.
+ */
+export function bottleSuggestPanelLayout(opts: {
+  open: boolean;
+  resultCount: number;
+  showCustom: boolean;
+}): {
+  listboxIncludesCustomAdd: false;
+  customAddOutsideListbox: boolean;
+  listboxHasOptions: boolean;
+  expanded: boolean;
+} {
+  return {
+    listboxIncludesCustomAdd: false,
+    customAddOutsideListbox: opts.showCustom,
+    listboxHasOptions: opts.resultCount > 0,
+    // Popup stays expanded for custom-add-only (zero options) as well as results.
+    expanded: opts.open
+  };
+}

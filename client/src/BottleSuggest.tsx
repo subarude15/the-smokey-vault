@@ -342,19 +342,20 @@ export function BottleSuggest({
               </button>
             );
           })}
-
-        {showCustom && (
-          <button
-            type="button"
-            className="suggest-custom"
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={pickCustom}
-          >
-            <Plus size={16} aria-hidden="true" />
-            <span>Add “{q}” manually</span>
-          </button>
-        )}
       </div>
+
+      {/* Manual add stays a real button outside the listbox — never role="option". */}
+      {showCustom && (
+        <button
+          type="button"
+          className="suggest-custom"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={pickCustom}
+        >
+          <Plus size={16} aria-hidden="true" />
+          <span>Add “{q}” manually</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   BOTTLE_SUGGEST_DEBOUNCE_MS,
   BOTTLE_SUGGEST_MAX_RESULTS,
   BOTTLE_SUGGEST_MIN_QUERY,
+  bottleSuggestPanelLayout,
   clampActiveIndex,
   isAbortError,
   isCurrentRequest,
@@ -175,5 +177,72 @@ describe("BottleSuggest custom-add honesty", () => {
     assert.notEqual(action.type, "select");
     assert.equal(forbiddenFabrication.source, "vault");
     assert.notEqual(action.type, forbiddenFabrication.source);
+  });
+
+  it("a11y: manual-add stays outside the listbox and is never an option", () => {
+    const withResults = bottleSuggestPanelLayout({
+      open: true,
+      resultCount: 3,
+      showCustom: true
+    });
+    assert.equal(withResults.listboxIncludesCustomAdd, false);
+    assert.equal(withResults.customAddOutsideListbox, true);
+    assert.equal(withResults.listboxHasOptions, true);
+    assert.equal(withResults.expanded, true);
+
+    const customOnly = bottleSuggestPanelLayout({
+      open: true,
+      resultCount: 0,
+      showCustom: true
+    });
+    assert.equal(customOnly.listboxIncludesCustomAdd, false);
+    assert.equal(customOnly.customAddOutsideListbox, true);
+    assert.equal(customOnly.listboxHasOptions, false);
+    assert.equal(customOnly.expanded, true);
+
+    // Enter still routes to custom when there are zero real options.
+    assert.deepEqual(
+      mapSuggestKey("Enter", {
+        open: true,
+        hasCustomAdd: true,
+        activeIndex: -1,
+        resultCount: 0
+      }),
+      { type: "custom" }
+    );
+
+    // Source regression: custom-add markup must not nest inside role="listbox".
+    const source = readFileSync(new URL("../client/src/BottleSuggest.tsx", import.meta.url), "utf8");
+    const listboxRoleAt = source.indexOf('role="listbox"');
+    assert.ok(listboxRoleAt >= 0, "listbox role present");
+    const listboxOpenAt = source.lastIndexOf("<div", listboxRoleAt);
+    let depth = 0;
+    let cursor = listboxOpenAt;
+    let listboxCloseAt = -1;
+    while (cursor < source.length) {
+      if (source.startsWith("<div", cursor)) {
+        depth += 1;
+        cursor = source.indexOf(">", cursor) + 1;
+        continue;
+      }
+      if (source.startsWith("</div>", cursor)) {
+        depth -= 1;
+        if (depth === 0) {
+          listboxCloseAt = cursor;
+          break;
+        }
+        cursor += 6;
+        continue;
+      }
+      cursor += 1;
+    }
+    const customMarkupAt = source.indexOf('className="suggest-custom"');
+    assert.ok(listboxCloseAt >= 0, "listbox container closes");
+    assert.ok(customMarkupAt > listboxCloseAt, "manual-add renders after listbox container closes");
+    assert.equal(
+      /className="suggest-custom"[\s\S]*?role="option"/.test(source),
+      false,
+      "manual-add must not use role=option"
+    );
   });
 });
