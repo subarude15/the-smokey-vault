@@ -287,14 +287,14 @@ test("12-14 guest vs keeper enrichment visibility; useful content still surfaces
   assert.doesNotMatch(bottlePublicSrc, /Enrichment review/);
   assert.doesNotMatch(bottlePublicSrc, /confidenceBand/);
   assert.doesNotMatch(bottlePublicSrc, /TTB ID/);
-  assert.match(bottlePublicSrc, /HOUSE PROFILE|Producer notes|TASTING NOTES/);
+  assert.match(bottlePublicSrc, /TASTING PROFILE|TastingProfileView/);
 
   const publicHtml = renderToString(
     React.createElement(
       "div",
       { className: "bottle-public-content" },
       React.createElement("article", null, React.createElement("span", null, "TASTING NOTES"), React.createElement("p", null, "Vanilla oak")),
-      React.createElement("article", null, React.createElement("span", null, "HOUSE PROFILE"), React.createElement("p", null, "Peat smoke"))
+      React.createElement("article", null, React.createElement("span", null, "TASTING PROFILE"), React.createElement("p", null, "Peat smoke"))
     )
   );
   assert.match(publicHtml, /Vanilla oak/);
