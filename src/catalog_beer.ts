@@ -1,7 +1,13 @@
 import { type ProductSchema } from "./cola_client.js";
+import { normalizeSearchQuery } from "./search_normalize.js";
 
 export const CATALOG_BEER_API_BASE = "https://api.catalog.beer";
 export const CATALOG_BEER_MONTHLY_LIMIT = Number(process.env.CATALOG_BEER_MONTHLY_LIMIT ?? 1000);
+/** Successful Catalog.beer search responses stay hot for a day. */
+export const CATALOG_BEER_SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Empty successes get a shorter TTL so rare beers can reappear sooner. */
+export const CATALOG_BEER_SEARCH_EMPTY_TTL_MS = 60 * 60 * 1000;
+export const CATALOG_BEER_SEARCH_CACHE_MAX = 200;
 
 export type CatalogBeerBrewer = {
   id?: string;
@@ -30,14 +36,73 @@ type CatalogBeerList = {
 let monthKey = "";
 let monthRequests = 0;
 
+type CatalogBeerSearchCacheEntry = {
+  key: string;
+  results: CatalogBeerRecord[];
+  storedAt: number;
+  expiresAt: number;
+  lastAccessAt: number;
+};
+
+const catalogBeerSearchCache = new Map<string, CatalogBeerSearchCacheEntry>();
+
 function currentMonthKey() {
   const now = new Date();
   return `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}`;
 }
 
+export function clearCatalogBeerSearchCache() {
+  catalogBeerSearchCache.clear();
+}
+
 export function resetCatalogBeerQuota() {
   monthKey = "";
   monthRequests = 0;
+  clearCatalogBeerSearchCache();
+}
+
+export function getCatalogBeerSearchCacheSize() {
+  return catalogBeerSearchCache.size;
+}
+
+/** Test helper: mark every search-cache entry expired without clearing the map. */
+export function expireCatalogBeerSearchCacheForTests(now = Date.now()) {
+  for (const entry of catalogBeerSearchCache.values()) {
+    entry.expiresAt = now - 1;
+  }
+}
+
+function catalogBeerSearchCacheKey(query: string, count: number) {
+  return `${normalizeSearchQuery(query)}|${count}`;
+}
+
+function readCatalogBeerSearchCache(key: string, now = Date.now()): CatalogBeerRecord[] | null {
+  const entry = catalogBeerSearchCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    catalogBeerSearchCache.delete(key);
+    return null;
+  }
+  entry.lastAccessAt = now;
+  // Move to end for deterministic LRU eviction order.
+  catalogBeerSearchCache.delete(key);
+  catalogBeerSearchCache.set(key, entry);
+  return entry.results.map((beer) => ({ ...beer, brewer: beer.brewer ? { ...beer.brewer } : beer.brewer }));
+}
+
+function writeCatalogBeerSearchCache(key: string, results: CatalogBeerRecord[], ttlMs: number, now = Date.now()) {
+  while (catalogBeerSearchCache.size >= CATALOG_BEER_SEARCH_CACHE_MAX) {
+    const oldestKey = catalogBeerSearchCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    catalogBeerSearchCache.delete(oldestKey);
+  }
+  catalogBeerSearchCache.set(key, {
+    key,
+    results: results.map((beer) => ({ ...beer, brewer: beer.brewer ? { ...beer.brewer } : beer.brewer })),
+    storedAt: now,
+    expiresAt: now + ttlMs,
+    lastAccessAt: now
+  });
 }
 
 export function getCatalogBeerApiKey() {
@@ -48,6 +113,7 @@ export function isCatalogBeerConfigured() {
   return Boolean(getCatalogBeerApiKey());
 }
 
+/** Process-local monthly counter only — not durable across restarts. */
 export function getCatalogBeerUsage() {
   return {
     configured: isCatalogBeerConfigured(),
@@ -101,11 +167,27 @@ async function catalogBeerFetch(path: string, params?: Record<string, string>) {
 export async function searchCatalogBeers(query: string, count = 8): Promise<CatalogBeerRecord[]> {
   const q = query.trim();
   if (q.length < 2 || !isCatalogBeerConfigured()) return [];
+  if (isCatalogBeerQuotaExhausted()) return [];
+  const capped = Math.min(Math.max(count, 1), 20);
+  const cacheKey = catalogBeerSearchCacheKey(q, capped);
+  const cached = readCatalogBeerSearchCache(cacheKey);
+  if (cached) return cached;
+
   const payload = await catalogBeerFetch("/beer/search", {
     q,
-    count: String(Math.min(Math.max(count, 1), 20))
+    count: String(capped)
   }) as CatalogBeerList | null;
-  return payload?.data ?? [];
+
+  // Network / HTTP failures return null — do not poison the cache for a day.
+  if (payload == null) return [];
+
+  const results = payload.data ?? [];
+  writeCatalogBeerSearchCache(
+    cacheKey,
+    results,
+    results.length ? CATALOG_BEER_SEARCH_CACHE_TTL_MS : CATALOG_BEER_SEARCH_EMPTY_TTL_MS
+  );
+  return results;
 }
 
 export async function searchCatalogBrewers(query: string, count = 5): Promise<CatalogBeerBrewer[]> {

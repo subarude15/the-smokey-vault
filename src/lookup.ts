@@ -131,12 +131,21 @@ export function colaProductTypeForTable(table: SearchTable) {
   return "distilled spirits";
 }
 
+/** Unique local vault + beer_cache hits needed before Catalog.beer name search is skipped. */
+export const LOCAL_BEER_SUFFICIENCY_THRESHOLD = 5;
+
 function isBeerSearchModule(moduleId?: string) {
   return moduleId === "packaged_beer" || moduleId === "shelf" || moduleId === "taps" || moduleId === "keg" || moduleId === "brews";
 }
 
+/**
+ * Persist a beer_cache mapping for a Keeper scan → search pick.
+ * The scanned UPC from the request body is the cache key — never hit.product.upc,
+ * Catalog.beer id, or an unrelated search-result barcode.
+ */
 export async function rememberBeerFromHit(upc: string, hit: BottleSearchHit) {
-  const code = normalizeUpc(upc);
+  // Canonical UPC-A form so EAN-13 twins share one row; lookup still accepts either.
+  const code = primaryCatalogUpc(upc) || normalizeUpc(upc);
   if (!code) return;
   const brewery = String(hit.product.brewery ?? hit.product.brand ?? hit.product.maker ?? "").trim();
   const name = String(hit.product.name ?? hit.product.batch_name ?? "").trim();
@@ -425,7 +434,11 @@ export async function searchBottles(query: string, options?: { table?: string })
       results.push(hit);
     }
 
-    if (isCatalogBeerConfigured() && !isCatalogBeerQuotaExhausted()) {
+    // Catalog.beer is a fallback — skip when local vault + beer_cache already cover the query.
+    // Count unique brewery+name identities (seen), not raw inventory/cache rows.
+    const localUniqueCount = seen.size;
+    const needsCatalogBeer = localUniqueCount < LOCAL_BEER_SUFFICIENCY_THRESHOLD;
+    if (needsCatalogBeer && isCatalogBeerConfigured() && !isCatalogBeerQuotaExhausted()) {
       try {
         const beers = await searchCatalogBeers(q, 10);
         for (const beer of beers) {
