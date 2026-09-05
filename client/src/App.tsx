@@ -24,7 +24,7 @@ import {
   packagedCount, packagedStockLabel, FILL_STOPS, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   spiritFamilyFromLabel,
-  SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, shelfKindForModule,
+  SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, recipeIngredientMatchesBottle, shelfBottleFromItem, shelfKindForModule,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
@@ -2029,17 +2029,27 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           </div>
           {!(module.id === "taps" && isTapEmpty(item)) && <BottleVotes table={module.id} itemId={item.id}/>}
           {(moduleSupportsFindDrink(module.id) || admin) && <div className="bottle-detail-actions">
-            {moduleSupportsFindDrink(module.id) && <button type="button" className="secondary" onClick={() => setFindDrinkOpen(true)}><GlassWater size={16}/> Find a drink with this</button>}
-            {admin && (module.id === "wines" || module.id === "packaged_beer") && <button type="button" className="secondary drink-one" disabled={(module.id === "wines" ? bottlesLeft : packagedLeft) <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
-            {admin && module.id === "spirits" && <button type="button" className="secondary drink-one" disabled={spiritFill <= 0 || acting} onClick={pourDrink}>{acting ? "Pouring…" : "Pour a drink"}</button>}
-            {admin && module.id === "spirits" && nextSpirit && <button type="button" className="secondary drink-one" disabled={acting} onClick={openNextBottle}>{acting ? "Opening…" : "Open next"}</button>}
-            {admin && module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
-            {admin && module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
-            {admin && module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
-            {admin && onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
-            {admin && <button className="primary" onClick={onEdit}><Settings size={16}/> {module.id === "taps" && isTapEmpty(item) ? "Put a beer on" : "Edit"}</button>}
-            {admin && module.id === "taps" && !isTapEmpty(item) && <button className="secondary danger" onClick={onDelete}>Clear tap</button>}
-            {admin && module.id !== "taps" && <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>}
+            {moduleSupportsFindDrink(module.id) && (
+              <div className="bottle-detail-guest-actions">
+                <button type="button" className="primary find-drink-cta" onClick={() => setFindDrinkOpen(true)}>
+                  <GlassWater size={16}/> Find a drink with this
+                </button>
+              </div>
+            )}
+            {admin && (
+              <div className="bottle-detail-keeper-actions">
+                {(module.id === "wines" || module.id === "packaged_beer") && <button type="button" className="secondary drink-one" disabled={(module.id === "wines" ? bottlesLeft : packagedLeft) <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
+                {module.id === "spirits" && <button type="button" className="secondary drink-one" disabled={spiritFill <= 0 || acting} onClick={pourDrink}>{acting ? "Pouring…" : "Pour a drink"}</button>}
+                {module.id === "spirits" && nextSpirit && <button type="button" className="secondary drink-one" disabled={acting} onClick={openNextBottle}>{acting ? "Opening…" : "Open next"}</button>}
+                {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
+                {module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
+                {module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
+                {onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
+                <button type="button" className="secondary" onClick={onEdit}><Settings size={16}/> {module.id === "taps" && isTapEmpty(item) ? "Put a beer on" : "Edit"}</button>
+                {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary danger" onClick={onDelete}>Clear tap</button>}
+                {module.id !== "taps" && <button type="button" className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>}
+              </div>
+            )}
           </div>}
           {actionError ? <p className="error">{actionError}</p> : null}
         </div>
@@ -2737,9 +2747,24 @@ function FindDrinkWithBottleModal({ module, item, admin, onClose }:{
               <div>
                 <span className="eyebrow">INGREDIENTS</span>
                 <ul className="ingredient-list">
-                  {generated.ingredients.map((line) => (
-                    <li key={line} className="have matched-bottle"><span className="mark" aria-hidden="true">●</span><span>{line}</span></li>
-                  ))}
+                  {(() => {
+                    const bottle = kind ? shelfBottleFromItem(item as Record<string, unknown>, kind) : null;
+                    const matchedIndex = bottle
+                      ? generated.ingredients.findIndex((line) => recipeIngredientMatchesBottle(line, bottle))
+                      : -1;
+                    return generated.ingredients.map((line, index) => {
+                      const isMatch = index === matchedIndex;
+                      return (
+                        <li key={`${index}-${line}`} className={isMatch ? "have matched-bottle" : "have"}>
+                          <span className="mark" aria-hidden="true">●</span>
+                          <span>
+                            {line}
+                            {isMatch ? <small> · this bottle</small> : null}
+                          </span>
+                        </li>
+                      );
+                    });
+                  })()}
                 </ul>
               </div>
               <div className="recipe-details">
