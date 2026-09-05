@@ -36,5 +36,11 @@ export default defineConfig({
     })
   ],
   build: { outDir: "dist", emptyOutDir: true },
-  server: { port: 5173, proxy: { "/api": "http://localhost:8080" } }
+  server: {
+    port: 5173,
+    proxy: { "/api": "http://localhost:8080" },
+    // Tunnels and sandboxed preview hosts (phone + tablet testing) reach the dev server
+    // through a proxied hostname, so allow any preview host instead of only localhost.
+    allowedHosts: [".e2b.app"]
+  }
 });
