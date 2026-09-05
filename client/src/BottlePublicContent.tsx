@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { parseTastingProfile, type TastingProfile } from "./catalog";
 import { ENRICHMENT_MODULES, textChild, type BottleEnrichmentView } from "./EnrichmentPanel";
 
 /**
- * Patron-facing enriched content only — no provenance, confidence, jobs, or review UI.
- * Uses the existing enrichment read API but renders polished bottle-page notes.
+ * Guest-facing enriched content only — no provenance, confidence, jobs, or review UI.
+ * Uses the existing enrichment read API but renders polished bottle-page tasting profiles.
  */
 export function BottlePublicContent({
   table,
@@ -45,25 +46,8 @@ export function BottlePublicContent({
 
   return (
     <div className="bottle-public-content">
-      {official && !hasPersonalNotes ? (
-        <article className="bottle-notes">
-          <span className="eyebrow">TASTING NOTES</span>
-          <p>{official}</p>
-        </article>
-      ) : null}
-      {official && hasPersonalNotes ? (
-        <article className="bottle-notes">
-          <span className="eyebrow">PRODUCER NOTES</span>
-          <p>{official}</p>
-        </article>
-      ) : null}
-      {house ? (
-        <article className="bottle-notes bottle-notes-house">
-          <span className="eyebrow">HOUSE PROFILE</span>
-          <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
-          <p>{house}</p>
-        </article>
-      ) : null}
+      {official ? <TastingProfileView text={official} /> : null}
+      {house ? <TastingProfileView text={house} /> : null}
       {showImage ? (
         <div className="bottle-public-image">
           <img src={displayUrl} alt="" />
@@ -71,4 +55,41 @@ export function BottlePublicContent({
       ) : null}
     </div>
   );
+}
+
+/** Compact Aroma / Palate / Finish block for guest bottle detail. */
+export function TastingProfileView({ text }: { text: string }) {
+  const profile = parseTastingProfile(text);
+  if (!hasTastingContent(profile)) return null;
+
+  return (
+    <article className="bottle-notes tasting-profile">
+      <span className="eyebrow">TASTING PROFILE</span>
+      {profile.aroma ? (
+        <div className="tasting-profile-block">
+          <span className="tasting-profile-label">Aroma</span>
+          <p>{profile.aroma}</p>
+        </div>
+      ) : null}
+      {profile.palate ? (
+        <div className="tasting-profile-block">
+          <span className="tasting-profile-label">Palate</span>
+          <p>{profile.palate}</p>
+        </div>
+      ) : null}
+      {profile.finish ? (
+        <div className="tasting-profile-block">
+          <span className="tasting-profile-label">Finish</span>
+          <p>{profile.finish}</p>
+        </div>
+      ) : null}
+      {!profile.aroma && !profile.palate && !profile.finish && profile.fallback ? (
+        <p>{profile.fallback}</p>
+      ) : null}
+    </article>
+  );
+}
+
+function hasTastingContent(profile: TastingProfile): boolean {
+  return Boolean(profile.aroma || profile.palate || profile.finish || profile.fallback);
 }

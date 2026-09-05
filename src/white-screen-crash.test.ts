@@ -16,6 +16,7 @@ import { db } from "./db.js";
 import { buildBottleEnrichmentView, normalizeTextField } from "./ingestion/jobs/enrichment-view.js";
 import { LOOKUP_SOURCE_LABELS, type LookupSource } from "./lookup-shared.js";
 import { saveScanSessionBottle } from "./scan-session.js";
+import { parseTastingProfile } from "./tasting-profile.js";
 import { upsertProductContent } from "./ingestion/jobs/product-content.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,24 +96,37 @@ function EnrichmentPanelBody({ view }: { view: any }) {
   );
 }
 
-/** Mirrors BottlePublicContent — no enrichment plumbing labels. */
+/** Mirrors BottlePublicContent tasting-profile presentation — no enrichment plumbing labels. */
 function BottlePublicBody({ view }: { view: any }) {
   const official = textChild(view.tastingNotes?.official).trim();
   const house = textChild(view.tastingNotes?.houseProfile).trim();
   if (!official && !house) return null;
+
+  function profileArticle(raw: string) {
+    const profile = parseTastingProfile(raw);
+    const blocks: React.ReactNode[] = [
+      React.createElement("span", { key: "eyebrow" }, "TASTING PROFILE")
+    ];
+    if (profile.aroma) {
+      blocks.push(React.createElement("div", { key: "aroma" }, React.createElement("span", null, "Aroma"), React.createElement("p", null, profile.aroma)));
+    }
+    if (profile.palate) {
+      blocks.push(React.createElement("div", { key: "palate" }, React.createElement("span", null, "Palate"), React.createElement("p", null, profile.palate)));
+    }
+    if (profile.finish) {
+      blocks.push(React.createElement("div", { key: "finish" }, React.createElement("span", null, "Finish"), React.createElement("p", null, profile.finish)));
+    }
+    if (!profile.aroma && !profile.palate && !profile.finish && profile.fallback) {
+      blocks.push(React.createElement("p", { key: "fallback" }, profile.fallback));
+    }
+    return React.createElement("article", null, ...blocks);
+  }
+
   return React.createElement(
     "div",
     { className: "bottle-public-content" },
-    official ? React.createElement("article", null, React.createElement("span", null, "TASTING NOTES"), React.createElement("p", null, official)) : null,
-    house
-      ? React.createElement(
-          "article",
-          null,
-          React.createElement("span", null, "HOUSE PROFILE"),
-          React.createElement("p", null, "Generated house profile — not producer copy"),
-          React.createElement("p", null, house)
-        )
-      : null
+    official ? profileArticle(official) : null,
+    house ? profileArticle(house) : null
   );
 }
 
@@ -315,7 +329,7 @@ test("guest bottle detail hides EnrichmentPanel; keeper retains it", () => {
   assert.match(appSrc, /admin && ENRICHMENT_MODULES\.has\(module\.id\) \? <EnrichmentPanel/);
   assert.match(appSrc, /!admin && ENRICHMENT_MODULES\.has\(module\.id\) \? \(/);
   assert.match(appSrc, /<BottlePublicContent/);
-  assert.match(bottlePublicSrc, /Patron-facing enriched content only/);
+  assert.match(bottlePublicSrc, /Guest-facing enriched content only|Patron-facing enriched content only/);
   assert.doesNotMatch(bottlePublicSrc, /What the vault knows/);
   assert.doesNotMatch(bottlePublicSrc, /Enrichment review/);
   assert.doesNotMatch(bottlePublicSrc, /confidenceBand|TTB ID|image acceptance|Unverified/);
@@ -332,10 +346,15 @@ test("patron public content surfaces useful notes without plumbing", () => {
   };
   const html = render(React.createElement(BottlePublicBody, { view }));
   assert.match(html, /Vanilla and oak/);
-  assert.match(html, /HOUSE PROFILE/);
+  assert.match(html, /TASTING PROFILE/);
+  assert.match(html, /smoke/);
+  assert.match(html, /caramel/);
+  assert.doesNotMatch(html, /HOUSE PROFILE/);
   assert.doesNotMatch(html, /What the vault knows/);
   assert.doesNotMatch(html, /Enrichment review/);
   assert.doesNotMatch(html, /confidence/i);
+  assert.doesNotMatch(html, /not producer copy/i);
+  assert.doesNotMatch(html, /AI house profile/i);
 });
 
 test("AppErrorBoundary wraps App and recovery UI omits stacks/secrets", () => {

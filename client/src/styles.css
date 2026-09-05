@@ -1308,3 +1308,7 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .find-drink-card .matched-bottle small,
 .ingredient-preview .matched-bottle small{color:var(--accent);font-weight:600}
 .bottle-detail-actions .secondary svg{flex:none}
+.tasting-profile{display:flex;flex-direction:column;gap:10px}
+.tasting-profile-block{display:flex;flex-direction:column;gap:4px}
+.tasting-profile-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.tasting-profile p{margin:0;line-height:1.45;overflow-wrap:anywhere}

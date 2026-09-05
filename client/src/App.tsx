@@ -8,7 +8,7 @@ import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
 import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
-import { BottlePublicContent } from "./BottlePublicContent";
+import { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";
 import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
@@ -2083,7 +2083,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       </div>
       {hops.length > 0 && <div className="detail-chip-block"><span className="eyebrow">HOPS</span><div className="chip-row detail-chips">{hops.map((value) => <span className="chip static" key={value}>{value}</span>)}</div></div>}
       {flavors.length > 0 && <div className="detail-chip-block">{module.id === "brews" ? <span className="eyebrow">FLAVOR PROFILE</span> : null}<div className="chip-row detail-chips">{flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}</div></div>}
-      {item.tasting_notes ? <article className="bottle-notes"><span className="eyebrow">TASTING NOTES</span><p>{String(item.tasting_notes)}</p></article> : null}
+      {item.tasting_notes ? <TastingProfileView text={String(item.tasting_notes)} /> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
       {admin && ENRICHMENT_MODULES.has(module.id) ? <EnrichmentPanel table={module.id} itemId={item.id} /> : null}
       {!admin && ENRICHMENT_MODULES.has(module.id) ? (
