@@ -29,8 +29,8 @@ import {
 } from "./beer_search_query.js";
 import {
   breweryHintBonus,
+  breweryResolutionNeeded,
   resolveBreweryHints,
-  shouldAttemptBreweryResolution,
   type BreweryResolverHit
 } from "./open_brewery_db.js";
 import {
@@ -546,7 +546,8 @@ export async function searchBottles(query: string, options?: { table?: string })
   }
 
   let breweryHints: BreweryResolverHit[] = [];
-  if (beerParsed && results.length > 0 && shouldAttemptBreweryResolution(beerParsed)) {
+  // Skip OBDB when Vault/beer_cache already establish a strong brewery identity.
+  if (beerParsed && breweryResolutionNeeded(results, beerParsed)) {
     const candidateBreweries = collectCandidateBreweries(results);
     try {
       breweryHints = await resolveBreweryHints({

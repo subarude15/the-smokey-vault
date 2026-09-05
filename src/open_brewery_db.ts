@@ -5,8 +5,18 @@
  * Never invents beer products or BottleSearchHit rows.
  */
 
-import { beerTextTokens, foldBeerText } from "./beer_search_query.js";
+import {
+  beerTextTokens,
+  classifyBeerMatch,
+  foldBeerText
+} from "./beer_search_query.js";
 import type { ParsedBeerQuery } from "./beer_search_query.js";
+
+/** Local sources whose strong brewery+beer identity can skip OBDB. */
+const STRONG_LOCAL_SOURCES = new Set(["vault", "beer_cache"]);
+
+/** Match classes that already establish brewery identity without OBDB. */
+const STRONG_MATCH_CLASSES = new Set(["exact_identity", "name_and_brewery"]);
 
 function debugLog(msg: string, fields: Record<string, unknown> = {}): void {
   console.debug(JSON.stringify({ level: "debug", msg, ...fields }));
@@ -186,6 +196,41 @@ export function shouldAttemptBreweryResolution(parsed: ParsedBeerQuery): boolean
   return parsed.nonStyleTokens.some(
     (t) => t.length >= 4 && !PRODUCTISH_TOKENS.has(t) && !/^\d+$/.test(t)
   );
+}
+
+/**
+ * Deterministic gate: call OBDB only when existing beer hits do not already
+ * establish a strong local brewery identity (Vault / beer_cache).
+ *
+ * Skip when a strong local exact_identity or name_and_brewery hit exists and
+ * those strong locals agree on brewery. Still run when candidates disagree,
+ * only weak/brewery-only matches exist, or only remote hits are present.
+ */
+export function breweryResolutionNeeded(
+  hits: Array<{ source: string; product: Record<string, unknown> }>,
+  parsed: ParsedBeerQuery
+): boolean {
+  if (hits.length === 0) return false;
+  if (!shouldAttemptBreweryResolution(parsed)) return false;
+
+  const strongLocal = hits.filter((hit) => {
+    if (!STRONG_LOCAL_SOURCES.has(hit.source)) return false;
+    return STRONG_MATCH_CLASSES.has(classifyBeerMatch(hit.product, parsed));
+  });
+
+  // No strong local brewery+beer identity — OBDB may help disambiguate.
+  if (strongLocal.length === 0) return true;
+
+  // Strong local identity exists. Only call OBDB if those strong locals disagree.
+  const breweryKeys = new Set<string>();
+  for (const hit of strongLocal) {
+    const brewery = String(
+      hit.product.brewery ?? hit.product.brand ?? hit.product.producer ?? ""
+    ).trim();
+    const key = breweryCompareKey(brewery);
+    if (key) breweryKeys.add(key);
+  }
+  return breweryKeys.size > 1;
 }
 
 export function buildBreweryResolverQueries(

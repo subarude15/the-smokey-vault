@@ -16,6 +16,7 @@ import {
   resetCatalogBeerQuota,
   searchCatalogBeers
 } from "./catalog_beer.js";
+import { saveBeerCacheEntry } from "./beer_cache.js";
 import { db } from "./db.js";
 import { lookupProduct, LOCAL_BEER_SUFFICIENCY_THRESHOLD, searchBottles } from "./lookup.js";
 import {
@@ -26,6 +27,7 @@ import {
   isOpenBreweryDbEnabled,
   normalizeWebsiteHost,
   openBreweryDbCacheSizeForTests,
+  breweryResolutionNeeded,
   resolveBreweryHints,
   scoreBreweryNameMatch,
   searchOpenBreweryDb,
@@ -588,5 +590,247 @@ test("corpus fixtures fold/compare strongly", () => {
   for (const [left, right] of pairs) {
     const strength = scoreBreweryNameMatch(left, right);
     assert.ok(strength === "exact" || strength === "strong", `${left} vs ${right} → ${strength}`);
+  }
+});
+
+test("Gate A. exact Vault Yards Brawler skips OBDB", async () => {
+  process.env.OPEN_BREWERY_DB_ENABLED = "true";
+  delete process.env.CATALOG_BEER_API_KEY;
+  db.prepare(
+    "INSERT INTO packaged_beer(brewery, name, style, abv) VALUES(?, ?, ?, ?)"
+  ).run("Yards Brewing Co.", "Brawler", "English Mild", 4.5);
+  let obdbCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("openbrewerydb")) {
+      obdbCalls += 1;
+      return new Response(JSON.stringify(fixturePayload("yards")), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const parsed = parseBeerQuery("Yards Brawler");
+    assert.equal(
+      breweryResolutionNeeded(
+        [{ source: "vault", product: { brewery: "Yards Brewing Co.", name: "Brawler" } }],
+        parsed
+      ),
+      false
+    );
+    const { results } = await searchBottles("Yards Brawler", { table: "packaged_beer" });
+    assert.ok(results.length >= 1);
+    assert.equal(obdbCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    db.prepare("DELETE FROM packaged_beer WHERE brewery = ? AND name = ?").run(
+      "Yards Brewing Co.",
+      "Brawler"
+    );
+  }
+});
+
+test("Gate B. strong beer_cache result skips OBDB", async () => {
+  process.env.OPEN_BREWERY_DB_ENABLED = "true";
+  delete process.env.CATALOG_BEER_API_KEY;
+  const upc = "080109100123";
+  saveBeerCacheEntry({
+    upc,
+    brewery: "Yards Brewing Co.",
+    name: "Brawler",
+    style: "English Mild",
+    abv: 4.5,
+    source: "catalog_beer"
+  });
+  let obdbCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("openbrewerydb")) {
+      obdbCalls += 1;
+      return new Response(JSON.stringify(fixturePayload("yards")), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  try {
+    assert.equal(
+      breweryResolutionNeeded(
+        [{ source: "beer_cache", product: { brewery: "Yards Brewing Co.", name: "Brawler" } }],
+        parseBeerQuery("Yards Brawler")
+      ),
+      false
+    );
+    const { results } = await searchBottles("Yards Brawler", { table: "packaged_beer" });
+    assert.ok(results.some((r) => r.source === "beer_cache" || r.source === "vault"));
+    assert.equal(obdbCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    db.prepare("DELETE FROM beer_cache WHERE upc = ?").run(upc);
+  }
+});
+
+test("Gate C. ambiguous competing breweries may call OBDB", () => {
+  const parsed = parseBeerQuery("Yards Brawler");
+  assert.equal(
+    breweryResolutionNeeded(
+      [
+        { source: "vault", product: { brewery: "Yards Brewing Co.", name: "Brawler" } },
+        { source: "vault", product: { brewery: "Yards Alehouse", name: "Brawler" } }
+      ],
+      parsed
+    ),
+    true
+  );
+  assert.equal(
+    breweryResolutionNeeded(
+      [
+        { source: "catalog_beer", product: { brewery: "Yards Brewing Co.", name: "Brawler" } },
+        { source: "catalog_beer", product: { brewery: "Other Brewery", name: "Brawler" } }
+      ],
+      parsed
+    ),
+    true
+  );
+});
+
+test("Gate D. weak/brewery-only candidates may call OBDB", () => {
+  assert.equal(
+    breweryResolutionNeeded(
+      [{ source: "vault", product: { brewery: "Yards Brewing Co.", name: "Brawler" } }],
+      parseBeerQuery("Yards")
+    ),
+    true
+  );
+  assert.equal(
+    breweryResolutionNeeded(
+      [{ source: "catalog_beer", product: { brewery: "Yards Brewing Co.", name: "Brawler" } }],
+      parseBeerQuery("Yards Brawler")
+    ),
+    true
+  );
+});
+
+test("Gate E. style-only query still never calls OBDB", async () => {
+  assert.equal(breweryResolutionNeeded([{ source: "vault", product: { name: "IPA", style: "IPA" } }], parseBeerQuery("IPA")), false);
+  let obdbCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("openbrewerydb")) obdbCalls += 1;
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await searchBottles("IPA", { table: "packaged_beer" });
+    assert.equal(obdbCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Gate F. zero beer candidates still never calls OBDB", async () => {
+  assert.equal(breweryResolutionNeeded([], parseBeerQuery("Yards Brawler")), false);
+  process.env.OPEN_BREWERY_DB_ENABLED = "true";
+  delete process.env.CATALOG_BEER_API_KEY;
+  let obdbCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("openbrewerydb")) {
+      obdbCalls += 1;
+      return new Response(JSON.stringify(fixturePayload("yards")), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const { results } = await searchBottles("zzzz rare brewery xyzabc", { table: "packaged_beer" });
+    assert.equal(results.length, 0);
+    assert.equal(obdbCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Gate G. OBDB still never creates a BottleSearchHit", async () => {
+  process.env.OPEN_BREWERY_DB_ENABLED = "true";
+  delete process.env.CATALOG_BEER_API_KEY;
+  // Remote-only candidate so OBDB gate opens, but brewery rows must not become hits.
+  let obdbCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("openbrewerydb")) {
+      obdbCalls += 1;
+      return new Response(JSON.stringify(fixturePayload("yards")), { status: 200 });
+    }
+    if (url.includes("catalog.beer") || url.includes("catalogbeer")) {
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "cb-1",
+              name: "Brawler",
+              style: "English Mild",
+              abv: "4.5",
+              brewer: { name: "Yards Brewing Co." }
+            }
+          ]
+        }),
+        { status: 200 }
+      );
+    }
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  process.env.CATALOG_BEER_API_KEY = "test-key";
+  try {
+    const { results } = await searchBottles("Yards Brawler", { table: "packaged_beer" });
+    assert.ok(results.every((r) => r.source !== "open_brewery_db"));
+    assert.ok(results.every((r) => String(r.product.name ?? "") !== "Yards Brewing Co."));
+    // Gate may or may not call OBDB depending on catalog hit strength; never invent rows either way.
+    assert.ok(obdbCalls >= 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.CATALOG_BEER_API_KEY;
+  }
+});
+
+test("Gate H. Catalog.beer call count unchanged by OBDB gate", async () => {
+  process.env.CATALOG_BEER_API_KEY = "test-key";
+  resetCatalogBeerQuota();
+  clearCatalogBeerSearchCache();
+  db.prepare(
+    "INSERT INTO packaged_beer(brewery, name, style, abv) VALUES(?, ?, ?, ?)"
+  ).run("Yards Brewing Co.", "Brawler", "English Mild", 4.5);
+
+  async function runOnce(obdbEnabled: boolean) {
+    process.env.OPEN_BREWERY_DB_ENABLED = obdbEnabled ? "true" : "false";
+    clearCatalogBeerSearchCache();
+    resetCatalogBeerQuota();
+    clearOpenBreweryDbCacheForTests();
+    let catalogCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("catalog.beer") || url.includes("catalogbeer")) {
+        catalogCalls += 1;
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      if (url.includes("openbrewerydb")) {
+        return new Response(JSON.stringify(fixturePayload("yards")), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await searchBottles("Yards Brawler", { table: "packaged_beer" });
+      return catalogCalls;
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  try {
+    const withObdb = await runOnce(true);
+    const withoutObdb = await runOnce(false);
+    assert.equal(withObdb, withoutObdb);
+  } finally {
+    db.prepare("DELETE FROM packaged_beer WHERE brewery = ? AND name = ?").run(
+      "Yards Brewing Co.",
+      "Brawler"
+    );
   }
 });
