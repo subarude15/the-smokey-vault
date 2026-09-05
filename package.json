@@ -18,7 +18,8 @@
     "catalog:generate-fixtures": "node dist/generate-catalog-import-fixtures.js",
     "catalog:import:pa-spirits": "node dist/catalog-import-pa-spirits.js",
     "catalog:import:pa-wines": "node dist/catalog-import-pa-wines.js",
-    "catalog:import:iowa": "node dist/catalog-import-iowa.js"
+    "catalog:import:iowa": "node dist/catalog-import-iowa.js",
+    "smoke:official-beer-browser": "tsx scripts/smoke-official-beer-browser.ts"
   },
   "dependencies": {
     "@fastify/cors": "latest",
