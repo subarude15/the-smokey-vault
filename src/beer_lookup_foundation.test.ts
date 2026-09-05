@@ -32,6 +32,45 @@ const UPC_A = "036000291452";
 const EAN_13 = "0036000291452";
 const OTHER_UPC = "008500012345";
 
+
+function countBeerCacheTwins(upc: string): number {
+  const keys = beerCacheUpcLookupKeys(upc);
+  if (!keys.length) return 0;
+  const placeholders = keys.map(() => "?").join(", ");
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM beer_cache WHERE upc IN (${placeholders})`).get(...keys) as { n: number };
+  return Number(row.n);
+}
+
+function insertRawBeerCacheRow(row: {
+  upc: string;
+  brewery?: string;
+  name: string;
+  style?: string;
+  abv?: number | null;
+  catalog_beer_id?: string | null;
+  untappd_bid?: string | null;
+  image_url?: string | null;
+  source?: string;
+  cached_at: number;
+}) {
+  db.prepare(`
+    INSERT INTO beer_cache (
+      upc, catalog_beer_id, untappd_bid, brewery, name, style, abv, image_url, source, cached_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.upc,
+    row.catalog_beer_id ?? null,
+    row.untappd_bid ?? null,
+    row.brewery ?? "",
+    row.name,
+    row.style ?? "",
+    row.abv ?? null,
+    row.image_url ?? null,
+    row.source ?? "vault_seed",
+    row.cached_at
+  );
+}
+
 function wipeBeerCache(...upcs: string[]) {
   for (const upc of upcs) {
     for (const key of beerCacheUpcLookupKeys(upc)) {
@@ -489,4 +528,130 @@ test("U. spirit/wine search paths are unchanged by beer Catalog.beer gating", as
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("V. historical duplicate UPC-A/EAN-13 rows converge on lookup", () => {
+  wipeBeerCache(UPC_A, EAN_13);
+  const now = Math.floor(Date.now() / 1000);
+  // Simulate pre-fix saves that stored normalizeUpc() for each form separately.
+  insertRawBeerCacheRow({
+    upc: UPC_A,
+    brewery: "Yuengling",
+    name: "Traditional Lager",
+    style: "",
+    abv: null,
+    catalog_beer_id: "yuengling-trad",
+    image_url: null,
+    source: "vault_seed",
+    cached_at: now - 500
+  });
+  insertRawBeerCacheRow({
+    upc: EAN_13,
+    brewery: "",
+    name: "Traditional Lager",
+    style: "American Lager",
+    abv: 4.5,
+    catalog_beer_id: null,
+    untappd_bid: "untappd-123",
+    image_url: "https://example.com/yuengling.jpg",
+    source: "catalog_beer",
+    cached_at: now - 100
+  });
+  assert.equal(countBeerCacheTwins(UPC_A), 2);
+
+  const hit = getBeerCacheEntry(UPC_A);
+  assert.ok(hit);
+  assert.equal(hit?.upc, primaryCatalogUpc(UPC_A));
+  assert.equal(hit?.brewery, "Yuengling");
+  assert.equal(hit?.style, "American Lager");
+  assert.equal(hit?.abv, 4.5);
+  assert.equal(hit?.catalog_beer_id, "yuengling-trad");
+  assert.equal(hit?.untappd_bid, "untappd-123");
+  assert.equal(hit?.image_url, "https://example.com/yuengling.jpg");
+  assert.equal(countBeerCacheTwins(UPC_A), 1);
+
+  const viaEan = getBeerCacheEntry(EAN_13);
+  assert.ok(viaEan);
+  assert.equal(viaEan?.upc, hit?.upc);
+  assert.equal(viaEan?.name, hit?.name);
+  assert.equal(countBeerCacheTwins(EAN_13), 1);
+});
+
+test("W. save consolidates historical twin rows onto the canonical key", () => {
+  wipeBeerCache(UPC_A, EAN_13);
+  const now = Math.floor(Date.now() / 1000);
+  insertRawBeerCacheRow({
+    upc: EAN_13,
+    brewery: "Yards",
+    name: "Brawler",
+    style: "English Mild",
+    abv: 4.2,
+    catalog_beer_id: "yards-brawler",
+    source: "vault_seed",
+    cached_at: now - 400
+  });
+  insertRawBeerCacheRow({
+    upc: UPC_A,
+    brewery: "",
+    name: "Brawler",
+    style: "",
+    abv: null,
+    image_url: "https://example.com/brawler.jpg",
+    source: "catalog_beer",
+    cached_at: now - 200
+  });
+  assert.equal(countBeerCacheTwins(UPC_A), 2);
+
+  const stored = saveBeerCacheEntry({
+    upc: EAN_13,
+    brewery: "",
+    name: "Brawler",
+    style: "",
+    abv: null,
+    source: "vault_seed"
+  });
+  assert.equal(stored, primaryCatalogUpc(EAN_13));
+  assert.equal(countBeerCacheTwins(UPC_A), 1);
+
+  const hit = getBeerCacheEntry(EAN_13);
+  assert.equal(hit?.upc, primaryCatalogUpc(UPC_A));
+  assert.equal(hit?.brewery, "Yards");
+  assert.equal(hit?.style, "English Mild");
+  assert.equal(hit?.abv, 4.2);
+  assert.equal(hit?.catalog_beer_id, "yards-brawler");
+  assert.equal(hit?.image_url, "https://example.com/brawler.jpg");
+});
+
+test("X. getBeerCacheEntry is deterministic when twin rows disagree", () => {
+  wipeBeerCache(UPC_A, EAN_13);
+  const now = Math.floor(Date.now() / 1000);
+  insertRawBeerCacheRow({
+    upc: EAN_13,
+    brewery: "Old Brewery",
+    name: "Perpetual IPA",
+    style: "IPA",
+    abv: 7.0,
+    source: "vault_seed",
+    cached_at: now - 800
+  });
+  insertRawBeerCacheRow({
+    upc: UPC_A,
+    brewery: "Troegs",
+    name: "Perpetual IPA",
+    style: "American IPA",
+    abv: 7.5,
+    catalog_beer_id: "troegs-perpetual",
+    source: "catalog_beer",
+    cached_at: now - 50
+  });
+
+  const a = getBeerCacheEntry(UPC_A);
+  const b = getBeerCacheEntry(EAN_13);
+  assert.equal(a?.upc, primaryCatalogUpc(UPC_A));
+  assert.equal(b?.upc, a?.upc);
+  assert.equal(a?.brewery, "Troegs");
+  assert.equal(a?.style, "American IPA");
+  assert.equal(a?.abv, 7.5);
+  assert.equal(a?.catalog_beer_id, "troegs-perpetual");
+  assert.equal(countBeerCacheTwins(UPC_A), 1);
 });

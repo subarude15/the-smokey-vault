@@ -87,21 +87,155 @@ function rowFromDb(row: BeerCacheRow | undefined, { allowStale = false } = {}): 
   };
 }
 
-function findBeerCacheRow(rawUpc: string): BeerCacheRow | undefined {
+function nonEmptyText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function canonicalBeerCacheUpc(rawUpc: string): string {
+  return primaryCatalogUpc(rawUpc) || normalizeUpc(rawUpc);
+}
+
+/** Load every beer_cache row that is an exact UPC-A/EAN-13 twin of rawUpc. */
+function loadBeerCacheTwinRows(rawUpc: string): BeerCacheRow[] {
   const keys = beerCacheUpcLookupKeys(rawUpc);
-  if (!keys.length) return undefined;
+  if (!keys.length) return [];
   const placeholders = keys.map(() => "?").join(", ");
-  return db.prepare(`SELECT * FROM beer_cache WHERE upc IN (${placeholders}) LIMIT 1`).get(...keys) as
-    | BeerCacheRow
-    | undefined;
+  return db.prepare(`SELECT * FROM beer_cache WHERE upc IN (${placeholders})`).all(...keys) as BeerCacheRow[];
+}
+
+function preferText(preferred: unknown, fallback: unknown): string {
+  return nonEmptyText(preferred) || nonEmptyText(fallback);
+}
+
+function preferNullableText(preferred: unknown, fallback: unknown): string | null {
+  return preferText(preferred, fallback) || null;
+}
+
+function preferAbv(preferred: unknown, fallback: unknown): number | null {
+  if (preferred != null && preferred !== "" && !Number.isNaN(Number(preferred))) return Number(preferred);
+  if (fallback != null && fallback !== "" && !Number.isNaN(Number(fallback))) return Number(fallback);
+  return null;
+}
+
+/**
+ * Fold historical twin rows oldest → newest so newer non-empty fields win,
+ * while empty/null never erases an older useful value.
+ */
+function mergeBeerCacheTwinRows(rows: BeerCacheRow[]): BeerCacheRow | null {
+  if (!rows.length) return null;
+  const ordered = [...rows].sort(
+    (a, b) => Number(a.cached_at) - Number(b.cached_at) || String(a.upc).localeCompare(String(b.upc))
+  );
+  let merged: BeerCacheRow = { ...ordered[0]! };
+  for (const row of ordered.slice(1)) {
+    merged = {
+      upc: merged.upc,
+      catalog_beer_id: preferNullableText(row.catalog_beer_id, merged.catalog_beer_id),
+      untappd_bid: preferNullableText(row.untappd_bid, merged.untappd_bid),
+      brewery: preferText(row.brewery, merged.brewery),
+      name: preferText(row.name, merged.name) || merged.name,
+      style: preferText(row.style, merged.style),
+      abv: preferAbv(row.abv, merged.abv),
+      image_url: preferNullableText(row.image_url, merged.image_url),
+      source: preferText(row.source, merged.source) || merged.source,
+      cached_at: Math.max(Number(merged.cached_at ?? 0), Number(row.cached_at ?? 0))
+    };
+  }
+  return merged;
+}
+
+/**
+ * Collapse UPC-A/EAN-13 twin rows onto primaryCatalogUpc.
+ * Used by save and by lookup self-heal when historical duplicates exist.
+ */
+function consolidateBeerCacheTwins(
+  rawUpc: string,
+  incoming?: {
+    catalog_beer_id?: string | null;
+    untappd_bid?: string | null;
+    brewery?: string;
+    name?: string;
+    style?: string;
+    abv?: number | null;
+    image_url?: string | null;
+    source?: BeerCacheSource | string;
+    cached_at?: number;
+  }
+): BeerCacheRow | null {
+  const canonical = canonicalBeerCacheUpc(rawUpc);
+  if (!canonical) return null;
+
+  const twins = loadBeerCacheTwinRows(rawUpc);
+  const mergedExisting = mergeBeerCacheTwinRows(twins);
+  const name = preferText(incoming?.name, mergedExisting?.name);
+  if (!name) return null;
+
+  const brewery = preferText(incoming?.brewery, mergedExisting?.brewery);
+  const style = preferText(incoming?.style, mergedExisting?.style);
+  const abv = preferAbv(incoming?.abv, mergedExisting?.abv);
+  const imageUrl = preferNullableText(incoming?.image_url, mergedExisting?.image_url);
+  const catalogBeerId = preferNullableText(incoming?.catalog_beer_id, mergedExisting?.catalog_beer_id);
+  const untappdBid = preferNullableText(incoming?.untappd_bid, mergedExisting?.untappd_bid);
+  const source = preferText(incoming?.source, mergedExisting?.source) || "vault_seed";
+  const cachedAt =
+    incoming?.cached_at != null
+      ? Number(incoming.cached_at)
+      : Math.max(Number(mergedExisting?.cached_at ?? 0), ...twins.map((row) => Number(row.cached_at ?? 0)));
+
+  // Drop every equivalent alias row, then write one canonical key.
+  for (const key of beerCacheUpcLookupKeys(rawUpc)) {
+    if (key !== canonical) {
+      db.prepare("DELETE FROM beer_cache WHERE upc = ?").run(key);
+    }
+  }
+  for (const row of twins) {
+    if (row.upc !== canonical) {
+      db.prepare("DELETE FROM beer_cache WHERE upc = ?").run(row.upc);
+    }
+  }
+
+  db.prepare(`
+    INSERT INTO beer_cache (
+      upc, catalog_beer_id, untappd_bid, brewery, name, style, abv, image_url, source, cached_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(upc) DO UPDATE SET
+      catalog_beer_id=excluded.catalog_beer_id,
+      untappd_bid=excluded.untappd_bid,
+      brewery=excluded.brewery,
+      name=excluded.name,
+      style=excluded.style,
+      abv=excluded.abv,
+      image_url=excluded.image_url,
+      source=excluded.source,
+      cached_at=excluded.cached_at
+  `).run(
+    canonical,
+    catalogBeerId,
+    untappdBid,
+    brewery,
+    name,
+    style,
+    abv,
+    imageUrl,
+    source,
+    cachedAt || Math.floor(Date.now() / 1000)
+  );
+
+  return (db.prepare("SELECT * FROM beer_cache WHERE upc = ?").get(canonical) as BeerCacheRow | undefined) ?? null;
 }
 
 export function getBeerCacheEntry(rawUpc: string, { allowStale = false } = {}): BeerCacheEntry | null {
-  return rowFromDb(findBeerCacheRow(rawUpc), { allowStale });
-}
+  const twins = loadBeerCacheTwinRows(rawUpc);
+  if (!twins.length) return null;
 
-function nonEmptyText(value: unknown): string {
-  return String(value ?? "").trim();
+  const canonical = canonicalBeerCacheUpc(rawUpc);
+  const needsHeal = twins.length > 1 || (canonical && twins.some((row) => row.upc !== canonical));
+  if (needsHeal) {
+    // Historical duplicate or non-canonical lone twin → converge on primaryCatalogUpc.
+    return rowFromDb(consolidateBeerCacheTwins(rawUpc) ?? undefined, { allowStale });
+  }
+
+  return rowFromDb(twins[0], { allowStale });
 }
 
 export function saveBeerCacheEntry(entry: {
@@ -118,47 +252,18 @@ export function saveBeerCacheEntry(entry: {
   const name = nonEmptyText(entry.name);
   if (!name) return null;
 
-  // Prefer an existing twin-row key so UPC-A/EAN-13 do not fork into duplicate rows.
-  const existing = findBeerCacheRow(entry.upc);
-  const upc = existing?.upc || primaryCatalogUpc(entry.upc) || normalizeUpc(entry.upc);
-  if (!upc) return null;
-
-  const brewery = nonEmptyText(entry.brewery);
-  const style = nonEmptyText(entry.style);
-  const abv = entry.abv == null || Number.isNaN(Number(entry.abv)) ? null : Number(entry.abv);
-  const imageUrl = nonEmptyText(entry.image_url) || null;
-  const catalogBeerId = nonEmptyText(entry.catalog_beer_id) || null;
-  const untappdBid = nonEmptyText(entry.untappd_bid) || null;
-  const source = nonEmptyText(entry.source) || "vault_seed";
-  const cachedAt = Math.floor(Date.now() / 1000);
-
-  db.prepare(`
-    INSERT INTO beer_cache (
-      upc, catalog_beer_id, untappd_bid, brewery, name, style, abv, image_url, source, cached_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(upc) DO UPDATE SET
-      catalog_beer_id=COALESCE(excluded.catalog_beer_id, beer_cache.catalog_beer_id),
-      untappd_bid=COALESCE(excluded.untappd_bid, beer_cache.untappd_bid),
-      brewery=CASE WHEN TRIM(excluded.brewery) = '' THEN beer_cache.brewery ELSE excluded.brewery END,
-      name=excluded.name,
-      style=CASE WHEN TRIM(excluded.style) = '' THEN beer_cache.style ELSE excluded.style END,
-      abv=COALESCE(excluded.abv, beer_cache.abv),
-      image_url=COALESCE(excluded.image_url, beer_cache.image_url),
-      source=CASE WHEN TRIM(excluded.source) = '' THEN beer_cache.source ELSE excluded.source END,
-      cached_at=excluded.cached_at
-  `).run(
-    upc,
-    catalogBeerId,
-    untappdBid,
-    brewery,
+  const saved = consolidateBeerCacheTwins(entry.upc, {
+    catalog_beer_id: entry.catalog_beer_id,
+    untappd_bid: entry.untappd_bid,
+    brewery: entry.brewery,
     name,
-    style,
-    abv,
-    imageUrl,
-    source,
-    cachedAt
-  );
-  return upc;
+    style: entry.style,
+    abv: entry.abv,
+    image_url: entry.image_url,
+    source: entry.source,
+    cached_at: Math.floor(Date.now() / 1000)
+  });
+  return saved?.upc ?? null;
 }
 
 export function beerCacheToProduct(entry: BeerCacheEntry): ProductSchema {
