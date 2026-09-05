@@ -502,6 +502,42 @@ export function compareSpirits(a: Record<string, unknown>, b: Record<string, unk
   return String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { sensitivity: "base" });
 }
 
+export type BottleCollectionModule = "spirits" | "wines" | "packaged_beer";
+
+function visibleProductName(item: Record<string, unknown> | null | undefined): string {
+  return String(item?.name ?? "").trim();
+}
+
+function compareVisibleProductName(a: Record<string, unknown>, b: Record<string, unknown>): number {
+  const nameA = visibleProductName(a);
+  const nameB = visibleProductName(b);
+  if (nameA && !nameB) return -1;
+  if (!nameA && nameB) return 1;
+  return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+}
+
+export function compareBottleCollectionByName(
+  moduleId: BottleCollectionModule,
+  a: Record<string, unknown>,
+  b: Record<string, unknown>
+): number {
+  const name = compareVisibleProductName(a, b);
+  if (name !== 0) return name;
+
+  switch (moduleId) {
+    case "spirits":
+      return compareSpirits(a, b);
+    case "packaged_beer":
+      return comparePackagedBeer(a, b);
+    case "wines":
+      return 0;
+    default: {
+      const exhaustive: never = moduleId;
+      return exhaustive;
+    }
+  }
+}
+
 export function prepareSpiritWrite(body: Record<string, unknown>): Record<string, unknown> {
   const next = { ...body };
   if (next.fill_level !== undefined) next.fill_level = nearestFillStop(next.fill_level);

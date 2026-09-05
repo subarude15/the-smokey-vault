@@ -20,8 +20,8 @@ import {
   remainingFromPercent, serializeList, wineKindLabel, wineSweetnessStops, brewToTap,
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseGravity, tapsForBatch, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel,
-  packagedCount, packagedStockLabel, FILL_STOPS, compareSpirits, fillStopLabel, isSpiritEmpty,
+  onTapLabel, parseGravity, tapsForBatch, compareBottleCollectionByName, drinkOnePackaged, normalizeBeerVessel,
+  packagedCount, packagedStockLabel, FILL_STOPS, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   spiritFamilyFromLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason,
@@ -1746,10 +1746,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
     : module.id === "brews"
       ? [...filtered].sort(compareBrews)
       : module.id === "packaged_beer"
-        ? [...filtered].sort(comparePackagedBeer)
+        ? [...filtered].sort((a, b) => compareBottleCollectionByName("packaged_beer", a, b))
         : module.id === "spirits"
-          ? [...filtered].sort(compareSpirits)
-          : filtered;
+          ? [...filtered].sort((a, b) => compareBottleCollectionByName("spirits", a, b))
+          : module.id === "wines"
+            ? [...filtered].sort((a, b) => compareBottleCollectionByName("wines", a, b))
+            : filtered;
   const canFind = ["spirits","packaged_beer","wines","taps","brews"].includes(module.id);
   const brewfatherReady = admin && module.id === "brews" && brewfatherConfigured;
   const emptyActions = admin ? <>
