@@ -18,6 +18,7 @@ export const PRODUCT_FIELD_SOURCES = [
   "vision",
   "web",
   "llm",
+  "official_brewery",
   "user",
   "unknown"
 ] as const;

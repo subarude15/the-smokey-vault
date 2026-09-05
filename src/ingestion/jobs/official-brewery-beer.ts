@@ -1,0 +1,216 @@
+/**
+ * Apply official brewery beer product-page discovery during packaged-beer metadata enrichment.
+ * Domain-scoped only — never blocks autocomplete / BottleSuggest.
+ */
+import { parseBeerQuery } from "../../beer_search_query.js";
+import {
+  discoverOfficialBeerProductPage,
+  isOfficialBreweryDiscoveryEnabled,
+  type OfficialBeerDiscoveryDeps,
+  type OfficialBeerDiscoveryResult
+} from "../../official_brewery_beer_discovery.js";
+import { resolveBreweryHints } from "../../open_brewery_db.js";
+import {
+  field,
+  mergeField,
+  type BottleCandidate,
+  type ProductField
+} from "../candidate/index.js";
+import { upsertEnrichmentSource } from "./enrichment-sources.js";
+import { upsertProductContent } from "./product-content.js";
+
+export type OfficialBreweryBeerApplyResult = {
+  attempted: boolean;
+  discovery: OfficialBeerDiscoveryResult | null;
+  candidate: BottleCandidate;
+  productPageStored: boolean;
+  abvUpdated: boolean;
+  notesStored: boolean;
+};
+
+function cloneField<T>(f: ProductField<T>): ProductField<T> {
+  return {
+    ...f,
+    contributors: f.contributors ? f.contributors.map((c) => ({ ...c })) : undefined
+  };
+}
+
+function cloneCandidate(candidate: BottleCandidate): BottleCandidate {
+  return {
+    ...candidate,
+    upc: cloneField(candidate.upc),
+    name: cloneField(candidate.name),
+    brand: cloneField(candidate.brand),
+    product_type: cloneField(candidate.product_type),
+    category: cloneField(candidate.category),
+    abv: cloneField(candidate.abv),
+    proof: cloneField(candidate.proof),
+    volume_ml: cloneField(candidate.volume_ml),
+    origin: cloneField(candidate.origin),
+    ttb_id: cloneField(candidate.ttb_id)
+  };
+}
+
+async function resolveBreweryWebsite(args: {
+  breweryName: string;
+  beerName: string;
+  websiteUrl?: string | null;
+  websiteHost?: string | null;
+}): Promise<{ websiteUrl: string | null; websiteHost: string | null }> {
+  if (args.websiteUrl || args.websiteHost) {
+    return {
+      websiteUrl: args.websiteUrl ?? null,
+      websiteHost: args.websiteHost ?? null
+    };
+  }
+  try {
+    const parsed = parseBeerQuery(`${args.breweryName} ${args.beerName}`.trim());
+    const hints = await resolveBreweryHints({
+      parsed,
+      candidateBreweries: [args.breweryName]
+    });
+    const hit = hints[0];
+    if (!hit) return { websiteUrl: null, websiteHost: null };
+    return {
+      websiteUrl: hit.websiteUrl ?? null,
+      websiteHost: hit.websiteHost ?? null
+    };
+  } catch {
+    return { websiteUrl: null, websiteHost: null };
+  }
+}
+
+/**
+ * Discover the official brewery product page for a packaged beer and merge
+ * high-confidence ABV / notes / product URL without overriding vault/user values.
+ */
+export async function applyOfficialBreweryBeerDiscovery(options: {
+  entityType: string;
+  entityId: number;
+  candidate: BottleCandidate;
+  row: Record<string, unknown>;
+  discoveryDeps?: OfficialBeerDiscoveryDeps;
+}): Promise<OfficialBreweryBeerApplyResult> {
+  const candidate = cloneCandidate(options.candidate);
+
+  if (options.entityType !== "packaged_beer") {
+    return {
+      attempted: false,
+      discovery: null,
+      candidate,
+      productPageStored: false,
+      abvUpdated: false,
+      notesStored: false
+    };
+  }
+
+  if (!isOfficialBreweryDiscoveryEnabled()) {
+    return {
+      attempted: false,
+      discovery: null,
+      candidate,
+      productPageStored: false,
+      abvUpdated: false,
+      notesStored: false
+    };
+  }
+
+  const breweryName = String(
+    options.row.brewery ?? options.row.brand ?? candidate.brand.value ?? ""
+  ).trim();
+  const beerName = String(options.row.name ?? candidate.name.value ?? "").trim();
+  if (!breweryName || !beerName) {
+    return {
+      attempted: false,
+      discovery: null,
+      candidate,
+      productPageStored: false,
+      abvUpdated: false,
+      notesStored: false
+    };
+  }
+
+  const website = await resolveBreweryWebsite({
+    breweryName,
+    beerName,
+    websiteUrl: (options.row.website_url as string | null | undefined) ?? null,
+    websiteHost: (options.row.website_host as string | null | undefined) ?? null
+  });
+
+  const discovery = await discoverOfficialBeerProductPage(
+    {
+      breweryName,
+      beerName,
+      breweryWebsiteUrl: website.websiteUrl,
+      breweryWebsiteHost: website.websiteHost,
+      style: (options.row.style as string | null | undefined) ?? candidate.category.value,
+      upc: candidate.upc.value
+    },
+    options.discoveryDeps
+  );
+
+  let productPageStored = false;
+  let abvUpdated = false;
+  let notesStored = false;
+
+  if (discovery.status === "matched" && discovery.productPageUrl) {
+    upsertEnrichmentSource({
+      entityType: options.entityType,
+      entityId: options.entityId,
+      sourceType: "official_product_page",
+      sourceUrl: discovery.productPageUrl
+    });
+    productPageStored = true;
+
+    if (discovery.fields.abv != null) {
+      const beforeSource = candidate.abv.source;
+      const beforeValue = candidate.abv.value;
+      const merged = mergeField(
+        candidate.abv,
+        field(discovery.fields.abv, "official_brewery"),
+        "abv"
+      );
+      candidate.abv = merged.field;
+      if (merged.overwritten || (beforeValue == null && candidate.abv.value != null)) {
+        abvUpdated =
+          beforeSource !== "vault" &&
+          beforeSource !== "user" &&
+          beforeSource !== "barcode_cache";
+        if (beforeValue == null) abvUpdated = true;
+        if (
+          beforeSource === "vault" ||
+          beforeSource === "user" ||
+          beforeSource === "barcode_cache"
+        ) {
+          abvUpdated = false;
+        } else if (merged.overwritten || beforeValue == null) {
+          abvUpdated = true;
+        }
+      }
+    }
+
+    const notes =
+      discovery.fields.tastingNotes?.trim() ||
+      discovery.fields.description?.trim() ||
+      null;
+    if (notes) {
+      upsertProductContent({
+        entityType: "packaged_beer",
+        entityId: options.entityId,
+        officialNotes: notes,
+        officialSourceUrl: discovery.productPageUrl,
+        officialSourceType: "official"
+      });
+      notesStored = true;
+    }
+  }
+
+  return {
+    attempted: true,
+    discovery,
+    candidate,
+    productPageStored,
+    abvUpdated,
+    notesStored
+  };
+}

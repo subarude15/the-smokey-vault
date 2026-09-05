@@ -58,9 +58,14 @@ export {
   type OfficialSourceType
 } from "./product-content.js";
 
-export { runMetadataJob, type MetadataJobResult } from "./metadata-job.js";
+export { runMetadataJob, type MetadataJobResult, type MetadataJobDeps } from "./metadata-job.js";
 export { runTastingNotesJob, type TastingNotesJobResult } from "./tasting-notes-job.js";
 export { runImageJob, type ImageJobResult, type ImageJobDeps } from "./image-job.js";
+
+export {
+  applyOfficialBreweryBeerDiscovery,
+  type OfficialBreweryBeerApplyResult
+} from "./official-brewery-beer.js";
 
 export {
   ensureEnrichmentSourcesTable,

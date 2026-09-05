@@ -19,6 +19,7 @@ test("confidence bands are discrete plateaus keyed by source", () => {
   assert.equal(confidenceForSource("vault"), CONFIDENCE.VERY_HIGH);
   assert.equal(confidenceForSource("barcode_cache"), CONFIDENCE.VERY_HIGH);
   assert.equal(confidenceForSource("user"), CONFIDENCE.VERY_HIGH);
+  assert.equal(confidenceForSource("official_brewery"), CONFIDENCE.VERY_HIGH);
   assert.equal(confidenceForSource("iowa"), CONFIDENCE.HIGH);
   assert.equal(confidenceForSource("fwgs"), CONFIDENCE.HIGH);
   assert.equal(confidenceForSource("cola"), CONFIDENCE.HIGH);

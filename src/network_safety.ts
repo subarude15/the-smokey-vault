@@ -267,6 +267,11 @@ export async function fetchSafeHttp(input: string | URL, options: FetchSafeOptio
     }
 
     if (response.status >= 300 && response.status < 400) {
+      // maxRedirects === 0: return the redirect response so callers can enforce
+      // extra hop policy (e.g. official-domain checks) before following.
+      if (maxRedirects <= 0) {
+        return response;
+      }
       response.body.resume();
       if (redirects >= maxRedirects) {
         throw new NetworkSafetyError("Too many redirects from that link.", "redirect");

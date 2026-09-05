@@ -1,6 +1,7 @@
 /**
  * Run one metadata enrichment job against a saved inventory entity.
  */
+import type { OfficialBeerDiscoveryDeps } from "../../official_brewery_beer_discovery.js";
 import {
   executeMetadataEnrichment,
   planEnrichment,
@@ -18,6 +19,7 @@ import {
   type MetadataJobResultPayload,
   unresolvedMetadataFields
 } from "./metadata-outcome.js";
+import { applyOfficialBreweryBeerDiscovery } from "./official-brewery-beer.js";
 import type { EnrichmentJob } from "./types.js";
 
 export type MetadataJobResult = {
@@ -28,18 +30,28 @@ export type MetadataJobResult = {
   cacheUpdated: boolean;
   /** Lightweight progress for job.result_json. */
   resultPayload: MetadataJobResultPayload;
+  officialBreweryDiscovery?: {
+    attempted: boolean;
+    status?: string;
+    productPageStored?: boolean;
+    abvUpdated?: boolean;
+  };
+};
+
+export type MetadataJobDeps = MetadataEnrichmentDeps & {
+  officialBeerDiscoveryDeps?: OfficialBeerDiscoveryDeps;
 };
 
 export async function runMetadataJob(
   job: EnrichmentJob,
-  deps: MetadataEnrichmentDeps = {}
+  deps: MetadataJobDeps = {}
 ): Promise<MetadataJobResult> {
   const row = loadInventoryRow(job.entity_type, job.entity_id);
   if (!row) {
     throw new Error(`Inventory ${job.entity_type}#${job.entity_id} not found`);
   }
 
-  const before = candidateFromInventoryRow(job.entity_type, row);
+  let before = candidateFromInventoryRow(job.entity_type, row);
   const plan = planEnrichment(before);
 
   if (!plan.identified) {
@@ -68,15 +80,50 @@ export async function runMetadataJob(
       }
     };
   }
+
+  // Official brewery discovery for identified packaged beer — even when other
+  // metadata fields already look complete. Never runs on autocomplete keystrokes.
+  let officialMeta: MetadataJobResult["officialBreweryDiscovery"];
+  if (job.entity_type === "packaged_beer") {
+    const snapshotBeforeOfficial = before;
+    const applied = await applyOfficialBreweryBeerDiscovery({
+      entityType: job.entity_type,
+      entityId: job.entity_id,
+      candidate: before,
+      row,
+      discoveryDeps: deps.officialBeerDiscoveryDeps
+    });
+    before = applied.candidate;
+    officialMeta = {
+      attempted: applied.attempted,
+      status: applied.discovery?.status,
+      productPageStored: applied.productPageStored,
+      abvUpdated: applied.abvUpdated
+    };
+
+    if (applied.abvUpdated) {
+      persistMetadataImprovements({
+        entityType: job.entity_type,
+        entityId: job.entity_id,
+        before: snapshotBeforeOfficial,
+        after: before
+      });
+    }
+  }
+
   if (!hasRecommendedMetadataWork(before)) {
     return {
       skipped: true,
-      reason: "already_complete",
-      inventoryUpdated: [],
+      reason:
+        officialMeta?.productPageStored || officialMeta?.abvUpdated
+          ? "official_brewery_only"
+          : "already_complete",
+      inventoryUpdated: officialMeta?.abvUpdated ? ["abv"] : [],
       cacheUpdated: false,
+      officialBreweryDiscovery: officialMeta,
       resultPayload: {
         requested: [],
-        updated: [],
+        updated: officialMeta?.abvUpdated ? ["abv"] : [],
         unresolved: []
       }
     };
@@ -87,7 +134,8 @@ export async function runMetadataJob(
   // Transient system/dep failures with zero progress should retry, not look like
   // a successful "nothing found" completion.
   if (execution.errors.length > 0 && execution.updated.length === 0) {
-    const message = execution.errors.map((e) => e.message).join("; ") || "metadata enrichment failed";
+    const message =
+      execution.errors.map((e) => e.message).join("; ") || "metadata enrichment failed";
     throw new Error(message);
   }
 
@@ -116,6 +164,7 @@ export async function runMetadataJob(
     execution,
     inventoryUpdated: persisted.inventoryUpdated,
     cacheUpdated: persisted.cacheUpdated,
+    officialBreweryDiscovery: officialMeta,
     resultPayload
   };
 }

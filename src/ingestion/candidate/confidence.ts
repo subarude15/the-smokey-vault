@@ -6,7 +6,7 @@ import { CONFIDENCE, type ProductFieldSource } from "./types.js";
  *
  * | Band        | Score | When |
  * |-------------|-------|------|
- * | VERY_HIGH  | 0.95  | vault shelf hit, user edit, barcode_cache UPC memory |
+ * | VERY_HIGH  | 0.95  | vault shelf hit, user edit, barcode_cache UPC memory, official brewery product page |
  * | HIGH        | 0.80  | beer_cache, cola_cache, Iowa, FWGS, COLA, vision label text |
  * | MEDIUM      | 0.55  | Open Food Facts, upcitemdb, generic web extraction |
  * | LOW         | 0.30  | unsupported LLM inference, unknown |
@@ -16,6 +16,7 @@ export const SOURCE_CONFIDENCE: Record<ProductFieldSource, number> = {
   vault: CONFIDENCE.VERY_HIGH,
   barcode_cache: CONFIDENCE.VERY_HIGH,
   user: CONFIDENCE.VERY_HIGH,
+  official_brewery: CONFIDENCE.VERY_HIGH,
   beer_cache: CONFIDENCE.HIGH,
   cola_cache: CONFIDENCE.HIGH,
   plcb_spirits: CONFIDENCE.HIGH,
