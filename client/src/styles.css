@@ -1321,3 +1321,16 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
   .bottle-detail-image{height:200px;padding:14px}
   .bottle-detail-keeper-actions{width:100%}
 }
+
+/* BottleSuggest UX — loading/empty/error/custom + a11y helpers */
+.suggest-root{display:contents}
+.suggest-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px;padding:8px 10px;min-height:40px}
+.suggest-status-detail{color:var(--muted);opacity:.85;font-size:12px}
+.suggest-error{color:#f2988f}
+.suggest-custom{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px dashed var(--line);background:transparent;border-radius:10px;padding:12px 10px;color:var(--text);cursor:pointer;min-height:48px;font-size:14px}
+.suggest-custom:hover,.suggest-custom:focus-visible{border-color:var(--accent);color:var(--accent-2)}
+.suggest-list{max-height:min(320px,50vh);overflow:auto}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media (prefers-reduced-motion:reduce){
+  .suggest-status .spinner{animation:none}
+}
