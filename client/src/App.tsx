@@ -1882,10 +1882,10 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
             {module.id === "brews" && parseList(item.hops).slice(0,3).map((value) => <span key={`hop-${value}`}>{value}</span>)}
             {module.id === "brews" && parseList(item.flavors).slice(0,3).map((value) => <span key={`flavor-${value}`}>{value}</span>)}
             {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
-            {item.bottle_count != null && module.id !== "packaged_beer" ? <span className="stock-chip">{item.bottle_count} bottles</span> : null}
-            {module.id === "spirits" ? <span className="stock-chip">{spiritStockLabel(item.stock_count)}</span> : null}
-            {module.id === "packaged_beer" ? <span className="stock-chip">{packagedStockLabel(item.count, item.vessel)}</span> : item.count != null ? <span className="stock-chip">{item.count} packaged</span> : null}
-            {item.upc ? <span>UPC {String(item.upc)}</span> : null}
+            {admin && item.bottle_count != null && module.id !== "packaged_beer" ? <span className="stock-chip">{item.bottle_count} bottles</span> : null}
+            {admin && module.id === "spirits" ? <span className="stock-chip">{spiritStockLabel(item.stock_count)}</span> : null}
+            {admin && module.id === "packaged_beer" ? <span className="stock-chip">{packagedStockLabel(item.count, item.vessel)}</span> : admin && item.count != null ? <span className="stock-chip">{item.count} packaged</span> : null}
+            {admin && item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
@@ -1921,6 +1921,11 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const hops = parseList(item.hops);
   const tags = parseList(item.tags);
   const skip = new Set(["notes", "tasting_notes", "flavors", "tags", "hops", "image_url", "sweetness", "body", "drink_by_date", "remaining_l", "keg_size_l", "status", "calculated_abv", "count", "fill_level", "stock_count", module.primary]);
+  // Guests get product metadata only — UPC / raw inventory counts stay Keeper-facing.
+  if (!admin) {
+    skip.add("upc");
+    skip.add("bottle_count");
+  }
   const wineKind = module.id === "wines" ? wineKindLabel(String(item.type ?? ""), String(item.style ?? "")) : "";
   const wineSweetness = module.id === "wines"
     ? migrateWineSweetnessValue(item.sweetness, String(item.type ?? ""), String(item.style ?? ""))
@@ -2015,10 +2020,10 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
             {item.volume_ml ? <span>{item.volume_ml} ml</span> : null}
             {onTap ? <span>{onTap}</span> : null}
             {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
-            {module.id === "spirits" ? <span>{spiritStockLabel(item.stock_count)}</span> : item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
-            {item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
-            {packagedLabel ? <span>{packagedLabel}</span> : item.count != null && module.id !== "packaged_beer" ? <span>{item.count} packaged</span> : null}
-            {item.upc ? <span>UPC {String(item.upc)}</span> : null}
+            {admin && module.id === "spirits" ? <span>{spiritStockLabel(item.stock_count)}</span> : admin && item.stock_count != null ? <span>{item.stock_count} bottles</span> : null}
+            {admin && item.bottle_count != null && module.id !== "packaged_beer" ? <span>{item.bottle_count} bottles</span> : null}
+            {admin && packagedLabel ? <span>{packagedLabel}</span> : admin && item.count != null && module.id !== "packaged_beer" ? <span>{item.count} packaged</span> : null}
+            {admin && item.upc ? <span>UPC {String(item.upc)}</span> : null}
             {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
           {!(module.id === "taps" && isTapEmpty(item)) && <BottleVotes table={module.id} itemId={item.id}/>}
@@ -2061,7 +2066,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           />
           <small className="field-hint">{fillStopLabel(item.fill_level)} · {spiritStockLabel(item.stock_count)}</small>
         </div>}
-        {module.id === "packaged_beer" && <div className="full">
+        {admin && module.id === "packaged_beer" && <div className="full">
           <span>In the cold room</span>
           <strong>{packagedLabel}</strong>
         </div>}

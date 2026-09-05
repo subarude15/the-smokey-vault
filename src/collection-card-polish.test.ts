@@ -111,7 +111,7 @@ test("stock chips stay visible and secondary metadata stays quieter", () => {
   assert.match(slice, /className="stock-chip"/);
   assert.match(slice, /spiritStockLabel/);
   assert.match(slice, /packagedStockLabel/);
-  assert.match(slice, /item\.upc \? <span>UPC/);
+  assert.match(slice, /admin && item\.upc \? <span>UPC/);
   assert.match(
     cssSrc,
     /\.inventory-card \.meta span\.stock-chip\{/,
