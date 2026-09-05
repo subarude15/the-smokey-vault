@@ -172,6 +172,7 @@ const SOURCE_LABELS: Record<ProductFieldSource, string> = {
   vision: "Vision",
   web: "Web",
   llm: "AI",
+  official_brewery: "Official brewery",
   user: "User",
   unknown: "Unknown"
 };
