@@ -57,6 +57,12 @@ import {
   type ShelfSessionMode,
   scanTabSurface
 } from "./scan-session-nav";
+import {
+  pushBottleDetailHistory,
+  resolveDetailBackTarget,
+  shouldCloseDetailOnPopState,
+  syncHistoryAfterClosingDetail
+} from "./bottle-detail-nav";
 type Field = { key: string; label: string; type?: string; options?: string[] };
 type Module = {
   id: string; label: string; singular: string; icon: typeof Bottle; title: string; subtitle: string;
@@ -815,6 +821,7 @@ export default function App() {
             openScanner={() => navigate("scan")}
             openItem={shelfViewItem?.moduleId === module.id ? shelfViewItem.item : undefined}
             onOpenItemConsumed={() => setShelfViewItem(null)}
+            ensureCollection={() => navigate(module.id)}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
             onPutOnTap={admin && module.id === "brews" ? async (brew) => {
@@ -1632,10 +1639,12 @@ function ScanPage({
   </>;
 }
 
-function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, openItem, onOpenItemConsumed, seedCreate, onSeedConsumed, onPutOnTap }: {
+function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, openItem, onOpenItemConsumed, seedCreate, onSeedConsumed, onPutOnTap, ensureCollection }: {
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
   openItem?: Item; onOpenItemConsumed?: () => void;
   seedCreate?: Item; onSeedConsumed?: () => void; onPutOnTap?: (item: Item) => void;
+  /** Safety net: keep/return the user on this module's collection after closing detail. */
+  ensureCollection?: () => void;
 }) {
   const { brewfatherConfigured } = useHouse();
   const [items,setItems] = useState<Item[]>([]);
@@ -1647,6 +1656,10 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const [taps,setTaps] = useState<Item[]>([]);
   const [syncing,setSyncing] = useState(false);
   const openedScanKey = useRef<number | undefined>(undefined);
+  const detailOriginRef = useRef<string>(module.id);
+  const savedScrollRef = useRef(0);
+  const viewingRef = useRef<Item | undefined>(undefined);
+  viewingRef.current = viewing;
   const load = useCallback(() => {
     setLoadError("");
     return api<Item[]>(`/inventory/${module.id}`).then(setItems).catch((err) => {
@@ -1665,18 +1678,56 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
     if (syncError) setLoadError(syncError);
     setSyncing(false);
   }, [load]);
+  const openBottleDetail = useCallback((item: Item, originModuleId: string = module.id) => {
+    detailOriginRef.current = resolveDetailBackTarget(originModuleId, module.id);
+    savedScrollRef.current = window.scrollY;
+    setEditing(undefined);
+    setViewing(item);
+    pushBottleDetailHistory(window.history, module.id, Number(item.id));
+  }, [module.id]);
+  const closeBottleDetail = useCallback(() => {
+    const scrollY = savedScrollRef.current;
+    setViewing(undefined);
+    onOpenItemConsumed?.();
+    syncHistoryAfterClosingDetail(window.history, module.id);
+    // Deterministic in-app Back: remain on the natural/origin collection, never Dashboard.
+    resolveDetailBackTarget(detailOriginRef.current, module.id);
+    ensureCollection?.();
+    requestAnimationFrame(() => {
+      window.scrollTo(0, scrollY);
+    });
+  }, [ensureCollection, module.id, onOpenItemConsumed]);
   useEffect(() => {
-    // Preserve an explicit shelf-session "View bottle" target across mount/load.
-    if (openItem) setViewing(openItem);
-    else setViewing(undefined);
+    // Load collection data. Do NOT clear card-opened viewing when openItem is absent —
+    // that wiped in-collection detail whenever load identity refreshed.
     if (admin && module.id === "brews" && brewfatherConfigured) void syncFromBrewfather(false);
     else void load();
-  }, [admin, module.id, brewfatherConfigured, load, syncFromBrewfather, openItem]);
+  }, [admin, module.id, brewfatherConfigured, load, syncFromBrewfather]);
   useEffect(() => {
     if (!openItem) return;
-    setEditing(undefined);
-    setViewing(openItem);
-  }, [openItem]);
+    openBottleDetail(openItem, module.id);
+  }, [openItem, module.id, openBottleDetail]);
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (!viewingRef.current) return;
+      if (!shouldCloseDetailOnPopState(event.state, module.id)) return;
+      const scrollY = savedScrollRef.current;
+      setViewing(undefined);
+      onOpenItemConsumed?.();
+      ensureCollection?.();
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY);
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [ensureCollection, module.id, onOpenItemConsumed]);
+  useEffect(() => {
+    return () => {
+      // Explicit tab/nav changes unmount Inventory; drop stale detail history without history.back().
+      syncHistoryAfterClosingDetail(window.history, module.id);
+    };
+  }, [module.id]);
   useEffect(() => {
     if (module.id !== "brews") {
       setTaps([]);
@@ -1702,8 +1753,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
     if (!scanDraft || openedScanKey.current === scanDraft.key) return;
     openedScanKey.current = scanDraft.key;
     if (scanDraft.mode === "view") {
-      setEditing(undefined);
-      setViewing({ id: itemId(scanDraft.values), ...scanDraft.values } as Item);
+      openBottleDetail({ id: itemId(scanDraft.values), ...scanDraft.values } as Item, module.id);
       finishScanReview("viewed");
       return;
     }
@@ -1769,8 +1819,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       module={module}
       item={viewing}
       admin={admin}
-      onBack={() => { setViewing(undefined); onOpenItemConsumed?.(); }}
-      onEdit={() => { setEditing(viewing); setViewing(undefined); onOpenItemConsumed?.(); }}
+      onBack={closeBottleDetail}
+      onEdit={() => { setEditing(viewing); closeBottleDetail(); }}
       onDelete={() => module.id === "taps" ? clearTap(viewing) : remove(viewing.id)}
       onUpdated={(next) => { setViewing(next); load(); }}
       onPutOnTap={onPutOnTap ? () => onPutOnTap(viewing) : undefined}
@@ -1805,7 +1855,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         const outOfStock = (module.id === "packaged_beer" && packagedCount(item.count) <= 0)
           || (module.id === "spirits" && isSpiritEmpty(item));
         const blocked = Number(item.blocked_from_ordering ?? 0) === 1;
-        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}${blocked ? " blocked-bottle" : ""}`} key={item.id} onClick={() => setViewing(item)}>
+        return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}${blocked ? " blocked-bottle" : ""}`} key={item.id} onClick={() => openBottleDetail(item, module.id)}>
         {blocked && <span className="blocked-ribbon">{BLOCKED_RIBBON_LABEL}</span>}
         <div className="card-icon">{(() => {
           // Same precedence as bottle detail: server-derived display_image_url
@@ -1938,7 +1988,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   }
   return (
     <section className="bottle-detail">
-      <button className="secondary back-button" onClick={onBack}><ArrowLeft size={17}/> Back to {module.label}</button>
+      <button type="button" className="secondary back-button" onClick={onBack} aria-label={`Back to ${module.label}`}><ArrowLeft size={17}/> Back to {module.label}</button>
       <div className="bottle-detail-hero">
         <div className="bottle-detail-image">
           {(() => {

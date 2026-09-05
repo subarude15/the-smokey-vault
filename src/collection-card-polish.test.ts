@@ -64,8 +64,8 @@ test("D. click-to-open-detail behavior unchanged", () => {
   const slice = inventoryCardSlice();
   assert.match(
     slice,
-    /onClick=\{\(\)\s*=>\s*setViewing\(item\)\}/,
-    "collection cards must still open detail via setViewing(item)"
+    /onClick=\{\(\)\s*=>\s*openBottleDetail\(item(?:,\s*module\.id)?\)\}/,
+    "collection cards must still open detail via openBottleDetail(item)"
   );
   assert.match(slice, /type="button"/);
 });
