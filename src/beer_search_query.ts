@@ -328,10 +328,18 @@ export function classifyBeerMatch(product: Record<string, unknown>, parsed: Pars
   return "weak";
 }
 
+export type BeerRankOptions = {
+  /** Open Brewery DB (or similar) brewery-resolution hints — ranking only. */
+  breweryHints?: Array<{ name: string }>;
+  /** Optional bonus scorer; defaults to no bonus when omitted. */
+  breweryHintBonus?: (candidateBrewery: string, hints: Array<{ name: string }>) => number;
+};
+
 export function scoreBeerHit(
   product: Record<string, unknown>,
   parsed: ParsedBeerQuery,
-  source: string
+  source: string,
+  options?: BeerRankOptions
 ): number {
   const fields = beerProductFields(product);
   const matchClass = classifyBeerMatch(product, parsed);
@@ -363,19 +371,26 @@ export function scoreBeerHit(
   if (matchClass === "brewery_only") score -= 40;
   if (matchClass === "style_only") score -= 30;
 
+  // Modest brewery-resolution bonus — never invents products; cannot outrank exact identity alone.
+  const hints = options?.breweryHints;
+  if (hints?.length && fields.brewery && options?.breweryHintBonus) {
+    score += options.breweryHintBonus(fields.brewery, hints);
+  }
+
   return score;
 }
 
 export function rankBeerSearchHits<T extends { source: string; product: Record<string, unknown> }>(
   hits: T[],
-  parsed: ParsedBeerQuery
+  parsed: ParsedBeerQuery,
+  options?: BeerRankOptions
 ): T[] {
   return hits
     .map((hit, index) => ({
       hit,
       index,
       score: matchesBeerQuery(hit.product, parsed)
-        ? scoreBeerHit(hit.product, parsed, hit.source)
+        ? scoreBeerHit(hit.product, parsed, hit.source, options)
         : -1000 + index
     }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
