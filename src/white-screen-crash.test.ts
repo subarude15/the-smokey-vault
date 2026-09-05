@@ -16,7 +16,7 @@ import { db } from "./db.js";
 import { buildBottleEnrichmentView, normalizeTextField } from "./ingestion/jobs/enrichment-view.js";
 import { LOOKUP_SOURCE_LABELS, type LookupSource } from "./lookup-shared.js";
 import { saveScanSessionBottle } from "./scan-session.js";
-import { parseTastingProfile } from "./tasting-profile.js";
+import { parseTastingProfile, selectGuestEnrichedTastingText } from "./tasting-profile.js";
 import { upsertProductContent } from "./ingestion/jobs/product-content.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -100,34 +100,26 @@ function EnrichmentPanelBody({ view }: { view: any }) {
 function BottlePublicBody({ view }: { view: any }) {
   const official = textChild(view.tastingNotes?.official).trim();
   const house = textChild(view.tastingNotes?.houseProfile).trim();
-  if (!official && !house) return null;
+  const enriched = selectGuestEnrichedTastingText(official, house);
+  if (!enriched) return null;
 
-  function profileArticle(raw: string) {
-    const profile = parseTastingProfile(raw);
-    const blocks: React.ReactNode[] = [
-      React.createElement("span", { key: "eyebrow" }, "TASTING PROFILE")
-    ];
-    if (profile.aroma) {
-      blocks.push(React.createElement("div", { key: "aroma" }, React.createElement("span", null, "Aroma"), React.createElement("p", null, profile.aroma)));
-    }
-    if (profile.palate) {
-      blocks.push(React.createElement("div", { key: "palate" }, React.createElement("span", null, "Palate"), React.createElement("p", null, profile.palate)));
-    }
-    if (profile.finish) {
-      blocks.push(React.createElement("div", { key: "finish" }, React.createElement("span", null, "Finish"), React.createElement("p", null, profile.finish)));
-    }
-    if (!profile.aroma && !profile.palate && !profile.finish && profile.fallback) {
-      blocks.push(React.createElement("p", { key: "fallback" }, profile.fallback));
-    }
-    return React.createElement("article", null, ...blocks);
+  const profile = parseTastingProfile(enriched);
+  const blocks: React.ReactNode[] = [
+    React.createElement("span", { key: "eyebrow" }, "TASTING PROFILE")
+  ];
+  if (profile.aroma) {
+    blocks.push(React.createElement("div", { key: "aroma" }, React.createElement("span", null, "Aroma"), React.createElement("p", null, profile.aroma)));
   }
-
-  return React.createElement(
-    "div",
-    { className: "bottle-public-content" },
-    official ? profileArticle(official) : null,
-    house ? profileArticle(house) : null
-  );
+  if (profile.palate) {
+    blocks.push(React.createElement("div", { key: "palate" }, React.createElement("span", null, "Palate"), React.createElement("p", null, profile.palate)));
+  }
+  if (profile.finish) {
+    blocks.push(React.createElement("div", { key: "finish" }, React.createElement("span", null, "Finish"), React.createElement("p", null, profile.finish)));
+  }
+  if (!profile.aroma && !profile.palate && !profile.finish && profile.fallback) {
+    blocks.push(React.createElement("p", { key: "fallback" }, profile.fallback));
+  }
+  return React.createElement("div", { className: "bottle-public-content" }, React.createElement("article", null, ...blocks));
 }
 
 /** Mirrors App.tsx ItemForm source chip with ?? fallback. */
@@ -347,8 +339,10 @@ test("patron public content surfaces useful notes without plumbing", () => {
   const html = render(React.createElement(BottlePublicBody, { view }));
   assert.match(html, /Vanilla and oak/);
   assert.match(html, /TASTING PROFILE/);
-  assert.match(html, /smoke/);
-  assert.match(html, /caramel/);
+  // Official wins — house profile must not also render a second block.
+  assert.equal((html.match(/TASTING PROFILE/g) || []).length, 1);
+  assert.doesNotMatch(html, /smoke/);
+  assert.doesNotMatch(html, /caramel/);
   assert.doesNotMatch(html, /HOUSE PROFILE/);
   assert.doesNotMatch(html, /What the vault knows/);
   assert.doesNotMatch(html, /Enrichment review/);

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   parseTastingProfile,
+  selectGuestEnrichedTastingText,
   stripTastingBoilerplate,
   tastingProfileHasProvenanceBoilerplate
 } from "./tasting-profile.js";
@@ -143,4 +144,51 @@ test("JSON string house profiles parse the same way", () => {
   assert.equal(profile.aroma, "Citrus");
   assert.equal(profile.palate, "Juniper");
   assert.equal(profile.finish, "Dry");
+});
+
+test("guest precedence A. official only -> one Tasting Profile using official", () => {
+  const picked = selectGuestEnrichedTastingText("Producer oak and vanilla.", "");
+  assert.equal(picked, "Producer oak and vanilla.");
+  assert.match(bottlePublicSrc, /selectGuestEnrichedTastingText/);
+  assert.doesNotMatch(
+    bottlePublicSrc,
+    /official \? <TastingProfileView[\s\S]*house \? <TastingProfileView/
+  );
+});
+
+test("guest precedence B. house only -> one Tasting Profile using house", () => {
+  const picked = selectGuestEnrichedTastingText("", "AI house profile (not producer copy)\nAroma: Pine.");
+  assert.match(picked, /Aroma: Pine/);
+  assert.equal(selectGuestEnrichedTastingText(null, "House only copy."), "House only copy.");
+});
+
+test("guest precedence C. official + house -> ONE Tasting Profile, official wins", () => {
+  const picked = selectGuestEnrichedTastingText(
+    "Official citrus and spice.",
+    "AI house profile (not producer copy)\nAroma: Smoke.\nPalate: Caramel."
+  );
+  assert.equal(picked, "Official citrus and spice.");
+  assert.doesNotMatch(picked, /Smoke|Caramel|AI house profile/);
+  // Guest path must not render both blocks when both sources exist.
+  assert.match(bottlePublicSrc, /selectGuestEnrichedTastingText\(official, house\)/);
+  assert.doesNotMatch(bottlePublicSrc, /\{official \? <TastingProfileView/);
+  assert.doesNotMatch(bottlePublicSrc, /\{house \? <TastingProfileView/);
+});
+
+test("guest precedence D. Keeper EnrichmentPanel still retains house + official provenance", () => {
+  assert.match(enrichmentPanelSrc, /officialText/);
+  assert.match(enrichmentPanelSrc, /houseProfileText/);
+  assert.match(enrichmentPanelSrc, /AI house profile|Generated house profile/);
+  assert.match(enrichmentPanelSrc, /not producer copy/i);
+  assert.match(enrichmentPanelSrc, /No official producer notes yet|official/i);
+});
+
+test("guest precedence E. no guest-facing Producer Notes / House Profile / AI labels", () => {
+  assert.doesNotMatch(bottlePublicSrc, /Producer Notes|House Profile|HOUSE PROFILE/);
+  assert.doesNotMatch(bottlePublicSrc, /\bAI\b|generated|not producer copy/i);
+  assert.match(bottlePublicSrc, /TASTING PROFILE/);
+  // Personal tasting_notes already shown by BottleDetail — skip enriched tasting to avoid two headings.
+  assert.match(bottlePublicSrc, /hasPersonalNotes \? "" : selectGuestEnrichedTastingText/);
+  assert.match(appSrc, /item\.tasting_notes \? <TastingProfileView/);
+  assert.match(appSrc, /hasPersonalNotes=\{Boolean/);
 });

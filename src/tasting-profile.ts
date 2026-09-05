@@ -149,6 +149,19 @@ export function parseTastingProfile(input: unknown): TastingProfile {
   return { fallback: text.replace(/\s+/g, " ").trim() };
 }
 
+/**
+ * Guest enriched tasting precedence: official producer notes win over house profile.
+ * Does not merge or concatenate the two sources.
+ */
+export function selectGuestEnrichedTastingText(
+  official: string | null | undefined,
+  houseProfile: string | null | undefined
+): string {
+  const officialText = String(official ?? "").trim();
+  if (officialText) return officialText;
+  return String(houseProfile ?? "").trim();
+}
+
 /** True when guest-facing copy still contains AI/provenance boilerplate. */
 export function tastingProfileHasProvenanceBoilerplate(text: string): boolean {
   const value = String(text ?? "");

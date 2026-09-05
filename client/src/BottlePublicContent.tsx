@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import { parseTastingProfile, type TastingProfile } from "./catalog";
+import { parseTastingProfile, selectGuestEnrichedTastingText, type TastingProfile } from "./catalog";
 import { ENRICHMENT_MODULES, textChild, type BottleEnrichmentView } from "./EnrichmentPanel";
 
 /**
  * Guest-facing enriched content only — no provenance, confidence, jobs, or review UI.
  * Uses the existing enrichment read API but renders polished bottle-page tasting profiles.
+ *
+ * Guests see at most one enriched Tasting Profile: official producer notes win over house
+ * profile. When BottleDetail already renders personal tasting_notes, skip enrichment tasting
+ * so the page does not stack two identical TASTING PROFILE headings.
  */
 export function BottlePublicContent({
   table,
@@ -39,15 +43,16 @@ export function BottlePublicContent({
 
   const official = textChild(view.tastingNotes?.official).trim();
   const house = textChild(view.tastingNotes?.houseProfile).trim();
+  // Personal tasting_notes already render via BottleDetail — avoid a second Tasting Profile.
+  const enrichedText = hasPersonalNotes ? "" : selectGuestEnrichedTastingText(official, house);
   const displayUrl = textChild(view.image?.displayUrl).trim();
   const showImage = Boolean(displayUrl) && !hasShelfImage && !view.image?.userPreferred;
 
-  if (!official && !house && !showImage) return null;
+  if (!enrichedText && !showImage) return null;
 
   return (
     <div className="bottle-public-content">
-      {official ? <TastingProfileView text={official} /> : null}
-      {house ? <TastingProfileView text={house} /> : null}
+      {enrichedText ? <TastingProfileView text={enrichedText} /> : null}
       {showImage ? (
         <div className="bottle-public-image">
           <img src={displayUrl} alt="" />

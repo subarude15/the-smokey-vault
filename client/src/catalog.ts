@@ -77,7 +77,11 @@ export {
   SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, shelfBottleFromItem, shelfKindForModule
 } from "../../src/cocktails";
 export type { IngredientLine } from "../../src/cocktails";
-export { parseTastingProfile, stripTastingBoilerplate } from "../../src/tasting-profile";
+export {
+  parseTastingProfile,
+  selectGuestEnrichedTastingText,
+  stripTastingBoilerplate
+} from "../../src/tasting-profile";
 export type { TastingProfile } from "../../src/tasting-profile";
 export { overviewGreeting, overviewHeroCopy } from "../../src/overview";
 export type { OverviewSnapshot, OverviewPour } from "../../src/overview";
