@@ -9,7 +9,7 @@ import {
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseCommaList, parseGravity, prepareBrewWrite, tapsForBatch, brewDisplayName,
-  comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite,
+  compareBottleCollectionByName, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedStockLabel, preparePackagedWrite,
   compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
   prepareSpiritWrite, spiritStock, spiritStockLabel,
   wineBodyLabel, wineBodyValue, wineDrinkByOverdue
@@ -144,6 +144,82 @@ test("packaged stock labels, drink-one, and out-of-stock sort", () => {
   assert.deepEqual(sorted, ["Beta", "Alpha", "Zebra"]);
 });
 
+test("PR #90: Spirits collection defaults A to Z by visible name", () => {
+  const sorted = [
+    { name: "Tito's Handmade Vodka", brand: "Tito's", category: "Vodka", fill_level: 100, stock_count: 1 },
+    { name: "Captain Morgan Original Spiced Rum", brand: "Captain Morgan", category: "Rum", fill_level: 100, stock_count: 1 },
+    { name: "Maker's Mark", brand: "Maker's Mark", category: "Whiskey", fill_level: 100, stock_count: 1 }
+  ].sort((a, b) => compareBottleCollectionByName("spirits", a, b)).map((row) => row.name);
+
+  assert.deepEqual(sorted, [
+    "Captain Morgan Original Spiced Rum",
+    "Maker's Mark",
+    "Tito's Handmade Vodka"
+  ]);
+});
+
+test("PR #90: Wine Cellar collection defaults A to Z by visible name", () => {
+  const sorted = [
+    { name: "Korbel Sweet Cuvee", producer: "Korbel" },
+    { name: "Barefoot Moscato", producer: "Barefoot" },
+    { name: "Yellow Tail Shiraz", producer: "Yellow Tail" }
+  ].sort((a, b) => compareBottleCollectionByName("wines", a, b)).map((row) => row.name);
+
+  assert.deepEqual(sorted, ["Barefoot Moscato", "Korbel Sweet Cuvee", "Yellow Tail Shiraz"]);
+});
+
+test("PR #90: Packaged Beer collection defaults A to Z by visible name", () => {
+  const sorted = [
+    { name: "Yuengling Lager", brewery: "Yuengling", count: 6 },
+    { name: "All Day IPA", brewery: "Founders", count: 6 },
+    { name: "Miller Lite", brewery: "Miller", count: 6 }
+  ].sort((a, b) => compareBottleCollectionByName("packaged_beer", a, b)).map((row) => row.name);
+
+  assert.deepEqual(sorted, ["All Day IPA", "Miller Lite", "Yuengling Lager"]);
+});
+
+test("PR #90: Bottle collection name sort is case-insensitive and trims whitespace", () => {
+  const caseSorted = [
+    { name: "charlie" },
+    { name: "Bravo" },
+    { name: "alpha" }
+  ].sort((a, b) => compareBottleCollectionByName("wines", a, b)).map((row) => row.name);
+  assert.deepEqual(caseSorted, ["alpha", "Bravo", "charlie"]);
+
+  const whitespaceSorted = [
+    { name: "Tito's Handmade Vodka", brand: "Tito's", category: "Vodka" },
+    { name: "  Maker's Mark  ", brand: "Maker's Mark", category: "Whiskey" },
+    { name: "Captain Morgan Original Spiced Rum", brand: "Captain Morgan", category: "Rum" }
+  ].sort((a, b) => compareBottleCollectionByName("spirits", a, b)).map((row) => row.name);
+  assert.deepEqual(whitespaceSorted, [
+    "Captain Morgan Original Spiced Rum",
+    "  Maker's Mark  ",
+    "Tito's Handmade Vodka"
+  ]);
+});
+
+test("PR #90: Bottle collection blank names sort after named products", () => {
+  const sorted = [
+    { name: "" },
+    { name: null },
+    { name: "Captain Morgan" }
+  ].sort((a, b) => compareBottleCollectionByName("wines", a, b)).map((row) => row.name);
+
+  assert.deepEqual(sorted, ["Captain Morgan", "", null]);
+});
+
+test("PR #90: Filtered bottle collection remains alphabetized", () => {
+  const filtered = [
+    { name: "Zinfandel", type: "Red" },
+    { name: "Barefoot Moscato", type: "White" },
+    { name: "Korbel Sweet Cuvee", type: "Sparkling" },
+    { name: "Yellow Tail Shiraz", type: "Red" }
+  ].filter((row) => row.type !== "White");
+
+  const sorted = filtered.sort((a, b) => compareBottleCollectionByName("wines", a, b)).map((row) => row.name);
+  assert.deepEqual(sorted, ["Korbel Sweet Cuvee", "Yellow Tail Shiraz", "Zinfandel"]);
+});
+
 test("preparePackagedWrite clamps count and normalizes vessel", () => {
   const saved = preparePackagedWrite({ count: -3, vessel: "crowler" });
   assert.equal(saved.count, 0);
@@ -245,6 +321,17 @@ test("compareBrews keeps active batches ahead of archived, then along the pipeli
   assert.deepEqual(sorted, ["Earlier Pils", "Pils", "House IPA", "Old Stout"]);
 });
 
+test("PR #90: Homebrew comparator ordering remains status and brew-date based", () => {
+  const rows = [
+    { batch_name: "Zulu", status: "Archived", brew_date: "2026-01-01" },
+    { batch_name: "Alpha", status: "Ready to Keg", brew_date: "2026-08-01" },
+    { batch_name: "Bravo", status: "Fermenting", brew_date: "2026-08-10" },
+    { batch_name: "Charlie", status: "Fermenting", brew_date: "2026-07-01" }
+  ];
+  const sorted = [...rows].sort(compareBrews).map((row) => row.batch_name);
+  assert.deepEqual(sorted, ["Charlie", "Bravo", "Alpha", "Zulu"]);
+});
+
 test("tapsForBatch matches brewery batch names onto handles", () => {
   const taps = [
     { tap_number: 3, brewery_batch: "Vault IPA" },
@@ -254,6 +341,16 @@ test("tapsForBatch matches brewery batch names onto handles", () => {
   assert.deepEqual(tapsForBatch(taps, "Vault IPA"), [3, 7]);
   assert.equal(onTapLabel([3]), "On tap 3");
   assert.equal(onTapLabel([3, 7]), "On taps 3, 7");
+});
+
+test("PR #90: Draft tap ordering by tap number remains unchanged", () => {
+  const sorted = [
+    { tap_number: 7, brewery_batch: "Seventh" },
+    { tap_number: 1, brewery_batch: "First" },
+    { tap_number: 3, brewery_batch: "Third" }
+  ].sort((a, b) => Number(a.tap_number) - Number(b.tap_number)).map((row) => row.tap_number);
+
+  assert.deepEqual(sorted, [1, 3, 7]);
 });
 
 test("prepareBrewWrite normalizes gravity and stores calculated ABV", () => {
