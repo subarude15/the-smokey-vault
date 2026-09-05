@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, Grape, HandCoins, LayoutDashboard,
+  ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
   Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste, Zap
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
@@ -24,7 +24,7 @@ import {
   packagedCount, packagedStockLabel, FILL_STOPS, fillStopLabel, isSpiritEmpty,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   spiritFamilyFromLabel,
-  SEASONS, collectionGroup, compareCocktails, currentSeason,
+  SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, shelfKindForModule,
   overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
@@ -1946,6 +1946,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
   const onTap = onTapLabel(tapNumbers ?? []);
   const [actionError, setActionError] = useState("");
   const [acting, setActing] = useState(false);
+  const [findDrinkOpen, setFindDrinkOpen] = useState(false);
   async function patchItem(payload: Record<string, unknown>, failed: string) {
     if (!admin || acting) return;
     setActing(true);
@@ -2027,17 +2028,18 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
             {tags.map((value) => <span key={value}>#{value}</span>)}
           </div>
           {!(module.id === "taps" && isTapEmpty(item)) && <BottleVotes table={module.id} itemId={item.id}/>}
-          {admin && <div className="bottle-detail-actions">
-            {(module.id === "wines" || module.id === "packaged_beer") && <button type="button" className="secondary drink-one" disabled={(module.id === "wines" ? bottlesLeft : packagedLeft) <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
-            {module.id === "spirits" && <button type="button" className="secondary drink-one" disabled={spiritFill <= 0 || acting} onClick={pourDrink}>{acting ? "Pouring…" : "Pour a drink"}</button>}
-            {module.id === "spirits" && nextSpirit && <button type="button" className="secondary drink-one" disabled={acting} onClick={openNextBottle}>{acting ? "Opening…" : "Open next"}</button>}
-            {module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
-            {module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
-            {module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
-            {onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
-            <button className="primary" onClick={onEdit}><Settings size={16}/> {module.id === "taps" && isTapEmpty(item) ? "Put a beer on" : "Edit"}</button>
-            {module.id === "taps" && !isTapEmpty(item) && <button className="secondary danger" onClick={onDelete}>Clear tap</button>}
-            {module.id !== "taps" && <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>}
+          {(moduleSupportsFindDrink(module.id) || admin) && <div className="bottle-detail-actions">
+            {moduleSupportsFindDrink(module.id) && <button type="button" className="secondary" onClick={() => setFindDrinkOpen(true)}><GlassWater size={16}/> Find a drink with this</button>}
+            {admin && (module.id === "wines" || module.id === "packaged_beer") && <button type="button" className="secondary drink-one" disabled={(module.id === "wines" ? bottlesLeft : packagedLeft) <= 0 || acting} onClick={drinkOne}>{acting ? "Saving…" : "Drink one"}</button>}
+            {admin && module.id === "spirits" && <button type="button" className="secondary drink-one" disabled={spiritFill <= 0 || acting} onClick={pourDrink}>{acting ? "Pouring…" : "Pour a drink"}</button>}
+            {admin && module.id === "spirits" && nextSpirit && <button type="button" className="secondary drink-one" disabled={acting} onClick={openNextBottle}>{acting ? "Opening…" : "Open next"}</button>}
+            {admin && module.id === "taps" && !isTapEmpty(item) && <button type="button" className="secondary drink-one" disabled={kegLeft <= 0 || acting} onClick={pourPintNow}>{acting ? "Pouring…" : "Pour a pint"}</button>}
+            {admin && module.id === "brews" && brewNext && <button type="button" className="secondary drink-one" disabled={acting} onClick={advanceBrew}>{acting ? "Saving…" : `Advance to ${brewNext}`}</button>}
+            {admin && module.id === "brews" && <button type="button" className="secondary" disabled={acting} onClick={archiveBrew}>{acting ? "Saving…" : brewStatus === "Archived" ? "Unarchive" : "Archive"}</button>}
+            {admin && onPutOnTap && <button type="button" className="secondary" onClick={onPutOnTap}>Put on tap</button>}
+            {admin && <button className="primary" onClick={onEdit}><Settings size={16}/> {module.id === "taps" && isTapEmpty(item) ? "Put a beer on" : "Edit"}</button>}
+            {admin && module.id === "taps" && !isTapEmpty(item) && <button className="secondary danger" onClick={onDelete}>Clear tap</button>}
+            {admin && module.id !== "taps" && <button className="secondary danger" onClick={onDelete}><Trash2 size={16}/> Remove</button>}
           </div>}
           {actionError ? <p className="error">{actionError}</p> : null}
         </div>
@@ -2093,6 +2095,14 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
         />
       ) : null}
       {!(module.id === "taps" && isTapEmpty(item)) && <GuestReviews table={module.id} itemId={item.id} admin={admin}/>}
+      {findDrinkOpen && moduleSupportsFindDrink(module.id) && (
+        <FindDrinkWithBottleModal
+          module={module}
+          item={item}
+          admin={admin}
+          onClose={() => setFindDrinkOpen(false)}
+        />
+      )}
     </section>
   );
 }
@@ -2609,6 +2619,151 @@ function substituteGroups(lines: IngredientLine[]): SubstituteGroup[] {
   return lines
     .filter((line) => Boolean(line.substitute_options?.length))
     .map((line) => ({ ingredient: line.text, options: line.substitute_options ?? [] }));
+}
+
+
+function FindDrinkWithBottleModal({ module, item, admin, onClose }:{
+  module: Module; item: Item; admin: boolean; onClose: () => void;
+}) {
+  const bottleLabel = String(item[module.primary] ?? item.name ?? "this bottle");
+  const kind = shelfKindForModule(module.id);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [matches, setMatches] = useState<CocktailDrink[]>([]);
+  const [generated, setGenerated] = useState<GeneratedRecipe>();
+  const [selected, setSelected] = useState<CocktailDrink>();
+  const [source, setSource] = useState<"book" | "ai" | "none">("none");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!kind) {
+        setLoading(false);
+        setError("Couldn't find a drink for this bottle yet.");
+        return;
+      }
+      setLoading(true);
+      setError("");
+      setMatches([]);
+      setGenerated(undefined);
+      setSource("none");
+      try {
+        const drinks = await api<CocktailDrink[]>("/cocktails/match");
+        if (cancelled) return;
+        const found = findRecipesForBottle(item as Record<string, unknown>, kind, drinks as Array<Record<string, unknown>>) as unknown as CocktailDrink[];
+        const safeFound = found.map((drink) => guestSafeRecipe(drink as Record<string, unknown>) as CocktailDrink);
+        if (safeFound.length) {
+          setMatches(safeFound);
+          setSource("book");
+          setLoading(false);
+          return;
+        }
+        const required_bottle = {
+          name: String(item.name ?? item[module.primary] ?? ""),
+          brand: String(item.brand ?? item.producer ?? item.maker ?? ""),
+          category: String(item.category ?? ""),
+          sub_category: String(item.sub_category ?? ""),
+          type: String(item.type ?? ""),
+          style: String(item.style ?? ""),
+          kind
+        };
+        const prompt = `Create one cocktail recipe using ${bottleLabel} as a required ingredient.`;
+        const data = await api<{ recipe: GeneratedRecipe }>("/ai/mixologist", {
+          method: "POST",
+          body: JSON.stringify({ prompt, required_bottle })
+        });
+        if (cancelled) return;
+        setGenerated(guestSafeRecipe(data.recipe as unknown as Record<string, unknown>) as unknown as GeneratedRecipe);
+        setSource("ai");
+      } catch {
+        if (!cancelled) {
+          setError("Couldn't find a drink for this bottle yet.");
+          setSource("none");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void run();
+    return () => { cancelled = true; };
+  }, [module, item, kind, bottleLabel]);
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Drinks with ${bottleLabel}`}>
+      <section className="modal recipe-modal find-drink-modal">
+        <header className="modal-header">
+          <div>
+            <span className="eyebrow">FIND A DRINK</span>
+            <h2>Drinks with {bottleLabel}</h2>
+            <p>{source === "book" ? "From the house recipe book." : source === "ai" ? "Crafted by the mixologist for this bottle." : "Searching the shelf and recipe book…"}</p>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><X/></button>
+        </header>
+        {loading && <div className="ai-loading" aria-live="polite"><LoaderCircle className="spinner"/><div><strong>Looking for a drink…</strong><span>Checking saved recipes, then the mixologist if needed.</span></div></div>}
+        {!loading && error && <div className="ai-error"><CircleAlert/><div><strong>No luck yet</strong><span>{error}</span></div></div>}
+        {!loading && !error && source === "book" && (
+          <div className="find-drink-results">
+            {matches.map((drink) => {
+              const lines = cocktailLines(drink);
+              return (
+                <button type="button" className="recipe-card find-drink-card" key={String(drink.id ?? drink.name)} onClick={() => setSelected(drink)}>
+                  <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness, !admin)}</span>
+                  <h3>{drink.name}</h3>
+                  <p>{drink.method} · {drink.glassware}</p>
+                  <ul className="ingredient-preview">
+                    {lines.slice(0, 4).map((line) => (
+                      <li key={line.text} className={`${line.state}${String((drink as { matched_ingredient?: string }).matched_ingredient) === line.text ? " matched-bottle" : ""}`}>
+                        {line.text}
+                        {String((drink as { matched_ingredient?: string }).matched_ingredient) === line.text ? <small> · this bottle</small> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {!loading && !error && source === "ai" && generated && (
+          <article className="generated-recipe find-drink-generated">
+            <div className="generated-heading">
+              <div>
+                <span className="eyebrow">MIXOLOGIST · {generated.season.toUpperCase()}</span>
+                <h3>{generated.name}</h3>
+                <p>{generated.notes}</p>
+              </div>
+              <GlassWater size={28}/>
+            </div>
+            <div className="recipe-modal-body">
+              <div>
+                <span className="eyebrow">INGREDIENTS</span>
+                <ul className="ingredient-list">
+                  {generated.ingredients.map((line) => (
+                    <li key={line} className="have matched-bottle"><span className="mark" aria-hidden="true">●</span><span>{line}</span></li>
+                  ))}
+                </ul>
+              </div>
+              <div className="recipe-details">
+                <div><span>METHOD</span><strong>{generated.method}</strong></div>
+                <div><span>GLASS</span><strong>{generated.glassware}</strong></div>
+                <div><span>GARNISH</span><strong>{generated.garnish || "None"}</strong></div>
+              </div>
+            </div>
+            {admin ? <p className="field-hint">Open the Mixologist page if you want to save this to Custom Cocktails.</p> : null}
+          </article>
+        )}
+        <footer className="modal-footer">
+          <button className="primary" onClick={onClose}>Close</button>
+        </footer>
+      </section>
+      {selected && <RecipeModal
+        drink={selected}
+        admin={admin}
+        close={() => setSelected(undefined)}
+        onChanged={() => {}}
+        onDeleted={() => setSelected(undefined)}
+      />}
+    </div>
+  );
 }
 
 function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sharedUrl?: string; onSharedConsumed?: () => void }) {

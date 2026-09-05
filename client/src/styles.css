@@ -1300,3 +1300,11 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
     max-width: 100%;
   }
 }
+.find-drink-modal .find-drink-results{display:grid;gap:12px;margin-top:8px}
+.find-drink-card{text-align:left;width:100%}
+.find-drink-card .matched-bottle,
+.ingredient-list .matched-bottle,
+.ingredient-preview .matched-bottle{color:var(--accent);font-weight:600}
+.find-drink-card .matched-bottle small,
+.ingredient-preview .matched-bottle small{color:var(--accent);font-weight:600}
+.bottle-detail-actions .secondary svg{flex:none}

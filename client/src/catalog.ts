@@ -74,7 +74,7 @@ export {
 } from "../../src/canonical-normalize";
 
 export {
-  SEASONS, collectionGroup, compareCocktails, currentSeason
+  SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, shelfBottleFromItem, shelfKindForModule
 } from "../../src/cocktails";
 export type { IngredientLine } from "../../src/cocktails";
 export { overviewGreeting, overviewHeroCopy } from "../../src/overview";
