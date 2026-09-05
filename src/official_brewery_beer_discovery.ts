@@ -6,12 +6,20 @@
  * identity correction.
  */
 
+import { Readable } from "node:stream";
 import { beerTextTokens, foldBeerText } from "./beer_search_query.js";
 import {
   hostMatchesDiscoveredDomain,
   registeredDomain
 } from "./ingestion/enrichment/official-domain.js";
-import { NetworkSafetyError, parseSafeHttpUrl } from "./network_safety.js";
+import {
+  NetworkSafetyError,
+  fetchSafeHttp,
+  headerValue,
+  parseSafeHttpUrl,
+  type LookupFn,
+  type PinnedRequestFn
+} from "./network_safety.js";
 
 export type OfficialBeerDiscoveryInput = {
   breweryName: string;
@@ -124,6 +132,10 @@ export type OfficialBeerDiscoveryDeps = {
   maxRedirects?: number;
   maxBytes?: number;
   timeoutMs?: number;
+  /** Injected into fetchSafeHttp for SSRF tests (no live DNS). */
+  lookup?: LookupFn;
+  /** Injected into fetchSafeHttp for SSRF / redirect tests. */
+  request?: PinnedRequestFn;
 };
 
 function emptyFields(): OfficialBeerExtractedFields {
@@ -560,52 +572,95 @@ function sameOfficialDomain(candidateUrl: string, domain: string): boolean {
   }
 }
 
+async function readBodyLimited(body: Readable, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of body) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > maxBytes) {
+        body.destroy();
+        throw new NetworkSafetyError("Response is too large.", "too_large");
+      }
+      chunks.push(buf);
+    }
+  } catch (error) {
+    body.destroy();
+    throw error;
+  }
+  return Buffer.concat(chunks, total);
+}
+
 async function defaultFetchHtml(
   url: string,
-  opts: { maxRedirects: number; maxBytes: number; timeoutMs: number; domain: string }
-): Promise<{ finalUrl: string; html: string; contentType: string }> {
-  let current = parseSafeHttpUrl(url).toString();
-  for (let hop = 0; hop <= opts.maxRedirects; hop += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
-    try {
-      const response = await fetch(current, {
-        method: "GET",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: {
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "User-Agent": "SmokeyVaultOfficialBeerDiscovery/1.0"
-        }
-      });
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
-        if (!location) throw new Error("redirect_missing_location");
-        const next = parseSafeHttpUrl(location, current);
-        if (!hostMatchesDiscoveredDomain(next.hostname, opts.domain)) {
-          throw new Error("redirect_left_official_domain");
-        }
-        current = next.toString();
-        continue;
-      }
-      if (!response.ok) {
-        throw new Error(`http_${response.status}`);
-      }
-      const contentType = String(response.headers.get("content-type") || "").toLowerCase();
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.byteLength > opts.maxBytes) {
-        throw new Error("response_too_large");
-      }
-      return {
-        finalUrl: current,
-        html: buffer.toString("utf8"),
-        contentType
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+  opts: {
+    maxRedirects: number;
+    maxBytes: number;
+    timeoutMs: number;
+    domain: string;
+    lookup?: LookupFn;
+    request?: PinnedRequestFn;
   }
-  throw new Error("too_many_redirects");
+): Promise<{ finalUrl: string; html: string; contentType: string }> {
+  let current = parseSafeHttpUrl(url);
+  if (!hostMatchesDiscoveredDomain(current.hostname, opts.domain)) {
+    throw new NetworkSafetyError("URL left the official brewery domain.", "redirect");
+  }
+
+  for (let hop = 0; hop <= opts.maxRedirects; hop += 1) {
+    if (!hostMatchesDiscoveredDomain(current.hostname, opts.domain)) {
+      throw new NetworkSafetyError("Redirect left the official brewery domain.", "redirect");
+    }
+
+    const response = await fetchSafeHttp(current, {
+      timeoutMs: opts.timeoutMs,
+      maxRedirects: 0,
+      lookup: opts.lookup,
+      request: opts.request,
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "SmokeyVaultOfficialBeerDiscovery/1.0"
+      }
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = headerValue(response.headers, "location");
+      response.body.resume();
+      if (!location) {
+        throw new NetworkSafetyError("The page redirected without a destination.", "redirect");
+      }
+      if (hop >= opts.maxRedirects) {
+        throw new NetworkSafetyError("Too many redirects from that link.", "redirect");
+      }
+      const next = parseSafeHttpUrl(location, current.href);
+      if (!hostMatchesDiscoveredDomain(next.hostname, opts.domain)) {
+        throw new NetworkSafetyError("Redirect left the official brewery domain.", "redirect");
+      }
+      current = next;
+      continue;
+    }
+
+    if (response.status < 200 || response.status >= 300) {
+      response.body.resume();
+      throw new Error(`http_${response.status}`);
+    }
+
+    const contentType = headerValue(response.headers, "content-type").toLowerCase();
+    const declaredLength = Number(headerValue(response.headers, "content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > opts.maxBytes) {
+      response.body.destroy();
+      throw new NetworkSafetyError("Response is too large.", "too_large");
+    }
+
+    const buffer = await readBodyLimited(response.body, opts.maxBytes);
+    return {
+      finalUrl: current.toString(),
+      html: buffer.toString("utf8"),
+      contentType
+    };
+  }
+  throw new NetworkSafetyError("Too many redirects from that link.", "redirect");
 }
 
 type Budget = { pagesFetched: number; maxPages: number };
@@ -616,9 +671,12 @@ type FetchCtx = {
   maxBytes: number;
   timeoutMs: number;
   domain: string;
+  lookup?: LookupFn;
+  request?: PinnedRequestFn;
 };
 
 async function fetchPage(
+
   url: string,
   ctx: FetchCtx,
   budget: Budget
@@ -631,7 +689,9 @@ async function fetchPage(
       maxRedirects: ctx.maxRedirects,
       maxBytes: ctx.maxBytes,
       timeoutMs: ctx.timeoutMs,
-      domain: ctx.domain
+      domain: ctx.domain,
+      lookup: ctx.lookup,
+      request: ctx.request
     });
   } catch (err) {
     if (err instanceof NetworkSafetyError) return null;
@@ -858,7 +918,9 @@ export async function discoverOfficialBeerProductPage(
     maxRedirects: deps.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
     maxBytes: deps.maxBytes ?? DEFAULT_MAX_BYTES,
     timeoutMs: deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    domain: originInfo.domain
+    domain: originInfo.domain,
+    lookup: deps.lookup,
+    request: deps.request
   };
   const budget: Budget = { pagesFetched: 0, maxPages };
 
