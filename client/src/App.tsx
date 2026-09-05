@@ -1805,7 +1805,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         const blocked = Number(item.blocked_from_ordering ?? 0) === 1;
         return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}${blocked ? " blocked-bottle" : ""}`} key={item.id} onClick={() => setViewing(item)}>
         {blocked && <span className="blocked-ribbon">{BLOCKED_RIBBON_LABEL}</span>}
-        <div className="card-icon">{item.image_url ? <img src={String(item.image_url)} alt=""/> : <module.icon/>}</div>
+        <div className="card-icon">{(() => {
+          // Same precedence as bottle detail: server-derived display_image_url
+          // (user shelf → accepted enrichment) then legacy image_url fallback.
+          const cardImage = String(item.display_image_url ?? item.image_url ?? "").trim();
+          return cardImage ? <img src={cardImage} alt=""/> : <module.icon/>;
+        })()}</div>
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
             {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
