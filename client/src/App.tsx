@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
   Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste, Zap
@@ -144,7 +144,6 @@ const MOBILE_SHORT_LABELS: Record<string, string> = {
   dashboard: "Home",
   taps: "On Tap",
   cocktails: "Drinks",
-  mixologist: "AI Mix",
   gallery: "Gallery",
   events: "Events",
   patrons: "Regulars",
@@ -484,6 +483,7 @@ async function resolveSuggestion(module: Module, hit: BottleSearchHit, upc = "")
 
 export default function App() {
   const [page, setPage] = useState("dashboard");
+  const [cocktailFocus, setCocktailFocus] = useState<"mixologist" | null>(null);
   const [admin, setAdmin] = useState(tokenExists());
   const [mobileNav, setMobileNav] = useState(false);
   const [moreSheet, setMoreSheet] = useState(false);
@@ -628,11 +628,24 @@ export default function App() {
   }, [admin, handToGuest]);
 
   const navigate = (next: string) => {
-    setPage(next);
+    if (next === "mixologist") {
+      setCocktailFocus("mixologist");
+      setPage("cocktails");
+    } else {
+      if (next !== "cocktails") setCocktailFocus(null);
+      setPage(next);
+    }
     setMobileNav(false);
     setMoreSheet(false);
     if (navHint) dismissNavHint();
   };
+
+  // Legacy page id: never leave a blank Mixologist page behind.
+  useEffect(() => {
+    if (page !== "mixologist") return;
+    setCocktailFocus("mixologist");
+    setPage("cocktails");
+  }, [page]);
   /** Legacy single-scan only — never used by an active shelf ScanSession. */
   function handleScan(result: ScanResult) {
     if (!admin) return Promise.resolve("cancelled" as ScanReviewOutcome);
@@ -700,8 +713,7 @@ export default function App() {
       return true;
     }).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"brewery",label:"Brewery Lab",icon:FlaskConical },
-    { id:"cocktails",label:"Cocktails & Seasonal",icon:Wine },
-    { id:"mixologist",label:"AI Mixologist",icon:Sparkles },
+    { id:"cocktails",label:"What Can I Make?",icon:Wine },
     { id:"patrons",label:"Regulars",icon:Users },
     { id:"staff",label:"Meet the Crew",icon:Users },
     { id:"gallery",label:"Bar Gallery",icon:Camera },
@@ -837,8 +849,7 @@ export default function App() {
               navigate("taps");
             } : undefined}
           />)}
-          {page === "cocktails" && <Cocktails admin={admin} sharedUrl={admin ? sharedRecipeUrl : ""} onSharedConsumed={() => setSharedRecipeUrl("")}/>}
-          {page === "mixologist" && <Mixologist admin={admin}/>}
+          {page === "cocktails" && <Cocktails admin={admin} sharedUrl={admin ? sharedRecipeUrl : ""} onSharedConsumed={() => setSharedRecipeUrl("")} focusMixologist={cocktailFocus === "mixologist"} onMixologistFocused={() => setCocktailFocus(null)}/>}
           {page === "next" && <WhatsNextPage admin={admin}/>}
           {admin && (page === "scan" || shelfSessionMode !== "idle") && (
             <div className={page === "scan" ? undefined : "scan-session-parked"} hidden={page !== "scan"} aria-hidden={page !== "scan"}>
@@ -1150,8 +1161,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       </div>
     </section>}
     <section className="feature-grid">
-      <button className="feature-card warm feature-card-lead" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Inventory-matched recipes and random picks from what’s actually on the shelf.</p></div><Shuffle size={56}/></button>
-      <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Describe the mood. We’ll mix from what’s on the shelf, then show {keeperName} the drink.</p></div><Sparkles size={56}/></button>
+      <button className="feature-card warm feature-card-lead" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Shelf-matched recipes first — then ask the Mixologist when you want something custom.</p></div><Shuffle size={56}/></button>
+      <button className="feature-card" onClick={() => go("mixologist")}><div><span className="eyebrow">CUSTOM CREATIONS</span><h2>Ask the Mixologist</h2><p>Same page as What can I make? Describe the mood and we’ll craft from the shelf.</p></div><Sparkles size={56}/></button>
       <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>Give us your 2 cents</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
     </section>
   </>;
@@ -2773,7 +2784,7 @@ function FindDrinkWithBottleModal({ module, item, admin, onClose }:{
                 <div><span>GARNISH</span><strong>{generated.garnish || "None"}</strong></div>
               </div>
             </div>
-            {admin ? <p className="field-hint">Open the Mixologist page if you want to save this to Custom Cocktails.</p> : null}
+            {admin ? <p className="field-hint">Ask the Mixologist on What Can I Make? if you want to save this to Custom Cocktails.</p> : null}
           </article>
         )}
         <footer className="modal-footer">
@@ -2791,7 +2802,13 @@ function FindDrinkWithBottleModal({ module, item, admin, onClose }:{
   );
 }
 
-function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sharedUrl?: string; onSharedConsumed?: () => void }) {
+function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false, onMixologistFocused }: {
+  admin: boolean;
+  sharedUrl?: string;
+  onSharedConsumed?: () => void;
+  focusMixologist?: boolean;
+  onMixologistFocused?: () => void;
+}) {
   const { keeperName } = useHouse();
   const [drinks, setDrinks] = useState<CocktailDrink[]>([]);
   const [filter, setFilter] = useState("ready");
@@ -2801,7 +2818,26 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
   const [selected, setSelected] = useState<CocktailDrink>();
   const [importer, setImporter] = useState(Boolean(sharedUrl));
   const [loadError, setLoadError] = useState("");
+  const mixologistSectionRef = useRef<HTMLElement | null>(null);
+  const mixologistPromptRef = useRef<HTMLTextAreaElement | null>(null);
   const nowSeason = currentSeason();
+
+  function scrollToMixologist() {
+    const section = mixologistSectionRef.current;
+    if (!section) return;
+    const reduce = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    section.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    window.setTimeout(() => mixologistPromptRef.current?.focus({ preventScroll: true }), reduce ? 0 : 280);
+  }
+
+  useEffect(() => {
+    if (!focusMixologist) return;
+    const timer = window.setTimeout(() => {
+      scrollToMixologist();
+      onMixologistFocused?.();
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [focusMixologist, onMixologistFocused]);
   function load() {
     api<CocktailDrink[]>("/cocktails/match")
       .then((rows) => setDrinks([...rows].sort(compareCocktails)))
@@ -2848,6 +2884,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
       </div>
       <div className="toolbar-actions">
         {admin && <button className="secondary" onClick={() => setImporter(true)}><Link size={17}/> Add from a link</button>}
+        <button type="button" className="secondary" onClick={scrollToMixologist}><Sparkles size={17}/> Ask the Mixologist</button>
         <button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button>
       </div>
     </div>
@@ -2885,7 +2922,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
         ))}
       </div>
     </section>
-    {!shown.length ? <Empty icon={Wine} title="No matching cocktails" text={search.trim() ? "Nothing matches that search." : season === "All" ? "Stock a few more bottles and check back." : `No ${season.toLowerCase()} recipes match this filter.`}/> :
+    {!shown.length ? <Empty icon={Wine} title="No matching cocktails" text={search.trim() ? "Nothing matches that search — or ask the Mixologist for something custom." : season === "All" ? "Stock a few more bottles and check back, or ask the Mixologist for something custom." : `No ${season.toLowerCase()} recipes match this filter — or ask the Mixologist for something custom.`} actions={<button type="button" className="secondary" onClick={scrollToMixologist}><Sparkles size={16}/> Ask the Mixologist</button>}/> :
       <div className="recipe-grid">{shown.map((drink) => {
         const lines = cocktailLines(drink);
         const preview = lines.slice(0, 3);
@@ -2903,6 +2940,8 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed }: { admin: boolean; sha
           </button>
         );
       })}</div>}
+    <div className="mixologist-divider" role="separator" aria-hidden="true" />
+    <MixologistPanel admin={admin} sectionRef={mixologistSectionRef} promptRef={mixologistPromptRef}/>
     {selected && <RecipeModal
       drink={selected}
       admin={admin}
@@ -3110,7 +3149,11 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
 
 type GeneratedRecipe = { name:string; ingredients:string[]; method:string; glassware:string; garnish:string; season:string; notes:string };
 
-function Mixologist({admin}:{admin:boolean}) {
+function MixologistPanel({ admin, sectionRef, promptRef }: {
+  admin: boolean;
+  sectionRef?: RefObject<HTMLElement | null>;
+  promptRef?: RefObject<HTMLTextAreaElement | null>;
+}) {
   const [prompt,setPrompt] = useState("");
   const [recipe,setRecipe] = useState<GeneratedRecipe>();
   const [loading,setLoading] = useState(false);
@@ -3149,20 +3192,28 @@ function Mixologist({admin}:{admin:boolean}) {
   }
   async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
   const loadingCopy = mixologistLoadingStep(waitMs);
-  return <><PageTitle eyebrow="YOUR PERSONAL BARTENDER" title="Make it memorable." subtitle="Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples. Walk the drink over to the bar when you want it made."/>
+  return (
+    <section className="mixologist-panel" ref={sectionRef} id="ask-the-mixologist" aria-labelledby="mixologist-heading">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">ASK THE MIXOLOGIST</span>
+          <h2 id="mixologist-heading">Want something different?</h2>
+          <p>Describe a mood or a bottle. The mixologist only sees what is actually on the shelf, plus pantry staples.</p>
+        </div>
+      </div>
     <div className="mixologist" aria-busy={loading}>
       <Sparkles size={44}/>
-      <div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button key={p} disabled={loading} onClick={()=>setPrompt(p)}>{p}</button>)}</div>
-      <textarea value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…" disabled={loading}/>
+      <div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button type="button" key={p} disabled={loading} onClick={()=>setPrompt(p)}>{p}</button>)}</div>
+      <textarea ref={promptRef} id="mixologist-prompt" aria-label="Describe what you are in the mood for" value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…" disabled={loading}/>
       <div className="mixologist-actions">
         <button className="primary" disabled={loading||!prompt} aria-busy={loading} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button>
-        <button className="secondary" disabled={loading} onClick={()=>ask("Recommend the single best cocktail I can make from bottles currently on the shelf. Name those bottles. Favor ingredients I already own and explain the choice briefly in the notes.")}><Shuffle/> Recommend from the shelf</button>
       </div>
       {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
       {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
       {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}
     </div>
-  </>;
+    </section>
+  );
 }
 
 function lastBackupLabel(iso?: string) {
