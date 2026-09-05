@@ -1,5 +1,11 @@
 import { db } from "./db.js";
-import { normalizeUpc, type ProductSchema } from "./cola_client.js";
+import {
+  ean13Form,
+  normalizeUpc,
+  primaryCatalogUpc,
+  upcAForm,
+  type ProductSchema
+} from "./cola_client.js";
 
 export const BEER_CACHE_TTL_SECONDS = 86400 * 90;
 
@@ -47,10 +53,23 @@ export function ensureBeerCacheTable() {
 
 ensureBeerCacheTable();
 
-export function getBeerCacheEntry(rawUpc: string, { allowStale = false } = {}): BeerCacheEntry | null {
-  const upc = normalizeUpc(rawUpc);
-  if (!upc) return null;
-  const row = db.prepare("SELECT * FROM beer_cache WHERE upc = ?").get(upc) as BeerCacheRow | undefined;
+/**
+ * Exact UPC-A / EAN-13 twin forms only — no prefix, substring, or zero-stripping fuzzy matches.
+ * Built on the shared cola_client helpers (no second conversion implementation).
+ */
+export function beerCacheUpcLookupKeys(rawUpc: string): string[] {
+  const keys = new Set<string>();
+  const normalized = normalizeUpc(rawUpc);
+  const primary = primaryCatalogUpc(rawUpc);
+  const upcA = upcAForm(rawUpc);
+  const ean13 = ean13Form(rawUpc);
+  for (const key of [normalized, primary, upcA, ean13]) {
+    if (key) keys.add(key);
+  }
+  return [...keys];
+}
+
+function rowFromDb(row: BeerCacheRow | undefined, { allowStale = false } = {}): BeerCacheEntry | null {
   if (!row || !String(row.name ?? "").trim()) return null;
   const age = Math.floor(Date.now() / 1000) - Number(row.cached_at ?? 0);
   if (!allowStale && age > BEER_CACHE_TTL_SECONDS) return null;
@@ -68,6 +87,23 @@ export function getBeerCacheEntry(rawUpc: string, { allowStale = false } = {}): 
   };
 }
 
+function findBeerCacheRow(rawUpc: string): BeerCacheRow | undefined {
+  const keys = beerCacheUpcLookupKeys(rawUpc);
+  if (!keys.length) return undefined;
+  const placeholders = keys.map(() => "?").join(", ");
+  return db.prepare(`SELECT * FROM beer_cache WHERE upc IN (${placeholders}) LIMIT 1`).get(...keys) as
+    | BeerCacheRow
+    | undefined;
+}
+
+export function getBeerCacheEntry(rawUpc: string, { allowStale = false } = {}): BeerCacheEntry | null {
+  return rowFromDb(findBeerCacheRow(rawUpc), { allowStale });
+}
+
+function nonEmptyText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
 export function saveBeerCacheEntry(entry: {
   upc: string;
   catalog_beer_id?: string | null;
@@ -79,10 +115,23 @@ export function saveBeerCacheEntry(entry: {
   image_url?: string | null;
   source?: BeerCacheSource | string;
 }) {
-  const upc = normalizeUpc(entry.upc);
-  const name = String(entry.name ?? "").trim();
-  if (!upc || !name) return null;
+  const name = nonEmptyText(entry.name);
+  if (!name) return null;
+
+  // Prefer an existing twin-row key so UPC-A/EAN-13 do not fork into duplicate rows.
+  const existing = findBeerCacheRow(entry.upc);
+  const upc = existing?.upc || primaryCatalogUpc(entry.upc) || normalizeUpc(entry.upc);
+  if (!upc) return null;
+
+  const brewery = nonEmptyText(entry.brewery);
+  const style = nonEmptyText(entry.style);
+  const abv = entry.abv == null || Number.isNaN(Number(entry.abv)) ? null : Number(entry.abv);
+  const imageUrl = nonEmptyText(entry.image_url) || null;
+  const catalogBeerId = nonEmptyText(entry.catalog_beer_id) || null;
+  const untappdBid = nonEmptyText(entry.untappd_bid) || null;
+  const source = nonEmptyText(entry.source) || "vault_seed";
   const cachedAt = Math.floor(Date.now() / 1000);
+
   db.prepare(`
     INSERT INTO beer_cache (
       upc, catalog_beer_id, untappd_bid, brewery, name, style, abv, image_url, source, cached_at
@@ -90,23 +139,23 @@ export function saveBeerCacheEntry(entry: {
     ON CONFLICT(upc) DO UPDATE SET
       catalog_beer_id=COALESCE(excluded.catalog_beer_id, beer_cache.catalog_beer_id),
       untappd_bid=COALESCE(excluded.untappd_bid, beer_cache.untappd_bid),
-      brewery=excluded.brewery,
+      brewery=CASE WHEN TRIM(excluded.brewery) = '' THEN beer_cache.brewery ELSE excluded.brewery END,
       name=excluded.name,
-      style=excluded.style,
-      abv=excluded.abv,
+      style=CASE WHEN TRIM(excluded.style) = '' THEN beer_cache.style ELSE excluded.style END,
+      abv=COALESCE(excluded.abv, beer_cache.abv),
       image_url=COALESCE(excluded.image_url, beer_cache.image_url),
-      source=excluded.source,
+      source=CASE WHEN TRIM(excluded.source) = '' THEN beer_cache.source ELSE excluded.source END,
       cached_at=excluded.cached_at
   `).run(
     upc,
-    entry.catalog_beer_id ?? null,
-    entry.untappd_bid ?? null,
-    String(entry.brewery ?? ""),
+    catalogBeerId,
+    untappdBid,
+    brewery,
     name,
-    String(entry.style ?? ""),
-    entry.abv == null ? null : Number(entry.abv),
-    entry.image_url ?? null,
-    String(entry.source ?? "vault_seed"),
+    style,
+    abv,
+    imageUrl,
+    source,
     cachedAt
   );
   return upc;
