@@ -502,6 +502,8 @@ test("V/W/X/Y. spirits/wines short-circuit; search paths do not import browser a
       if (!/\.(ts|tsx)$/.test(name)) continue;
       if (path.includes("official_brewery_beer_browser")) continue;
       if (path.includes("official_brewery_beer_discovery")) continue;
+      // Read-only ops smoke harness may import the browser adapter.
+      if (path.includes("smoke_official_beer_browser")) continue;
       const text = readFileSync(path, "utf8");
       if (text.includes("official_brewery_beer_browser")) {
         offenders.push(path);

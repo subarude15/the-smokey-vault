@@ -295,3 +295,138 @@ test("adapter J. does not log API key or full HTML", async () => {
   assert.equal(joined.includes("test-key"), false);
   assert.equal(joined.includes("SECRET_FULL_HTML_SHOULD_NOT_APPEAR"), false);
 });
+
+test("adapter K. html-only result accepted", async () => {
+  configureOfficialBrowserEnv();
+  const outcome = await renderOfficialBreweryBeerPage(
+    {
+      url: "https://yardsbrewing.com/beers",
+      breweryName: "Yards",
+      beerName: "Brawler",
+      registeredDomain: "yardsbrewing.com"
+    },
+    {
+      runTask: async () =>
+        ({
+          kind: "success",
+          httpStatus: 200,
+          envelope: { outcome: "success", success: true },
+          data: {
+            finalUrl: "https://yardsbrewing.com/beers/brawler",
+            title: "Brawler",
+            html: "<html><body><h1>Brawler</h1></body></html>"
+          }
+        }) as FigraniumRunResult
+    }
+  );
+  assert.equal(outcome.status, "ok");
+  if (outcome.status !== "ok") return;
+  assert.ok(outcome.page.html?.includes("Brawler"));
+  assert.equal(outcome.page.links.length, 0);
+});
+
+test("adapter L. links-only result accepted", async () => {
+  configureOfficialBrowserEnv();
+  const outcome = await renderOfficialBreweryBeerPage(
+    {
+      url: "https://yardsbrewing.com/beers",
+      breweryName: "Yards",
+      beerName: "Brawler",
+      registeredDomain: "yardsbrewing.com"
+    },
+    {
+      runTask: async () =>
+        ({
+          kind: "success",
+          httpStatus: 200,
+          envelope: { outcome: "success", success: true },
+          data: {
+            finalUrl: "https://yardsbrewing.com/beers",
+            title: "Beers",
+            links: [{ href: "https://yardsbrewing.com/beers/brawler", text: "Brawler" }]
+          }
+        }) as FigraniumRunResult
+    }
+  );
+  assert.equal(outcome.status, "ok");
+  if (outcome.status !== "ok") return;
+  assert.equal(outcome.page.html, null);
+  assert.equal(outcome.page.links.length, 1);
+});
+
+test("adapter M. relative links normalize to absolute same-domain URLs", async () => {
+  configureOfficialBrowserEnv();
+  const outcome = await renderOfficialBreweryBeerPage(
+    {
+      url: "https://yardsbrewing.com/beers",
+      breweryName: "Yards",
+      beerName: "Brawler",
+      registeredDomain: "yardsbrewing.com"
+    },
+    {
+      runTask: async () =>
+        ({
+          kind: "success",
+          httpStatus: 200,
+          envelope: { outcome: "success", success: true },
+          data: {
+            finalUrl: "https://yardsbrewing.com/beers",
+            html: "<html><body>Beers</body></html>",
+            links: [
+              { href: "/beers/brawler", text: "Brawler" },
+              { href: "brawler", text: "Relative" }
+            ]
+          }
+        }) as FigraniumRunResult
+    }
+  );
+  assert.equal(outcome.status, "ok");
+  if (outcome.status !== "ok") return;
+  assert.ok(
+    outcome.page.links.every((link) => link.href.startsWith("https://yardsbrewing.com/"))
+  );
+  assert.ok(
+    outcome.page.links.some((link) => link.href.includes("/beers/brawler"))
+  );
+});
+
+test("adapter N. auth_error maps to error status", async () => {
+  configureOfficialBrowserEnv();
+  const outcome = await renderOfficialBreweryBeerPage(
+    {
+      url: "https://yardsbrewing.com/beers",
+      breweryName: "Yards",
+      beerName: "Brawler",
+      registeredDomain: "yardsbrewing.com"
+    },
+    {
+      runTask: async () => ({
+        kind: "auth_error",
+        httpStatus: 401,
+        message: "Figranium unauthorized"
+      })
+    }
+  );
+  assert.equal(outcome.status, "error");
+  if (outcome.status === "ok") return;
+  assert.match(outcome.reason, /unauthorized|auth/i);
+});
+
+test("adapter O. unavailable task maps to unavailable status", async () => {
+  configureOfficialBrowserEnv();
+  const outcome = await renderOfficialBreweryBeerPage(
+    {
+      url: "https://yardsbrewing.com/beers",
+      breweryName: "Yards",
+      beerName: "Brawler",
+      registeredDomain: "yardsbrewing.com"
+    },
+    {
+      runTask: async () => ({
+        kind: "unavailable",
+        message: "Figranium unreachable"
+      })
+    }
+  );
+  assert.equal(outcome.status, "unavailable");
+});
