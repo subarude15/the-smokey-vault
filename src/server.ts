@@ -11,7 +11,7 @@ import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin 
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
 import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
-import { buildShelf, matchCocktail, mixologistShelfSummary } from "./cocktails.js";
+import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottlePrompt, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
@@ -1025,19 +1025,32 @@ async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS
   throw lastError;
 }
 
-app.post<{ Body: { prompt?: string } }>("/api/ai/mixologist", async (request, reply) => {
+app.post<{ Body: { prompt?: string; required_bottle?: RequiredBottleRef } }>("/api/ai/mixologist", async (request, reply) => {
   const shelf = mixologistShelfSummary(currentShelf());
+  const requiredRef = request.body.required_bottle;
+  const requiredBottle = requiredRef ? requiredBottleFromRef(requiredRef) : null;
+  const requestText = requiredBottle
+    ? mixologistRequiredBottlePrompt(requiredBottle, request.body.prompt)
+    : (request.body.prompt ?? "Create a cocktail");
   try {
-    const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${request.body.prompt ?? "Create a cocktail"}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`, undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
-    return { recipe: parseGeneratedRecipe(result) };
+    const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${requestText}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`, undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
+    let recipe = parseGeneratedRecipe(result);
+    if (requiredBottle && !generatedRecipeIncludesBottle(recipe, requiredBottle)) {
+      const retry = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${mixologistRequiredBottleRetryPrompt(requiredBottle)}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`, undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
+      recipe = parseGeneratedRecipe(retry);
+      if (!generatedRecipeIncludesBottle(recipe, requiredBottle)) {
+        return reply.code(502).send({ error: "Couldn't find a drink for this bottle yet." });
+      }
+    }
+    return { recipe };
   } catch (error) {
     app.log.error({ error }, "AI mixologist request failed");
     if (error instanceof AiRecipeParseError) {
-      return reply.code(502).send({ error: error.message });
+      return reply.code(502).send({ error: requiredBottle ? "Couldn't find a drink for this bottle yet." : error.message });
     }
     const status = error instanceof AiRequestError ? error.statusCode : 502;
     const message = error instanceof AiRequestError ? error.message : "The AI service could not be reached. Check your provider settings and network connection.";
-    return reply.code(status).send({ error: message });
+    return reply.code(status).send({ error: requiredBottle ? "Couldn't find a drink for this bottle yet." : message });
   }
 });
 

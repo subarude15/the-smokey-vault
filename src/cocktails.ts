@@ -84,12 +84,16 @@ export function isPlaceholderIngredients(value: unknown): boolean {
 
 export function stripMeasure(ingredient: string): string {
   let value = ingredient.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").trim();
+  // Drop leading unicode / mixed-number fractions before unit stripping.
+  value = value.replace(/^(?:\d+\s*)?[½¼¾⅓⅔]\s*/u, "");
   for (let i = 0; i < 4; i++) {
-    const next = value.replace(/^(?:\d+(?:\.\d+)?\s*(?:ml|cl|oz|tsp|tbsp|dashes?|drops?|sprigs?|cubes?|dash|splash)?\s*)/i, "");
+    const next = value
+      .replace(/^(?:\d+(?:\.\d+)?\s*(?:ml|cl|oz|tsp|tbsp|dashes?|drops?|sprigs?|cubes?|dash|splash)?\.?\s*)/i, "")
+      .replace(/^(?:ml|cl|oz|tsp|tbsp)\.?\s+/i, "");
     if (next === value) break;
     value = next.trim();
   }
-  return value.replace(/^(?:fresh|a|an|the)\s+/i, "").trim();
+  return value.replace(/^(?:fresh|a|an|the)\s+/i, "").trim().replace(/^\.\s*/, "");
 }
 
 export function ingredientOptions(normalized: string): string[] {
@@ -342,4 +346,132 @@ export function collectionGroup(collection: unknown): "Custom" | "Seasonal" | "C
   if (value === "Custom Cocktails") return "Custom";
   if (/seasonal/i.test(value)) return "Seasonal";
   return "Classics";
+}
+
+
+const EXTRACT_OR_ESSENCE = /\b(extract|essence|flavoring|flavouring)\b/i;
+
+/** Spirits always; wines where the recipe book already has wine cocktails. Packaged beer is out of scope for PR #94. */
+export function moduleSupportsFindDrink(moduleId: string): boolean {
+  return moduleId === "spirits" || moduleId === "wines";
+}
+
+export function shelfKindForModule(moduleId: string): ShelfBottle["kind"] | null {
+  if (moduleId === "spirits") return "spirit";
+  if (moduleId === "wines") return "wine";
+  if (moduleId === "packaged_beer" || moduleId === "taps") return "beer";
+  return null;
+}
+
+/** Build a matching bottle from an inventory row without on-shelf / blocked filters. */
+export function shelfBottleFromItem(item: Record<string, unknown>, kind: ShelfBottle["kind"]): ShelfBottle {
+  return shelfBottle(item, kind);
+}
+
+export function recipeIngredientMatchesBottle(ingredient: string, bottle: ShelfBottle): boolean {
+  const normalized = stripMeasure(ingredient);
+  if (!normalized) return false;
+  if (EXTRACT_OR_ESSENCE.test(normalized) && !EXTRACT_OR_ESSENCE.test(bottle.haystack)) return false;
+  const line = matchIngredient(ingredient, [bottle]);
+  return line.state === "have" || line.state === "substitute";
+}
+
+export function recipeIncludesBottle(recipe: { ingredients?: unknown }, bottle: ShelfBottle): boolean {
+  return parseIngredients(recipe.ingredients).some((ingredient) => recipeIngredientMatchesBottle(ingredient, bottle));
+}
+
+export type BottleDrinkMatch<T extends Record<string, unknown> = Record<string, unknown>> = T & {
+  ingredients: string[];
+  lines: IngredientLine[];
+  missing: string[];
+  readiness: Readiness;
+  has_substitutes: boolean;
+  matched_ingredient: string;
+};
+
+/**
+ * Search saved recipes for ones that include the selected bottle, then sort by
+ * existing readiness (ready → almost → missing) and name.
+ */
+export function findRecipesForBottle<T extends Record<string, unknown>>(
+  item: Record<string, unknown>,
+  kind: ShelfBottle["kind"],
+  recipes: T[],
+  shelfForReadiness?: ShelfBottle[]
+): BottleDrinkMatch<T>[] {
+  const bottle = shelfBottleFromItem(item, kind);
+  const shelf = shelfForReadiness?.length ? shelfForReadiness : [bottle];
+  const matches: BottleDrinkMatch<T>[] = [];
+  for (const recipe of recipes) {
+    const ingredients = parseIngredients(recipe.ingredients);
+    const matchedIngredient = ingredients.find((ingredient) => recipeIngredientMatchesBottle(ingredient, bottle));
+    if (!matchedIngredient) continue;
+    const matched = matchCocktail(recipe, shelf);
+    matches.push({
+      ...recipe,
+      ...matched,
+      matched_ingredient: matchedIngredient
+    });
+  }
+  return matches.sort(compareCocktails);
+}
+
+export type RequiredBottleRef = {
+  name?: string;
+  brand?: string;
+  category?: string;
+  sub_category?: string;
+  type?: string;
+  style?: string;
+  kind?: ShelfBottle["kind"];
+};
+
+export function requiredBottleFromRef(ref: RequiredBottleRef): ShelfBottle {
+  const kind = ref.kind ?? "spirit";
+  return shelfBottleFromItem({
+    name: ref.name,
+    brand: ref.brand,
+    category: ref.category,
+    sub_category: ref.sub_category,
+    type: ref.type,
+    style: ref.style,
+    fill_level: 100,
+    stock_count: 1,
+    bottle_count: 1
+  }, kind);
+}
+
+export function mixologistRequiredBottlePrompt(bottle: ShelfBottle, request?: string): string {
+  const label = bottle.label;
+  const base = (request ?? "").trim() || `Create one cocktail recipe that must use ${label} as a required ingredient.`;
+  return `${base}
+
+HARD REQUIREMENT: The recipe MUST include ${label} as one of the ingredients (or a clearly compatible measured pour of this bottle's spirit/wine type). Do not omit it. Do not swap in a different base spirit. Name this bottle in the ingredients list.`;
+}
+
+export function mixologistRequiredBottleRetryPrompt(bottle: ShelfBottle): string {
+  return `Previous recipe omitted the required bottle. Create one cocktail that MUST list "${bottle.label}" as an ingredient with an exact measure. Do not use a different spirit or wine.`;
+}
+
+export function generatedRecipeIncludesBottle(
+  recipe: { ingredients?: unknown },
+  bottle: ShelfBottle
+): boolean {
+  return recipeIncludesBottle(recipe, bottle);
+}
+
+const GUEST_RECIPE_STRIP = new Set([
+  "upc", "stock_count", "fill_level", "bottle_count", "count", "remaining_l", "keg_size_l",
+  "enrichment_status", "enrichment_job_id", "enrichment_source", "source_job", "provenance",
+  "blocked_from_ordering", "display_image_url"
+]);
+
+/** Drop inventory / UPC / enrichment internals from a recipe payload shown to guests. */
+export function guestSafeRecipe<T extends Record<string, unknown>>(recipe: T): T {
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(recipe)) {
+    if (GUEST_RECIPE_STRIP.has(key)) continue;
+    safe[key] = value;
+  }
+  return safe as T;
 }
