@@ -1473,7 +1473,18 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
         <form className="wanted-form" onSubmit={(event) => submitFreeform(event, "shelf")}>
           <div className="suggest-wrap">
             <input value={shelfQuery} onChange={(e) => { setShelfQuery(e.target.value); setShelfLocked(""); }} maxLength={MAX_NEXT_NAME} placeholder="Search a bottle or wine…" autoComplete="off"/>
-            <BottleSuggest moduleId={shelfKind} query={shelfQuery} locked={shelfLocked} onPick={(hit) => pickHit("shelf", hit)}/>
+            <BottleSuggest
+              moduleId={shelfKind}
+              query={shelfQuery}
+              locked={shelfLocked}
+              onPick={(hit) => pickHit("shelf", hit)}
+              allowCustomAdd
+              onCustomAdd={(name) => {
+                void add({ board: "shelf", name, kind: shelfKind });
+                setShelfQuery("");
+                setShelfLocked(name);
+              }}
+            />
           </div>
           <button className="primary" type="submit" disabled={!shelfQuery.trim()}><Plus size={16}/> Add to the board</button>
         </form>
@@ -1488,7 +1499,18 @@ function WhatsNextPage({ admin }: { admin: boolean }) {
         <form className="wanted-form" onSubmit={(event) => submitFreeform(event, "keg")}>
           <div className="suggest-wrap">
             <input value={kegQuery} onChange={(e) => { setKegQuery(e.target.value); setKegLocked(""); }} maxLength={MAX_NEXT_NAME} placeholder="Search a beer or type a keg idea…" autoComplete="off"/>
-            <BottleSuggest moduleId="keg" query={kegQuery} locked={kegLocked} onPick={(hit) => pickHit("keg", hit)}/>
+            <BottleSuggest
+              moduleId="keg"
+              query={kegQuery}
+              locked={kegLocked}
+              onPick={(hit) => pickHit("keg", hit)}
+              allowCustomAdd
+              onCustomAdd={(name) => {
+                void add({ board: "keg", name, kind: "keg" });
+                setKegQuery("");
+                setKegLocked(name);
+              }}
+            />
           </div>
           <button className="primary" type="submit" disabled={!kegQuery.trim()}><Plus size={16}/> Put on the board</button>
         </form>
@@ -2548,6 +2570,8 @@ function ItemForm({ module,item,review,source,close,saved }:{module:Module;item:
               moduleId={module.id}
               query={current}
               locked={suggestLock}
+              allowCustomAdd
+              onCustomAdd={(name) => setSuggestLock(name)}
               onPick={async (hit) => {
                 try {
                   const values = await resolveSuggestion(module, hit);
