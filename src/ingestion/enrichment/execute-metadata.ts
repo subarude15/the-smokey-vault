@@ -59,7 +59,8 @@ import {
 } from "./tasting-notes-sources.js";
 import {
   classifySourceUrlWithDiscovery,
-  discoverOfficialDomains
+  discoverOfficialDomains,
+  registeredDomain
 } from "./official-domain.js";
 import {
   buildMetadataQueryTiers,
@@ -94,6 +95,12 @@ export type EnrichmentExecutionResult = {
   conflicts: FieldConflict[];
   errors: EnrichmentExecutionError[];
   diagnostics: JobDiagnosticsPayload;
+  /**
+   * Official brewery registered domains established by accepted authoritative
+   * sources classified as official. Structured signal — never scraped from
+   * diagnostic stage text.
+   */
+  acceptedOfficialDomains: string[];
 };
 
 export type MetadataEnrichmentDeps = {
@@ -372,7 +379,8 @@ function summarize(
     updated,
     conflicts,
     errors,
-    diagnostics: sanitizeJobDiagnostics(diagnostics)
+    diagnostics: sanitizeJobDiagnostics(diagnostics),
+    acceptedOfficialDomains: []
   };
 }
 
@@ -408,9 +416,12 @@ export async function executeMetadataEnrichment(
   const stages: EnrichmentDiagnosticStage[] = [];
   const diagnostics = emptyDiagnostics();
   diagnostics.rejectReasons = rejects;
+  let acceptedOfficialDomains: string[] = [];
 
   if (!targets.length) {
-    return summarize(before, candidate, targets, conflicts, errors, diagnostics);
+    const empty = summarize(before, candidate, targets, conflicts, errors, diagnostics);
+    empty.acceptedOfficialDomains = [];
+    return empty;
   }
 
   const lookupByUpc = deps.lookupByUpc ?? ((upc: string) => lookupProduct(upc, { mode: "live" }));
@@ -684,6 +695,14 @@ export async function executeMetadataEnrichment(
             isAuthoritativeSource(h.sourceClass)
             || h.url.includes("injected.local")
         );
+        acceptedOfficialDomains = [
+          ...new Set(
+            authoritative
+              .filter((h) => h.sourceClass === "official")
+              .map((h) => registeredDomain(h.url))
+              .filter((d): d is string => Boolean(d))
+          )
+        ];
         const rejected = classified.filter((h) => !authoritative.includes(h));
 
         stages.push({
@@ -858,6 +877,7 @@ export async function executeMetadataEnrichment(
 
   diagnostics.stages = stages;
   const result = summarize(before, candidate, targets, conflicts, errors, diagnostics);
+  result.acceptedOfficialDomains = acceptedOfficialDomains;
 
   // Clear no-result reason when we made useful progress.
   // Summary "still missing" excludes fields that were updated this run.

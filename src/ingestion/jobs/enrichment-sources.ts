@@ -4,7 +4,7 @@
  */
 import { db } from "../../db.js";
 
-export type EnrichmentSourceType = "official_product_page";
+export type EnrichmentSourceType = "official_product_page" | "official_brewery_domain";
 
 export type EnrichmentSourceRecord = {
   entityType: string;

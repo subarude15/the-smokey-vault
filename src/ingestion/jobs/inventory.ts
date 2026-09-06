@@ -20,7 +20,8 @@ import {
   isUnresolvedField,
   mergeField,
   type BottleCandidate,
-  type ProductField
+  type ProductField,
+  confidenceForSource
 } from "../candidate/index.js";
 import type { MetadataEnrichmentField } from "../enrichment/metadata-fields.js";
 import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
@@ -143,7 +144,11 @@ export function candidateFromInventoryRow(
       candidate.abv.source
     );
     if (abvSource !== candidate.abv.source) {
-      candidate.abv = { ...candidate.abv, source: abvSource };
+      candidate.abv = {
+        ...candidate.abv,
+        source: abvSource,
+        confidence: confidenceForSource(abvSource)
+      };
     }
     const categorySource = resolveCandidateSourceFromOwnership(
       entityType,
@@ -152,7 +157,11 @@ export function candidateFromInventoryRow(
       candidate.category.source
     );
     if (categorySource !== candidate.category.source) {
-      candidate.category = { ...candidate.category, source: categorySource };
+      candidate.category = {
+        ...candidate.category,
+        source: categorySource,
+        confidence: confidenceForSource(categorySource)
+      };
     }
   }
 
