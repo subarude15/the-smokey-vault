@@ -36,6 +36,11 @@ import {
   upsertProductImage
 } from "./product-images.js";
 import {
+  consumeOfficialImageRepair,
+  getPendingOfficialImageRepair,
+  hasPendingOfficialImageRepair
+} from "./official-image-repair.js";
+import {
   getEnrichmentSource,
   upsertEnrichmentSource
 } from "./enrichment-sources.js";
@@ -265,6 +270,7 @@ export async function runImageJob(
       verified: true,
       rejectionReason: null
     });
+
     return {
       skipped: true,
       reason: "user_image_present",
@@ -289,7 +295,11 @@ export async function runImageJob(
     }
   }
 
-  if (hasDurableAcceptedProductImage(job.entity_type, job.entity_id)) {
+  const pendingOfficialImageRepair = hasPendingOfficialImageRepair(
+    job.entity_type,
+    job.entity_id
+  );
+  if (hasDurableAcceptedProductImage(job.entity_type, job.entity_id) && !pendingOfficialImageRepair) {
     return {
       skipped: true,
       reason: "already_complete",
@@ -330,10 +340,16 @@ export async function runImageJob(
     job.entity_id,
     "official_product_page"
   );
+  const pendingRepair = pendingOfficialImageRepair
+    ? getPendingOfficialImageRepair(job.entity_type, job.entity_id)
+    : null;
   const execution = await executeImageEnrichment(before, {
     ...deps,
     knownOfficialProductPageUrl:
-      deps.knownOfficialProductPageUrl ?? knownOfficial?.sourceUrl ?? null
+      deps.knownOfficialProductPageUrl
+      ?? pendingRepair?.official_page_url
+      ?? knownOfficial?.sourceUrl
+      ?? null
   });
 
   if (execution.selectedOfficialProductPageUrl) {
@@ -378,7 +394,11 @@ export async function runImageJob(
 
   assertInventoryImageUnchanged(job.entity_type, job.entity_id, inventoryImageUrl);
 
-  return {
+    if (imageSaved && pendingOfficialImageRepair) {
+    consumeOfficialImageRepair(job.entity_type, job.entity_id);
+  }
+
+return {
     skipped: false,
     execution,
     imageSaved,

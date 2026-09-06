@@ -405,6 +405,14 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   const result = db.prepare(`INSERT INTO ${table} (${values.join(",")}) VALUES (${values.map(() => "?").join(",")})`)
     .run(...values.map((field) => body[field] as never));
   const created = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(result.lastInsertRowid) as Record<string, unknown>;
+  if (table === "packaged_beer") {
+    const { stampHumanFieldOwnership } = await import("./ingestion/jobs/field-ownership.js");
+    stampHumanFieldOwnership({
+      entityType: table,
+      entityId: Number(created.id),
+      fields: values
+    });
+  }
   queueBackgroundEnrichmentSafe(table, Number(created.id), created);
   return reply.code(201).send(withInventoryDisplayFields(table, created));
 });
@@ -504,6 +512,14 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
     .run(...values.map((field) => body[field] as never), request.params.id);
   const updated = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id) as Record<string, unknown>;
   maybeInventoryPour(table, existing, updated);
+  if (table === "packaged_beer") {
+    const { stampHumanFieldOwnership } = await import("./ingestion/jobs/field-ownership.js");
+    stampHumanFieldOwnership({
+      entityType: table,
+      entityId: Number(updated.id),
+      fields: values
+    });
+  }
   queueBackgroundEnrichmentSafe(table, Number(updated.id), updated);
   return withInventoryDisplayFields(table, updated);
 });

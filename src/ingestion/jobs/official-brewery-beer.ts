@@ -18,6 +18,10 @@ import {
 } from "../candidate/index.js";
 import { upsertEnrichmentSource } from "./enrichment-sources.js";
 import { upsertProductContent } from "./product-content.js";
+import {
+  applyOfficialBeerRepairs,
+  type OfficialRepairSummary
+} from "./official-beer-repair.js";
 
 export type OfficialBreweryBeerApplyResult = {
   attempted: boolean;
@@ -26,6 +30,9 @@ export type OfficialBreweryBeerApplyResult = {
   productPageStored: boolean;
   abvUpdated: boolean;
   notesStored: boolean;
+  styleUpdated: boolean;
+  imageRepairRequested: boolean;
+  repairSummary: OfficialRepairSummary | null;
 };
 
 function cloneField<T>(f: ProductField<T>): ProductField<T> {
@@ -91,7 +98,7 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
   row: Record<string, unknown>;
   discoveryDeps?: OfficialBeerDiscoveryDeps;
 }): Promise<OfficialBreweryBeerApplyResult> {
-  const candidate = cloneCandidate(options.candidate);
+  let candidate = cloneCandidate(options.candidate);
 
   if (options.entityType !== "packaged_beer") {
     return {
@@ -100,7 +107,10 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       candidate,
       productPageStored: false,
       abvUpdated: false,
-      notesStored: false
+      notesStored: false,
+      styleUpdated: false,
+      imageRepairRequested: false,
+      repairSummary: null
     };
   }
 
@@ -111,7 +121,10 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       candidate,
       productPageStored: false,
       abvUpdated: false,
-      notesStored: false
+      notesStored: false,
+      styleUpdated: false,
+      imageRepairRequested: false,
+      repairSummary: null
     };
   }
 
@@ -126,7 +139,10 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       candidate,
       productPageStored: false,
       abvUpdated: false,
-      notesStored: false
+      notesStored: false,
+      styleUpdated: false,
+      imageRepairRequested: false,
+      repairSummary: null
     };
   }
 
@@ -152,6 +168,9 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
   let productPageStored = false;
   let abvUpdated = false;
   let notesStored = false;
+  let styleUpdated = false;
+  let imageRepairRequested = false;
+  let repairSummary: OfficialRepairSummary | null = null;
 
   if (discovery.status === "matched" && discovery.productPageUrl) {
     upsertEnrichmentSource({
@@ -203,6 +222,21 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       });
       notesStored = true;
     }
+
+    // Narrow exact/strong-match repair for machine-owned style/ABV/image.
+    // Does not change global authority ranking; Keeper/user values stay protected.
+    const repaired = applyOfficialBeerRepairs({
+      entityType: "packaged_beer",
+      entityId: options.entityId,
+      row: options.row,
+      candidate,
+      discovery
+    });
+    candidate = repaired.candidate;
+    repairSummary = repaired.summary;
+    if (repaired.summary.styleRepaired) styleUpdated = true;
+    if (repaired.summary.abvRepaired) abvUpdated = true;
+    if (repaired.summary.imageRepairRequested) imageRepairRequested = true;
   }
 
   return {
@@ -211,6 +245,9 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
     candidate,
     productPageStored,
     abvUpdated,
-    notesStored
+    notesStored,
+    styleUpdated,
+    imageRepairRequested,
+    repairSummary
   };
 }

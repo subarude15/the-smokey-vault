@@ -15,6 +15,7 @@ import {
   inventoryHasUserImage,
   productImageNeedsLocalization
 } from "./product-images.js";
+import { hasPendingOfficialImageRepair } from "./official-image-repair.js";
 import {
   enqueueImageJob,
   enqueueMetadataJob,
@@ -143,7 +144,12 @@ export function shouldScheduleImageEnrichment(options: {
 }): boolean {
   if (inventoryHasUserImage(options.row, options.entityType, options.entityId)) return false;
   // Durable local accepted images are done. Remote accepted images still need repair.
-  if (hasDurableAcceptedProductImage(options.entityType, options.entityId)) return false;
+  if (
+    hasDurableAcceptedProductImage(options.entityType, options.entityId) &&
+    !hasPendingOfficialImageRepair(options.entityType, options.entityId)
+  ) {
+    return false;
+  }
   if (productImageNeedsLocalization(options.entityType, options.entityId)) return true;
   if (hasCompletedJob(options.entityType, options.entityId, "image")) return false;
   return true;

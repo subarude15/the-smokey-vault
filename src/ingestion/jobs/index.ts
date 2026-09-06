@@ -167,3 +167,38 @@ export {
   recordAdminAuditEvent,
   type AdminAuditEvent
 } from "./admin-audit.js";
+
+export {
+  isOfficialRepairMatchQuality,
+  passesOfficialRepairGate,
+  applyOfficialBeerRepairs,
+  isKeeperVisibleRepairEvent,
+  repairEventsAsConflicts,
+  type OfficialRepairDecision,
+  type OfficialFieldRepairEvent,
+  type OfficialRepairSummary
+} from "./official-beer-repair.js";
+
+export {
+  ensureFieldOwnershipTable,
+  getFieldOwnership,
+  upsertFieldOwnership,
+  stampHumanFieldOwnership,
+  stampMachineFieldOwnership,
+  classifyStoredFieldForOfficialRepair,
+  backfillMachineFieldOwnershipFromMetadataJobs,
+  clearFieldOwnershipForTests,
+  resolveCandidateSourceFromOwnership,
+  type FieldOwnershipKind,
+  type OwnedEnrichmentField,
+  type FieldOwnershipRecord
+} from "./field-ownership.js";
+
+export {
+  ensureOfficialImageRepairTable,
+  requestOfficialImageRepair,
+  getPendingOfficialImageRepair,
+  hasPendingOfficialImageRepair,
+  consumeOfficialImageRepair,
+  clearOfficialImageRepairForTests
+} from "./official-image-repair.js";
