@@ -305,6 +305,43 @@ test("smoke H. successful discovery returns exit 0", async () => {
   assert.match(lines.join("\n"), /status: matched/);
 });
 
+test("smoke I. guessed_product_url_matched reports static route, browser unused", async () => {
+  const result = await runOfficialBeerBrowserSmoke(
+    parseSmokeOfficialBeerBrowserArgs([
+      "--brewery",
+      "Victory Brewing Company",
+      "--beer",
+      "Sour Monkey",
+      "--url",
+      "https://victorybeer.com"
+    ]),
+    {
+      envDiagnostics: configuredEnv,
+      skipCacheClear: true,
+      discoverOfficialPage: async () =>
+        emptyDiscovery({
+          status: "matched",
+          match: "exact_name",
+          productPageUrl: "https://victorybeer.com/beers/sour-monkey/",
+          registeredDomain: "victorybeer.com",
+          reason: "guessed_product_url_matched",
+          pagesFetched: 1
+        })
+    }
+  );
+  assert.equal(result.exitCode, 0);
+  const report = result.reports[0];
+  assert.ok(report && report.mode === "full-discovery");
+  if (report && report.mode === "full-discovery") {
+    assert.equal(report.route, "static");
+    assert.equal(report.browserUsed, false);
+  }
+  const lines = formatSmokeReport(report!);
+  assert.match(lines.join("\n"), /route: static/);
+  assert.match(lines.join("\n"), /browser used: no/);
+  assert.match(lines.join("\n"), /guessed_product_url_matched/);
+});
+
 test("smoke presets list is operational fixtures only", () => {
   assert.ok(OFFICIAL_BEER_SMOKE_PRESETS.length >= 5);
   const labels = OFFICIAL_BEER_SMOKE_PRESETS.map((p) => p.label);
