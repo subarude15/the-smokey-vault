@@ -487,6 +487,254 @@ export function classifyOfficialBeerPageMatch(args: {
   return "none";
 }
 
+const STYLE_LABEL_RE =
+  /^(?:beer\s*)?(?:style|type|category|classification|variety)$/i;
+const NOTES_LABEL_RE =
+  /^(?:notes?|tasting\s*notes?|flavor\s*notes?|description|about|overview)$/i;
+const DESCRIPTION_BOILERPLATE_RE =
+  /\b(you must be\s*21|must be\s*21|sign up for our newsletter|we use cookies|cookie (?:policy|notice)|shop now|find a retailer|add to cart|age gate|terms of (?:use|service)|privacy policy)\b/i;
+const STYLE_MARKETING_RE =
+  /^(?:bold and adventurous|hop-?forward|seasonal favorite|crisp and refreshing|smooth finish|sessionable|easy drinking)\b/i;
+const REJECTED_IMAGE_PATH_RE =
+  /(?:favicon|logo|sprite|icon|avatar|badge|social|facebook|twitter|instagram|pinterest|youtube|tiktok|tracking|pixel|1x1|spacer|wordmark|header-logo|site-logo)/i;
+
+/** Collect image URL strings from JSON-LD `image` in all common Product shapes. */
+export function collectJsonLdImageUrls(image: unknown): string[] {
+  const out: string[] = [];
+  const push = (raw: unknown) => {
+    if (typeof raw === "string" && raw.trim()) {
+      out.push(raw.trim());
+      return;
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.url === "string" && obj.url.trim()) out.push(obj.url.trim());
+    if (typeof obj.contentUrl === "string" && obj.contentUrl.trim()) {
+      out.push(obj.contentUrl.trim());
+    }
+  };
+  if (Array.isArray(image)) {
+    for (const item of image) push(item);
+  } else {
+    push(image);
+  }
+  return out;
+}
+
+export function isRejectedOfficialImageCandidate(
+  rawUrl: string,
+  alt: string = ""
+): boolean {
+  const value = String(rawUrl || "").trim();
+  if (!value) return true;
+  const lower = value.toLowerCase();
+  if (
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("javascript:")
+  ) {
+    return true;
+  }
+  if (REJECTED_IMAGE_PATH_RE.test(lower) || REJECTED_IMAGE_PATH_RE.test(alt)) {
+    return true;
+  }
+  try {
+    const parsed = new URL(value);
+    const path = parsed.pathname.toLowerCase();
+    if (/\.(svg|ico)(\?|$)/i.test(path)) return true;
+  } catch {
+    if (/\.(svg|ico)(\?|$)/i.test(lower)) return true;
+  }
+  return false;
+}
+
+function absolutizeOfficialImageUrl(
+  raw: string,
+  pageUrl: string
+): string | null {
+  if (isRejectedOfficialImageCandidate(raw)) return null;
+  try {
+    const abs = parseSafeHttpUrl(raw, pageUrl).toString();
+    if (isRejectedOfficialImageCandidate(abs)) return null;
+    return abs;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStyleValue(raw: string | null | undefined): string | null {
+  const value = stripTags(String(raw || ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value || value.length < 2 || value.length > 80) return null;
+  if (STYLE_MARKETING_RE.test(value)) return null;
+  if (DESCRIPTION_BOILERPLATE_RE.test(value)) return null;
+  if (/[.!?]/.test(value) || value.split(/\s+/).length > 8) return null;
+  return value.slice(0, 120);
+}
+
+function normalizeDescriptionValue(raw: string | null | undefined): string | null {
+  const value = stripTags(String(raw || ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value || value.length < 24) return null;
+  if (DESCRIPTION_BOILERPLATE_RE.test(value)) return null;
+  return value.slice(0, MAX_DESCRIPTION_CHARS) || null;
+}
+
+function extractLabeledTableMap(html: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const rowRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let row: RegExpExecArray | null;
+  while ((row = rowRe.exec(html))) {
+    const th = row[1]!.match(/<th\b[^>]*>([\s\S]*?)<\/th>/i);
+    const td = row[1]!.match(/<td\b[^>]*>([\s\S]*?)<\/td>/i);
+    if (!th || !td) continue;
+    const label = stripTags(th[1] || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    const value = stripTags(td[1] || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (label && value && !map.has(label)) map.set(label, value);
+  }
+  return map;
+}
+
+function extractStyleFromHtml(html: string, text: string): string | null {
+  const classMatch = html.match(
+    /<(?:h[1-6]|p|div|span)[^>]*class=["'][^"']*\bbeer-style\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:h[1-6]|p|div|span)>/i
+  );
+  const fromClass = normalizeStyleValue(classMatch?.[1]);
+  if (fromClass) return fromClass;
+
+  const table = extractLabeledTableMap(html);
+  for (const [label, value] of table) {
+    if (STYLE_LABEL_RE.test(label)) {
+      const normalized = normalizeStyleValue(value);
+      if (normalized) return normalized;
+    }
+  }
+
+  const labeled = text.match(
+    /\b(?:beer\s*)?(?:style|type|category)\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9 &'\/.-]{1,60})/i
+  );
+  return normalizeStyleValue(labeled?.[1]);
+}
+
+function extractDescriptionFromHtml(html: string, text: string): {
+  description: string | null;
+  tastingNotes: string | null;
+  source: string | null;
+} {
+  const table = extractLabeledTableMap(html);
+  for (const [label, value] of table) {
+    if (!NOTES_LABEL_RE.test(label)) continue;
+    const normalized = normalizeDescriptionValue(value);
+    if (!normalized) continue;
+    if (/tasting|flavor/.test(label)) {
+      return { description: null, tastingNotes: normalized, source: "table_notes" };
+    }
+    return { description: normalized, tastingNotes: null, source: "table_notes" };
+  }
+
+  const notesMatch = text.match(
+    /\b(?:tasting notes?|flavor notes?)\s*[:\-]\s*([^.!?]{8,240})/i
+  );
+  const tastingNotes = normalizeDescriptionValue(notesMatch?.[1] ?? null);
+  if (tastingNotes) {
+    return { description: null, tastingNotes, source: "labeled_text" };
+  }
+
+  return { description: null, tastingNotes: null, source: null };
+}
+
+/**
+ * Deterministic official product-page image candidates.
+ * Priority: JSON-LD → og:image → twitter:image → product-scoped DOM <img>.
+ */
+export function extractOfficialBeerImageCandidates(args: {
+  html: string;
+  pageUrl: string;
+  beerName: string;
+}): string[] {
+  const { html, pageUrl, beerName } = args;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | null | undefined) => {
+    if (!raw) return;
+    const abs = absolutizeOfficialImageUrl(raw, pageUrl);
+    if (!abs || seen.has(abs)) return;
+    seen.add(abs);
+    out.push(abs);
+  };
+
+  for (const block of extractJsonLdBlocks(html)) {
+    walkJsonLd(block, (obj) => {
+      for (const url of collectJsonLdImageUrls(obj.image)) push(url);
+    });
+    if (out.length >= 6) return out.slice(0, 6);
+  }
+
+  push(extractMetaContent(html, "og:image"));
+  push(extractMetaContent(html, "twitter:image"));
+  push(extractMetaContent(html, "twitter:image:src"));
+
+  const beerFold = foldBeerText(beerName);
+  const beerTokens = beerTextTokens(beerName).filter((t) => t.length >= 3);
+  const imgRe = /<img\b[^>]*>/gi;
+  let img: RegExpExecArray | null;
+  const scored: Array<{ url: string; score: number }> = [];
+  while ((img = imgRe.exec(html)) && scored.length < 40) {
+    const tag = img[0];
+    const src =
+      tag.match(/\bsrc=["']([^"']+)["']/i)?.[1] ||
+      tag.match(/\bdata-src=["']([^"']+)["']/i)?.[1] ||
+      null;
+    if (!src) continue;
+    const abs = absolutizeOfficialImageUrl(src, pageUrl);
+    if (!abs || seen.has(abs)) continue;
+    const alt = tag.match(/\balt=["']([^"']*)["']/i)?.[1] || "";
+    if (isRejectedOfficialImageCandidate(abs, alt)) continue;
+    const width = Number(tag.match(/\bwidth=["']?(\d+)/i)?.[1] || "");
+    const height = Number(tag.match(/\bheight=["']?(\d+)/i)?.[1] || "");
+    if (
+      Number.isFinite(width) &&
+      Number.isFinite(height) &&
+      width > 0 &&
+      height > 0 &&
+      (width <= 2 || height <= 2 || (width < 64 && height < 64))
+    ) {
+      continue;
+    }
+    let score = 0;
+    const altFold = foldBeerText(alt);
+    if (altFold && beerFold && (altFold === beerFold || altFold.includes(beerFold))) {
+      score += 6;
+    }
+    for (const token of beerTokens.slice(0, 4)) {
+      if (altFold.includes(token) || abs.toLowerCase().includes(token)) {
+        score += 2;
+        break;
+      }
+    }
+    if (/render|can|bottle|pack|product|hero/i.test(abs)) score += 2;
+    if (/beer-hero|product-image|wp-post-image/i.test(tag)) score += 2;
+    if (score <= 0) continue;
+    scored.push({ url: abs, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
+  for (const item of scored) {
+    if (seen.has(item.url)) continue;
+    seen.add(item.url);
+    out.push(item.url);
+    if (out.length >= 6) break;
+  }
+
+  return out.slice(0, 6);
+}
+
 function extractFromJsonLd(blocks: unknown[]): Partial<OfficialBeerExtractedFields> {
   const out: Partial<OfficialBeerExtractedFields> = {};
   walkJsonLd(blocks, (obj) => {
@@ -495,22 +743,22 @@ function extractFromJsonLd(blocks: unknown[]): Partial<OfficialBeerExtractedFiel
       ? typeRaw.map((t) => String(t).toLowerCase())
       : [String(typeRaw || "").toLowerCase()];
     const isProductish = types.some((t) =>
-      ["product", "beverages", "alcoholicbeverage"].includes(t)
+      ["product", "beverage", "alcoholicbeverage"].includes(t)
     );
     if (!isProductish && !obj.name) return;
 
     if (!out.productName) out.productName = firstString(obj.name);
     if (!out.description) out.description = firstString(obj.description);
     if (!out.imageUrl) {
-      const image = obj.image;
-      if (typeof image === "string") out.imageUrl = image;
-      else if (Array.isArray(image) && typeof image[0] === "string") out.imageUrl = image[0];
-      else if (image && typeof image === "object" && typeof (image as { url?: unknown }).url === "string") {
-        out.imageUrl = String((image as { url: string }).url);
-      }
+      const images = collectJsonLdImageUrls(obj.image);
+      if (images[0]) out.imageUrl = images[0];
     }
     if (!out.brewery) {
       out.brewery = firstString(obj.brand, obj.manufacturer, obj.producer);
+    }
+    if (!out.style) {
+      out.style =
+        normalizeStyleValue(firstString(obj.category, obj.additionalType)) || null;
     }
     const additional = obj.additionalProperty;
     const props = Array.isArray(additional) ? additional : additional ? [additional] : [];
@@ -521,7 +769,9 @@ function extractFromJsonLd(blocks: unknown[]): Partial<OfficialBeerExtractedFiel
       const value = String(p.value ?? "");
       if (!out.abv && /abv|alcohol/.test(name)) out.abv = parseAbvPercent(`${name} ${value}`);
       if (!out.ibu && /ibu/.test(name)) out.ibu = parseIbuValue(`${name} ${value}`);
-      if (!out.style && /style/.test(name) && value.trim()) out.style = value.trim();
+      if (!out.style && STYLE_LABEL_RE.test(name) && value.trim()) {
+        out.style = normalizeStyleValue(value);
+      }
     }
   });
   return out;
@@ -538,7 +788,6 @@ export function extractOfficialBeerMetadata(args: {
   const h1 = extractH1(html);
   const ogTitle = extractMetaContent(html, "og:title");
   const ogDescription = extractMetaContent(html, "og:description");
-  const ogImage = extractMetaContent(html, "og:image");
   const canonicalUrl = extractCanonical(html, pageUrl);
   const jsonLd = extractFromJsonLd(extractJsonLdBlocks(html));
   const text = stripTags(html).slice(0, 20_000);
@@ -549,40 +798,66 @@ export function extractOfficialBeerMetadata(args: {
     (ogTitle && foldBeerText(ogTitle).includes(foldBeerText(args.beerName)) ? ogTitle : null) ||
     (title ? title.split(/\s*[|\-–—]\s*/)[0]?.trim() || null : null);
 
+  const fromDom = extractDescriptionFromHtml(html, text);
   const descriptionRaw =
     jsonLd.description ||
     ogDescription ||
     extractMetaContent(html, "description") ||
+    fromDom.description ||
     null;
-  const description = descriptionRaw
-    ? stripTags(descriptionRaw).slice(0, MAX_DESCRIPTION_CHARS) || null
-    : null;
+  const description = normalizeDescriptionValue(descriptionRaw);
+
+  const tastingNotes =
+    fromDom.tastingNotes ||
+    (() => {
+      const notesMatch = text.match(
+        /\b(?:tasting notes?|flavor notes?)\s*[:\-]\s*([^.!?]{8,240})/i
+      );
+      return normalizeDescriptionValue(notesMatch?.[1] ?? null);
+    })();
 
   const abv = jsonLd.abv ?? parseAbvPercent(text) ?? parseAbvPercent(description) ?? null;
   const ibu = jsonLd.ibu ?? parseIbuValue(text) ?? parseIbuValue(description) ?? null;
 
-  let style = jsonLd.style || null;
-  if (!style) {
-    const styleMatch = text.match(/\bstyle\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9 &'/-]{1,60})/i);
-    if (styleMatch?.[1]) style = styleMatch[1].trim();
-  }
-
-  let tastingNotes: string | null = null;
-  const notesMatch = text.match(
-    /\b(?:tasting notes?|flavor notes?)\s*[:\-]\s*([^.!?]{8,240})/i
-  );
-  if (notesMatch?.[1]) tastingNotes = notesMatch[1].trim();
+  const style =
+    normalizeStyleValue(jsonLd.style) || extractStyleFromHtml(html, text) || null;
 
   const packageSizes = extractPackageSizes(text);
 
-  let imageUrl = jsonLd.imageUrl || ogImage || null;
-  if (imageUrl) {
-    try {
-      imageUrl = parseSafeHttpUrl(imageUrl, pageUrl).toString();
-    } catch {
-      imageUrl = null;
-    }
-  }
+  const imageCandidates = extractOfficialBeerImageCandidates({
+    html,
+    pageUrl,
+    beerName: args.beerName
+  });
+  const imageUrl = imageCandidates[0] || null;
+
+  logDiscovery("official_beer_extract_style", {
+    present: Boolean(style),
+    source: style ? (jsonLd.style ? "json_ld" : "dom") : null
+  });
+  logDiscovery("official_beer_extract_description", {
+    present: Boolean(description || tastingNotes),
+    source: description
+      ? jsonLd.description
+        ? "json_ld"
+        : ogDescription
+          ? "og"
+          : fromDom.source || "meta"
+      : tastingNotes
+        ? fromDom.source || "labeled_text"
+        : null
+  });
+  logDiscovery("official_beer_extract_image_candidate", {
+    present: Boolean(imageUrl),
+    candidateCount: imageCandidates.length,
+    host: (() => {
+      try {
+        return imageUrl ? new URL(imageUrl).host : null;
+      } catch {
+        return null;
+      }
+    })()
+  });
 
   return {
     productName: productName ? stripTags(productName).slice(0, 200) || null : null,
