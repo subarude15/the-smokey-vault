@@ -38,6 +38,9 @@ import {
   maybeEnqueueImageEnrichment,
   previewEnrichmentBackfill,
   queueEnrichmentBackfill,
+  queueItemEnrichment,
+  normalizeItemEnrichmentJobTypes,
+  normalizeItemEnrichmentQueueMode,
   startEnrichmentWorker,
   type EnrichmentBackfillJobType
 } from "./ingestion/jobs/index.js";
@@ -560,6 +563,48 @@ app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/en
   });
   if (!view) return reply.code(404).send({ error: "Item not found" });
   return view;
+});
+
+/**
+ * Keeper-only: queue or retry enrichment jobs for a single shelf bottle.
+ * Enqueues background work only — does not run enrichment in-request.
+ */
+app.post<{
+  Params: { table: string; id: string };
+  Body: { jobTypes?: string[]; mode?: string };
+}>("/api/inventory/:table/:id/enrichment/queue", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Queue or retry enrichment jobs for one inventory bottle"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const table = request.params.table;
+  if (!isEnrichmentEntityType(table)) {
+    return reply.code(404).send({ error: "Enrichment not available for this module" });
+  }
+  const id = Number(request.params.id);
+  if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
+
+  const jobTypes = normalizeItemEnrichmentJobTypes(request.body?.jobTypes);
+  if (jobTypes === null) {
+    return reply.code(400).send({ error: "jobTypes must be metadata, tasting_notes, and/or image" });
+  }
+  const mode = normalizeItemEnrichmentQueueMode(request.body?.mode);
+  if (mode === null) {
+    return reply.code(400).send({ error: "mode must be missing or retry" });
+  }
+
+  const result = queueItemEnrichment({
+    entityType: table,
+    entityId: id,
+    jobTypes: jobTypes ?? undefined,
+    mode: mode ?? undefined
+  });
+  if ("error" in result) {
+    return reply.code(result.statusCode).send({ error: result.error });
+  }
+  return result;
 });
 
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/reviews", async (request, reply) => {

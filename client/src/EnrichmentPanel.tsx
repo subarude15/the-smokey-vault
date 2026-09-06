@@ -148,6 +148,44 @@ export const ENRICHMENT_POLL_MS = 7_000;
 
 export const ENRICHMENT_MODULES = new Set(["spirits", "packaged_beer", "wines"]);
 
+export type ItemEnrichmentJobType = "metadata" | "tasting_notes" | "image";
+
+export type ItemEnrichmentQueueResult = {
+  entityType: string;
+  entityId: number;
+  mode: "missing" | "retry";
+  queued: ItemEnrichmentJobType[];
+  skipped: Array<{ type: ItemEnrichmentJobType; reason: string }>;
+};
+
+export function primaryEnrichmentActionLabel(
+  statusLabel: JobView["statusLabel"]
+): "Queue" | "Try again" | "Retry missing" | "Retry" | null {
+  switch (statusLabel) {
+    case "not_started":
+      return "Queue";
+    case "no_result":
+      return "Try again";
+    case "partial":
+      return "Retry missing";
+    case "failed":
+      return "Retry";
+    default:
+      return null;
+  }
+}
+
+export function enrichmentHasMissingWork(jobs: JobView[] | undefined): boolean {
+  if (!jobs?.length) return false;
+  return jobs.some((job) =>
+    job.statusLabel === "not_started"
+    || job.statusLabel === "no_result"
+    || job.statusLabel === "partial"
+    || job.statusLabel === "failed"
+  );
+}
+
+
 export function shouldPollEnrichment(jobs: JobView[] | undefined): boolean {
   if (!jobs?.length) return false;
   return jobs.some((j) => j.statusLabel === "waiting" || j.statusLabel === "in_progress");
@@ -301,9 +339,9 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
 }
 
 /**
- * Read-only enrichment / review panel for keepers only.
+ * Keeper enrichment / review panel (keepers only).
  * Patrons see BottlePublicContent instead — useful notes without plumbing.
- * Does not offer conflict resolution, re-runs, or content edits.
+ * Offers per-item queue / retry controls; conflict resolution remains deferred.
  */
 
 function imageSourceLabel(sourceType: string | null | undefined, verified: boolean | null | undefined): string {
@@ -327,6 +365,9 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const [view, setView] = useState<BottleEnrichmentView | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [queueBusy, setQueueBusy] = useState<string | null>(null);
+  const [queueNotice, setQueueNotice] = useState("");
+  const [queueError, setQueueError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -371,6 +412,52 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       if (timer) clearInterval(timer);
     };
   }, [table, itemId]);
+
+  async function refreshEnrichment() {
+    try {
+      const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`);
+      setView(next);
+      setError("");
+    } catch (err) {
+      setQueueError(err instanceof Error ? err.message : "Could not refresh enrichment");
+    }
+  }
+
+  async function queueEnrichment(options: {
+    jobTypes?: ItemEnrichmentJobType[];
+    mode?: "missing" | "retry";
+    busyKey: string;
+  }) {
+    setQueueBusy(options.busyKey);
+    setQueueError("");
+    setQueueNotice("");
+    try {
+      const result = await api<ItemEnrichmentQueueResult>(
+        `/inventory/${table}/${itemId}/enrichment/queue`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...(options.jobTypes ? { jobTypes: options.jobTypes } : {}),
+            ...(options.mode ? { mode: options.mode } : {})
+          })
+        }
+      );
+      if (result.queued.length === 1) {
+        setQueueNotice(`${jobTypeDisplay(result.queued[0])} queued`);
+      } else if (result.queued.length > 1) {
+        setQueueNotice(`${result.queued.length} enrichment jobs queued`);
+      } else if (result.skipped.some((s) => s.reason === "already_queued")) {
+        setQueueNotice("Already queued");
+      } else {
+        setQueueNotice("Nothing to queue");
+      }
+      await refreshEnrichment();
+    } catch (err) {
+      setQueueError(err instanceof Error ? err.message : "Could not queue enrichment");
+    } finally {
+      setQueueBusy(null);
+    }
+  }
 
   if (!ENRICHMENT_MODULES.has(table)) return null;
 
@@ -438,6 +525,26 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         </div>
       ) : null}
 
+      <div className="enrichment-item-actions">
+        <button
+          type="button"
+          className="secondary"
+          disabled={Boolean(queueBusy) || !enrichmentHasMissingWork(jobs)}
+          aria-busy={queueBusy === "missing"}
+          onClick={() => void queueEnrichment({ mode: "missing", busyKey: "missing" })}
+        >
+          {queueBusy === "missing"
+            ? "Queueing…"
+            : enrichmentHasMissingWork(jobs)
+              ? "Queue missing enrichment"
+              : "Nothing missing"}
+        </button>
+        {queueNotice ? (
+          <p className="enrichment-queue-notice" role="status" aria-live="polite">{queueNotice}</p>
+        ) : null}
+        {queueError ? <p className="error enrichment-queue-error">{queueError}</p> : null}
+      </div>
+
       <div className="enrichment-jobs">
         {(() => {
           const allIdle = jobs.length > 0 && jobs.every((j) => j.statusLabel === "not_started");
@@ -454,10 +561,53 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           const showWhy =
             (job.statusLabel === "no_result" || job.statusLabel === "failed" || job.statusLabel === "partial")
             && (job.diagnosticSummary || job.diagnostics);
+          const primaryLabel = primaryEnrichmentActionLabel(job.statusLabel);
+          const showRerun = job.statusLabel === "complete";
+          const jobBusyKey = `job:${job.type}`;
+          const jobDisabled =
+            Boolean(queueBusy)
+            || job.statusLabel === "waiting"
+            || job.statusLabel === "in_progress";
           return (
             <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
               <span>{jobTypeDisplay(job.type)}</span>
               <strong>{jobStatusDisplay(job.statusLabel)}</strong>
+              <div className="enrichment-job-actions">
+                {primaryLabel ? (
+                  <button
+                    type="button"
+                    className="secondary enrichment-job-action"
+                    disabled={jobDisabled}
+                    aria-busy={queueBusy === jobBusyKey}
+                    onClick={() =>
+                      void queueEnrichment({
+                        jobTypes: [job.type as ItemEnrichmentJobType],
+                        mode: job.statusLabel === "not_started" ? "missing" : "retry",
+                        busyKey: jobBusyKey
+                      })
+                    }
+                  >
+                    {queueBusy === jobBusyKey ? "Queueing…" : primaryLabel}
+                  </button>
+                ) : null}
+                {showRerun ? (
+                  <button
+                    type="button"
+                    className="enrichment-job-rerun"
+                    disabled={jobDisabled}
+                    aria-busy={queueBusy === jobBusyKey}
+                    onClick={() =>
+                      void queueEnrichment({
+                        jobTypes: [job.type as ItemEnrichmentJobType],
+                        mode: "retry",
+                        busyKey: jobBusyKey
+                      })
+                    }
+                  >
+                    {queueBusy === jobBusyKey ? "Queueing…" : "Re-run"}
+                  </button>
+                ) : null}
+              </div>
               {job.type === "metadata" && job.lastRunLabel ? (
                 <small className="enrichment-last-run">Last run: {textChild(job.lastRunLabel)}</small>
               ) : null}

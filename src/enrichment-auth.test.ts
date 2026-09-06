@@ -80,6 +80,41 @@ test("enrichment has no public mutation routes", async () => {
   }
 });
 
+test("per-item enrichment queue requires keeper auth", async () => {
+  cleanup();
+  const id = insertSpirit("Queue Auth Bottle");
+  try {
+    const guest = await app.inject({
+      method: "POST",
+      url: `/api/inventory/spirits/${id}/enrichment/queue`,
+      payload: { mode: "missing" }
+    });
+    assert.equal(guest.statusCode, 401);
+    assert.equal((guest.json() as { error: string }).error, "Admin session required");
+
+    const token = createTestAdminToken();
+    const keeper = await app.inject({
+      method: "POST",
+      url: `/api/inventory/spirits/${id}/enrichment/queue`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { mode: "missing" }
+    });
+    assert.equal(keeper.statusCode, 200);
+    const body = keeper.json() as {
+      entityType: string;
+      entityId: number;
+      queued: string[];
+      skipped: Array<{ type: string; reason: string }>;
+    };
+    assert.equal(body.entityType, "spirits");
+    assert.equal(body.entityId, id);
+    assert.ok(Array.isArray(body.queued));
+    assert.ok(Array.isArray(body.skipped));
+  } finally {
+    cleanup(id);
+  }
+});
+
 test("inventory mutations remain protected without admin authorization", async () => {
   cleanup();
   const id = insertSpirit("Auth Guard Bottle");

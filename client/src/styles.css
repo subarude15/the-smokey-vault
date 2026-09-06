@@ -1197,6 +1197,15 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .enrichment-job-in_progress,.enrichment-job-waiting{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .enrichment-job-no_result{opacity:.9}
 .enrichment-job-partial{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+.enrichment-item-actions{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.enrichment-item-actions .secondary{max-width:100%}
+.enrichment-queue-notice{margin:0;font-size:13px;color:var(--muted)}
+.enrichment-queue-error{margin:0;font-size:13px}
+.enrichment-job-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.enrichment-job-action{font-size:12px;padding:6px 10px}
+.enrichment-job-rerun{appearance:none;border:0;background:transparent;color:var(--muted);font:600 12px inherit;padding:4px 2px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.enrichment-job-rerun:disabled{opacity:.5;cursor:not-allowed}
+.enrichment-last-run,.enrichment-still-missing{display:block;margin-top:2px}
 .enrichment-diagnostics{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.45}
 .enrichment-diagnostics summary{cursor:pointer;color:var(--text);font-weight:600}
 .enrichment-diagnostics ul{margin:6px 0 0;padding-left:16px}
