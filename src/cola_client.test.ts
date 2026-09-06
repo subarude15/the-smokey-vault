@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   barcodeVariants,
+  canonicalGtin,
   ean13Form,
   expandUpcE,
   mapColaToSchema,
@@ -9,6 +10,7 @@ import {
   mapToSpiritType,
   normalizeAbv,
   normalizeUpc,
+  isValidGtin,
   parseVolumeMl,
   productToInventoryFields,
   resetColaBurst,
@@ -47,6 +49,23 @@ test("UPC-E expansion produces a 12-digit code with a valid check digit", () => 
   const expanded = expandUpcE("04252614");
   assert.equal(expanded.length, 12);
   assert.equal(expanded.slice(-1), upcCheckDigit(expanded.slice(0, 11)));
+});
+
+test("GTIN validation accepts complete formats and rejects truncated Yuengling code", () => {
+  assert.equal(isValidGtin("96385074"), true);
+  assert.equal(canonicalGtin("96385074"), "96385074");
+  assert.equal(isValidGtin("036602301979"), true);
+  assert.equal(isValidGtin("0089924788874"), true);
+  assert.equal(isValidGtin("10012345678902"), true);
+  assert.equal(canonicalGtin("10012345678902"), "10012345678902");
+  assert.equal(upcAForm("96385074"), "");
+  assert.equal(ean13Form("96385074"), "");
+  assert.equal(canonicalGtin("0089924788874"), "089924788874");
+  assert.equal(isValidGtin("00899247"), false);
+  assert.equal(canonicalGtin("00899247"), "");
+  assert.equal(normalizeUpc("00899247"), "");
+  // Existing checksum-valid UPC-E support remains intact.
+  assert.equal(canonicalGtin("04252614"), expandUpcE("04252614"));
 });
 
 test("normalizeAbv and parseVolumeMl read OCR strings", () => {

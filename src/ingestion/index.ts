@@ -41,10 +41,13 @@ export {
   RECOMMENDED_FIELDS,
   OPTIONAL_CONTENT_FIELDS,
   METADATA_ENRICHMENT_FIELDS,
+  metadataFieldsForEntityType,
+  metadataEntityTypeForProductType,
   type EnrichmentPlan,
   type EnrichmentTask,
   type EnrichmentField,
-  type EnrichmentExecutionResult
+  type EnrichmentExecutionResult,
+  type MetadataEntityType
 } from "./enrichment/index.js";
 
 export {

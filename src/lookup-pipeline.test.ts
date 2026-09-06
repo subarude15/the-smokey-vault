@@ -66,7 +66,7 @@ test("mixers skip catalogs and miss to no_catalog", async () => {
 });
 
 test("beer uses cache before COLA and calls COLA only after OFF miss", async () => {
-  const upc = "001200000000";
+  const upc = "001200000005";
   db.prepare("DELETE FROM cola_cache WHERE upc=?").run(upc);
   db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
   db.prepare("DELETE FROM beer_cache WHERE upc=?").run(upc);
@@ -78,7 +78,7 @@ test("beer uses cache before COLA and calls COLA only after OFF miss", async () 
       searchFwgs: async () => { fwgs += 1; return { name: "Liquor", brand: "", volume_ml: 750, price: "", image_url: null }; },
       searchCola: async () => { cola += 1; return { product_name: "Liquor" }; },
       searchOff: async () => ({
-        upc: "001200000000",
+        upc: "001200000005",
         name: "Nugget Nectar",
         brand: "Troegs",
         category: "Beer",

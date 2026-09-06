@@ -16,6 +16,36 @@ export const METADATA_ENRICHMENT_FIELDS = [
 
 export type MetadataEnrichmentField = (typeof METADATA_ENRICHMENT_FIELDS)[number];
 
+export type MetadataEntityType = "spirits" | "packaged_beer" | "wines";
+
+const METADATA_FIELDS_BY_ENTITY_TYPE: Record<
+  MetadataEntityType,
+  readonly MetadataEnrichmentField[]
+> = {
+  spirits: METADATA_ENRICHMENT_FIELDS,
+  wines: METADATA_ENRICHMENT_FIELDS,
+  packaged_beer: ["category", "abv"]
+};
+
+/** Core completeness/enrichment fields for one inventory entity type. */
+export function metadataFieldsForEntityType(
+  entityType: MetadataEntityType
+): readonly MetadataEnrichmentField[] {
+  return METADATA_FIELDS_BY_ENTITY_TYPE[entityType];
+}
+
+/** Compatibility helper for candidate-only execution paths. */
+export function metadataEntityTypeForProductType(
+  productType: unknown
+): MetadataEntityType {
+  const value = String(productType ?? "").trim().toLowerCase();
+  if (value === "beer" || value === "malt beverage" || value === "packaged_beer") {
+    return "packaged_beer";
+  }
+  if (value === "wine" || value === "wines") return "wines";
+  return "spirits";
+}
+
 export function isMetadataEnrichmentField(field: string): field is MetadataEnrichmentField {
   return (METADATA_ENRICHMENT_FIELDS as readonly string[]).includes(field);
 }

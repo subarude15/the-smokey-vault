@@ -73,10 +73,11 @@ test("generateOfficialBeerProductUrlCandidates is bounded, ordered, same-origin"
     origin: "https://victorybeer.com",
     beerName: "Sour Monkey"
   });
-  assert.ok(candidates.length <= 8);
-  assert.equal(candidates.length, OFFICIAL_BEER_PRODUCT_PATH_PREFIXES.length);
+  assert.ok(candidates.length <= 12);
   assert.equal(candidates[0], "https://victorybeer.com/beer/sour-monkey/");
   assert.equal(candidates[1], "https://victorybeer.com/beers/sour-monkey/");
+  assert.equal(candidates[2], "https://victorybeer.com/our-beer/sour-monkey/");
+  assert.equal(candidates[3], "https://victorybeer.com/our-beers/sour-monkey/");
   assert.ok(candidates.includes("https://victorybeer.com/beers/sour-monkey/"));
 
   const troegs = generateOfficialBeerProductUrlCandidates({
@@ -91,6 +92,18 @@ test("generateOfficialBeerProductUrlCandidates is bounded, ordered, same-origin"
   });
   assert.ok(dirt.includes("https://victorybeer.com/beers/dirtwolf/"));
   assert.ok(!dirt.some((u) => u.includes("dirt-wolf")));
+
+  const storedDirt = generateOfficialBeerProductUrlCandidates({
+    origin: "https://victorybeer.com",
+    beerName: "Dirt wolf"
+  });
+  assert.deepEqual(storedDirt.slice(0, 4), [
+    "https://victorybeer.com/beer/dirt-wolf/",
+    "https://victorybeer.com/beers/dirt-wolf/",
+    "https://victorybeer.com/our-beer/dirt-wolf/",
+    "https://victorybeer.com/our-beers/dirt-wolf/"
+  ]);
+  assert.ok(storedDirt.includes("https://victorybeer.com/beers/dirtwolf/"));
 });
 
 test("guessed candidates reject host-injection / unsafe slug construction", () => {
@@ -181,6 +194,64 @@ test("B. Victory DirtWolf matches guessed product URL", async () => {
   assert.equal(result.productPageUrl, "https://victorybeer.com/beers/dirtwolf/");
   assert.equal(result.reason, "guessed_product_url_matched");
   assert.match(String(result.fields.imageUrl), /dw-render-|dirtwolf/i);
+});
+
+test("B2. stored Dirt wolf identity reaches compact slug without weakening page identity", async () => {
+  clearOfficialBeerDiscoveryCache();
+  const result = await discoverOfficialBeerProductPage(
+    {
+      breweryName: "Victory Brewing Company",
+      beerName: "Dirt wolf",
+      breweryWebsiteUrl: "https://victorybeer.com"
+    },
+    {
+      fetchHtml: mockFetch({
+        ...emptySitemaps("https://victorybeer.com"),
+        "https://victorybeer.com/beers/dirtwolf/": {
+          html: fixture("victory-dirtwolf.html")
+        }
+      })
+    }
+  );
+  assert.equal(result.status, "matched");
+  assert.ok(result.match === "exact_name" || result.match === "strong_name");
+  assert.equal(result.productPageUrl, "https://victorybeer.com/beers/dirtwolf/");
+});
+
+test("B3. Yuengling Traditional Lager reaches singular /our-beer/ within direct budget", async () => {
+  clearOfficialBeerDiscoveryCache();
+  const fetched: string[] = [];
+  let browserCalls = 0;
+  const url = "https://yuengling.com/our-beer/traditional-lager/";
+  const result = await discoverOfficialBeerProductPage(
+    {
+      breweryName: "Yuengling",
+      beerName: "Traditional lager",
+      breweryWebsiteUrl: "https://yuengling.com"
+    },
+    {
+      browserFallbackEnabled: true,
+      renderOfficialPage: async () => {
+        browserCalls += 1;
+        return { status: "error", reason: "should_not_run" };
+      },
+      fetchHtml: async (candidate) => {
+        fetched.push(candidate);
+        return {
+          finalUrl: candidate,
+          contentType: "text/html",
+          html: candidate === url
+            ? `<html><head><title>Traditional Lager | Yuengling</title></head><body><h1>Traditional Lager</h1><p>Yuengling Traditional Lager is an iconic amber lager.</p><p>4.5% ABV · 12 IBU</p></body></html>`
+            : "<html><head><title>Home</title></head><body></body></html>"
+        };
+      }
+    }
+  );
+  assert.equal(result.status, "matched");
+  assert.ok(result.match === "exact_name" || result.match === "strong_name");
+  assert.equal(result.productPageUrl, url);
+  assert.ok(fetched.indexOf(url) >= 0 && fetched.indexOf(url) < MAX_GUESSED_PRODUCT_FETCHES);
+  assert.equal(browserCalls, 0);
 });
 
 test("C. Tröegs Nugget Nectar matches guessed /beer/<slug>/", async () => {

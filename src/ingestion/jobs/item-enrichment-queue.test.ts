@@ -149,7 +149,7 @@ test("primary action labels and missing-work helpers", () => {
   );
 });
 
-test("DirtWolf missing mode queues metadata only; tasting and image stay complete", () => {
+test("healthy beer has no missing metadata job; tasting and image stay complete", () => {
   cleanup();
   try {
     const beer = insertDirtWolf();
@@ -157,7 +157,7 @@ test("DirtWolf missing mode queues metadata only; tasting and image stay complet
     seedCompleteTastingAndImage(entityId);
 
     assert.deepEqual(statusMap(entityId), {
-      metadata: "not_started",
+      metadata: "complete",
       tasting_notes: "complete",
       image: "complete"
     });
@@ -168,14 +168,15 @@ test("DirtWolf missing mode queues metadata only; tasting and image stay complet
       mode: "missing"
     });
     assert.ok(!("error" in result));
-    assert.deepEqual(result.queued, ["metadata"]);
+    assert.deepEqual(result.queued, []);
     assert.deepEqual(result.skipped, [
+      { type: "metadata", reason: "already_complete" },
       { type: "tasting_notes", reason: "already_complete" },
       { type: "image", reason: "already_complete" }
     ]);
 
     const jobs = listJobsForEntity("packaged_beer", entityId);
-    assert.ok(jobs.some((j) => j.job_type === "metadata" && j.status === "pending"));
+    assert.equal(jobs.filter((j) => j.job_type === "metadata" && j.status === "pending").length, 0);
     assert.equal(jobs.filter((j) => j.job_type === "tasting_notes" && j.status === "pending").length, 0);
     assert.equal(jobs.filter((j) => j.job_type === "image" && j.status === "pending").length, 0);
   } finally {
@@ -249,7 +250,7 @@ test("no_result metadata is queueable in missing mode", () => {
   }
 });
 
-test("partial metadata Retry missing queues metadata only", () => {
+test("historical spirit-only beer gaps are complete but explicit metadata rerun still queues", () => {
   cleanup();
   try {
     const beer = insertDirtWolf({ name: `${NAME} Partial`, abv: 8.7 });
@@ -266,7 +267,7 @@ test("partial metadata Retry missing queues metadata only", () => {
       unresolved: ["origin", "volume_ml"]
     });
 
-    assert.equal(statusMap(entityId).metadata, "partial");
+    assert.equal(statusMap(entityId).metadata, "complete");
 
     const result = queueItemEnrichment({
       entityType: "packaged_beer",

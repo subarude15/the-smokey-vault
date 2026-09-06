@@ -19,7 +19,7 @@ import {
   resetCatalogBeerQuota,
   searchCatalogBeers
 } from "./catalog_beer.js";
-import { ean13Form, normalizeUpc, primaryCatalogUpc, upcAForm } from "./cola_client.js";
+import { ean13Form, normalizeUpc, primaryCatalogUpc, upcAForm, upcCheckDigit } from "./cola_client.js";
 import { db } from "./db.js";
 import {
   LOCAL_BEER_SUFFICIENCY_THRESHOLD,
@@ -278,9 +278,13 @@ test("K. sufficient local unique results skip Catalog.beer", async () => {
   process.env.CATALOG_BEER_API_KEY = "test-key";
   resetCatalogBeerQuota();
   wipeBeerCache(UPC_A);
+  const localUpc = (index: number) => {
+    const body = `0800000000${index}`;
+    return `${body}${upcCheckDigit(body)}`;
+  };
   for (let i = 0; i < LOCAL_BEER_SUFFICIENCY_THRESHOLD; i += 1) {
     saveBeerCacheEntry({
-      upc: `08000000000${i}`,
+      upc: localUpc(i),
       brewery: `Local Brewery ${i}`,
       name: `Local IPA ${i}`,
       style: "IPA",
@@ -305,7 +309,7 @@ test("K. sufficient local unique results skip Catalog.beer", async () => {
   } finally {
     globalThis.fetch = originalFetch;
     for (let i = 0; i < LOCAL_BEER_SUFFICIENCY_THRESHOLD; i += 1) {
-      wipeBeerCache(`08000000000${i}`);
+      wipeBeerCache(localUpc(i));
     }
   }
 });

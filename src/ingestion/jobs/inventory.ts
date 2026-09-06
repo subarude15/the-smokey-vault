@@ -3,6 +3,7 @@
  * (plus barcode_cache / cola_cache when a UPC is present for fields the shelf table lacks).
  */
 import { getBarcodeCacheEntry, saveBarcodeCacheEntry } from "../../barcode_cache.js";
+import { saveBeerCacheEntry } from "../../beer_cache.js";
 import { resolveMonotonicSpiritClassification } from "../../catalog.js";
 import {
   isUsableCanonicalFamily,
@@ -24,7 +25,9 @@ import {
   confidenceForSource
 } from "../candidate/index.js";
 import type { MetadataEnrichmentField } from "../enrichment/metadata-fields.js";
-import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
+import {
+  metadataFieldsForEntityType
+} from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import type { EnrichmentEntityType } from "./types.js";
 import {
@@ -57,14 +60,22 @@ function applyMergeOnto(
   (candidate as unknown as Record<string, ProductField<unknown>>)[name] = merged.field;
 }
 
-function overlayUpcCaches(candidate: BottleCandidate): BottleCandidate {
+function overlayUpcCaches(
+  candidate: BottleCandidate,
+  entityType: EnrichmentEntityType
+): BottleCandidate {
   const upc = candidate.upc.value?.trim();
   if (!upc) return candidate;
 
   const cola = getFromCache(upc, { allowStale: true });
   if (cola) {
     const fromCola = candidateFromProduct(cola, "cola_cache");
-    for (const name of [...METADATA_ENRICHMENT_FIELDS, "category", "product_type", "name", "brand"] as const) {
+    for (const name of [
+      ...metadataFieldsForEntityType(entityType),
+      "product_type",
+      "name",
+      "brand"
+    ] as const) {
       applyMergeOnto(candidate, name, fromCola[name] as ProductField<unknown>);
     }
   }
@@ -83,7 +94,11 @@ function overlayUpcCaches(candidate: BottleCandidate): BottleCandidate {
       },
       "barcode_cache"
     );
-    for (const name of ["abv", "proof", "volume_ml", "category", "name", "brand"] as const) {
+    for (const name of [
+      ...metadataFieldsForEntityType(entityType),
+      "name",
+      "brand"
+    ] as const) {
       applyMergeOnto(candidate, name, fromBarcode[name] as ProductField<unknown>);
     }
   }
@@ -165,7 +180,7 @@ export function candidateFromInventoryRow(
     }
   }
 
-  return overlayUpcCaches(candidate);
+  return overlayUpcCaches(candidate, entityType);
 }
 
 function fieldNeedsWork(f: ProductField<unknown>): boolean {
@@ -178,15 +193,20 @@ export function hasPersistableMetadataWork(
   entityType: EnrichmentEntityType
 ): boolean {
   const columnMap = INVENTORY_COLUMN_FOR[entityType];
-  return METADATA_ENRICHMENT_FIELDS.some((name) => {
+  return metadataFieldsForEntityType(entityType).some((name) => {
     if (!columnMap[name]) return false;
     return fieldNeedsWork(candidate[name] as ProductField<unknown>);
   });
 }
 
 /** True when any metadata enrichment field on the candidate still needs work. */
-export function hasRecommendedMetadataWork(candidate: BottleCandidate): boolean {
-  return METADATA_ENRICHMENT_FIELDS.some((name) => fieldNeedsWork(candidate[name] as ProductField<unknown>));
+export function hasRecommendedMetadataWork(
+  candidate: BottleCandidate,
+  entityType: EnrichmentEntityType = "spirits"
+): boolean {
+  return metadataFieldsForEntityType(entityType).some((name) =>
+    fieldNeedsWork(candidate[name] as ProductField<unknown>)
+  );
 }
 
 /**
@@ -207,7 +227,7 @@ export function shouldScheduleMetadataEnrichment(options: {
 }): boolean {
   const { candidate, entityType, entityId, force = false } = options;
   const needsPersistable = hasPersistableMetadataWork(candidate, entityType);
-  const needsRecommended = hasRecommendedMetadataWork(candidate);
+  const needsRecommended = hasRecommendedMetadataWork(candidate, entityType);
   if (!needsPersistable && !needsRecommended) return false;
 
   // Cache-only gaps still require a UPC key for catalog/web lookup.
@@ -254,7 +274,7 @@ export function persistMetadataImprovements(options: {
   const inventoryUpdated: string[] = [];
   const currentRow = loadInventoryRow(entityType, entityId);
 
-  for (const name of METADATA_ENRICHMENT_FIELDS) {
+  for (const name of metadataFieldsForEntityType(entityType)) {
     const column = columnMap[name];
     if (!column) continue;
     if (!shouldPersistField(before[name] as ProductField<unknown>, after[name] as ProductField<unknown>)) continue;
@@ -327,7 +347,7 @@ export function persistMetadataImprovements(options: {
       source: "enrichment"
     };
     let touchCache = false;
-    for (const name of METADATA_ENRICHMENT_FIELDS) {
+    for (const name of metadataFieldsForEntityType(entityType)) {
       if (!shouldPersistField(before[name] as ProductField<unknown>, after[name] as ProductField<unknown>)) {
         // Still allow classification cache sync when inventory hierarchy was repaired above.
         if (!(name === "category" && inventoryUpdated.includes("category"))) continue;
@@ -355,8 +375,26 @@ export function persistMetadataImprovements(options: {
     }
     if (inventoryUpdated.includes("category")) touchCache = true;
     if (touchCache) {
-      saveBarcodeCacheEntry(cachePatch as Parameters<typeof saveBarcodeCacheEntry>[0]);
-      if (after.abv.value != null || after.origin.value || after.ttb_id.value || after.volume_ml.value != null || inventoryUpdated.includes("category")) {
+      if (entityType === "packaged_beer") {
+        saveBeerCacheEntry({
+          upc,
+          name: String(after.name.value),
+          brewery: String(after.brand.value ?? ""),
+          style: String(after.category.value ?? ""),
+          abv: after.abv.value,
+          source: "vault_seed"
+        });
+      } else {
+        saveBarcodeCacheEntry(cachePatch as Parameters<typeof saveBarcodeCacheEntry>[0]);
+      }
+      if (
+        entityType !== "packaged_beer"
+        && (after.abv.value != null
+          || after.origin.value
+          || after.ttb_id.value
+          || after.volume_ml.value != null
+          || inventoryUpdated.includes("category"))
+      ) {
         saveToCache(
           {
             upc,

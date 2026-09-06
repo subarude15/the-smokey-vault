@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import {
+  canonicalGtin,
   ColaSummary,
   fetchColaQuota,
   getLastQuota,
@@ -158,7 +159,7 @@ function isBeerSearchModule(moduleId?: string) {
  */
 export async function rememberBeerFromHit(upc: string, hit: BottleSearchHit) {
   // Canonical UPC-A form so EAN-13 twins share one row; lookup still accepts either.
-  const code = primaryCatalogUpc(upc) || normalizeUpc(upc);
+  const code = canonicalGtin(upc);
   if (!code) return;
   const brewery = String(hit.product.brewery ?? hit.product.brand ?? hit.product.maker ?? "").trim();
   const name = String(hit.product.name ?? hit.product.batch_name ?? "").trim();
@@ -208,7 +209,9 @@ export async function lookupProduct(rawUpc: string, options: LookupOptions = {})
     return miss("invalid", rawUpc, kindHint);
   }
 
-  const upc = primaryCatalogUpc(rawUpc);
+  const upc = kindHint === "beer"
+    ? canonicalGtin(rawUpc)
+    : primaryCatalogUpc(rawUpc);
   if (!upc) {
     return miss("invalid", rawUpc, kindHint);
   }
@@ -566,7 +569,17 @@ export async function searchBottles(query: string, options?: { table?: string })
         breweryHintBonus
       })
     : results;
-  return { results: ranked.slice(0, 20), quota: getLastQuota() };
+  const safeRanked = ranked.map((hit) => {
+    if (hit.table !== "packaged_beer") return hit;
+    const rawHitUpc = String(hit.product.upc ?? "").trim();
+    if (!rawHitUpc) return hit;
+    const validUpc = canonicalGtin(rawHitUpc);
+    const product = { ...hit.product };
+    if (validUpc) product.upc = validUpc;
+    else delete product.upc;
+    return { ...hit, product };
+  });
+  return { results: safeRanked.slice(0, 20), quota: getLastQuota() };
 }
 
 /** Collect distinct brewery strings from existing beer hits (never invents products). */

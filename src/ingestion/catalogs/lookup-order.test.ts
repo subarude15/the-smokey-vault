@@ -41,7 +41,7 @@ test("spirits catalogs are called Iowa then FWGS then COLA then OFF then upcitem
 });
 
 test("beer catalogs skip FWGS and call OFF then upcitemdb then COLA", async () => {
-  const upc = "055566677799";
+  const upc = "055566677791";
   db.prepare("DELETE FROM cola_cache WHERE upc=?").run(upc);
   db.prepare("DELETE FROM barcode_cache WHERE upc=?").run(upc);
   db.prepare("DELETE FROM beer_cache WHERE upc=?").run(upc);

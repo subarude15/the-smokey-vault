@@ -168,6 +168,24 @@ test("7-10 authorized keeper can edit and save spirit, wine, and packaged beer",
   cleanup();
   const token = createTestAdminToken();
 
+  const invalidBeerCreate = await app.inject({
+    method: "POST",
+    url: "/api/inventory/packaged_beer",
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      name: "Truncated Beer Barcode",
+      brewery: "Keeper Brewing",
+      style: "Lager",
+      upc: "00899247",
+      count: 6
+    }
+  });
+  assert.equal(invalidBeerCreate.statusCode, 400, invalidBeerCreate.body);
+  assert.equal(
+    Number(db.prepare("SELECT COUNT(*) AS count FROM packaged_beer WHERE upc = ?").get("00899247")?.count ?? 0),
+    0
+  );
+
   const spiritCreate = await app.inject({
     method: "POST",
     url: "/api/inventory/spirits",
@@ -210,7 +228,7 @@ test("7-10 authorized keeper can edit and save spirit, wine, and packaged beer",
       name: "Edit Beer",
       brewery: "Keeper Brewing",
       style: "IPA",
-      upc: `${PREFIX}203`,
+      upc: "091287002030",
       count: 6
     }
   });
@@ -244,6 +262,14 @@ test("7-10 authorized keeper can edit and save spirit, wine, and packaged beer",
     });
     assert.equal(beerPut.statusCode, 200);
     assert.equal((beerPut.json() as { notes: string }).notes, "Beer cold box");
+
+    const invalidBeerPut = await app.inject({
+      method: "PUT",
+      url: `/api/inventory/packaged_beer/${beerId}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { upc: "00899247" }
+    });
+    assert.equal(invalidBeerPut.statusCode, 400, invalidBeerPut.body);
 
     // Client still exposes edit entry from BottleDetail for keepers
     assert.ok(appSrc.includes("setEditing(viewing)"));

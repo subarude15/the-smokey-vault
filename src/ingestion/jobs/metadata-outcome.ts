@@ -3,7 +3,11 @@
  * A completed job is not automatically a successful enrichment.
  */
 import { isUnresolvedField, type BottleCandidate, type ProductField } from "../candidate/index.js";
-import { METADATA_ENRICHMENT_FIELDS, type MetadataEnrichmentField } from "../enrichment/metadata-fields.js";
+import {
+  METADATA_ENRICHMENT_FIELDS,
+  metadataFieldsForEntityType,
+  type MetadataEnrichmentField
+} from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import { hasActiveEnrichmentJob, hasCompletedJob, hasFailedJob, getLatestCompletedJobResult } from "./store.js";
 import {
@@ -35,8 +39,11 @@ function fieldNeedsWork(f: ProductField<unknown>): boolean {
 }
 
 /** Recommended metadata gaps still open on the candidate. */
-export function unresolvedMetadataFields(candidate: BottleCandidate): MetadataEnrichmentField[] {
-  return METADATA_ENRICHMENT_FIELDS.filter((name) =>
+export function unresolvedMetadataFields(
+  candidate: BottleCandidate,
+  entityType: EnrichmentEntityType = "spirits"
+): MetadataEnrichmentField[] {
+  return metadataFieldsForEntityType(entityType).filter((name) =>
     fieldNeedsWork(candidate[name] as ProductField<unknown>)
   );
 }
@@ -69,9 +76,9 @@ export function metadataOutcomeFromState(options: {
   const { candidate, entityType, entityId } = options;
   if (hasActiveEnrichmentJob(entityType, entityId, "metadata")) return "active";
 
-  const gaps = unresolvedMetadataFields(candidate);
+  const gaps = unresolvedMetadataFields(candidate, entityType);
   const needsPersistable = hasPersistableMetadataWork(candidate, entityType);
-  const needsRecommended = hasRecommendedMetadataWork(candidate);
+  const needsRecommended = hasRecommendedMetadataWork(candidate, entityType);
 
   if (!needsPersistable && !needsRecommended) return "complete";
 
@@ -93,7 +100,7 @@ export function metadataOutcomeFromState(options: {
   // A bottle with meaningful metadata (beyond shelf-default volume) and remaining
   // gaps stays Partial even when a rerun finds nothing new (updated=[]).
   // Empty bottles with empty reruns stay No result.
-  const meaningfulPopulated = METADATA_ENRICHMENT_FIELDS.filter((name) => {
+  const meaningfulPopulated = metadataFieldsForEntityType(entityType).filter((name) => {
     if (name === "volume_ml") return false;
     return !fieldNeedsWork(candidate[name] as ProductField<unknown>);
   }).length;
@@ -151,13 +158,21 @@ export function metadataLastRunLabel(options: {
 }
 
 export function buildMetadataJobResultPayload(options: {
+  entityType?: EnrichmentEntityType;
   requested: string[];
   before: BottleCandidate;
   after: BottleCandidate;
   inventoryUpdated: string[];
   diagnostics?: JobDiagnosticsPayload | null;
 }): MetadataJobResultPayload {
-  const { requested, before, after, inventoryUpdated, diagnostics } = options;
+  const {
+    entityType = "spirits",
+    requested,
+    before,
+    after,
+    inventoryUpdated,
+    diagnostics
+  } = options;
   const updated = new Set<string>(inventoryUpdated.filter((name) => name !== "sub_category"));
   // Map inventory column aliases back to enrichment field names.
   if (inventoryUpdated.includes("region")) updated.add("origin");
@@ -177,7 +192,7 @@ export function buildMetadataJobResultPayload(options: {
 
   // Final unresolved MUST come from the post-persist/post-reload candidate.
   // A field that is present & trusted on the final bottle cannot stay unresolved.
-  const unresolved = unresolvedMetadataFields(after)
+  const unresolved = unresolvedMetadataFields(after, entityType)
     .map(String)
     .filter((name) => !updated.has(name));
 

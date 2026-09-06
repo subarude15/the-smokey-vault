@@ -9,7 +9,7 @@ import {
 import { db } from "./db.js";
 
 test("beer cache round-trips UPC lookup and text search", () => {
-  const upc = "001234567890";
+  const upc = "001234567895";
   db.prepare("DELETE FROM beer_cache WHERE upc = ?").run(upc);
   saveBeerCacheEntry({
     upc,

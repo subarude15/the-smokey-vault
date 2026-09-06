@@ -26,9 +26,12 @@ export { planEnrichment } from "./plan.js";
 
 export {
   METADATA_ENRICHMENT_FIELDS,
+  metadataFieldsForEntityType,
+  metadataEntityTypeForProductType,
   isMetadataEnrichmentField,
   proofFromAbv,
   abvFromProof,
+  type MetadataEntityType,
   type MetadataEnrichmentField
 } from "./metadata-fields.js";
 

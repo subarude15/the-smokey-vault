@@ -25,7 +25,7 @@ import { getFromCache } from "../catalogs/cola-cache-store.js";
 import { searchGovernmentByBarcode } from "../catalogs/government/lookup.js";
 import { applyGovernmentCatalogEvidence } from "../enrichment/government-evidence.js";
 import { planEnrichment } from "../enrichment/index.js";
-import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
+import { metadataFieldsForEntityType } from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import { candidateFromInventoryRow, loadInventoryRow } from "./inventory.js";
 import {
@@ -391,7 +391,10 @@ function fieldLike<T>(value: T, source: ProductFieldSource): ProductField<T> {
   };
 }
 
-function missingRecommendedLabels(candidate: BottleCandidate): string[] {
+function missingRecommendedLabels(
+  candidate: BottleCandidate,
+  entityType: EnrichmentEntityType
+): string[] {
   const labels: Record<string, string> = {
     category: "Category",
     abv: "ABV",
@@ -403,7 +406,7 @@ function missingRecommendedLabels(candidate: BottleCandidate): string[] {
   };
   // Deterministic order; category appears once even though it is both a
   // recommended identity aid and a METADATA_ENRICHMENT_FIELDS entry.
-  const order = ["upc", ...METADATA_ENRICHMENT_FIELDS] as const;
+  const order = ["upc", ...metadataFieldsForEntityType(entityType)] as const;
   const seen = new Set<string>();
   const missing: string[] = [];
   for (const name of order) {
@@ -522,9 +525,18 @@ function buildJobViews(
         };
         const labelize = (names: string[]) =>
           names.map((n) => fieldLabels[n] ?? n);
-        stillMissing = labelize(unresolvedMetadataFields(candidate).map(String));
+        const allowedMetadata = new Set(
+          metadataFieldsForEntityType(entityType).map(String)
+        );
+        stillMissing = labelize(
+          unresolvedMetadataFields(candidate, entityType).map(String)
+        );
         // Prefer stored unresolved when present (final-state payload).
-        if (stored?.unresolved?.length) stillMissing = labelize(stored.unresolved.map(String));
+        if (stored?.unresolved?.length) {
+          stillMissing = labelize(
+            stored.unresolved.map(String).filter((name) => allowedMetadata.has(name))
+          );
+        }
         // Prefer a clearer summary for partial bottles with empty reruns.
         if (lastRunLabel === "No new data found" && stillMissing.length) {
           diagnosticSummary = `Last run: No new data found. Still missing: ${stillMissing.join(", ")}`;
@@ -738,7 +750,7 @@ export function buildBottleEnrichmentView(options: {
     enrichment: {
       identified: plan.identified,
       needsReview: plan.needsReview,
-      missing: missingRecommendedLabels(candidate),
+      missing: missingRecommendedLabels(candidate, entityType),
       jobs: buildJobViews(
         entityType,
         options.entityId,
