@@ -2,7 +2,7 @@
  * Official beer browser smoke CLI tests — no network, no DB writes.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -350,4 +350,62 @@ test("smoke presets list is operational fixtures only", () => {
   assert.ok(labels.includes("yards-brawler"));
   assert.ok(labels.includes("victory-golden-monkey"));
   assert.ok(labels.includes("yards-nonsense-negative"));
+});
+
+test("production smoke CLI: tsconfig.server.json includes compiled entrypoint", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const tsconfig = JSON.parse(readFileSync(join(root, "tsconfig.server.json"), "utf8")) as {
+    include: string[];
+    exclude?: string[];
+  };
+  assert.ok(tsconfig.include.some((p) => p === "src/**/*.ts" || p === "src/**/*"));
+  assert.ok(
+    !(tsconfig.exclude ?? []).some((p) => p.includes("smoke-official-beer-browser-cli"))
+  );
+  assert.ok(
+    existsSync(join(root, "src/smoke-official-beer-browser-cli.ts")),
+    "compiled CLI source must live under src/"
+  );
+});
+
+test("production smoke CLI: package.json invokes node dist, not tsx", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+    dependencies?: Record<string, string>;
+  };
+  const smoke = pkg.scripts["smoke:official-beer-browser"];
+  assert.equal(smoke, "node dist/smoke-official-beer-browser-cli.js");
+  assert.doesNotMatch(smoke, /\btsx\b/);
+  assert.ok(!pkg.dependencies?.tsx, "tsx must not be a production dependency");
+});
+
+test("production smoke CLI: argv still accepts brewery/beer/url/browser-only/presets", () => {
+  const parsed = parseSmokeOfficialBeerBrowserArgs([
+    "--brewery",
+    "Yards Brewing Co.",
+    "--beer",
+    "Brawler",
+    "--url",
+    "https://yardsbrewing.com",
+    "--browser-only",
+    "--presets"
+  ]);
+  assert.equal(parsed.brewery, "Yards Brewing Co.");
+  assert.equal(parsed.beer, "Brawler");
+  assert.equal(parsed.url, "https://yardsbrewing.com");
+  assert.equal(parsed.browserOnly, true);
+  assert.equal(parsed.presets, true);
+});
+
+test("production smoke CLI: dist entry exists after server build output", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const distCli = join(root, "dist/smoke-official-beer-browser-cli.js");
+  // Build may not have run in every unit-test invocation; when dist exists, require the CLI.
+  if (existsSync(join(root, "dist"))) {
+    assert.ok(
+      existsSync(distCli),
+      "dist/smoke-official-beer-browser-cli.js must be present after build"
+    );
+  }
 });

@@ -19,7 +19,7 @@
     "catalog:import:pa-spirits": "node dist/catalog-import-pa-spirits.js",
     "catalog:import:pa-wines": "node dist/catalog-import-pa-wines.js",
     "catalog:import:iowa": "node dist/catalog-import-iowa.js",
-    "smoke:official-beer-browser": "tsx scripts/smoke-official-beer-browser.ts"
+    "smoke:official-beer-browser": "node dist/smoke-official-beer-browser-cli.js"
   },
   "dependencies": {
     "@fastify/cors": "latest",
