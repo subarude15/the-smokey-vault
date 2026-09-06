@@ -83,7 +83,21 @@ const NOT_FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_SITEMAP_URLS = 80;
 const MAX_CHILD_SITEMAPS = 3;
 const MAX_DESCRIPTION_CHARS = 4_000;
-
+/** Cap guessed product-page fetches so sitemap/index crawl retains budget. */
+export const MAX_GUESSED_PRODUCT_FETCHES = 4;
+/**
+ * Generic official product-path prefixes (deterministic order).
+ * Prefer common beer/product stems first; never brewery-specific.
+ */
+export const OFFICIAL_BEER_PRODUCT_PATH_PREFIXES = [
+  "/beer/",
+  "/beers/",
+  "/our-beers/",
+  "/products/",
+  "/product/",
+  "/brew/",
+  "/brews/"
+] as const;
 const PRODUCT_PATH_HINTS = [
   "beer",
   "beers",
@@ -673,6 +687,178 @@ export function scoreOfficialBeerHtmlPage(args: {
   };
 }
 
+
+/**
+ * Deterministic URL-safe slug from a known beer name.
+ * Uses foldBeerText for diacritics/punctuation, then hyphenates tokens.
+ * Does not fuzzy-correct spelling or invent words.
+ */
+export function slugifyOfficialBeerName(beerName: string): string {
+  const folded = foldBeerText(beerName);
+  const slug = folded
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return slug;
+}
+
+/**
+ * Build a tiny bounded set of same-origin product URL candidates.
+ * Constructed via the URL API (never raw host concatenation) and capped at 8.
+ *
+ * Path order: /beer/, /beers/, /our-beers/, /products/, /product/, /brew/, /brews/
+ */
+export function generateOfficialBeerProductUrlCandidates(args: {
+  origin: string;
+  beerName: string;
+}): string[] {
+  const slug = slugifyOfficialBeerName(args.beerName);
+  if (!slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return [];
+
+  let originUrl: URL;
+  try {
+    originUrl = parseSafeHttpUrl(args.origin);
+  } catch {
+    return [];
+  }
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const prefix of OFFICIAL_BEER_PRODUCT_PATH_PREFIXES) {
+    const path = `${prefix}${slug}/`;
+    let candidate: URL;
+    try {
+      candidate = new URL(path, originUrl);
+    } catch {
+      continue;
+    }
+    if (candidate.origin !== originUrl.origin) continue;
+    if (candidate.username || candidate.password) continue;
+    if (!candidate.pathname.includes(`/${slug}/`) && !candidate.pathname.endsWith(`/${slug}`)) {
+      continue;
+    }
+    // Reject protocol-relative / host-injection attempts.
+    if (candidate.pathname.includes("//")) continue;
+    const href = candidate.toString();
+    if (seen.has(href)) continue;
+    seen.add(href);
+    out.push(href);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+async function tryGuessedOfficialBeerProductUrls(args: {
+  input: OfficialBeerDiscoveryInput;
+  origin: string;
+  domain: string;
+  beerName: string;
+  breweryName: string;
+  ctx: FetchCtx;
+  budget: Budget;
+}): Promise<{
+  matched: EvaluatedPage | null;
+  hintUrls: string[];
+  jsShellEvidence: boolean;
+  guessesTried: number;
+}> {
+  const candidates = generateOfficialBeerProductUrlCandidates({
+    origin: args.origin,
+    beerName: args.beerName
+  });
+  logDiscovery("official_beer_guess_start", {
+    domain: args.domain,
+    beer: args.beerName,
+    candidateCount: candidates.length
+  });
+
+  const hintUrls: string[] = [];
+  let jsShellEvidence = false;
+  let guessesTried = 0;
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    if (guessesTried >= MAX_GUESSED_PRODUCT_FETCHES) break;
+    if (args.budget.pagesFetched >= args.budget.maxPages) break;
+    const candidate = candidates[i]!;
+    if (!sameOfficialDomain(candidate, args.domain)) continue;
+
+    let path = candidate;
+    try {
+      path = new URL(candidate).pathname;
+    } catch {
+      continue;
+    }
+
+    logDiscovery("official_beer_guess_candidate", {
+      domain: args.domain,
+      path,
+      candidateIndex: i + 1,
+      beer: args.beerName
+    });
+
+    guessesTried += 1;
+    const evaluated = await evaluateCandidatePage(
+      candidate,
+      args.input,
+      args.domain,
+      args.ctx,
+      args.budget
+    );
+    if (!evaluated) {
+      logDiscovery("official_beer_guess_miss", {
+        domain: args.domain,
+        path,
+        candidateIndex: i + 1,
+        match: "none"
+      });
+      continue;
+    }
+
+    hintUrls.push(evaluated.finalUrl);
+    if (htmlLooksLikeJsAppShell(evaluated.html)) {
+      jsShellEvidence = true;
+    }
+
+    if (evaluated.match === "exact_name" || evaluated.match === "strong_name") {
+      logDiscovery("official_beer_guess_match", {
+        domain: args.domain,
+        path,
+        candidateIndex: i + 1,
+        match: evaluated.match,
+        beer: args.beerName
+      });
+      return {
+        matched: evaluated,
+        hintUrls,
+        jsShellEvidence,
+        guessesTried
+      };
+    }
+
+    logDiscovery("official_beer_guess_miss", {
+      domain: args.domain,
+      path,
+      candidateIndex: i + 1,
+      match: evaluated.match
+    });
+  }
+
+  if (guessesTried > 0) {
+    logDiscovery("official_beer_guess_exhausted", {
+      domain: args.domain,
+      beer: args.beerName,
+      guessesTried
+    });
+  }
+
+  return {
+    matched: null,
+    hintUrls,
+    jsShellEvidence,
+    guessesTried
+  };
+}
+
 function defaultSeedIndexUrls(origin: string): string[] {
   return [
     `${origin}/`,
@@ -1216,6 +1402,41 @@ export async function discoverOfficialBeerProductPage(
   });
 
   try {
+    // 1) Deterministic same-domain product URL guesses (cheap, bounded).
+    const guessed = await tryGuessedOfficialBeerProductUrls({
+      input: { ...input, beerName, breweryName },
+      origin: originInfo.origin,
+      domain: originInfo.domain,
+      beerName,
+      breweryName,
+      ctx,
+      budget
+    });
+    if (
+      guessed.matched &&
+      (guessed.matched.match === "exact_name" || guessed.matched.match === "strong_name")
+    ) {
+      const result: OfficialBeerDiscoveryResult = {
+        status: "matched",
+        match: guessed.matched.match,
+        productPageUrl: guessed.matched.url,
+        registeredDomain: originInfo.domain,
+        fields: {
+          ...guessed.matched.fields,
+          productPageUrl: guessed.matched.url,
+          canonicalUrl: guessed.matched.fields.canonicalUrl || guessed.matched.url
+        },
+        pagesFetched: budget.pagesFetched,
+        reason: "guessed_product_url_matched"
+      };
+      discoveryCache.set(key, { result, expiresAt: now + POSITIVE_CACHE_TTL_MS });
+      return result;
+    }
+
+    // Guesses use a separate tiny allotment; keep a full static crawl budget afterward.
+    budget.maxPages = budget.pagesFetched + maxPages;
+
+    // 2) Existing sitemap / static crawl.
     const sitemapUrls = await collectSitemapCandidateUrls(
       originInfo.origin,
       originInfo.domain,
@@ -1224,7 +1445,16 @@ export async function discoverOfficialBeerProductPage(
       budget
     );
 
+    // Remaining unfetched product-path guesses become high-priority static seeds
+    // (still same-domain, still identity-validated) without expanding the guess budget.
+    const allGuessCandidates = generateOfficialBeerProductUrlCandidates({
+      origin: originInfo.origin,
+      beerName
+    });
+    const remainingGuessSeeds = allGuessCandidates.slice(guessed.guessesTried);
+
     const seedUrls = [
+      ...remainingGuessSeeds,
       ...sitemapUrls,
       `${originInfo.origin}/`,
       `${originInfo.origin}/beers`,
@@ -1235,6 +1465,9 @@ export async function discoverOfficialBeerProductPage(
 
     const queue: Array<{ url: string; depth: number }> = [];
     const seen = new Set<string>();
+    for (const url of allGuessCandidates.slice(0, guessed.guessesTried)) {
+      seen.add(url);
+    }
     for (const url of seedUrls) {
       if (!sameOfficialDomain(url, originInfo.domain)) continue;
       if (seen.has(url)) continue;
@@ -1244,10 +1477,10 @@ export async function discoverOfficialBeerProductPage(
 
     let best: EvaluatedPage | null = null;
 
-    let jsShellEvidence = false;
-    const hintUrls: string[] = [];
+    let jsShellEvidence = guessed.jsShellEvidence;
+    const hintUrls: string[] = [...guessed.hintUrls];
 
-    while (queue.length > 0 && budget.pagesFetched < maxPages) {
+    while (queue.length > 0 && budget.pagesFetched < budget.maxPages) {
       const next = queue.shift()!;
       const evaluated = await evaluateCandidatePage(
         next.url,

@@ -267,7 +267,7 @@ function inferDiscoveryRoute(result: OfficialBeerDiscoveryResult): {
     // Browser path considered but not used for rendering.
     return { route: "static", browserUsed: false };
   }
-  if (reason === "matched") {
+  if (reason === "matched" || reason === "guessed_product_url_matched") {
     return { route: "static", browserUsed: false };
   }
   if (
