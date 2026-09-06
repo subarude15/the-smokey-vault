@@ -5,6 +5,7 @@
  * can repair explicitly machine-owned fields without clobbering Keeper edits.
  */
 import { db } from "../../db.js";
+import { ensureEnrichmentJobsTable } from "./store.js";
 import type { ProductFieldSource } from "../candidate/types.js";
 import type { EnrichmentEntityType } from "./types.js";
 
@@ -222,6 +223,7 @@ export function backfillMachineFieldOwnershipFromMetadataJobs(options?: {
   entityId?: number;
 }): { stamped: Array<{ entityId: number; field: OwnedEnrichmentField; source: ProductFieldSource }> } {
   ensureFieldOwnershipTable();
+  ensureEnrichmentJobsTable();
   const stamped: Array<{
     entityId: number;
     field: OwnedEnrichmentField;
