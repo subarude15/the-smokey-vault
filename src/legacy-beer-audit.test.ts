@@ -557,6 +557,123 @@ test("retailer/blog URLs are not recovered as official brewery domains", () => {
   assert.equal(recoverOfficialBreweryDomainFromEvidence({ entityId }), null);
 });
 
+test("unrelated website_url classifying as unknown is not recovered or backfilled", () => {
+  cleanup();
+
+  const entityId = insertPackagedBeer({
+    brewery: "Victory Brewing Company",
+    name: "DirtWolf",
+    style: "Sticke Alt Ale",
+    abv: 8.5
+  });
+  stampMachineFieldOwnership({
+    entityType: "packaged_beer",
+    entityId,
+    field: "category",
+    source: "vision"
+  });
+  seedHistoricalMetadataJob(entityId, {
+    requested: ["category", "abv"],
+    updated: [],
+    unresolved: ["category", "abv"]
+  });
+
+  const row = {
+    id: entityId,
+    brewery: "Victory Brewing Company",
+    name: "DirtWolf",
+    website_url: "https://random-example-site.com"
+  };
+
+  assert.equal(
+    recoverOfficialBreweryDomainFromEvidence({ entityId, row }),
+    null
+  );
+
+  const audit = auditPackagedBeer(entityId, row);
+  assert.equal(audit.candidate, true);
+  assert.equal(audit.recoveredOfficialDomain, null);
+
+  const queued = queueLegacyBeerAudit();
+  assert.equal(queued.queued, 1);
+  assert.equal(queued.domainsBackfilled, 0);
+  assert.equal(
+    getEnrichmentSource("packaged_beer", entityId, "official_brewery_domain"),
+    null
+  );
+});
+
+test("Victory official product page still recovers victorybeer.com", () => {
+  cleanup();
+
+  const entityId = insertPackagedBeer({
+    brewery: "Victory Brewing Company",
+    name: "DirtWolf",
+    style: "Sticke Alt Ale",
+    abv: 8.5
+  });
+  upsertEnrichmentSource({
+    entityType: "packaged_beer",
+    entityId,
+    sourceType: "official_product_page",
+    sourceUrl: "https://victorybeer.com/beers/dirtwolf/"
+  });
+
+  assert.equal(
+    recoverOfficialBreweryDomainFromEvidence({ entityId }),
+    "victorybeer.com"
+  );
+});
+
+test("active jobs do not consume the queue limit so later candidates are reached", () => {
+  cleanup();
+
+  const ids: number[] = [];
+  for (let i = 0; i < 55; i += 1) {
+    const entityId = insertPackagedBeer({
+      brewery: "Yards Brewing Co.",
+      name: `Legacy Mild ${i}`,
+      style: "English Mild",
+      abv: 4.1
+    });
+    stampMachineFieldOwnership({
+      entityType: "packaged_beer",
+      entityId,
+      field: "category",
+      source: "web"
+    });
+    seedHistoricalMetadataJob(entityId, {
+      requested: ["category"],
+      updated: [],
+      unresolved: ["category"]
+    });
+    ids.push(entityId);
+  }
+
+  // First 50 candidates already have an active metadata job.
+  for (const entityId of ids.slice(0, 50)) {
+    enqueueMetadataJob({
+      entityType: "packaged_beer",
+      entityId,
+      upc: ""
+    });
+  }
+
+  const queued = queueLegacyBeerAudit({ limit: 50 });
+  assert.equal(queued.candidates, 55);
+  assert.equal(queued.alreadyQueued, 50);
+  assert.equal(queued.queued, 5);
+  assert.equal(queued.remaining, 0);
+
+  for (const entityId of ids.slice(50)) {
+    assert.equal(
+      hasActiveEnrichmentJob("packaged_beer", entityId, "metadata"),
+      true,
+      `candidate ${entityId} should be newly queued`
+    );
+  }
+});
+
 test("guest cannot preview or queue legacy beer audit", async () => {
   cleanup();
   const preview = await app.inject({

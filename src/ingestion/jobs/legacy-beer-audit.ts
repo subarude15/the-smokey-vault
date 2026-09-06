@@ -95,7 +95,12 @@ function isImageAssetUrl(url: string): boolean {
   }
 }
 
-function domainFromTrustedUrl(url: string): string | null {
+/**
+ * Durable pipeline evidence may yield a domain even when classifySourceUrl()
+ * would return "unknown" (no brand context). Still refuse retailer / UGC /
+ * regulatory / importer hosts and raw image-asset URLs.
+ */
+function domainFromDurableEvidenceUrl(url: string): string | null {
   const sourceClass = classifySourceUrl(url);
   if (
     sourceClass === "retailer"
@@ -105,16 +110,33 @@ function domainFromTrustedUrl(url: string): string | null {
   ) {
     return null;
   }
-  if (isImageAssetUrl(url) && sourceClass !== "official") return null;
-  const domain = registeredDomain(url);
-  if (!domain) return null;
-  if (sourceClass === "official" || sourceClass === "unknown") return domain;
-  return null;
+  if (isImageAssetUrl(url)) return null;
+  return registeredDomain(url);
+}
+
+/**
+ * Inventory website_url is only trusted when classifySourceUrl confirms it is
+ * an official brewery host given brewery/beer identity. Generic "unknown"
+ * URLs must not become official_brewery_domain evidence.
+ */
+function domainFromWebsiteUrl(
+  url: string,
+  breweryName: string | null,
+  beerName: string | null
+): string | null {
+  const sourceClass = classifySourceUrl(url, {
+    brand: breweryName,
+    name: beerName
+  });
+  if (sourceClass !== "official") return null;
+  if (isImageAssetUrl(url)) return null;
+  return registeredDomain(url);
 }
 
 /**
  * Recover a registered official brewery domain from durable local evidence only.
- * Never trusts retailer / UGC / CDN image hosts or guessed brewery-name domains.
+ * Never trusts retailer / UGC / CDN image hosts, guessed brewery-name domains,
+ * or generic classifySourceUrl() === "unknown" inventory website URLs.
  * Preview-safe: no network I/O.
  */
 export function recoverOfficialBreweryDomainFromEvidence(options: {
@@ -122,6 +144,9 @@ export function recoverOfficialBreweryDomainFromEvidence(options: {
   row?: Record<string, unknown> | null;
 }): string | null {
   const { entityId } = options;
+  const row = options.row ?? null;
+  const breweryName = String(row?.brewery ?? "").trim() || null;
+  const beerName = String(row?.name ?? "").trim() || null;
 
   const storedDomain = getEnrichmentSource(
     ENTITY_TYPE,
@@ -132,21 +157,24 @@ export function recoverOfficialBreweryDomainFromEvidence(options: {
     return registeredDomain(storedDomain.sourceUrl);
   }
 
-  const trustedUrls: string[] = [];
-
+  // Intrinsically trusted durable record types (pipeline provenance).
   const productPage = getEnrichmentSource(
     ENTITY_TYPE,
     entityId,
     "official_product_page"
   );
-  if (productPage?.sourceUrl) trustedUrls.push(productPage.sourceUrl);
+  if (productPage?.sourceUrl) {
+    const domain = domainFromDurableEvidenceUrl(productPage.sourceUrl);
+    if (domain) return domain;
+  }
 
   const content = getProductContent(ENTITY_TYPE, entityId);
   if (
     content?.official_source_type === "official"
     && content.official_source_url
   ) {
-    trustedUrls.push(content.official_source_url);
+    const domain = domainFromDurableEvidenceUrl(content.official_source_url);
+    if (domain) return domain;
   }
 
   const image = getProductImage(ENTITY_TYPE, entityId);
@@ -156,14 +184,14 @@ export function recoverOfficialBreweryDomainFromEvidence(options: {
     && image.source_url
     && !isImageAssetUrl(image.source_url)
   ) {
-    trustedUrls.push(image.source_url);
+    const domain = domainFromDurableEvidenceUrl(image.source_url);
+    if (domain) return domain;
   }
 
-  const websiteUrl = String(options.row?.website_url ?? "").trim();
-  if (websiteUrl) trustedUrls.push(websiteUrl);
-
-  for (const url of trustedUrls) {
-    const domain = domainFromTrustedUrl(url);
+  // website_url requires brand-aware official classification — never "unknown".
+  const websiteUrl = String(row?.website_url ?? "").trim();
+  if (websiteUrl) {
+    const domain = domainFromWebsiteUrl(websiteUrl, breweryName, beerName);
     if (domain) return domain;
   }
 
@@ -423,17 +451,34 @@ export function queueLegacyBeerAudit(options?: {
     auditsById.set(entityId, result);
   }
 
-  const toProcess = allCandidateIds.slice(0, limit);
   let queued = 0;
   let alreadyQueued = 0;
   let skipped = 0;
   let domainsBackfilled = 0;
+  const newlyQueuedIds = new Set<number>();
 
+  // Scan every candidate in deterministic id order. Active metadata jobs are
+  // counted as alreadyQueued but do NOT consume the enqueue limit, so later
+  // candidates remain reachable on subsequent Keeper actions.
   const run = db.transaction(() => {
-    for (const entityId of toProcess) {
+    for (const entityId of allCandidateIds) {
       const audit = auditsById.get(entityId) ?? auditPackagedBeer(entityId);
       if (!audit.candidate) {
         skipped += 1;
+        continue;
+      }
+
+      if (hasActiveEnrichmentJob(ENTITY_TYPE, entityId, "metadata")) {
+        alreadyQueued += 1;
+        logLegacyAudit("legacy_beer_repair_skipped", {
+          entityId,
+          reason: "already_queued"
+        });
+        continue;
+      }
+
+      if (queued >= limit) {
+        // Leave remaining eligible candidates for a later Keeper action.
         continue;
       }
 
@@ -449,15 +494,6 @@ export function queueLegacyBeerAudit(options?: {
           entityId,
           domain: audit.recoveredOfficialDomain
         });
-      }
-
-      if (hasActiveEnrichmentJob(ENTITY_TYPE, entityId, "metadata")) {
-        alreadyQueued += 1;
-        logLegacyAudit("legacy_beer_repair_skipped", {
-          entityId,
-          reason: "already_queued"
-        });
-        continue;
       }
 
       const enqueue = queueItemEnrichment({
@@ -478,6 +514,7 @@ export function queueLegacyBeerAudit(options?: {
 
       if (enqueue.queued.includes("metadata")) {
         queued += 1;
+        newlyQueuedIds.add(entityId);
         logLegacyAudit("legacy_beer_repair_queued", { entityId });
         continue;
       }
@@ -500,7 +537,13 @@ export function queueLegacyBeerAudit(options?: {
   });
   run();
 
-  const remaining = Math.max(0, allCandidateIds.length - toProcess.length);
+  // Candidates still lacking an active metadata job after this action.
+  const remaining = allCandidateIds.filter(
+    (entityId) =>
+      !newlyQueuedIds.has(entityId)
+      && !hasActiveEnrichmentJob(ENTITY_TYPE, entityId, "metadata")
+  ).length;
+
   const auditEvent = recordAdminAuditEvent("legacy_beer_audit_queue", {
     candidates: allCandidateIds.length,
     queued,
