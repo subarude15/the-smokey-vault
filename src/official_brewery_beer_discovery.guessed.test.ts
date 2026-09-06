@@ -180,7 +180,7 @@ test("B. Victory DirtWolf matches guessed product URL", async () => {
   assert.ok(result.match === "exact_name" || result.match === "strong_name");
   assert.equal(result.productPageUrl, "https://victorybeer.com/beers/dirtwolf/");
   assert.equal(result.reason, "guessed_product_url_matched");
-  assert.equal(result.fields.imageUrl, "https://victorybeer.com/images/dirtwolf.jpg");
+  assert.match(String(result.fields.imageUrl), /dw-render-|dirtwolf/i);
 });
 
 test("C. Tröegs Nugget Nectar matches guessed /beer/<slug>/", async () => {

@@ -88,6 +88,12 @@ export function extractStructuredProductFacts(
     pushUnique(imageUrls, ogImage, pageUrl);
     usedOpenGraph = true;
   }
+  const twitterImage =
+    metaContent(html, "twitter:image") || metaContent(html, "twitter:image:src");
+  if (twitterImage) {
+    pushUnique(imageUrls, twitterImage, pageUrl);
+    usedOpenGraph = true;
+  }
   const ogTitle = metaContent(html, "og:title");
   const ogDesc = metaContent(html, "og:description");
   const ogType = metaContent(html, "og:type");
@@ -155,11 +161,27 @@ export function extractStructuredProductFacts(
           for (const item of image) {
             if (typeof item === "string") pushUnique(imageUrls, item, pageUrl);
             else if (item && typeof item === "object" && "url" in item) {
-              pushUnique(imageUrls, String((item as { url?: unknown }).url ?? ""), pageUrl);
+              pushUnique(
+                imageUrls,
+                String(
+                  (item as { url?: unknown; contentUrl?: unknown }).url ??
+                    (item as { contentUrl?: unknown }).contentUrl ??
+                    ""
+                ),
+                pageUrl
+              );
             }
           }
-        } else if (image && typeof image === "object" && "url" in (image as object)) {
-          pushUnique(imageUrls, String((image as { url?: unknown }).url ?? ""), pageUrl);
+        } else if (image && typeof image === "object") {
+          pushUnique(
+            imageUrls,
+            String(
+              (image as { url?: unknown; contentUrl?: unknown }).url ??
+                (image as { contentUrl?: unknown }).contentUrl ??
+                ""
+            ),
+            pageUrl
+          );
         }
       }
     } catch {
