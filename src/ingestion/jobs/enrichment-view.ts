@@ -46,6 +46,7 @@ import {
   friendlyDiagnosticSummary,
   type JobDiagnosticsPayload
 } from "../enrichment/diagnostics.js";
+import { listAdminAuditEvents } from "./admin-audit.js";
 import {
   ENRICHMENT_JOB_TYPES,
   isEnrichmentEntityType,
@@ -613,6 +614,49 @@ function resolveDisplayImage(options: {
   };
 }
 
+
+function officialRepairConflictViews(
+  entityType: EnrichmentEntityType,
+  entityId: number
+): ConflictView[] {
+  if (entityType !== "packaged_beer") return [];
+  const events = listAdminAuditEvents({
+    actionTypePrefix: "beer_official_repair_",
+    limit: 40
+  });
+  const out: ConflictView[] = [];
+  const seen = new Set<string>();
+  for (const event of events) {
+    if (Number(event.detail.entityId) !== entityId) continue;
+    const fieldName = String(event.detail.field ?? "");
+    if (fieldName !== "abv" && fieldName !== "category") continue;
+    const decision = String(event.detail.decision ?? event.action_type);
+    if (
+      !decision.includes("repaired_machine_value") &&
+      !decision.includes("preserved_human") &&
+      !decision.includes("unresolved_conflict") &&
+      !event.action_type.includes("preserved_human") &&
+      !event.action_type.includes("applied")
+    ) {
+      continue;
+    }
+    const key = `${fieldName}:${String(event.detail.previousValue)}:${String(event.detail.incomingValue)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const previousSource = String(event.detail.previousSource ?? "unknown");
+    out.push({
+      field: fieldName === "category" ? "style" : fieldName,
+      keptValue: (event.detail.previousValue as string | number | null) ?? null,
+      keptSource: previousSource,
+      keptSourceLabel: sourceLabel(previousSource),
+      competingValue: (event.detail.incomingValue as string | number | null) ?? null,
+      competingSource: "official_brewery",
+      competingSourceLabel: sourceLabel("official_brewery")
+    });
+  }
+  return out;
+}
+
 export function buildBottleEnrichmentView(options: {
   entityType: string;
   entityId: number;
@@ -703,7 +747,10 @@ export function buildBottleEnrichmentView(options: {
         image,
         includeDiagnostics
       ),
-      conflicts: conflictViews(plan.reviewConflicts)
+      conflicts: [
+        ...conflictViews(plan.reviewConflicts),
+        ...(includeDiagnostics ? officialRepairConflictViews(entityType, options.entityId) : [])
+      ]
     },
     tastingNotes: {
       official: content?.official_tasting_notes ?? null,

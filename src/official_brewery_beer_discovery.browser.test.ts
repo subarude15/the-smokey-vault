@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { field, mergeField } from "./ingestion/candidate/index.js";
 import type { BottleCandidate, ProductFieldSource } from "./ingestion/candidate/types.js";
 import { applyOfficialBreweryBeerDiscovery } from "./ingestion/jobs/official-brewery-beer.js";
+import { clearFieldOwnershipForTests, stampHumanFieldOwnership } from "./ingestion/jobs/field-ownership.js";
 import {
   clearEnrichmentSourcesForTests,
   getEnrichmentSource
@@ -106,7 +107,9 @@ function okBrowserPage(html = fixture("yards-brawler.html")): OfficialBeerBrowse
 
 afterEach(() => {
   clearOfficialBeerDiscoveryCache();
+  clearFieldOwnershipForTests();
   clearEnrichmentSourcesForTests();
+  clearFieldOwnershipForTests();
   delete process.env.FIGRANIUM_OFFICIAL_BEER_TASK_ID;
 });
 
@@ -380,10 +383,20 @@ test("P/Q. browser official ABV merges over beer_cache but not vault/user/barcod
 
   for (const locked of ["vault", "user", "barcode_cache"] as const) {
     clearOfficialBeerDiscoveryCache();
+    clearFieldOwnershipForTests();
+    // Trusted Keeper vault/user values must stamp human ownership so exact official
+    // repair does not treat the inventory vault reload stamp as a machine seed.
+    if (locked === "vault" || locked === "user") {
+      stampHumanFieldOwnership({
+        entityType: "packaged_beer",
+        entityId: 202,
+        fields: ["abv"]
+      });
+    }
     const kept = await applyOfficialBreweryBeerDiscovery({
       entityType: "packaged_beer",
       entityId: 202,
-      candidate: makeCandidate(locked, 5.5),
+      candidate: makeCandidate(locked === "vault" ? "user" : locked, 5.5),
       row: {
         brewery: "Yards Brewing Co.",
         name: "Brawler",
@@ -392,7 +405,10 @@ test("P/Q. browser official ABV merges over beer_cache but not vault/user/barcod
       discoveryDeps
     });
     assert.equal(kept.candidate.abv.value, 5.5);
-    assert.equal(kept.candidate.abv.source, locked);
+    assert.equal(
+      kept.candidate.abv.source,
+      locked === "vault" ? "user" : locked
+    );
     assert.equal(kept.abvUpdated, false);
   }
 });

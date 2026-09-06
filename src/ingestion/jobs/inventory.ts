@@ -26,12 +26,16 @@ import type { MetadataEnrichmentField } from "../enrichment/metadata-fields.js";
 import { METADATA_ENRICHMENT_FIELDS } from "../enrichment/metadata-fields.js";
 import { TRUSTED_MIN } from "../enrichment/rules.js";
 import type { EnrichmentEntityType } from "./types.js";
+import {
+  resolveCandidateSourceFromOwnership,
+  stampMachineFieldOwnership
+} from "./field-ownership.js";
 import type { BottleCandidateFieldName } from "../candidate/types.js";
 
 /** Inventory columns that can receive metadata enrichment, by table. */
 const INVENTORY_COLUMN_FOR: Record<EnrichmentEntityType, Partial<Record<MetadataEnrichmentField, string>>> = {
   spirits: { category: "category", abv: "abv", volume_ml: "volume_ml" },
-  packaged_beer: { abv: "abv" },
+  packaged_beer: { abv: "abv", category: "style" },
   wines: { origin: "region" }
 };
 
@@ -128,6 +132,30 @@ export function candidateFromInventoryRow(
   if (!classification && !usableFamily) {
     candidate.category = emptyField();
   }
+
+  // Overlay durable ownership so vault-stamped reloads do not erase machine/human markers.
+  const entityId = Number(row.id);
+  if (entityType === "packaged_beer" && Number.isFinite(entityId) && entityId > 0) {
+    const abvSource = resolveCandidateSourceFromOwnership(
+      entityType,
+      entityId,
+      "abv",
+      candidate.abv.source
+    );
+    if (abvSource !== candidate.abv.source) {
+      candidate.abv = { ...candidate.abv, source: abvSource };
+    }
+    const categorySource = resolveCandidateSourceFromOwnership(
+      entityType,
+      entityId,
+      "category",
+      candidate.category.source
+    );
+    if (categorySource !== candidate.category.source) {
+      candidate.category = { ...candidate.category, source: categorySource };
+    }
+  }
+
   return overlayUpcCaches(candidate);
 }
 
@@ -345,6 +373,26 @@ export function persistMetadataImprovements(options: {
         );
       }
       cacheUpdated = true;
+    }
+  }
+
+
+  if (entityType === "packaged_beer" && inventoryUpdated.length > 0) {
+    if (inventoryUpdated.includes("abv")) {
+      stampMachineFieldOwnership({
+        entityType,
+        entityId,
+        field: "abv",
+        source: after.abv.source
+      });
+    }
+    if (inventoryUpdated.includes("style") || inventoryUpdated.includes("category")) {
+      stampMachineFieldOwnership({
+        entityType,
+        entityId,
+        field: "category",
+        source: after.category.source
+      });
     }
   }
 

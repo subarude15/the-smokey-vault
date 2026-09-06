@@ -35,6 +35,8 @@ export type MetadataJobResult = {
     status?: string;
     productPageStored?: boolean;
     abvUpdated?: boolean;
+    styleUpdated?: boolean;
+    imageRepairRequested?: boolean;
   };
 };
 
@@ -98,15 +100,26 @@ export async function runMetadataJob(
       attempted: applied.attempted,
       status: applied.discovery?.status,
       productPageStored: applied.productPageStored,
-      abvUpdated: applied.abvUpdated
+      abvUpdated: applied.abvUpdated,
+      styleUpdated: applied.styleUpdated,
+      imageRepairRequested: applied.imageRepairRequested
     };
 
-    if (applied.abvUpdated) {
+    if (applied.abvUpdated || applied.styleUpdated) {
       persistMetadataImprovements({
         entityType: job.entity_type,
         entityId: job.entity_id,
         before: snapshotBeforeOfficial,
         after: before
+      });
+    }
+
+    if (applied.imageRepairRequested) {
+      const { maybeEnqueueImageEnrichment } = await import("./enqueue.js");
+      maybeEnqueueImageEnrichment({
+        entityType: job.entity_type,
+        entityId: job.entity_id,
+        row
       });
     }
   }
@@ -115,15 +128,21 @@ export async function runMetadataJob(
     return {
       skipped: true,
       reason:
-        officialMeta?.productPageStored || officialMeta?.abvUpdated
+        officialMeta?.productPageStored || officialMeta?.abvUpdated || officialMeta?.styleUpdated || officialMeta?.imageRepairRequested
           ? "official_brewery_only"
           : "already_complete",
-      inventoryUpdated: officialMeta?.abvUpdated ? ["abv"] : [],
+      inventoryUpdated: [
+        ...(officialMeta?.abvUpdated ? ["abv"] as const : []),
+        ...(officialMeta?.styleUpdated ? ["style"] as const : [])
+      ],
       cacheUpdated: false,
       officialBreweryDiscovery: officialMeta,
       resultPayload: {
         requested: [],
-        updated: officialMeta?.abvUpdated ? ["abv"] : [],
+        updated: [
+          ...(officialMeta?.abvUpdated ? ["abv"] as const : []),
+          ...(officialMeta?.styleUpdated ? ["style"] as const : [])
+        ],
         unresolved: []
       }
     };

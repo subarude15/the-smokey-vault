@@ -67,3 +67,50 @@ export function getLatestAdminAuditEvent(actionType?: string): AdminAuditEvent |
 export function clearAdminAuditForTests() {
   db.exec("DELETE FROM admin_audit_events");
 }
+
+
+export function listAdminAuditEvents(options?: {
+  actionTypePrefix?: string;
+  limit?: number;
+}): AdminAuditEvent[] {
+  ensureAdminAuditTable();
+  const limit = Math.max(1, Math.min(options?.limit ?? 20, 100));
+  const prefix = options?.actionTypePrefix;
+  if (prefix) {
+    const rows = db.prepare(`
+      SELECT id, action_type, detail_json, created_at
+      FROM admin_audit_events
+      WHERE action_type LIKE ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(`${prefix}%`, limit) as Array<{
+      id: number;
+      action_type: string;
+      detail_json: string;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      action_type: row.action_type,
+      detail: JSON.parse(row.detail_json) as Record<string, unknown>,
+      created_at: row.created_at
+    }));
+  }
+  const rows = db.prepare(`
+    SELECT id, action_type, detail_json, created_at
+    FROM admin_audit_events
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(limit) as Array<{
+    id: number;
+    action_type: string;
+    detail_json: string;
+    created_at: string;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    action_type: row.action_type,
+    detail: JSON.parse(row.detail_json) as Record<string, unknown>,
+    created_at: row.created_at
+  }));
+}
