@@ -13,6 +13,7 @@ import {
 import type { ProductFieldSource } from "../candidate/types.js";
 import { recordAdminAuditEvent } from "./admin-audit.js";
 import {
+  backfillMachineFieldOwnershipFromMetadataJobs,
   classifyStoredFieldForOfficialRepair,
   stampMachineFieldOwnership,
   type OwnedEnrichmentField
@@ -381,6 +382,12 @@ export function applyOfficialBeerRepairs(options: {
   if (!passesOfficialRepairGate({ entityType: options.entityType, discovery: options.discovery })) {
     summary.evaluated = false;
     return { candidate: options.candidate, summary };
+  }
+
+  // Deterministic DirtWolf-class path: stamp machine ownership only when completed
+  // metadata jobs recorded durable field updates — never from vault reload alone.
+  if (options.entityType === "packaged_beer") {
+    backfillMachineFieldOwnershipFromMetadataJobs({ entityId: options.entityId });
   }
 
   let candidate = options.candidate;

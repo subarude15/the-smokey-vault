@@ -2,7 +2,7 @@
  * Durable machine-vs-human field ownership for packaged-beer repair.
  * Inventory rows remain vault-stamped on reload; this sidecar records whether a
  * value was Keeper/human entered or machine-derived so exact official matches
- * can repair DirtWolf-class vault seeds without clobbering Keeper edits.
+ * can repair explicitly machine-owned fields without clobbering Keeper edits.
  */
 import { db } from "../../db.js";
 import type { ProductFieldSource } from "../candidate/types.js";
@@ -191,15 +191,16 @@ export function classifyStoredFieldForOfficialRepair(options: {
       reason: "machine_source"
     };
   }
-  // Inventory reload stamps everything as vault. Without an ownership row this is
-  // the historical "machine vault seed" class (DirtWolf). Exact/strong official
-  // repair may correct it; true Keeper edits must stamp human ownership.
+  // Inventory reload stamps everything as vault. Without an ownership row we
+  // cannot tell Keeper/manual history from machine fill — do not guess.
+  // DirtWolf-class repairs require durable machine evidence (or an explicit
+  // machine ownership stamp), not the vault reload source alone.
   if (options.candidateSource === "vault") {
     return {
-      repairable: true,
-      ownership: "machine",
+      repairable: false,
+      ownership: "unknown",
       source: "vault",
-      reason: "unmarked_vault_seed"
+      reason: "unmarked_vault_ambiguous"
     };
   }
   return {
@@ -208,6 +209,85 @@ export function classifyStoredFieldForOfficialRepair(options: {
     source: options.candidateSource,
     reason: "ambiguous_ownership"
   };
+}
+
+
+/**
+ * Deterministic ownership backfill from durable enrichment-job evidence only.
+ * Stamps machine ownership for abv/category when a completed metadata job
+ * recorded those fields in `updated` (or diagnostics.accepted). Never infers
+ * machine ownership from a vault candidate reload stamp alone.
+ */
+export function backfillMachineFieldOwnershipFromMetadataJobs(options?: {
+  entityId?: number;
+}): { stamped: Array<{ entityId: number; field: OwnedEnrichmentField; source: ProductFieldSource }> } {
+  ensureFieldOwnershipTable();
+  const stamped: Array<{
+    entityId: number;
+    field: OwnedEnrichmentField;
+    source: ProductFieldSource;
+  }> = [];
+  const params: Array<string | number> = ["packaged_beer", "metadata", "completed"];
+  let sql = `
+    SELECT entity_id, result_json
+    FROM enrichment_jobs
+    WHERE entity_type = ?
+      AND job_type = ?
+      AND status = ?
+      AND result_json IS NOT NULL
+  `;
+  if (options?.entityId != null) {
+    sql += ` AND entity_id = ?`;
+    params.push(options.entityId);
+  }
+  sql += ` ORDER BY id ASC`;
+  const rows = db.prepare(sql).all(...params) as Array<{
+    entity_id: number;
+    result_json: string | null;
+  }>;
+
+  const fieldsByEntity = new Map<number, Set<OwnedEnrichmentField>>();
+  for (const row of rows) {
+    if (!row.result_json) continue;
+    let parsed: {
+      updated?: unknown;
+      diagnostics?: { accepted?: unknown };
+    };
+    try {
+      parsed = JSON.parse(row.result_json);
+    } catch {
+      continue;
+    }
+    const names = new Set<string>();
+    if (Array.isArray(parsed.updated)) {
+      for (const item of parsed.updated) names.add(String(item));
+    }
+    const accepted = parsed.diagnostics?.accepted;
+    if (Array.isArray(accepted)) {
+      for (const item of accepted) names.add(String(item));
+    }
+    const owned = fieldsByEntity.get(row.entity_id) ?? new Set<OwnedEnrichmentField>();
+    for (const name of names) {
+      if (name === "abv") owned.add("abv");
+      if (name === "category" || name === "style") owned.add("category");
+    }
+    if (owned.size) fieldsByEntity.set(row.entity_id, owned);
+  }
+
+  for (const [entityId, fields] of fieldsByEntity) {
+    for (const field of fields) {
+      const existing = getFieldOwnership("packaged_beer", entityId, field);
+      if (existing) continue;
+      stampMachineFieldOwnership({
+        entityType: "packaged_beer",
+        entityId,
+        field,
+        source: "web"
+      });
+      stamped.push({ entityId, field, source: "web" });
+    }
+  }
+  return { stamped };
 }
 
 export function clearFieldOwnershipForTests(): void {

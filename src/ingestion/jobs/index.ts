@@ -186,6 +186,7 @@ export {
   stampHumanFieldOwnership,
   stampMachineFieldOwnership,
   classifyStoredFieldForOfficialRepair,
+  backfillMachineFieldOwnershipFromMetadataJobs,
   clearFieldOwnershipForTests,
   resolveCandidateSourceFromOwnership,
   type FieldOwnershipKind,

@@ -18,6 +18,11 @@ import {
   stampMachineFieldOwnership
 } from "./ingestion/jobs/field-ownership.js";
 import {
+  clearEnrichmentJobsForTests,
+  enqueueMetadataJob,
+  markJobCompleted
+} from "./ingestion/jobs/store.js";
+import {
   clearEnrichmentSourcesForTests,
   getEnrichmentSource
 } from "./ingestion/jobs/enrichment-sources.js";
@@ -111,6 +116,7 @@ function insertPackagedBeer(row: {
 
 afterEach(() => {
   clearFieldOwnershipForTests();
+  clearEnrichmentJobsForTests();
   clearOfficialImageRepairForTests();
   clearProductImagesForTests();
   clearEnrichmentSourcesForTests();
@@ -533,14 +539,65 @@ test("applyOfficialBreweryBeerDiscovery still stores product page + notes; repai
   assert.equal(applied.candidate.abv.source, "official_brewery");
 });
 
-test("unmarked vault seed is repairable under exact official match (DirtWolf class)", () => {
+test("unmarked historical vault value is ambiguous and is not automatically repaired", () => {
   const entityId = insertPackagedBeer({
     brewery: "Victory Brewing Company",
     name: "DirtWolf",
     style: "Sticke Alt Ale",
     abv: 8.5
   });
-  // No ownership row — inventory reload vault stamp is treated as historical machine seed.
+  // No ownership row and no durable machine job evidence — vault reload is ambiguous.
+  const { candidate: after, summary } = applyOfficialBeerRepairs({
+    entityType: "packaged_beer",
+    entityId,
+    row: { id: entityId },
+    candidate: makeCandidate({ source: "vault", category: "Sticke Alt Ale", abv: 8.5 }),
+    discovery: dirtwolfOfficialDiscovery()
+  });
+  assert.equal(summary.styleRepaired, false);
+  assert.equal(summary.abvRepaired, false);
+  assert.equal(after.category.value, "Sticke Alt Ale");
+  assert.equal(after.abv.value, 8.5);
+  assert.equal(after.category.source, "vault");
+  assert.equal(after.abv.source, "vault");
+  assert.ok(
+    summary.events.some(
+      (e) => e.field === "category" && e.decision === "unresolved_conflict"
+    )
+  );
+  assert.ok(
+    summary.events.some((e) => e.field === "abv" && e.decision === "unresolved_conflict")
+  );
+  const styleEvent = summary.events.find(
+    (e) => e.field === "category" && e.decision === "unresolved_conflict"
+  );
+  const abvEvent = summary.events.find(
+    (e) => e.field === "abv" && e.decision === "unresolved_conflict"
+  );
+  assert.equal(styleEvent?.incomingValue, "Double IPA");
+  assert.equal(abvEvent?.incomingValue, 8.7);
+  assert.equal(styleEvent?.incomingSource, "official_brewery");
+  assert.equal(abvEvent?.incomingSource, "official_brewery");
+});
+
+test("DirtWolf: durable metadata-job evidence backfills machine ownership then repairs", () => {
+  const entityId = insertPackagedBeer({
+    brewery: "Victory Brewing Company",
+    name: "DirtWolf",
+    style: "Sticke Alt Ale",
+    abv: 8.5
+  });
+  const queued = enqueueMetadataJob({
+    entityType: "packaged_beer",
+    entityId,
+    upc: ""
+  });
+  markJobCompleted(queued.job.id, {
+    requested: ["category", "abv"],
+    updated: ["category", "abv"],
+    unresolved: []
+  });
+
   const { candidate: after, summary } = applyOfficialBeerRepairs({
     entityType: "packaged_beer",
     entityId,
@@ -552,5 +609,6 @@ test("unmarked vault seed is repairable under exact official match (DirtWolf cla
   assert.equal(summary.abvRepaired, true);
   assert.equal(after.category.value, "Double IPA");
   assert.equal(after.abv.value, 8.7);
-  assert.equal(after.abv.source, "official_brewery");
+  assert.equal(getFieldOwnership("packaged_beer", entityId, "category")?.ownership, "machine");
+  assert.equal(getFieldOwnership("packaged_beer", entityId, "abv")?.ownership, "machine");
 });

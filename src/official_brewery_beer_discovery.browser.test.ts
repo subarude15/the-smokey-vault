@@ -384,9 +384,9 @@ test("P/Q. browser official ABV merges over beer_cache but not vault/user/barcod
   for (const locked of ["vault", "user", "barcode_cache"] as const) {
     clearOfficialBeerDiscoveryCache();
     clearFieldOwnershipForTests();
-    // Trusted Keeper vault/user values must stamp human ownership so exact official
-    // repair does not treat the inventory vault reload stamp as a machine seed.
-    if (locked === "vault" || locked === "user") {
+    // Keeper-entered user values stamp human ownership. Unmarked vault is no
+    // longer auto-repaired; leave it unmarked so ownership stays unresolved.
+    if (locked === "user") {
       stampHumanFieldOwnership({
         entityType: "packaged_beer",
         entityId: 202,
@@ -396,7 +396,7 @@ test("P/Q. browser official ABV merges over beer_cache but not vault/user/barcod
     const kept = await applyOfficialBreweryBeerDiscovery({
       entityType: "packaged_beer",
       entityId: 202,
-      candidate: makeCandidate(locked === "vault" ? "user" : locked, 5.5),
+      candidate: makeCandidate(locked, 5.5),
       row: {
         brewery: "Yards Brewing Co.",
         name: "Brawler",
@@ -407,7 +407,7 @@ test("P/Q. browser official ABV merges over beer_cache but not vault/user/barcod
     assert.equal(kept.candidate.abv.value, 5.5);
     assert.equal(
       kept.candidate.abv.source,
-      locked === "vault" ? "user" : locked
+      locked
     );
     assert.equal(kept.abvUpdated, false);
   }
