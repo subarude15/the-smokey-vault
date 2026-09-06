@@ -142,6 +142,20 @@ export {
 } from "./enrichment-backfill.js";
 
 export {
+  queueItemEnrichment,
+  normalizeItemEnrichmentJobTypes,
+  normalizeItemEnrichmentQueueMode,
+  primaryItemEnrichmentActionLabel,
+  showsItemEnrichmentRerunAction,
+  itemEnrichmentHasMissingWork,
+  type ItemEnrichmentJobType,
+  type ItemEnrichmentQueueMode,
+  type ItemEnrichmentQueueResult,
+  type ItemEnrichmentSkip,
+  type ItemEnrichmentSkipReason
+} from "./item-enrichment-queue.js";
+
+export {
   metadataEnrichmentAvailability,
   tastingNotesEnrichmentAvailability,
   imageEnrichmentAvailability,
