@@ -31,7 +31,59 @@ type EnrichmentBackfillQueueResult = {
   };
 };
 
+type LegacyBeerAuditReason =
+  | "metadata_no_result"
+  | "metadata_partial"
+  | "metadata_failed"
+  | "metadata_predates_official_pipeline"
+  | "no_official_brewery_domain"
+  | "historical_machine_metadata"
+  | "historical_machine_image"
+  | "no_official_notes"
+  | "known_official_product_page_without_domain"
+  | "official_source_available_but_not_reprocessed";
+
+type LegacyBeerAuditItem = {
+  entityId: number;
+  name: string;
+  brewery: string | null;
+  candidate: boolean;
+  reasons: LegacyBeerAuditReason[];
+  recoveredOfficialDomain: string | null;
+};
+
+type LegacyBeerAuditPreview = {
+  scanned: number;
+  candidates: number;
+  reasonCounts: Partial<Record<LegacyBeerAuditReason, number>>;
+  items: LegacyBeerAuditItem[];
+  truncated: boolean;
+};
+
+type LegacyBeerAuditQueueResult = {
+  candidates: number;
+  queued: number;
+  alreadyQueued: number;
+  skipped: number;
+  domainsBackfilled: number;
+  remaining: number;
+  auditId: number;
+};
+
 type JobType = "metadata" | "tasting_notes" | "image";
+
+const REASON_LABELS: Record<LegacyBeerAuditReason, string> = {
+  metadata_no_result: "Old no-result metadata",
+  metadata_partial: "Old partial metadata",
+  metadata_failed: "Old failed metadata",
+  metadata_predates_official_pipeline: "Completed before official brewery pipeline",
+  no_official_brewery_domain: "Missing durable official brewery domain",
+  historical_machine_metadata: "Historical machine metadata",
+  historical_machine_image: "Historical machine image",
+  no_official_notes: "Missing official notes",
+  known_official_product_page_without_domain: "Official product page without domain",
+  official_source_available_but_not_reprocessed: "Official source available, not reprocessed"
+};
 
 function totalQueued(result: EnrichmentBackfillQueueResult) {
   return result.queued.metadata + result.queued.tasting_notes + result.queued.image;
@@ -46,6 +98,13 @@ function previewJobTotal(preview: EnrichmentBackfillPreview, types?: JobType[]) 
   return total;
 }
 
+function summarizeLegacyReasons(counts: Partial<Record<LegacyBeerAuditReason, number>>) {
+  return (Object.entries(counts) as Array<[LegacyBeerAuditReason, number]>)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+}
+
 export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string) => void }) {
   const [preview, setPreview] = useState<EnrichmentBackfillPreview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +112,13 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   const [error, setError] = useState("");
   const [lastQueue, setLastQueue] = useState<EnrichmentBackfillQueueResult | null>(null);
   const [searxngUnreachable, setSearxngUnreachable] = useState(false);
+
+  const [legacyPreview, setLegacyPreview] = useState<LegacyBeerAuditPreview | null>(null);
+  const [legacyLoading, setLegacyLoading] = useState(true);
+  const [legacyBusy, setLegacyBusy] = useState(false);
+  const [legacyError, setLegacyError] = useState("");
+  const [legacyExpanded, setLegacyExpanded] = useState(false);
+  const [lastLegacyQueue, setLastLegacyQueue] = useState<LegacyBeerAuditQueueResult | null>(null);
 
   const loadPreview = useCallback(async () => {
     setError("");
@@ -64,6 +130,19 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
       setError(err instanceof Error ? err.message : "Could not load enrichment preview");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadLegacyPreview = useCallback(async () => {
+    setLegacyError("");
+    setLegacyLoading(true);
+    try {
+      const next = await api<LegacyBeerAuditPreview>("/admin/enrichment/legacy-beer-audit");
+      setLegacyPreview(next);
+    } catch (err) {
+      setLegacyError(err instanceof Error ? err.message : "Could not load legacy beer audit");
+    } finally {
+      setLegacyLoading(false);
     }
   }, []);
 
@@ -81,8 +160,9 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
 
   useEffect(() => {
     void loadPreview();
+    void loadLegacyPreview();
     void loadHealthHint();
-  }, [loadPreview, loadHealthHint]);
+  }, [loadPreview, loadLegacyPreview, loadHealthHint]);
 
   async function queue(types?: JobType[]) {
     if (!preview) return;
@@ -118,7 +198,45 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
     }
   }
 
+  async function queueLegacyAudit() {
+    if (!legacyPreview || legacyPreview.candidates === 0) {
+      onMessage("No legacy packaged beers need another look.");
+      return;
+    }
+    const count = legacyPreview.candidates;
+    if (!window.confirm(
+      `Queue legacy beer audit for up to ${Math.min(50, count)} packaged beer${count === 1 ? "" : "s"}? `
+      + "This only schedules the existing enrichment pipeline; Keeper-entered values stay protected."
+    )) return;
+
+    setLegacyBusy(true);
+    setLegacyError("");
+    try {
+      const result = await api<LegacyBeerAuditQueueResult>("/admin/enrichment/legacy-beer-audit", {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      setLastLegacyQueue(result);
+      onMessage(
+        `Legacy beer audit queued ${result.queued} metadata job${result.queued === 1 ? "" : "s"}`
+        + (result.alreadyQueued ? `, ${result.alreadyQueued} already queued` : "")
+        + (result.domainsBackfilled ? `, ${result.domainsBackfilled} domain${result.domainsBackfilled === 1 ? "" : "s"} backfilled` : "")
+        + (result.remaining ? `, ${result.remaining} remaining` : "")
+        + "."
+      );
+      await loadLegacyPreview();
+      await loadPreview();
+    } catch (err) {
+      setLegacyError(err instanceof Error ? err.message : "Could not queue legacy beer audit");
+    } finally {
+      setLegacyBusy(false);
+    }
+  }
+
   const jobTotal = preview ? preview.metadata + preview.tastingNotes + preview.images : 0;
+  const legacyReasonSummary = legacyPreview
+    ? summarizeLegacyReasons(legacyPreview.reasonCounts)
+    : [];
 
   return (
     <section className="settings-card enrichment-maintenance">
@@ -187,6 +305,89 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
           {" "}({lastQueue.queued.metadata} metadata, {lastQueue.queued.tasting_notes} tasting notes, {lastQueue.queued.image} images).
         </p>
       )}
+
+      <div className="legacy-beer-audit">
+        <h4>Legacy beer audit</h4>
+        <p>
+          Older packaged-beer records may have been enriched before the current official brewery pipeline.
+          Preview records worth checking again. Queuing an audit only schedules the existing enrichment pipeline;
+          Keeper-entered values stay protected.
+        </p>
+        <button
+          type="button"
+          className="secondary enrichment-refresh"
+          disabled={legacyLoading || legacyBusy}
+          onClick={() => void loadLegacyPreview()}
+        >
+          <RefreshCw size={16}/> {legacyLoading ? "Refreshing preview…" : "Refresh preview"}
+        </button>
+        {legacyError && <p className="error">{legacyError}</p>}
+        {legacyPreview && (
+          <>
+            <p className="legacy-beer-audit-summary">
+              Legacy packaged beers needing another look: <strong>{legacyPreview.candidates}</strong>
+              {legacyPreview.truncated ? " (showing first 50)" : ""}
+            </p>
+            {legacyReasonSummary.length > 0 && (
+              <ul className="legacy-beer-audit-reasons">
+                {legacyReasonSummary.map(([reason, count]) => (
+                  <li key={reason}>{count} {REASON_LABELS[reason]}</li>
+                ))}
+              </ul>
+            )}
+            <div className="enrichment-backfill-actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={legacyBusy || legacyLoading || legacyPreview.candidates === 0}
+                onClick={() => void queueLegacyAudit()}
+              >
+                <Sparkles size={17}/>
+                {legacyBusy
+                  ? "Queueing…"
+                  : `Queue legacy beer audit (${Math.min(50, legacyPreview.candidates)})`}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={legacyPreview.candidates === 0}
+                onClick={() => setLegacyExpanded((open) => !open)}
+              >
+                {legacyExpanded ? "Hide candidates" : "Show candidates"}
+              </button>
+            </div>
+            {legacyExpanded && legacyPreview.items.length > 0 && (
+              <ul className="legacy-beer-audit-list">
+                {legacyPreview.items.map((item) => (
+                  <li key={item.entityId}>
+                    <div className="legacy-beer-audit-item-title">
+                      {item.name}{item.brewery ? ` — ${item.brewery}` : ""}
+                    </div>
+                    <ul>
+                      {item.reasons.map((reason) => (
+                        <li key={reason}>{REASON_LABELS[reason]}</li>
+                      ))}
+                    </ul>
+                    {item.recoveredOfficialDomain ? (
+                      <div className="legacy-beer-audit-domain">
+                        Recoverable domain: {item.recoveredOfficialDomain}
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        {lastLegacyQueue && (
+          <p className="enrichment-backfill-banner" aria-live="polite">
+            Last legacy audit queued {lastLegacyQueue.queued}
+            {" "}(already queued {lastLegacyQueue.alreadyQueued}, skipped {lastLegacyQueue.skipped},
+            domains backfilled {lastLegacyQueue.domainsBackfilled}
+            {lastLegacyQueue.remaining ? `, remaining ${lastLegacyQueue.remaining}` : ""}).
+          </p>
+        )}
+      </div>
     </section>
   );
 }

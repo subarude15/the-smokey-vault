@@ -1343,3 +1343,15 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 @media (prefers-reduced-motion:reduce){
   .suggest-status .spinner{animation:none}
 }
+
+
+.legacy-beer-audit{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.legacy-beer-audit h4{margin:0 0 8px;font:600 18px "Playfair Display",serif;color:var(--text)}
+.legacy-beer-audit > p{color:var(--muted);font-size:13px;line-height:1.5;margin:0 0 12px}
+.legacy-beer-audit-summary{margin:12px 0 8px;color:var(--text);font-size:14px}
+.legacy-beer-audit-reasons{margin:0 0 12px;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.5}
+.legacy-beer-audit-list{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.legacy-beer-audit-list > li{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.legacy-beer-audit-item-title{font-weight:600;color:var(--text);margin-bottom:4px}
+.legacy-beer-audit-list ul{margin:0;padding-left:16px;color:var(--muted);font-size:13px;line-height:1.45}
+.legacy-beer-audit-domain{margin-top:6px;font-size:12px;color:var(--muted)}

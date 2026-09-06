@@ -142,6 +142,20 @@ export {
 } from "./enrichment-backfill.js";
 
 export {
+  LEGACY_BEER_AUDIT_QUEUE_LIMIT,
+  LEGACY_BEER_AUDIT_LIST_LIMIT,
+  recoverOfficialBreweryDomainFromEvidence,
+  auditPackagedBeer,
+  previewLegacyBeerAudit,
+  queueLegacyBeerAudit,
+  type LegacyBeerAuditReason,
+  type LegacyBeerAuditResult,
+  type LegacyBeerAuditPreview,
+  type LegacyBeerAuditQueueResult
+} from "./legacy-beer-audit.js";
+
+
+export {
   queueItemEnrichment,
   normalizeItemEnrichmentJobTypes,
   normalizeItemEnrichmentQueueMode,
