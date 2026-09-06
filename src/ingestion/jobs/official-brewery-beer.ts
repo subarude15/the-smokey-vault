@@ -16,7 +16,7 @@ import {
   type BottleCandidate,
   type ProductField
 } from "../candidate/index.js";
-import { upsertEnrichmentSource } from "./enrichment-sources.js";
+import { getEnrichmentSource, upsertEnrichmentSource } from "./enrichment-sources.js";
 import { upsertProductContent } from "./product-content.js";
 import {
   applyOfficialBeerRepairs,
@@ -33,6 +33,9 @@ export type OfficialBreweryBeerApplyResult = {
   styleUpdated: boolean;
   imageRepairRequested: boolean;
   repairSummary: OfficialRepairSummary | null;
+  /** Brewery website host actually used for this attempt (row/source/OBDB). */
+  resolvedWebsiteHost: string | null;
+  resolvedWebsiteUrl: string | null;
 };
 
 function cloneField<T>(f: ProductField<T>): ProductField<T> {
@@ -63,12 +66,33 @@ async function resolveBreweryWebsite(args: {
   beerName: string;
   websiteUrl?: string | null;
   websiteHost?: string | null;
+  entityType?: string;
+  entityId?: number;
 }): Promise<{ websiteUrl: string | null; websiteHost: string | null }> {
   if (args.websiteUrl || args.websiteHost) {
     return {
       websiteUrl: args.websiteUrl ?? null,
       websiteHost: args.websiteHost ?? null
     };
+  }
+  if (args.entityType && args.entityId != null) {
+    const stored = getEnrichmentSource(
+      args.entityType,
+      args.entityId,
+      "official_brewery_domain"
+    );
+    if (stored?.sourceUrl) {
+      return {
+        websiteUrl: stored.sourceUrl,
+        websiteHost: (() => {
+          try {
+            return new URL(stored.sourceUrl).hostname.replace(/^www\./, "");
+          } catch {
+            return stored.sourceUrl.replace(/^https?:\/\//i, "").replace(/^www\./, "").split("/")[0] || null;
+          }
+        })()
+      };
+    }
   }
   try {
     const parsed = parseBeerQuery(`${args.breweryName} ${args.beerName}`.trim());
@@ -110,7 +134,9 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       notesStored: false,
       styleUpdated: false,
       imageRepairRequested: false,
-      repairSummary: null
+      repairSummary: null,
+      resolvedWebsiteHost: null,
+      resolvedWebsiteUrl: null
     };
   }
 
@@ -124,7 +150,9 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       notesStored: false,
       styleUpdated: false,
       imageRepairRequested: false,
-      repairSummary: null
+      repairSummary: null,
+      resolvedWebsiteHost: null,
+      resolvedWebsiteUrl: null
     };
   }
 
@@ -142,7 +170,9 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
       notesStored: false,
       styleUpdated: false,
       imageRepairRequested: false,
-      repairSummary: null
+      repairSummary: null,
+      resolvedWebsiteHost: null,
+      resolvedWebsiteUrl: null
     };
   }
 
@@ -150,7 +180,9 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
     breweryName,
     beerName,
     websiteUrl: (options.row.website_url as string | null | undefined) ?? null,
-    websiteHost: (options.row.website_host as string | null | undefined) ?? null
+    websiteHost: (options.row.website_host as string | null | undefined) ?? null,
+    entityType: options.entityType,
+    entityId: options.entityId
   });
 
   const discovery = await discoverOfficialBeerProductPage(
@@ -248,6 +280,8 @@ export async function applyOfficialBreweryBeerDiscovery(options: {
     notesStored,
     styleUpdated,
     imageRepairRequested,
-    repairSummary
+    repairSummary,
+    resolvedWebsiteHost: website.websiteHost,
+    resolvedWebsiteUrl: website.websiteUrl
   };
 }
