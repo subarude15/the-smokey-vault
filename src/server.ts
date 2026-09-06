@@ -38,6 +38,8 @@ import {
   maybeEnqueueImageEnrichment,
   previewEnrichmentBackfill,
   queueEnrichmentBackfill,
+  previewLegacyBeerAudit,
+  queueLegacyBeerAudit,
   queueItemEnrichment,
   normalizeItemEnrichmentJobTypes,
   normalizeItemEnrichmentQueueMode,
@@ -260,6 +262,26 @@ app.post<{ Body: { types?: string[] } }>("/api/admin/enrichment/backfill", {
   }
   return queueEnrichmentBackfill(types?.length ? { types } : undefined);
 });
+
+app.get("/api/admin/enrichment/legacy-beer-audit", {
+  schema: { tags: ["Admin"], summary: "Preview legacy packaged-beer audit candidates (dry run)" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return previewLegacyBeerAudit();
+});
+
+app.post<{ Body: { limit?: number } }>("/api/admin/enrichment/legacy-beer-audit", {
+  schema: { tags: ["Admin"], summary: "Queue legacy packaged-beer audit metadata retries" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const limitRaw = request.body?.limit;
+  const limit = limitRaw == null ? undefined : Number(limitRaw);
+  if (limit != null && (!Number.isFinite(limit) || limit <= 0)) {
+    return reply.code(400).send({ error: "limit must be a positive number" });
+  }
+  return queueLegacyBeerAudit(limit != null ? { limit } : undefined);
+});
+
 
 app.post<{ Body: { code?: string; kind?: string } }>("/api/admin/inventory/scan-session/save", {
   schema: { tags: ["Admin"], summary: "Identify and save a scanned bottle during a shelf scan session" }
