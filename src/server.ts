@@ -103,7 +103,7 @@ import {
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
 import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
 import { previewInventoryCleanup } from "./inventory-cleanup-preview.js";
-import { serializeEnrichmentViewForCaller, serializeInventoryItemForCaller } from "./guest-inventory-response.js";
+import { serializeEnrichmentViewForCaller, serializeInventoryItemForCaller, serializeOverviewForCaller } from "./guest-inventory-response.js";
 
 /**
  * Behind a reverse proxy every request otherwise arrives from the proxy's address, which
@@ -852,7 +852,7 @@ app.get("/api/cocktails/match", async () => {
   });
 });
 
-app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot for the Overview page" } }, async () => {
+app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot for the Overview page" } }, async (request) => {
   const spirits = db.prepare("SELECT * FROM spirits").all() as Array<Record<string, unknown>>;
   const taps = db.prepare("SELECT * FROM taps ORDER BY tap_number ASC").all() as Array<Record<string, unknown>>;
   const brews = db.prepare("SELECT * FROM brews").all() as Array<Record<string, unknown>>;
@@ -861,7 +861,7 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
   const shelf = buildShelf(spirits, wines, packaged, taps);
   const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
     .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
-  return buildOverview({
+  const snap = buildOverview({
     spirits,
     taps,
     brews,
@@ -871,6 +871,7 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
     pours: listTonightPours(),
     keeperName: keeperName()
   });
+  return serializeOverviewForCaller(snap, { admin: isAdmin(request.headers.authorization) });
 });
 
 function restockThresholds() {

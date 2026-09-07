@@ -20,6 +20,7 @@ Shipped appliance boundaries for The Smokey Vault. Architects and agents must ke
 - Packaged beer stays out of the Bottle Library / spirits table and must not invent proof, generic `volume_ml`, origin, or TTB ID.
 - Deletion is per-item, authenticated, transactional, and cleanup-aware — no bulk purge automation.
 - Guest Mode must not expose keeper operational metadata (UPC, stock counts, enrichment diagnostics); Guest inventory/enrichment responses are allowlisted server-side.
+- Guest Mode may receive an intentional coarse availability projection (`availability_pct` for spirits/taps; overview keg `remaining_pct`) for fill/keg gauges. Exact pint counts, raw `fill_level` / `remaining_l`, and other operational quantities stay Keeper-only. Authorization must not depend on theme selection.
 - Keeper enrichment actions (rerun/retry, packaged-beer ABV/style verify, resolvable conflict keep/accept) require admin auth and reuse `product_field_ownership` — never a parallel override table.
 - Missing authoritative data is a valid outcome.
 

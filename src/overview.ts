@@ -25,7 +25,8 @@ export type OverviewTap = {
   style: string;
   abv: string;
   remaining_pct: number;
-  pints: number;
+  /** Exact pint count — Keeper Mode only; omitted from Guest overview responses. */
+  pints?: number;
   image_url: string;
   source_type: string;
   empty: boolean;

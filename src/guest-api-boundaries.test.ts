@@ -147,7 +147,7 @@ after(async () => {
 });
 
 test("serializer unit: guest inventory strips keeper fields and sets out_of_stock", () => {
-  const spirit = serializeGuestInventoryItem("spirits", {
+  const spareReady = serializeGuestInventoryItem("spirits", {
     id: 1,
     name: "Unit Spirit",
     brand: "Unit",
@@ -166,15 +166,17 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
     vote_total: 1,
     vote_score: 1
   });
-  assert.equal(spirit.name, "Unit Spirit");
-  assert.equal(spirit.out_of_stock, false); // spare bottle remaining
-  assert.equal(spirit.upc, undefined);
-  assert.equal(spirit.stock_count, undefined);
-  assert.equal(spirit.fill_level, undefined);
-  assert.equal(spirit.shelf_location, undefined);
-  assert.equal(spirit.purchase_date, undefined);
-  assert.equal(spirit.opened_date, undefined);
-  assert.equal(spirit.vote_up, 1);
+  assert.equal(spareReady.name, "Unit Spirit");
+  assert.equal(spareReady.out_of_stock, false); // spare bottle remaining
+  // Empty open bottle + spare → guest sees a full available bottle, not 0%/last pours.
+  assert.equal(spareReady.availability_pct, 100);
+  assert.equal(spareReady.upc, undefined);
+  assert.equal(spareReady.stock_count, undefined);
+  assert.equal(spareReady.fill_level, undefined);
+  assert.equal(spareReady.shelf_location, undefined);
+  assert.equal(spareReady.purchase_date, undefined);
+  assert.equal(spareReady.opened_date, undefined);
+  assert.equal(spareReady.vote_up, 1);
 
   const empty = serializeGuestInventoryItem("spirits", {
     id: 2,
@@ -185,6 +187,52 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
     stock_count: 1
   });
   assert.equal(empty.out_of_stock, true);
+  assert.equal(empty.availability_pct, 0);
+  assert.equal(empty.fill_level, undefined);
+  assert.equal(empty.stock_count, undefined);
+
+  const half = serializeGuestInventoryItem("spirits", {
+    id: 4,
+    name: "Half",
+    brand: "X",
+    category: "Whiskey",
+    fill_level: 50,
+    stock_count: 1,
+    upc: "leak"
+  });
+  assert.equal(half.out_of_stock, false);
+  assert.equal(half.availability_pct, 50);
+  assert.equal(half.fill_level, undefined);
+  assert.equal(half.stock_count, undefined);
+  assert.equal(half.upc, undefined);
+
+  // Partial open bottle with spares still reports the open bottle's coarse fill.
+  const halfWithSpare = serializeGuestInventoryItem("spirits", {
+    id: 6,
+    name: "Half Spare",
+    brand: "X",
+    category: "Whiskey",
+    fill_level: 50,
+    stock_count: 3
+  });
+  assert.equal(halfWithSpare.out_of_stock, false);
+  assert.equal(halfWithSpare.availability_pct, 50);
+  assert.equal(halfWithSpare.fill_level, undefined);
+  assert.equal(halfWithSpare.stock_count, undefined);
+
+  const tap = serializeGuestInventoryItem("taps", {
+    id: 5,
+    tap_number: 1,
+    brewery_batch: "House Ale",
+    style: "Pale",
+    abv: 5,
+    remaining_l: 9.5,
+    keg_size_l: 19.5
+  });
+  assert.equal(tap.availability_pct, 50);
+  assert.equal(tap.remaining_l, undefined);
+  assert.equal(tap.keg_size_l, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(tap, "pints"), false);
 
   const beer = serializeGuestInventoryItem("packaged_beer", {
     id: 3,
@@ -198,6 +246,7 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
   assert.equal(beer.out_of_stock, true);
   assert.equal(beer.count, undefined);
   assert.equal(beer.upc, undefined);
+  assert.equal(beer.availability_pct, undefined);
 });
 
 test("serializer unit: guest enrichment keeps tasting/image only", () => {
@@ -270,9 +319,13 @@ test("1. Guest spirits inventory returns public fields and omits keeper-only key
   assert.equal(item.tasting_notes, "Oak and vanilla");
   assert.equal(item.image_url, "/api/media/images/guest-bound-spirit.jpg");
   assert.equal(item.out_of_stock, false);
+  assert.equal(item.availability_pct, 50);
   assert.equal(typeof item.vote_up, "number");
   assert.equal(item.purchase_date, undefined);
   assert.equal(item.opened_date, undefined);
+  assert.equal(item.fill_level, undefined);
+  assert.equal(item.stock_count, undefined);
+  assert.equal(item.upc, undefined);
   assertNoForbiddenKeys(item, GUEST_FORBIDDEN_INVENTORY_KEYS);
   cleanup();
 });
@@ -410,6 +463,10 @@ test("6. Guest out_of_stock derives without leaking exact counts", async () => {
     INSERT INTO spirits (name, brand, category, fill_level, stock_count, upc)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run("GuestBound Empty", "Bound", "Gin", 0, 1, `${PREFIX}1002`);
+  const spareSpirit = db.prepare(`
+    INSERT INTO spirits (name, brand, category, fill_level, stock_count, upc)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run("GuestBound Spare", "Bound", "Rum", 0, 2, `${PREFIX}1003`);
   const emptyBeer = db.prepare(`
     INSERT INTO packaged_beer (brewery, name, style, count, upc, vessel)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -420,8 +477,17 @@ test("6. Guest out_of_stock derives without leaking exact counts", async () => {
     .find((row) => row.id === Number(emptySpirit.lastInsertRowid));
   assert.ok(spirit);
   assert.equal(spirit.out_of_stock, true);
+  assert.equal(spirit.availability_pct, 0);
   assert.equal(spirit.stock_count, undefined);
   assert.equal(spirit.fill_level, undefined);
+
+  const spare = (spirits.json() as Array<Record<string, unknown>>)
+    .find((row) => row.id === Number(spareSpirit.lastInsertRowid));
+  assert.ok(spare);
+  assert.equal(spare.out_of_stock, false);
+  assert.equal(spare.availability_pct, 100);
+  assert.equal(spare.stock_count, undefined);
+  assert.equal(spare.fill_level, undefined);
 
   const beers = await app.inject({ method: "GET", url: "/api/inventory/packaged_beer" });
   const beer = (beers.json() as Array<Record<string, unknown>>)
@@ -512,6 +578,7 @@ test("8. Guest allowlist covers taps, brews, and cocktails without keeper intern
     table: string;
     id: number;
     expectedGuest: Record<string, unknown>;
+    guestOnly?: Record<string, unknown>;
     keeperOnly: Record<string, unknown>;
   }> = [
     {
@@ -525,6 +592,7 @@ test("8. Guest allowlist covers taps, brews, and cocktails without keeper intern
         ibu: 35,
         tasting_notes: "Citrus and pine"
       },
+      guestOnly: { availability_pct: 50 },
       keeperOnly: { remaining_l: 9.5, keg_size_l: 19.5 }
     },
     {
@@ -568,6 +636,9 @@ test("8. Guest allowlist covers taps, brews, and cocktails without keeper intern
     for (const [key, value] of Object.entries(entry.expectedGuest)) {
       assert.equal(guestItem[key], value, `${entry.table}.${key}`);
     }
+    for (const [key, value] of Object.entries(entry.guestOnly ?? {})) {
+      assert.equal(guestItem[key], value, `${entry.table}.guestOnly.${key}`);
+    }
     assertNoForbiddenKeys(guestItem, GUEST_FORBIDDEN_INVENTORY_KEYS);
     for (const key of Object.keys(entry.keeperOnly)) {
       assert.equal(
@@ -576,6 +647,11 @@ test("8. Guest allowlist covers taps, brews, and cocktails without keeper intern
         `${entry.table} guest leaked ${key}`
       );
     }
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(guestItem, "pints"),
+      false,
+      `${entry.table} guest must not expose exact pints`
+    );
 
     const keeperRes = await app.inject({
       method: "GET",
@@ -592,7 +668,76 @@ test("8. Guest allowlist covers taps, brews, and cocktails without keeper intern
     for (const [key, value] of Object.entries(entry.keeperOnly)) {
       assert.equal(keeperItem[key], value, `keeper ${entry.table}.${key}`);
     }
+    for (const key of Object.keys(entry.guestOnly ?? {})) {
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(keeperItem, key),
+        false,
+        `keeper ${entry.table} should not carry guest-only derived ${key}`
+      );
+    }
   }
 
   cleanup();
+});
+
+test("9. Guest overview keeps keg gauge and strips exact pints", async () => {
+  cleanup();
+  const tap = db.prepare("SELECT id FROM taps ORDER BY tap_number ASC LIMIT 1").get() as { id: number };
+  assert.ok(tap?.id);
+  db.prepare(`
+    UPDATE taps SET
+      brewery_batch=?, maker=?, style=?, abv=?, remaining_l=?, keg_size_l=?, notes=?
+    WHERE id=?
+  `).run("GuestBound Overview Ale", "Bound", "Lager", 5, 19.5, 19.5, "GuestBound overview", tap.id);
+
+  const guest = await app.inject({ method: "GET", url: "/api/overview" });
+  assert.equal(guest.statusCode, 200);
+  const guestSnap = guest.json() as {
+    taps: { list: Array<{ title: string; remaining_pct?: number; pints?: number }> };
+  };
+  const guestTap = guestSnap.taps.list.find((row) => row.title === "GuestBound Overview Ale");
+  assert.ok(guestTap);
+  assert.equal(guestTap.remaining_pct, 100);
+  assert.equal(Object.prototype.hasOwnProperty.call(guestTap, "pints"), false);
+
+  const token = createTestAdminToken();
+  const keeper = await app.inject({
+    method: "GET",
+    url: "/api/overview",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(keeper.statusCode, 200);
+  const keeperSnap = keeper.json() as {
+    taps: { list: Array<{ title: string; remaining_pct?: number; pints?: number }> };
+  };
+  const keeperTap = keeperSnap.taps.list.find((row) => row.title === "GuestBound Overview Ale");
+  assert.ok(keeperTap);
+  assert.equal(keeperTap.remaining_pct, 100);
+  assert.equal(keeperTap.pints, 41);
+  cleanup();
+});
+
+test("10. Guest client renders gauges from availability_pct, not raw Keeper quantities", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { dirname, join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const appSrc = readFileSync(join(root, "client/src/App.tsx"), "utf8");
+  const helperSrc = readFileSync(join(root, "client/src/guestAvailability.ts"), "utf8");
+  assert.match(appSrc, /spiritGaugePct\(item, admin\)/);
+  assert.match(appSrc, /tapGaugeForDisplay\(item, admin, DEFAULT_KEG_L\)/);
+  assert.match(appSrc, /readAvailabilityPct\(item\)/);
+  assert.match(appSrc, /guestTapAvailabilityLabel/);
+  assert.match(appSrc, /guestSpiritAvailabilityLabel/);
+  // Guest availability lines must not interpolate exact pint counts.
+  assert.doesNotMatch(
+    appSrc,
+    /availability-line[\s\S]{0,240}kegPints/
+  );
+  assert.doesNotMatch(
+    appSrc,
+    /availability-line[\s\S]{0,240}pints left/
+  );
+  assert.match(helperSrc, /availability_pct/);
+  assert.match(helperSrc, /never exact pint counts/);
 });

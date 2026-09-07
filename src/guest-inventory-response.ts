@@ -4,8 +4,21 @@
  * Keeper Mode keeps full shelf rows. Guest Mode gets an explicit allowlist so
  * patrons inspecting network traffic never receive UPC, stock counts, shelf
  * location, or enrichment operational plumbing.
+ *
+ * Approved availability carve-out (PR #97): Guest Mode may receive a derived
+ * coarse `availability_pct` gauge for spirits and taps. Raw `fill_level`,
+ * `remaining_l`, exact pint counts, and other operational quantities stay
+ * Keeper-only. Derivation is theme-independent — never gated on CSS/theme.
  */
-import { isSpiritEmpty, packagedCount } from "./catalog.js";
+import {
+  DEFAULT_KEG_L,
+  isSpiritEmpty,
+  isTapEmpty,
+  nearestFillStop,
+  nearestKegStop,
+  openNextSpirit,
+  packagedCount
+} from "./catalog.js";
 import type { BottleEnrichmentView } from "./ingestion/jobs/enrichment-view.js";
 
 /** Fields attached by the inventory list route for vote-enabled tables. */
@@ -20,7 +33,8 @@ export const GUEST_VOTE_FIELDS = [
 /**
  * Explicit Guest allowlists per inventory table.
  * Derived from Guest Mode rendering (cards, bottle detail, votes, blocked ribbon)
- * plus a coarse `out_of_stock` availability signal for spirits / packaged beer.
+ * plus coarse availability signals (`out_of_stock`, `availability_pct`) for
+ * spirits / packaged beer / taps where approved.
  */
 export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   spirits: [
@@ -41,6 +55,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
     "base_ingredient",
     "blocked_from_ordering",
     "out_of_stock",
+    "availability_pct",
     ...GUEST_VOTE_FIELDS
   ],
   wines: [
@@ -101,6 +116,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
     "flavors",
     "tags",
     "base_ingredient",
+    "availability_pct",
     ...GUEST_VOTE_FIELDS
   ],
   brews: [
@@ -163,6 +179,34 @@ export function guestInventoryOutOfStock(
   return undefined;
 }
 
+/**
+ * Guest-safe bottle/keg fill gauge (0–100), snapped to existing fill/keg stops.
+ * Derived on the server from Keeper quantities — never a passthrough of raw fields.
+ *
+ * Spirits follow open-bottle semantics: an empty open bottle with spare stock
+ * projects as a full available bottle (same meaning as `openNextSpirit`), so
+ * guests never see "empty / last pours" while `out_of_stock` is false.
+ */
+export function guestInventoryAvailabilityPct(
+  table: string,
+  row: Record<string, unknown>
+): number | undefined {
+  if (table === "spirits") {
+    const openFill = nearestFillStop(row.fill_level);
+    if (openFill > 0) return openFill;
+    // Empty open bottle + spare(s) → patron can still be poured a full bottle.
+    if (openNextSpirit(row)) return 100;
+    return 0;
+  }
+  if (table === "taps") {
+    if (isTapEmpty(row)) return 0;
+    const remaining = Number(row.remaining_l ?? 0);
+    const size = Number(row.keg_size_l || DEFAULT_KEG_L);
+    return nearestKegStop(remaining, size);
+  }
+  return undefined;
+}
+
 function pickAllowedFields(
   row: Record<string, unknown>,
   allowed: readonly string[]
@@ -191,6 +235,10 @@ export function serializeGuestInventoryItem(
   const outOfStock = guestInventoryOutOfStock(table, row);
   if (typeof outOfStock === "boolean") {
     withAvailability.out_of_stock = outOfStock;
+  }
+  const availabilityPct = guestInventoryAvailabilityPct(table, row);
+  if (typeof availabilityPct === "number") {
+    withAvailability.availability_pct = availabilityPct;
   }
 
   const safe = pickAllowedFields(withAvailability, allowed);
@@ -244,6 +292,29 @@ export function serializeEnrichmentViewForCaller(
 ): BottleEnrichmentView | Record<string, unknown> {
   if (options.admin) return view;
   return serializeGuestEnrichmentView(view);
+}
+
+/**
+ * Guest overview projection: keep the derived keg gauge (`remaining_pct`) and
+ * strip exact pint counts. Keeper Mode retains the full snapshot.
+ */
+export function serializeOverviewForCaller<T extends {
+  taps: { list: Array<Record<string, unknown> & { pints?: number; remaining_pct?: number }> };
+}>(
+  snap: T,
+  options: { admin: boolean }
+): T {
+  if (options.admin) return snap;
+  return {
+    ...snap,
+    taps: {
+      ...snap.taps,
+      list: snap.taps.list.map((tap) => {
+        const { pints: _pints, ...rest } = tap;
+        return rest;
+      })
+    }
+  };
 }
 
 /** Keys that must never appear in Guest enrichment JSON (top-level or nested dump). */
