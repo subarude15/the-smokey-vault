@@ -133,7 +133,7 @@ Guest Mode may show **coarse bottle/keg availability gauges**. That is an intent
 | --- | --- | --- |
 | Bottle card (spirits) | fill gauge + `Full / ¾ / Half / ¼ / Empty` | server-derived `availability_pct` (fill stops) |
 | Tap card (On Tap + Tonight rail) | keg gauge + stop label (`Full` … `Kicked`) | inventory: `availability_pct`; overview: `remaining_pct` |
-| Bottle detail | one brass **availability line**: `POURING NOW · Half` / `ON THE SHELF · Half` (or `Last pours only` / `Kicked`) | same derived pct — no exact pint counts |
+| Bottle detail | one brass **availability line**: `POURING NOW · Half` / `ON THE SHELF · Half` (or `Empty` / `Kicked` when truly unavailable) | same derived pct — no exact pint counts; empty open bottle with spare stock projects as Full |
 | Tonight board | 6-glance swipe rail | existing `/api/overview` snapshot; Guest responses omit `pints` |
 
 Keeper Mode still sees exact quantities (`fill_level`, `remaining_l`, pint counts, stock, UPC, restock, enrichment).
