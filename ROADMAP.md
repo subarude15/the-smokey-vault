@@ -1,0 +1,107 @@
+# The Smokey Vault Roadmap
+
+Short project context for maintainers and coding agents. Update this file when a product PR changes the plan; do not turn it into a changelog.
+
+## Product
+
+The Smokey Vault is a private, self-hosted bar, wine cellar, packaged-beer inventory, brewery log, cocktail matcher, and AI mixologist. Keeper Mode manages inventory and enrichment; Guest Mode presents the collection safely.
+
+## Current state
+
+- Production runs from `ghcr.io/subarude15/the-smokey-vault:latest` on a Synology NAS.
+- Node.js 24, TypeScript, Fastify, React, and SQLite.
+- CI runs the full test suite, production build, catalog runtime checks, and Docker catalog verification.
+- Packaged-beer correctness work through PR119 is merged.
+- Verified production cases:
+  - Dirt wolf: official style, ABV, notes, and image found.
+  - Yuengling Traditional Lager: official notes and image found; no synthetic proof or 750 ml metadata.
+  - Ectogasm: no authoritative Drekker product page found, so the pipeline correctly returns no official result.
+
+## Non-negotiable rules
+
+- Preserve user/Keeper-owned values unless the user edits them.
+- Accept official product data only after strict exact/strong identity checks.
+- Never weaken source provenance or network-safety rules to make a lookup pass.
+- Packaged beer does not require or derive proof, generic `volume_ml`, origin, or TTB ID.
+- Canonical barcodes must pass GTIN-8/12/13/14 checksum validation; never invent missing digits.
+- Keep packaged beer out of the spirits table and Bottle Library.
+- Deletion stays per-item, authenticated, transactional, and cleanup-aware. No bulk purge.
+- Missing authoritative data is a valid result, not permission to guess.
+
+## Next PRs
+
+### PR120 — Keeper enrichment clarity
+
+UI-only unless production evidence exposes a data bug.
+
+- Say **Core enrichment complete** when only optional identifiers such as UPC are absent.
+- Separate required enrichment gaps from optional identifiers.
+- Keep job cards compact; put raw queries, rejected URLs, and stages in collapsed technical details.
+- Remove duplicate retry actions.
+- Hide null/empty AI profile fields and duplicate profile labels.
+- Hide resolved/stale conflicts or label them accurately.
+- Make provenance pills self-explanatory: source and confidence.
+
+### PR121 — Bottle-detail visual refinement
+
+- Improve product-image sizing when source art contains large blank margins.
+- Reduce nested-card density in product facts.
+- Collapse completed Keeper enrichment by default.
+- Improve responsive sizing for long product names.
+- Increase contrast for small labels and diagnostics.
+- Remove repeated facts when the hero already communicates them.
+
+### PR122+ — Evidence only
+
+Do not pre-plan discovery work. Open a focused PR only when a fresh production case proves a reproducible gap. Ectogasm alone is not a bug while Drekker publishes no authoritative product page.
+
+## Relevant code
+
+- `client/src/App.tsx` — bottle-detail route and Keeper actions.
+- `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
+- `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
+- `src/server.ts` — inventory API routes and authorization boundaries.
+- `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
+- `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
+- `src/ingestion/enrichment/metadata-fields.ts` — entity-specific metadata requirements.
+- `src/cola_client.ts` and existing UPC helpers — GTIN normalization and validation.
+
+Search before adding a helper. Reuse existing ownership, UPC alias, provenance, and outcome utilities.
+
+## Validation
+
+For each code PR:
+
+```bash
+npm test
+npm run build
+git diff --check
+```
+
+Also run the smallest focused test covering the changed behavior. Before squash-merging, require CI, Docker verification, and automated review to pass. After merging, confirm both `main` CI and container publishing succeed.
+
+## Production smoke matrix
+
+After changes to beer discovery, metadata, or enrichment UI, retest:
+
+1. Dirt wolf — successful official enrichment control.
+2. Yuengling Traditional Lager — `/our-beer/`, beer metadata, image, and GTIN regression case.
+3. Ectogasm — safe authoritative-source miss.
+4. One spirit and one wine — non-regression controls.
+
+Use fresh records for pipeline testing. Review cleanup candidates first, then remove obsolete test records individually.
+
+## Completed foundation
+
+- PR105–108: official-beer browser smoke support, deterministic paths, and extraction.
+- PR109–112: ownership-safe official repair, per-item queue controls, sequencing, and legacy beer audit.
+- PR113: packaged-beer discovery, metadata semantics, cache safety, and GTIN validation.
+- PR114–116: safe per-item deletion, cleanup preview, and Bottle Library separation.
+- PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
+
+## Explicitly deferred
+
+- No new external data source without a demonstrated product need and provenance design.
+- No automatic migration or bulk deletion of historical inventory.
+- No fuzzy acceptance of official product pages.
+- No large enrichment-system redesign for UI polish.
