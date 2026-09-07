@@ -30,18 +30,6 @@ The Smokey Vault is a private, self-hosted bar, wine cellar, packaged-beer inven
 
 ## Next PRs
 
-### PR120 — Keeper enrichment clarity
-
-UI-only unless production evidence exposes a data bug.
-
-- Say **Core enrichment complete** when only optional identifiers such as UPC are absent.
-- Separate required enrichment gaps from optional identifiers.
-- Keep job cards compact; put raw queries, rejected URLs, and stages in collapsed technical details.
-- Remove duplicate retry actions.
-- Hide null/empty AI profile fields and duplicate profile labels.
-- Hide resolved/stale conflicts or label them accurately.
-- Make provenance pills self-explanatory: source and confidence.
-
 ### PR121 — Bottle-detail visual refinement
 
 - Improve product-image sizing when source art contains large blank margins.
@@ -98,6 +86,7 @@ Use fresh records for pipeline testing. Review cleanup candidates first, then re
 - PR113: packaged-beer discovery, metadata semantics, cache safety, and GTIN validation.
 - PR114–116: safe per-item deletion, cleanup preview, and Bottle Library separation.
 - PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
+- PR120 — Keeper enrichment clarity: UI improvements for enrichment status clarity.
 
 ## Explicitly deferred
 

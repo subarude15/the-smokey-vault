@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { metadataFieldsForEntityType } from "../shared/metadata-utils";
 import { api } from "./api";
 
 export type FieldView = {
@@ -273,8 +274,14 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
         <strong className="enrichment-field-value">—</strong>
         <div className="enrichment-field-meta">
           <span className="chip static miss-chip">Missing</span>
-        </div>
+        </div>}
       </div>
+      
+      {coreComplete && (
+        <p className="enrichment-core-complete" role="status">
+          Core enrichment complete
+        </p>
+      )}
     );
   }
   const alcoholMissing =
@@ -368,6 +375,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const [queueBusy, setQueueBusy] = useState<string | null>(null);
   const [queueNotice, setQueueNotice] = useState("");
   const [queueError, setQueueError] = useState("");
+  const [coreComplete, setCoreComplete] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -382,6 +390,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         });
         if (cancelled) return;
         setView(next);
+        updateCoreCompleteStatus(next);
         setError("");
         setLoading(false);
         if (timer) {
@@ -417,6 +426,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     try {
       const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`);
       setView(next);
+      updateCoreCompleteStatus(next);
       setError("");
     } catch (err) {
       setQueueError(err instanceof Error ? err.message : "Could not refresh enrichment");
@@ -457,6 +467,20 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     } finally {
       setQueueBusy(null);
     }
+  }
+
+  function updateCoreCompleteStatus(view: BottleEnrichmentView) {
+    if (!view?.enrichment?.missing) return;
+    
+    const requiredFields = [
+      ...metadataFieldsForEntityType(table as any),
+      "name", "brand", "productType"
+    ];
+    
+    const missingRequired = view.enrichment.missing.filter(field => 
+      requiredFields.includes(field)
+    );
+    setCoreComplete(missingRequired.length === 0);
   }
 
   if (!ENRICHMENT_MODULES.has(table)) return null;
@@ -504,6 +528,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     userPreferred: false
   };
   const houseProfileText = textChild(tastingNotes.houseProfile).trim();
+  const hasHouseProfile = houseProfileText.length > 0;
   const officialText = textChild(tastingNotes.official).trim();
   const personalText = textChild(tastingNotes.personal).trim();
   const polling = shouldPollEnrichment(jobs);
@@ -811,7 +836,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
             <p className="muted">No official producer notes yet.</p>
           )}
         </div>
-        <div className="enrichment-note-card enrichment-note-house">
+        {hasHouseProfile && <div className="enrichment-note-card enrichment-note-house">
           <h3>AI house profile</h3>
           <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
           {houseProfileText ? (
