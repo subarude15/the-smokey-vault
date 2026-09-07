@@ -50,10 +50,11 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR122 — Server-side Guest inventory / enrichment redaction (API trust boundary; coarse `out_of_stock` only).
 - PR53 decision — stale draft closed unmerged; do not resurrect its parallel override architecture. Rebuild only the useful Keeper interaction on current `main`.
 - PR123 — Keeper enrichment actions on current architecture (rerun/retry, ownership-safe verify for packaged-beer ABV/style, resolvable conflict keep/accept without `enrichment_field_overrides`).
+- PR97 — Angel’s Share theme and guest availability carve-out merged. Theme/branding refinement is intentionally deferred until the broader site brand direction is settled.
 
 ## Next work
 
-Stability-first. Prefer small, testable PRs that reduce bugs and tighten Guest/Keeper boundaries. Do not open speculative discovery features.
+Stability-first, but prioritize concrete product usability problems observed in the live bar. Prefer small, testable PRs. Do not open speculative discovery features.
 
 ### Track A — Evidence-only discovery
 
@@ -63,15 +64,33 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 
 Priority order:
 
-1. **Review/merge PR #97** (Angel’s Share theme) — Product decision landed: guest-visible bottle/keg availability gauges are an intentional carve-out. Guest API exposes derived `availability_pct` (and overview `remaining_pct`) without raw `fill_level` / `remaining_l` / exact pints / UPC / stock. Rebased onto post-#122/#123 `main`; ready for review.
-2. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
-3. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
-4. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
-5. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
+1. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
+2. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
+3. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
+4. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
+
+### Track C — Product usability (next)
+
+These are explicitly desired near-term product improvements based on real household use.
+
+1. **Brewery Lab: make Brewfather-backed batches understandable and editable in The Smokey Vault.**
+   - Keep Brewfather as the source for brewing-specific batch data, but do not expose its raw/API-shaped model as the primary experience.
+   - Add a human-readable presentation layer for people who are not homebrewers: plain-language beer name/style, status, ABV, brew/package dates where useful, concise batch story/description, and clearly labeled brewing details behind an optional deeper view.
+   - Allow Keeper edits for site-owned presentation fields without corrupting Brewfather source data. At minimum support custom display name/description, tasting notes, and photos; consider serving notes or “what to expect” copy where it improves the guest experience.
+   - Define field ownership explicitly so Brewfather sync refreshes machine-owned brewing data while preserving Keeper-written notes, photos, and presentation copy.
+   - Guest Mode should read like a brewery taproom card, not a brewing-software API response.
+
+2. **Draft keg enrichment: show recognizable beer identity and imagery for commercial kegs.**
+   - For commercial draft beer, enrich enough metadata to make the tap/keg recognizable: brewery/brand, beer name, style, ABV when confidently available, and at least one useful image/logo.
+   - Prefer an official product/brand image when available, but a verified image of the equivalent packaged product (can/bottle artwork) is acceptable because most draft beers are also sold packaged.
+   - A brewery/beer logo is an acceptable fallback when product packaging art is unavailable.
+   - Do not require keg-specific artwork or keg-only product pages to succeed.
+   - Preserve strict identity matching: packaging format may differ, but brewery + beer identity must match strongly before reusing canned/bottled imagery or metadata.
+   - Keep this intentionally lightweight; the goal is a useful guest-facing tap card, not a new generalized enrichment architecture.
 
 ## Open PR status
 
-- **#97** Angel’s Share theme — open; rebased onto current `main` with Guest availability carve-out; ready for review (Track B #1).
+- **#121** Google Stitch `DESIGN.md` — draft branding/theme documentation; intentionally deferred until site branding direction is clearer.
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
 - **#53** Enrichment review actions — closed unmerged and superseded by PR123; do not rebase or merge.
 
@@ -127,3 +146,4 @@ Use fresh records for pipeline testing. Review cleanup candidates first, then re
 - No automatic migration or bulk deletion of historical inventory.
 - No fuzzy acceptance of official product pages.
 - No large enrichment-system redesign for UI polish.
+- Branding/theme refinement beyond existing shipped themes until the broader site brand direction is settled.
