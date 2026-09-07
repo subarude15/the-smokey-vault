@@ -28,16 +28,17 @@ The Smokey Vault is a private, self-hosted bar, wine cellar, packaged-beer inven
 - Deletion stays per-item, authenticated, transactional, and cleanup-aware. No bulk purge.
 - Missing authoritative data is a valid result, not permission to guess.
 
+## Completed foundation
+
+- PR105–108: official-beer browser smoke support, deterministic paths, and extraction.
+- PR109–112: ownership-safe official repair, per-item queue controls, sequencing, and legacy beer audit.
+- PR113: packaged-beer discovery, metadata semantics, cache safety, and GTIN validation.
+- PR114–116: safe per-item deletion, cleanup preview, and Bottle Library separation.
+- PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
+- PR120 — Keeper enrichment clarity: UI improvements for enrichment status clarity.
+- PR121 — Bottle-detail visual refinement: Image containment, responsive titles, collapsed enrichment, and high-contrast UI.
+
 ## Next PRs
-
-### PR121 — Bottle-detail visual refinement
-
-- Improve product-image sizing when source art contains large blank margins.
-- Reduce nested-card density in product facts.
-- Collapse completed Keeper enrichment by default.
-- Improve responsive sizing for long product names.
-- Increase contrast for small labels and diagnostics.
-- Remove repeated facts when the hero already communicates them.
 
 ### PR122+ — Evidence only
 
