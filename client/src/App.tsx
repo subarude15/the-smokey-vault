@@ -13,6 +13,13 @@ import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import {
+  guestSpiritAvailabilityLabel,
+  guestTapAvailabilityLabel,
+  readAvailabilityPct,
+  spiritGaugePct,
+  tapGaugeForDisplay
+} from "./guestAvailability";
+import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
   KEG_REMAINING_STOPS, KEG_SIZES, PACK_COUNT_STOPS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
   BREW_STATUSES, defaultSweetnessForWine, inferProductTable, inferWineFamilyAndStyle, kegFillPercent, kegSizeLabel,
@@ -1081,7 +1088,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
           <button type="button" className={`overview-tap${tap.empty ? " empty" : ""}`} key={tap.tap_number} onClick={() => go("taps")}>
             <span className="eyebrow">TAP {tap.tap_number}</span>
             <strong>{tap.title}</strong>
-            <small>{tap.empty ? "Nothing pouring" : [tap.style, tap.abv ? `${tap.abv}%` : "", tap.pints ? `${tap.pints} pints` : ""].filter(Boolean).join(" · ")}</small>
+            <small>{tap.empty ? "Nothing pouring" : [tap.style, tap.abv ? `${tap.abv}%` : "", admin && tap.pints ? `${tap.pints} pints` : ""].filter(Boolean).join(" · ")}</small>
             {!tap.empty && <span className="overview-tap-fill"><span style={{ width: `${tap.remaining_pct}%` }}/></span>}
           </button>
         ))}
@@ -1949,13 +1956,15 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
             {parseList(item.tags).slice(0,3).map((value) => <span key={value}>#{value}</span>)}
             {scoreLabel(item.vote_score as number | null, Number(item.vote_total)) ? <span>{scoreLabel(item.vote_score as number | null, Number(item.vote_total))}</span> : null}
           </div>
-          {module.id === "spirits" && <div className="fill"><span style={{width:`${nearestFillStop(item.fill_level)}%`}}/><small>{fillStopLabel(item.fill_level)}</small></div>}
+          {module.id === "spirits" && (() => {
+            const pct = spiritGaugePct(item, admin);
+            if (pct == null) return null;
+            return <div className="fill"><span style={{width:`${pct}%`}}/><small>{fillStopLabel(pct)}</small></div>;
+          })()}
           {module.id === "taps" && !isTapEmpty(item) && (() => {
-            const remaining = Number(item.remaining_l ?? 0);
-            const size = Number(item.keg_size_l || DEFAULT_KEG_L);
-            const pints = pintsRemaining(remaining);
-            const kicked = remaining <= 0;
-            return <div className="fill"><span style={{width:`${kegFillPercent(remaining, size)}%`}}/><small>{kicked ? "Kicked" : `${pints} pint${pints === 1 ? "" : "s"} left`}</small></div>;
+            const gauge = tapGaugeForDisplay(item, admin, DEFAULT_KEG_L);
+            if (!gauge) return null;
+            return <div className="fill"><span style={{width:`${gauge.pct}%`}}/><small>{gauge.label}</small></div>;
           })()}
           {module.id === "brews" && <BrewPipeline status={String(item.status ?? "")}/>}
         </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button>{module.id !== "taps" && <button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button>}</div>}
@@ -2115,9 +2124,17 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
         </div>
       </div>
       <div className="bottle-detail-grid">
-        {/* Guests browse to decide what to ask for, so availability is house-facing, not keeper-only. */}
-        {!admin && module.id === "taps" && !isTapEmpty(item) && <div className="full availability-line"><span>POURING NOW</span><strong>{kegLeft <= 0 ? "Kicked" : `${kegPints} pint${kegPints === 1 ? "" : "s"} left · ${fillStopLabel(kegFillPercent(kegLeft, kegSize))}`}</strong></div>}
-        {!admin && module.id === "spirits" && <div className="full availability-line"><span>ON THE SHELF</span><strong>{spiritFill <= 0 ? "Last pours only" : fillStopLabel(item.fill_level)}</strong></div>}
+        {/* Guest availability uses server-derived availability_pct — never raw fill/remaining/pints. */}
+        {!admin && module.id === "taps" && !isTapEmpty(item) && (() => {
+          const pct = readAvailabilityPct(item);
+          if (pct == null) return null;
+          return <div className="full availability-line"><span>POURING NOW</span><strong>{guestTapAvailabilityLabel(pct)}</strong></div>;
+        })()}
+        {!admin && module.id === "spirits" && (() => {
+          const pct = readAvailabilityPct(item);
+          if (pct == null) return null;
+          return <div className="full availability-line"><span>ON THE SHELF</span><strong>{guestSpiritAvailabilityLabel(pct)}</strong></div>;
+        })()}
         {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
         {module.id === "wines" && <div><span>Body</span><strong>{wineBodyLabel(item.body)}</strong></div>}
         {module.id === "wines" && drinkBy ? <div><span>Drink by</span><strong>{overdue ? `${drinkBy} · past` : drinkBy}</strong></div> : null}
@@ -3426,7 +3443,7 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Light and Dark keep the speakeasy look. Punk is the poster/sticker skin. Angel's Share is the dim-room build: brass on charred oak, label serif for names, mono for numbers, and fill gauges shown to guests. Same screens, different type and chrome. Patron Mode uses the same toggle in the top bar, and `?theme=angels` jumps a phone straight into it.</p>
+        <p>Light and Dark keep the speakeasy look. Punk is the poster/sticker skin. Angel's Share is the dim-room build: brass on charred oak, label serif for names, mono for numbers, and guest-visible fill/keg gauges from the house availability contract. Same screens, different type and chrome. Patron Mode uses the same toggle in the top bar, and `?theme=angels` jumps a phone straight into it.</p>
         <div className="theme-grid">{(["light","dark","punk","angels"] as const).map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}

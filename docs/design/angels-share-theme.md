@@ -4,7 +4,7 @@
 holding a drink in one hand. Not a marketing site. Availability is the product; everything else is chrome.
 
 > *Angel's share*: the part of a barrel that evaporates while it ages. The whole theme is about what is
-> **left in the barrel** — so the interface leads with level, count, and pourability instead of prose.
+> **left in the barrel** — so the interface leads with level and pourability instead of prose.
 
 ---
 
@@ -42,8 +42,9 @@ Where the guest lost time:
    Mono for anything you *check* — ABV, pints, tags, statuses, counts. Two voices, no ambiguity about which
    one is data.
 2. **Everything that can run out gets a gauge.** A brass dipstick in a notched trough: bottle fill, keg
-   remaining, wine bottle count, substitute availability. Same component everywhere, so one glance pattern
-   serves every shelf. **Guests see it too** — that is the entire point of the app.
+   remaining, substitute availability. Same component everywhere, so one glance pattern serves every shelf.
+   **Guests see the coarse gauge too** — sourced from the Guest availability contract, not raw Keeper liters
+   or exact pint counts.
 3. **Brass means available, ember means running short.** Two accents. Red stays reserved for destructive
    actions, so the room never turns into a traffic light.
 
@@ -63,7 +64,7 @@ Where the guest lost time:
  │ 6 stat cards, 2 rows │                ├──────────────────────┤
  ├──────────────────────┤                │ POURING RIGHT NOW →   │
  │ What's pouring       │                │ ┌────┐┌────┐┌────┐   │  every handle, with keg level
- │ tap cards (no level) │                │ │TAP1││TAP2││TAP3│   │  + pints left, for guests
+ │ tap cards (no level) │                │ │TAP1││TAP2││TAP3│   │  + coarse keg level, for guests
  │                      │                │ │▓▓▓▓││▓▓░░││ OPEN │  │
  ├──────────────────────┤                │ └────┘└────┘└────┘   │
  │ Off the menu         │                │ AT A GLANCE →         │  swipe rail, not a grid
@@ -126,16 +127,20 @@ second, non-color-dependent signal is the fill gauge right below it.
 
 ## 5. The availability model
 
-| Surface | What a guest now sees | Source |
-| --- | --- | --- |
-| Bottle card (spirits) | fill gauge + `Full / ¾ / Half / ¼` | `nearestFillStop(fill_level)` |
-| Tap card (home rail + On Tap) | keg gauge + `N pints left` | `remaining_l` → `pintsRemaining` |
-| Bottle detail | one brass **availability line**: `POURING NOW · 13 pints left · ¾` / `ON THE SHELF · Half` | read-only; no keeper controls exposed |
-| Tonight board | 6-glance swipe rail (pouring / off the menu / on the shelf / cellar / brewing / cold room) | existing `/overview` snapshot, no new endpoint |
+Guest Mode may show **coarse bottle/keg availability gauges**. That is an intentional product carve-out on top of the PR #122 Guest API trust boundary — not a return of raw Keeper inventory fields.
 
-Keeper-only data stays keeper-only: stock counts, UPCs, prices, restock list, enrichment plumbing.
-The three lines that changed are the `admin &&` gates on the fill/keg gauges and the tap rail, so if you want
-levels to stay behind the stick, revert those and nothing else moves.
+| Surface | What a guest sees | Source (Guest-safe) |
+| --- | --- | --- |
+| Bottle card (spirits) | fill gauge + `Full / ¾ / Half / ¼ / Empty` | server-derived `availability_pct` (fill stops) |
+| Tap card (On Tap + Tonight rail) | keg gauge + stop label (`Full` … `Kicked`) | inventory: `availability_pct`; overview: `remaining_pct` |
+| Bottle detail | one brass **availability line**: `POURING NOW · Half` / `ON THE SHELF · Half` (or `Last pours only` / `Kicked`) | same derived pct — no exact pint counts |
+| Tonight board | 6-glance swipe rail | existing `/api/overview` snapshot; Guest responses omit `pints` |
+
+Keeper Mode still sees exact quantities (`fill_level`, `remaining_l`, pint counts, stock, UPC, restock, enrichment).
+
+**Must stay Keeper-only for guests (network-visible):** `upc`, `stock_count`, `bottle_count`, `count`, raw `fill_level`, `remaining_l`, `keg_size_l`, exact pint counts, shelf location, enrichment diagnostics.
+
+The data contract is theme-independent. Angel’s Share makes gauges visually prominent; Light / Dark / Punk still receive the same Guest-safe fields and may render the shared gauge markup without Angel’s Share chrome.
 
 ## 6. Finding a drink
 
@@ -165,23 +170,22 @@ levels to stay behind the stick, revert those and nothing else moves.
 | File | Change |
 | --- | --- |
 | `client/src/theme-angels.css` *(new, ~860 lines)* | The whole theme: derived tokens, type, chrome, dock, sheet, gauges, cards, chips, forms, unlock pad, responsive + a11y blocks |
-| `client/src/App.tsx` | 5 surgical edits: `themePresets.angels`; `?theme=` override in `storedTheme()`; `cycleTheme`/`themeLabel`; `data-page`/`data-mode` on `.app-shell`; guest availability (2 gauge gates, 1 tap rail gate, 1 read-only detail line, 1 `tonight-cta` block) |
+| `client/src/App.tsx` | Surgical theme edits + guest gauges wired to `availability_pct` helpers |
+| `client/src/guestAvailability.ts` | Guest/Keeper gauge helpers (derived pct vs raw Keeper quantities) |
+| `src/guest-inventory-response.ts` | Guest allowlist + `availability_pct` derivation; overview pint strip |
 | `client/src/styles.css` | Base rules for `.tonight-cta` only — so the CTA works in every theme |
 | `client/src/main.tsx` | Import the theme layer after `styles.css` |
-| `client/index.html` | Two font families + a preconnect |
+| `client/index.html` | Fraunces + Instrument Sans alongside existing Google Fonts (same pattern as Punk/Playfair) |
 | `client/vite.config.ts` | `server.allowedHosts` so a proxied/tunneled dev server (phone testing) isn't blocked |
 
 Deliberate constraints:
 
 - **Scoped, never invasive.** Every rule is `html[data-theme="angels"] …` (guest layout additionally
-  `[data-mode="guest"]`), so Light/Dark/Punk render exactly as before. No `!important`, no new dependencies,
-  no new endpoints, no schema change.
+  `[data-mode="guest"]`), so Light/Dark/Punk render exactly as before. No theme-authorization on API
+  routes. No new dependencies, no schema expansion, no parallel inventory model.
+- **Server boundary first.** Guests never receive raw `fill_level` / `remaining_l` merely to paint a gauge.
 - **Layout via attributes, not forks.** `data-page` + `data-mode` let CSS scope the Tonight board, sticky
-  toolbars, and rail behavior to the surfaces that need them — the alternative was a parallel guest component,
-  which is the thing that rots.
-- Verified: `npm run build:client` ✓ · `npm test` 894 pass / 0 fail ✓ · every guest screen mounted in a DOM
-  harness and **129 of 199 theme selectors matched live** (the rest are keeper/modal-only states, checked
-  separately); palette contrast measured, not asserted.
+  toolbars, and rail behavior — no parallel guest component tree.
 
 ## 9. If this wins: next cut
 

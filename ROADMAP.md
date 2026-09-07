@@ -63,7 +63,7 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 
 Priority order:
 
-1. **Decide PR #97** (Angel’s Share theme) — Architecturally additive. Product call: treat guest-visible fill/keg gauges as an intentional availability carve-out while UPC/stock stay keeper-only; then rebase and merge, or park the PR.
+1. **Review/merge PR #97** (Angel’s Share theme) — Product decision landed: guest-visible bottle/keg availability gauges are an intentional carve-out. Guest API exposes derived `availability_pct` (and overview `remaining_pct`) without raw `fill_level` / `remaining_l` / exact pints / UPC / stock. Rebased onto post-#122/#123 `main`; ready for review.
 2. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
 3. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
 4. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
@@ -71,7 +71,7 @@ Priority order:
 
 ## Open PR status
 
-- **#97** Angel’s Share theme — open; rebase + availability carve-out decision required (Track B #1).
+- **#97** Angel’s Share theme — open; rebased onto current `main` with Guest availability carve-out; ready for review (Track B #1).
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
 - **#53** Enrichment review actions — closed unmerged and superseded by PR123; do not rebase or merge.
 
