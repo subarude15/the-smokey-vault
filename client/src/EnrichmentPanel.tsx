@@ -466,7 +466,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     return (
       <section className="enrichment-panel">
         <span className="eyebrow">Enrichment</span>
-        <p className="muted">Loading enrichmentâ€¦</p>
+        <p className="text-slate-300">Loading enrichmentâ€¦</p>
       </section>
     );
   }
