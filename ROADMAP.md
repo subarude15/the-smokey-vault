@@ -4,14 +4,23 @@ Short project context for maintainers and coding agents. Update this file when a
 
 ## Product
 
-The Smokey Vault is a private, self-hosted bar, wine cellar, packaged-beer inventory, brewery log, cocktail matcher, and AI mixologist. Keeper Mode manages inventory and enrichment; Guest Mode presents the collection safely.
+The Smokey Vault is a private, self-hosted home-bar appliance for a LAN kiosk and guest phones. It covers:
+
+- Inventory: spirits (Bottle Library), wine cellar, packaged beer, draft taps, and homebrew log
+- Guest Mode: digital bar menu / speakeasy portal (cocktails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
+- Keeper Mode: PIN unlock for scanning, enrichment, import review, restock, settings, and safe per-item deletion
+- Cocktail matcher, substitutions, and optional AI mixologist
+- Brewery Lab with optional Brewfather sync
+
+Guest Mode must present the collection safely. Keeper Mode owns mutations and operational metadata.
 
 ## Current state
 
 - Production runs from `ghcr.io/subarude15/the-smokey-vault:latest` on a Synology NAS.
 - Node.js 24, TypeScript, Fastify, React, and SQLite.
 - CI runs the full test suite, production build, catalog runtime checks, and Docker catalog verification.
-- Packaged-beer correctness work through PR119 is merged.
+- Packaged-beer correctness through GitHub PR #119 is merged.
+- After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
   - Yuengling Traditional Lager: official notes and image found; no synthetic proof or 750 ml metadata.
@@ -35,14 +44,32 @@ The Smokey Vault is a private, self-hosted bar, wine cellar, packaged-beer inven
 - PR113: packaged-beer discovery, metadata semantics, cache safety, and GTIN validation.
 - PR114–116: safe per-item deletion, cleanup preview, and Bottle Library separation.
 - PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
-- PR120 — Keeper enrichment clarity: UI improvements for enrichment status clarity.
-- PR121 — Bottle-detail visual refinement: Image containment, responsive titles, collapsed enrichment, and high-contrast UI.
+- Post-#119 on `main`: Keeper enrichment clarity, bottle-detail visual refinement, and EnrichmentPanel Hooks fix (direct commits, not separate GitHub PRs at the time).
 
-## Next PRs
+## Next work
 
-### PR122+ — Evidence only
+Stability-first. Prefer small, testable PRs that reduce bugs and tighten Guest/Keeper boundaries. Do not open speculative discovery features.
 
-Do not pre-plan discovery work. Open a focused PR only when a fresh production case proves a reproducible gap. Ectogasm alone is not a bug while Drekker publishes no authoritative product page.
+### Track A — Evidence-only discovery
+
+Do not pre-plan official-beer discovery work. Open a focused PR only when a fresh production case proves a reproducible gap. Ectogasm alone is not a bug while Drekker publishes no authoritative product page.
+
+### Track B — Hardening (planned)
+
+Priority order:
+
+1. **Server-side guest inventory / enrichment redaction** — Guest UI already hides UPC and stock chips (PR #93), but `GET /api/inventory/:table` and the public enrichment view still return full shelf rows to non-admin callers. Strip keeper metadata (UPC, stock/bottle counts, shelf location, enrichment diagnostics/conflict plumbing) for guests; keep guest-useful facts (name, brand, style, ABV, notes, image, votes).
+2. **Triage draft PR #53** (enrichment review actions) — Do not merge as-is. It is far behind `main`, conflicts with the current ownership/queue stack, and can fight packaged-beer field allowlists. Close it, or redesign onto `product_field_ownership` + beer allowlists + delete cleanup.
+3. **Decide PR #97** (Angel’s Share theme) — Architecturally additive. Product call: treat guest-visible fill/keg gauges as an intentional availability carve-out while UPC/stock stay keeper-only; then rebase and merge, or park the PR.
+4. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
+5. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
+6. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
+
+## Open PR status
+
+- **#97** Angel’s Share theme — open; rebase + availability carve-out decision required (Track B #3).
+- **#53** Enrichment review actions — draft; do not merge as-is (Track B #2).
+- **#78** Agentage memory MCP — draft tooling only; not product roadmap.
 
 ## Relevant code
 
@@ -56,6 +83,8 @@ Do not pre-plan discovery work. Open a focused PR only when a fresh production c
 - `src/cola_client.ts` and existing UPC helpers — GTIN normalization and validation.
 
 Search before adding a helper. Reuse existing ownership, UPC alias, provenance, and outcome utilities.
+
+Prefer extracting new UI into `client/src/` files rather than growing `App.tsx` further.
 
 ## Validation
 
@@ -80,14 +109,12 @@ After changes to beer discovery, metadata, or enrichment UI, retest:
 
 Use fresh records for pipeline testing. Review cleanup candidates first, then remove obsolete test records individually.
 
-## Completed foundation
+## Agent source of truth
 
-- PR105–108: official-beer browser smoke support, deterministic paths, and extraction.
-- PR109–112: ownership-safe official repair, per-item queue controls, sequencing, and legacy beer audit.
-- PR113: packaged-beer discovery, metadata semantics, cache safety, and GTIN validation.
-- PR114–116: safe per-item deletion, cleanup preview, and Bottle Library separation.
-- PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
-- PR120 — Keeper enrichment clarity: UI improvements for enrichment status clarity.
+- Prefer this file and `README.md` for product plan and ops.
+- `.spec/target-state.md` describes shipped appliance boundaries.
+- `.spec/CURRENT_TASK.md` is the active agent brief only when a task is assigned; otherwise it should say idle.
+- `GEMINI_CONTEXT.md` is deprecated for planning; do not treat its line counts or test totals as current.
 
 ## Explicitly deferred
 
