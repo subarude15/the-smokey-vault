@@ -1,0 +1,10 @@
+---
+description: Docker and local testing guidelines
+globs: ["Dockerfile", "docker-compose.yml", "src/**", "client/**"]
+---
+
+- SQLite database and uploads live in `./data` (`/data` in the container). Never delete or overwrite the `./data` directory during test runs.
+- `better-sqlite3` requires build dependencies (`python3`, `make`, `g++`) during Docker image build.
+- Local container mapping: Host port `6616` -> Container port `8080`.
+- Health endpoint for verification: `http://localhost:6616/api/health`.
+- Test commands should execute inside Docker or with `npm test` locally.
