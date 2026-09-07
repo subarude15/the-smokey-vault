@@ -79,17 +79,15 @@ export function normalizeItemEnrichmentQueueMode(
 /** Primary per-row action label for EnrichmentPanel (null = no primary button). */
 export function primaryItemEnrichmentActionLabel(
   statusLabel: JobStatusLabel
-): "Queue" | "Try again" | "Retry missing" | "Retry" | null {
+): "Run again" | "Retry" | null {
   switch (statusLabel) {
-    case "not_started":
-      return "Queue";
-    case "no_result":
-      return "Try again";
-    case "partial":
-      return "Retry missing";
     case "failed":
       return "Retry";
+    case "not_started":
+    case "no_result":
+    case "partial":
     case "complete":
+      return "Run again";
     case "waiting":
     case "in_progress":
       return null;

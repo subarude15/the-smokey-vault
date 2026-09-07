@@ -99,6 +99,8 @@ export type ConflictView = {
   competingValue: string | number | null;
   competingSource: string;
   competingSourceLabel: string;
+  resolvable?: boolean;
+  resolutionKind?: "identity" | "ownership";
 };
 
 export type BottleEnrichmentView = {
@@ -160,19 +162,39 @@ export type ItemEnrichmentQueueResult = {
 
 export function primaryEnrichmentActionLabel(
   statusLabel: JobView["statusLabel"]
-): "Queue" | "Try again" | "Retry missing" | "Retry" | null {
+): "Run again" | "Retry" | null {
   switch (statusLabel) {
-    case "not_started":
-      return "Queue";
-    case "no_result":
-      return "Try again";
-    case "partial":
-      return "Retry missing";
     case "failed":
       return "Retry";
+    case "not_started":
+    case "no_result":
+    case "partial":
+    case "complete":
+      return "Run again";
+    case "waiting":
+    case "in_progress":
+      return null;
     default:
       return null;
   }
+}
+
+/** Packaged-beer fields the server can mark human-owned today. */
+export function verifiableMetadataFields(
+  table: string,
+  metadata: BottleEnrichmentView["metadata"] | null | undefined
+): Array<{ field: "abv" | "category"; label: string }> {
+  if (table !== "packaged_beer" || !metadata) return [];
+  const out: Array<{ field: "abv" | "category"; label: string }> = [];
+  const abv = metadata.abv?.value;
+  if (typeof abv === "number" && Number.isFinite(abv) && abv > 0) {
+    out.push({ field: "abv", label: "ABV" });
+  }
+  const style = metadata.category?.value;
+  if (typeof style === "string" && style.trim()) {
+    out.push({ field: "category", label: "Style" });
+  }
+  return out;
 }
 
 export function enrichmentHasMissingWork(jobs: JobView[] | undefined): boolean {
@@ -340,7 +362,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
 /**
  * Keeper enrichment / review panel (keepers only).
  * Patrons see BottlePublicContent instead — useful notes without plumbing.
- * Offers per-item queue / retry controls; conflict resolution remains deferred.
+ * Offers per-item rerun/retry, ownership-safe verification, and resolvable conflicts.
  */
 
 function imageSourceLabel(sourceType: string | null | undefined, _verified: boolean | null | undefined): string {
@@ -368,22 +390,11 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const [queueBusy, setQueueBusy] = useState<string | null>(null);
   const [queueNotice, setQueueNotice] = useState("");
   const [queueError, setQueueError] = useState("");
-
-  // #region agent log
-  fetch("http://127.0.0.1:7894/ingest/c187dba4-1138-40f9-a159-c2b4c82ad1e9", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ffa455" },
-    body: JSON.stringify({
-      sessionId: "ffa455",
-      location: "EnrichmentPanel.tsx:render",
-      message: "EnrichmentPanel render",
-      data: { table, itemId, loading, hasView: Boolean(view), hasError: Boolean(error) },
-      timestamp: Date.now(),
-      hypothesisId: "H-hooks",
-      runId: "post-fix"
-    })
-  }).catch(() => {});
-  // #endregion
+  const [confirmAction, setConfirmAction] = useState<null | {
+    kind: "accept-conflict" | "verify";
+    field: string;
+    label: string;
+  }>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -430,26 +441,11 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   }, [table, itemId]);
 
   // Must run before any conditional returns (Rules of Hooks).
-  // #region agent log
   useEffect(() => {
-    fetch("http://127.0.0.1:7894/ingest/c187dba4-1138-40f9-a159-c2b4c82ad1e9", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ffa455" },
-      body: JSON.stringify({
-        sessionId: "ffa455",
-        location: "EnrichmentPanel.tsx:collapse-effect",
-        message: "collapse effect ran",
-        data: { hasView: Boolean(view), loading, hookPhase: "before-returns" },
-        timestamp: Date.now(),
-        hypothesisId: "H-hooks",
-        runId: "post-fix"
-      })
-    }).catch(() => {});
     if (!view) return;
     const jobs = Array.isArray(view.enrichment?.jobs) ? view.enrichment.jobs : [];
     if (!enrichmentHasMissingWork(jobs)) setExpanded(false);
   }, [view, loading]);
-  // #endregion
 
   async function refreshEnrichment() {
     try {
@@ -492,6 +488,80 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       await refreshEnrichment();
     } catch (err) {
       setQueueError(err instanceof Error ? err.message : "Could not queue enrichment");
+    } finally {
+      setQueueBusy(null);
+    }
+  }
+
+  async function rerunJob(jobType: ItemEnrichmentJobType, busyKey: string) {
+    setQueueBusy(busyKey);
+    setQueueError("");
+    setQueueNotice("");
+    try {
+      const result = await api<ItemEnrichmentQueueResult & { view?: BottleEnrichmentView }>(
+        `/inventory/${table}/${itemId}/enrichment/rerun`,
+        {
+          method: "POST",
+          body: JSON.stringify({ jobType })
+        }
+      );
+      if (result.queued.length) {
+        setQueueNotice(`${jobTypeDisplay(jobType)} queued`);
+      } else if (result.skipped.some((s) => s.reason === "already_queued")) {
+        setQueueNotice("Already queued");
+      } else {
+        setQueueNotice("Nothing to queue");
+      }
+      if (result.view) setView(result.view);
+      else await refreshEnrichment();
+    } catch (err) {
+      setQueueError(err instanceof Error ? err.message : "Could not rerun enrichment");
+    } finally {
+      setQueueBusy(null);
+    }
+  }
+
+  async function resolveConflict(field: string, choice: "keep" | "accept") {
+    setQueueBusy(`conflict:${field}:${choice}`);
+    setQueueError("");
+    setQueueNotice("");
+    setConfirmAction(null);
+    try {
+      const result = await api<{ view?: BottleEnrichmentView }>(
+        `/inventory/${table}/${itemId}/enrichment/resolve-conflict`,
+        {
+          method: "POST",
+          body: JSON.stringify({ field, choice })
+        }
+      );
+      setQueueNotice(choice === "keep" ? "Kept current value" : "Accepted competing value");
+      if (result.view) setView(result.view as BottleEnrichmentView);
+      else await refreshEnrichment();
+    } catch (err) {
+      setQueueError(err instanceof Error ? err.message : "Could not resolve conflict");
+    } finally {
+      setQueueBusy(null);
+    }
+  }
+
+  async function verifyField(field: "abv" | "category") {
+    setQueueBusy(`verify:${field}`);
+    setQueueError("");
+    setQueueNotice("");
+    setConfirmAction(null);
+    try {
+      const result = await api<{ view?: BottleEnrichmentView }>(
+        `/inventory/${table}/${itemId}/enrichment/verify-field`,
+        {
+          method: "POST",
+          body: JSON.stringify({ field })
+        }
+      );
+      setQueueNotice("Marked Keeper-confirmed");
+      if (result.view) setView(result.view as BottleEnrichmentView);
+      else await refreshEnrichment();
+    } catch (err) {
+      setQueueError(err instanceof Error ? err.message : "Could not mark verified");
     } finally {
       setQueueBusy(null);
     }
@@ -546,6 +616,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const personalText = textChild(tastingNotes.personal).trim();
   const coreComplete = !enrichmentHasMissingWork(jobs);
   const polling = shouldPollEnrichment(jobs);
+  const verifiable = verifiableMetadataFields(table, metadata);
 
   return (
     <section className="enrichment-panel">
@@ -577,7 +648,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           {enrichment.needsReview ? (
             <div className="enrichment-review-banner" role="status">
               <strong>Needs review</strong>
-              <p>Trusted sources disagree on identity. Kept values are shown; competing values are listed below. Editing is not available here yet.</p>
+              <p>Trusted sources disagree on identity. Resolve conflicts below, or keep the current vault values.</p>
             </div>
           ) : null}
 
@@ -601,6 +672,39 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
             {queueError ? <p className="error enrichment-queue-error">{queueError}</p> : null}
           </div>
 
+          {confirmAction ? (
+            <div className="enrichment-confirm" role="alertdialog" aria-label="Confirm enrichment action">
+              <p>
+                {confirmAction.kind === "verify"
+                  ? `Mark ${confirmAction.label} as Keeper-confirmed? Machine enrichment will not overwrite it later.`
+                  : `Replace the current ${confirmAction.label} value with the competing trusted value?`}
+              </p>
+              <div className="enrichment-confirm-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={Boolean(queueBusy)}
+                  onClick={() => setConfirmAction(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(queueBusy)}
+                  onClick={() => {
+                    if (confirmAction.kind === "verify") {
+                      void verifyField(confirmAction.field as "abv" | "category");
+                    } else {
+                      void resolveConflict(confirmAction.field, "accept");
+                    }
+                  }}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="enrichment-jobs">
             {(() => {
               const allIdle = jobs.length > 0 && jobs.every((j) => j.statusLabel === "not_started");
@@ -618,7 +722,6 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                 (job.statusLabel === "no_result" || job.statusLabel === "failed" || job.statusLabel === "partial")
                 && (job.diagnosticSummary || job.diagnostics);
               const primaryLabel = primaryEnrichmentActionLabel(job.statusLabel);
-              const showRerun = job.statusLabel === "complete";
               const jobBusyKey = `job:${job.type}`;
               const jobDisabled =
                 Boolean(queueBusy)
@@ -632,35 +735,14 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                     {primaryLabel ? (
                       <button
                         type="button"
-                        className="secondary enrichment-job-action"
+                        className={primaryLabel === "Retry" ? "secondary enrichment-job-action" : "enrichment-job-rerun"}
                         disabled={jobDisabled}
                         aria-busy={queueBusy === jobBusyKey}
                         onClick={() =>
-                          void queueEnrichment({
-                            jobTypes: [job.type as ItemEnrichmentJobType],
-                            mode: job.statusLabel === "not_started" ? "missing" : "retry",
-                            busyKey: jobBusyKey
-                          })
+                          void rerunJob(job.type as ItemEnrichmentJobType, jobBusyKey)
                         }
                       >
                         {queueBusy === jobBusyKey ? "Queueing…" : primaryLabel}
-                      </button>
-                    ) : null}
-                    {showRerun ? (
-                      <button
-                        type="button"
-                        className="enrichment-job-rerun"
-                        disabled={jobDisabled}
-                        aria-busy={queueBusy === jobBusyKey}
-                        onClick={() =>
-                          void queueEnrichment({
-                            jobTypes: [job.type as ItemEnrichmentJobType],
-                            mode: "retry",
-                            busyKey: jobBusyKey
-                          })
-                        }
-                      >
-                        {queueBusy === jobBusyKey ? "Queueing…" : "Re-run"}
                       </button>
                     ) : null}
                   </div>
@@ -810,6 +892,30 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                 </>
               ) : null}
             </div>
+            {verifiable.length ? (
+              <div className="enrichment-verify-actions">
+                {verifiable.map((item) => (
+                  <button
+                    key={item.field}
+                    type="button"
+                    className="secondary"
+                    disabled={Boolean(queueBusy)}
+                    aria-busy={queueBusy === `verify:${item.field}`}
+                    onClick={() =>
+                      setConfirmAction({
+                        kind: "verify",
+                        field: item.field,
+                        label: item.label
+                      })
+                    }
+                  >
+                    {queueBusy === `verify:${item.field}`
+                      ? "Saving…"
+                      : `Mark ${item.label} verified`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {conflicts.length ? (
@@ -821,6 +927,9 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                     c.competingSource === "plcb_spirits"
                     || c.competingSource === "plcb_wines"
                     || c.competingSource === "iowa";
+                  const fieldKey = c.field;
+                  const busyKeep = queueBusy === `conflict:${fieldKey}:keep`;
+                  const busyAccept = queueBusy === `conflict:${fieldKey}:accept`;
                   return (
                     <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
                       <strong>{c.field}</strong>
@@ -833,11 +942,38 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                           </>
                         ) : (
                           <>
-                            Kept <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
-                            <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
+                            Current <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs
+                            competing <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
                           </>
                         )}
                       </p>
+                      {c.resolvable ? (
+                        <div className="enrichment-conflict-actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={Boolean(queueBusy)}
+                            aria-busy={busyKeep}
+                            onClick={() => void resolveConflict(fieldKey, "keep")}
+                          >
+                            {busyKeep ? "Saving…" : "Keep current"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={Boolean(queueBusy)}
+                            aria-busy={busyAccept}
+                            onClick={() =>
+                              setConfirmAction({
+                                kind: "accept-conflict",
+                                field: fieldKey,
+                                label: fieldKey
+                              })
+                            }
+                          >
+                            {busyAccept ? "Saving…" : "Use competing"}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

@@ -44,6 +44,9 @@ import {
   queueItemEnrichment,
   normalizeItemEnrichmentJobTypes,
   normalizeItemEnrichmentQueueMode,
+  rerunItemEnrichmentJob,
+  verifyEnrichmentField,
+  resolveEnrichmentConflict,
   startEnrichmentWorker,
   type EnrichmentBackfillJobType
 } from "./ingestion/jobs/index.js";
@@ -600,8 +603,7 @@ app.get("/api/admin/inventory/cleanup-preview", {
  * Read-only enrichment / review state.
  * Guests receive a redacted tasting/image projection only.
  * Keepers receive the full review model (optional diagnostics when authenticated).
- * There is no mutation surface on this route — conflict resolution, re-runs, and
- * content edits are deferred and must use requireAdmin when added.
+ * Mutations use requireAdmin routes: queue, rerun, verify-field, resolve-conflict.
  */
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/enrichment", {
   schema: {
@@ -660,6 +662,89 @@ app.post<{
     entityId: id,
     jobTypes: jobTypes ?? undefined,
     mode: mode ?? undefined
+  });
+  if ("error" in result) {
+    return reply.code(result.statusCode).send({ error: result.error });
+  }
+  return result;
+});
+
+/**
+ * Keeper-only: explicit single-job rerun/retry (thin wrapper over queue semantics).
+ */
+app.post<{
+  Params: { table: string; id: string };
+  Body: { jobType?: string };
+}>("/api/inventory/:table/:id/enrichment/rerun", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Rerun or retry one enrichment job for an inventory bottle"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const result = rerunItemEnrichmentJob({
+    entityType: request.params.table,
+    entityId: Number(request.params.id),
+    jobType: request.body?.jobType
+  });
+  if ("error" in result) {
+    return reply.code(result.statusCode).send({ error: result.error });
+  }
+  return result;
+});
+
+/**
+ * Keeper-only: mark packaged-beer ABV/style as human-owned without changing the value.
+ */
+app.post<{
+  Params: { table: string; id: string };
+  Body: { field?: string };
+}>("/api/inventory/:table/:id/enrichment/verify-field", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Mark a supported enrichment field as Keeper-confirmed"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const result = verifyEnrichmentField({
+    entityType: request.params.table,
+    entityId: Number(request.params.id),
+    field: request.body?.field
+  });
+  if ("error" in result) {
+    return reply.code(result.statusCode).send({ error: result.error });
+  }
+  return result;
+});
+
+/**
+ * Keeper-only: resolve a displayed enrichment conflict.
+ * Client chooses keep|accept; server derives the trusted competing value.
+ */
+app.post<{
+  Params: { table: string; id: string };
+  Body: {
+    field?: string;
+    choice?: string;
+    value?: unknown;
+    competingValue?: unknown;
+    replacement?: unknown;
+  };
+}>("/api/inventory/:table/:id/enrichment/resolve-conflict", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Resolve a trusted enrichment field conflict"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const result = resolveEnrichmentConflict({
+    entityType: request.params.table,
+    entityId: Number(request.params.id),
+    field: request.body?.field,
+    choice: request.body?.choice,
+    value: request.body?.value,
+    competingValue: request.body?.competingValue,
+    replacement: request.body?.replacement
   });
   if ("error" in result) {
     return reply.code(result.statusCode).send({ error: result.error });
