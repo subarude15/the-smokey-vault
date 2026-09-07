@@ -104,7 +104,8 @@ const modules: Module[] = [
     ...beerFields, {key:"notes",label:"Cellar notes",type:"textarea"}
   ]},
   { id: "brews", label: "Homebrew Log", singular: "Batch", icon: FlaskConical, title: "Homebrew Log", subtitle: "Plan batches and follow fermentation through the cellar.", primary: "batch_name", secondary: "style", makerKey: "maker", kindKey: "style", fields: [
-    {key:"batch_name",label:"Batch name"},{key:"maker",label:"Brewery / maker"},
+    {key:"batch_name",label:"Batch name"},{key:"display_name",label:"Guest display name"},
+    {key:"maker",label:"Brewery / maker"},
     {key:"brew_date",label:"Brew date",type:"date"},{key:"status",label:"Status",type:"brewStatus"},
     {key:"style",label:"Style",options:BEER_STYLES},{key:"base_ingredient",label:"Base / grain",options:BASE_INGREDIENTS},
     {key:"hops",label:"Hops used",type:"hops"},
@@ -112,6 +113,7 @@ const modules: Module[] = [
     {key:"measured_og",label:"Measured OG",type:"gravity"},{key:"measured_fg",label:"Measured FG",type:"gravity"},
     {key:"calculated_abv",label:"Calculated ABV %",type:"brewAbv"},
     {key:"flavors",label:"Flavor profile",type:"flavors"},
+    {key:"guest_description",label:"About this beer",type:"textarea"},
     {key:"tasting_notes",label:"Tasting notes",type:"tasting"},
     {key:"schedule",label:"Dry hop / adjunct schedule",type:"textarea"},
     {key:"image_url",label:"Photo",type:"image"},

@@ -122,6 +122,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
   brews: [
     "id",
     "batch_name",
+    "display_name",
     "style",
     "brew_date",
     "calculated_abv",
@@ -131,6 +132,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
     "maker",
     "image_url",
     "display_image_url",
+    "guest_description",
     "tasting_notes",
     "flavors",
     "tags",
@@ -164,6 +166,7 @@ export const GUEST_FORBIDDEN_INVENTORY_KEYS = [
   "remaining_l",
   "keg_size_l",
   "brewfather_id",
+  "keeper_owns_image",
   "target_og",
   "target_fg",
   "measured_og",

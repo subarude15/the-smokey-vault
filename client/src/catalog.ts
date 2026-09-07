@@ -58,7 +58,8 @@ export {
   kegFillPercent, kegSizeLabel, nearestKegStop, pintsRemaining, pourPint, remainingFromPercent, brewToTap,
   emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
-  onTapLabel, parseGravity, tapsForBatch, brewDisplayName,
+  onTapLabel, parseGravity, tapsForBatch, brewDisplayName, brewPresentationName, brewGuestStatusLabel,
+  brewKeeperOwnsImage,
   compareBottleCollectionByName, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedCount, packagedStockLabel,
   compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
   spiritStock, spiritStockLabel, spiritFamilyFromLabel, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS

@@ -430,8 +430,11 @@ body.nav-open{overflow:hidden}
 .lab-tier{margin-bottom:32px}
 .lab-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px}
 .lab-card{display:flex;gap:16px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.lab-card-button{width:100%;text-align:left;color:inherit;cursor:pointer;transition:border-color .2s var(--ease-out),transform .2s var(--ease-spring),box-shadow .2s var(--ease-out)}
+.lab-card-button:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 10px 28px color-mix(in srgb,var(--bg) 55%,#3a2414)}
+.lab-card-button:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px}
 .lab-card.lab-pouring{border-color:var(--accent)}
-.lab-thumb{width:64px;height:64px;flex:none;border-radius:11px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--accent)}
+.lab-thumb{width:72px;height:88px;flex:none;border-radius:11px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--accent)}
 .lab-thumb img{width:100%;height:100%;object-fit:cover}
 .lab-body{flex:1;min-width:0}
 .lab-body h3{font:600 20px "Playfair Display";margin:6px 0 9px;line-height:1.15}
@@ -440,14 +443,35 @@ body.nav-open{overflow:hidden}
 .lab-stage{display:inline-block;padding:3px 9px;border-radius:99px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .lab-stage.fermenting{border-color:var(--accent-2);color:var(--accent-2)}
 .lab-stage.conditioning{border-color:var(--accent);color:var(--accent)}
+.lab-stage.pouring{border-color:var(--accent);color:var(--accent)}
 .lab-stats{display:flex;flex-wrap:wrap;gap:6px}
 .lab-stats span{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;background:var(--surface-2);color:var(--muted);font-size:12px}
+.lab-guest-meta{display:flex;flex-direction:column;gap:8px}
+.lab-card-blurb{margin:0;color:var(--muted);font-size:13px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lab-card-flavors{margin-top:2px}
 .lab-stage-days{display:block;margin-top:10px;color:var(--muted);font-size:12px}
 .lab-empty{margin:0;color:var(--muted)}
 .lab-log{list-style:none;margin:8px 0 18px;padding:0;display:flex;flex-direction:column;gap:6px}
-.lab-log li{display:flex;justify-content:space-between;gap:14px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:14px}
+.lab-log li{display:flex;justify-content:space-between;gap:14px;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:14px;overflow:hidden}
+.lab-log-button{display:flex;justify-content:space-between;gap:14px;width:100%;padding:10px 14px;border:0;background:transparent;color:inherit;cursor:pointer;text-align:left}
+.lab-log-button:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .lab-log span{color:var(--muted);font-size:13px}
 .lab-footer-actions{display:flex;flex-wrap:wrap;gap:8px}
+.lab-detail{display:flex;flex-direction:column;gap:22px}
+.lab-detail-hero{display:grid;grid-template-columns:180px minmax(0,1fr);gap:24px;align-items:start;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.lab-detail-image{width:180px;height:220px;border-radius:14px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden;color:var(--accent)}
+.lab-detail-image img{width:100%;height:100%;object-fit:cover}
+.lab-detail-copy h1{font:600 clamp(30px,3.6vw,46px) "Playfair Display";margin:8px 0 12px;line-height:1.08}
+.lab-tap-line{display:block;margin-top:8px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.lab-about{margin:12px 0 0;line-height:1.6;color:var(--text);max-width:54ch}
+.lab-tech-details{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:14px 16px}
+.lab-tech-details summary{cursor:pointer;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;font-size:12px}
+.lab-tech-details[open] summary{margin-bottom:12px}
+.lab-edit-grid{margin-top:4px}
+@media(max-width:700px){
+  .lab-detail-hero{grid-template-columns:1fr}
+  .lab-detail-image{width:min(100%,220px);height:200px;margin:0 auto}
+}
 .archive-block{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:16px 18px}
 .archive-block summary{cursor:pointer;font-weight:600;font-size:15px}
 .archive-block[open] summary{margin-bottom:14px}

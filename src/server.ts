@@ -9,7 +9,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession, resolveSessionSecret } from "./auth.js";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
-import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
+import { applyBrewImageOwnershipOnWrite, prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
 import { canonicalGtin } from "./cola_client.js";
 import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottlePrompt, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
@@ -121,7 +121,7 @@ const publicTables = new Set([...tables, "cocktails"]);
 const tableFields: Record<string, string[]> = {
   spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count","tasting_notes","flavors","tags","base_ingredient","blocked_from_ordering"],
   taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l","maker","notes","image_url","tasting_notes","flavors","tags","base_ingredient"],
-  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","image_url","tasting_notes","flavors","tags","base_ingredient","hops","brewfather_id"],
+  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","image_url","tasting_notes","flavors","tags","base_ingredient","hops","brewfather_id","display_name","guest_description","keeper_owns_image"],
   packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url","notes","tasting_notes","flavors","tags","base_ingredient","vessel"],
   wines: ["producer","name","varietal","vintage","type","style","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url","tasting_notes","flavors","tags","base_ingredient","blocked_from_ordering"]
 };
@@ -443,6 +443,8 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
       : table === "spirits"
         ? prepareSpiritWrite({ ...request.body })
         : { ...request.body };
+  // Decide ownership from the Keeper-submitted URL before localization rewrites it.
+  if (table === "brews") applyBrewImageOwnershipOnWrite(body);
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
@@ -560,6 +562,8 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
       : table === "spirits"
         ? prepareSpiritWrite({ ...request.body })
         : { ...request.body };
+  // Compare the Keeper-submitted image to the stored one before localization.
+  if (table === "brews") applyBrewImageOwnershipOnWrite(body, existing);
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;

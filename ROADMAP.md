@@ -73,7 +73,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Brewery Lab: make Brewfather-backed batches understandable and editable in The Smokey Vault.**
+1. **Brewery Lab: make Brewfather-backed batches understandable and editable in The Smokey Vault.** *(PR124 in progress)*
    - Keep Brewfather as the source for brewing-specific batch data, but do not expose its raw/API-shaped model as the primary experience.
    - Add a human-readable presentation layer for people who are not homebrewers: plain-language beer name/style, status, ABV, brew/package dates where useful, concise batch story/description, and clearly labeled brewing details behind an optional deeper view.
    - Allow Keeper edits for site-owned presentation fields without corrupting Brewfather source data. At minimum support custom display name/description, tasting notes, and photos; consider serving notes or “what to expect” copy where it improves the guest experience.
@@ -97,7 +97,10 @@ These are explicitly desired near-term product improvements based on real househ
 ## Relevant code
 
 - `client/src/App.tsx` — bottle-detail route and Keeper actions.
+- `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
+- `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
+- `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `src/server.ts` — inventory API routes and authorization boundaries.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
