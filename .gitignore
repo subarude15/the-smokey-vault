@@ -35,3 +35,6 @@ ehthumbs.db
 Desktop.ini
 
 .cursor/
+
+.env.aider
+.aider*

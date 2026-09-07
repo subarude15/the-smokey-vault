@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { metadataFieldsForEntityType } from "../shared/metadata-utils";
+﻿import { useEffect, useState } from "react";
 import { api } from "./api";
 
 export type FieldView = {
@@ -271,17 +270,11 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
     return (
       <div className="enrichment-field enrichment-field-missing">
         <span className="enrichment-field-label">{label}</span>
-        <strong className="enrichment-field-value">—</strong>
+        <strong className="enrichment-field-value">â€”</strong>
         <div className="enrichment-field-meta">
           <span className="chip static miss-chip">Missing</span>
-        </div>}
+        </div>
       </div>
-      
-      {coreComplete && (
-        <p className="enrichment-core-complete" role="status">
-          Core enrichment complete
-        </p>
-      )}
     );
   }
   const alcoholMissing =
@@ -291,13 +284,13 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
       || (typeof field.value === "number" && field.value === 0));
   const value =
     alcoholMissing || field.value == null || field.value === ""
-      ? "—"
+      ? "â€”"
       : typeof field.value === "number"
         ? String(field.value)
         : textChild(field.value);
   const title =
     field.confidence != null
-      ? `${field.sourceLabel ?? "Unknown"} · ${field.confidenceLabel ?? "Unknown"} (${field.confidence})`
+      ? `${field.sourceLabel ?? "Unknown"} Â· ${field.confidenceLabel ?? "Unknown"} (${field.confidence})`
       : undefined;
   const confirmations = (field.contributors ?? []).filter((c) => c.role === "confirmation");
   return (
@@ -332,11 +325,11 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
                       c.matchedCode ? `Matched ${c.matchedCode}` : null
                     ]
                       .filter(Boolean)
-                      .join(" · ")
+                      .join(" Â· ")
                   : undefined
               }
             >
-              Confirmed by {c.sourceLabel} · {c.confidenceLabel}
+              Confirmed by {c.sourceLabel} Â· {c.confidenceLabel}
             </div>
           ))}
         </div>
@@ -347,7 +340,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
 
 /**
  * Keeper enrichment / review panel (keepers only).
- * Patrons see BottlePublicContent instead — useful notes without plumbing.
+ * Patrons see BottlePublicContent instead â€” useful notes without plumbing.
  * Offers per-item queue / retry controls; conflict resolution remains deferred.
  */
 
@@ -375,7 +368,6 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const [queueBusy, setQueueBusy] = useState<string | null>(null);
   const [queueNotice, setQueueNotice] = useState("");
   const [queueError, setQueueError] = useState("");
-  const [coreComplete, setCoreComplete] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -390,7 +382,6 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         });
         if (cancelled) return;
         setView(next);
-        updateCoreCompleteStatus(next);
         setError("");
         setLoading(false);
         if (timer) {
@@ -426,7 +417,6 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     try {
       const next = await api<BottleEnrichmentView>(`/inventory/${table}/${itemId}/enrichment`);
       setView(next);
-      updateCoreCompleteStatus(next);
       setError("");
     } catch (err) {
       setQueueError(err instanceof Error ? err.message : "Could not refresh enrichment");
@@ -469,27 +459,13 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     }
   }
 
-  function updateCoreCompleteStatus(view: BottleEnrichmentView) {
-    if (!view?.enrichment?.missing) return;
-    
-    const requiredFields = [
-      ...metadataFieldsForEntityType(table as any),
-      "name", "brand", "productType"
-    ];
-    
-    const missingRequired = view.enrichment.missing.filter(field => 
-      requiredFields.includes(field)
-    );
-    setCoreComplete(missingRequired.length === 0);
-  }
-
   if (!ENRICHMENT_MODULES.has(table)) return null;
 
   if (loading && !view) {
     return (
       <section className="enrichment-panel">
         <span className="eyebrow">Enrichment</span>
-        <p className="muted">Loading enrichment…</p>
+        <p className="muted">Loading enrichmentâ€¦</p>
       </section>
     );
   }
@@ -528,7 +504,6 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     userPreferred: false
   };
   const houseProfileText = textChild(tastingNotes.houseProfile).trim();
-  const hasHouseProfile = houseProfileText.length > 0;
   const officialText = textChild(tastingNotes.official).trim();
   const personalText = textChild(tastingNotes.personal).trim();
   const polling = shouldPollEnrichment(jobs);
@@ -540,8 +515,14 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           <span className="eyebrow">Enrichment review</span>
           <h2>What the vault knows</h2>
         </div>
-        {polling ? <span className="guest-badge">Updating…</span> : null}
+        {polling ? <span className="guest-badge">Updatingâ€¦</span> : null}
       </div>
+
+      {coreComplete && (
+        <div className="enrichment-core-complete" role="status" style={{ padding: '8px 12px', background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', borderRadius: '6px', marginBottom: '12px', fontSize: '0.875rem', fontWeight: 500 }}>
+          Core enrichment complete (only optional identifiers missing)
+        </div>
+      )}
 
       {enrichment.needsReview ? (
         <div className="enrichment-review-banner" role="status">
@@ -559,7 +540,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           onClick={() => void queueEnrichment({ mode: "missing", busyKey: "missing" })}
         >
           {queueBusy === "missing"
-            ? "Queueing…"
+            ? "Queueingâ€¦"
             : enrichmentHasMissingWork(jobs)
               ? "Queue missing enrichment"
               : "Nothing missing"}
@@ -612,7 +593,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                       })
                     }
                   >
-                    {queueBusy === jobBusyKey ? "Queueing…" : primaryLabel}
+                    {queueBusy === jobBusyKey ? "Queueingâ€¦" : primaryLabel}
                   </button>
                 ) : null}
                 {showRerun ? (
@@ -629,7 +610,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                       })
                     }
                   >
-                    {queueBusy === jobBusyKey ? "Queueing…" : "Re-run"}
+                    {queueBusy === jobBusyKey ? "Queueingâ€¦" : "Re-run"}
                   </button>
                 ) : null}
               </div>
@@ -654,9 +635,9 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                         {job.diagnostics.imageCandidates.map((c, index) => {
                           const dims =
                             c.width != null && c.height != null
-                              ? `${c.width}×${c.height}`
+                              ? `${c.width}Ã—${c.height}`
                               : "dimensions unknown";
-                          const mime = c.mimeType ? ` · ${c.mimeType}` : "";
+                          const mime = c.mimeType ? ` Â· ${c.mimeType}` : "";
                           const sourceLabel = c.sourceType
                             ? c.sourceType.charAt(0).toUpperCase() + c.sourceType.slice(1)
                             : "";
@@ -677,13 +658,13 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                                 <summary>
                                   <code>{textChild(c.urlHost)}{textChild(c.urlPath || "")}</code>
                                   {c.accepted
-                                    ? " · accepted"
+                                    ? " Â· accepted"
                                     : c.rejectionReasons?.[0]
-                                      ? ` · ${formatRejectionLabel(c.rejectionReasons[0])}`
+                                      ? ` Â· ${formatRejectionLabel(c.rejectionReasons[0])}`
                                       : ""}
                                 </summary>
                                 <p>
-                                  {sourceLabel ? `${sourceLabel} · ` : ""}
+                                  {sourceLabel ? `${sourceLabel} Â· ` : ""}
                                   {dims}
                                   {mime}
                                 </p>
@@ -723,15 +704,15 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                           <li key={`${stage.stage}-${index}`}>
                             <strong>{stage.stage}</strong>
                             {stage.query ? `: ${textChild(stage.query).slice(0, 80)}` : null}
-                            {stage.candidateCount != null ? ` · ${stage.candidateCount} results` : null}
-                            {stage.acceptedCount != null ? ` · ${stage.acceptedCount} accepted` : null}
+                            {stage.candidateCount != null ? ` Â· ${stage.candidateCount} results` : null}
+                            {stage.acceptedCount != null ? ` Â· ${stage.acceptedCount} accepted` : null}
                             {stage.confirmedCount != null && stage.confirmedCount > 0
-                              ? ` · ${stage.confirmedCount} confirmed`
+                              ? ` Â· ${stage.confirmedCount} confirmed`
                               : null}
                             {stage.conflictCount != null && stage.conflictCount > 0
-                              ? ` · ${stage.conflictCount} conflict`
+                              ? ` Â· ${stage.conflictCount} conflict`
                               : null}
-                            {stage.reason ? ` · ${textChild(stage.reason)}` : null}
+                            {stage.reason ? ` Â· ${textChild(stage.reason)}` : null}
                           </li>
                         ))}
                     </ul>
@@ -797,13 +778,13 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
                     {governmentCompeting ? (
                       <>
                         Government conflict: {c.competingSourceLabel ?? c.competingSource} reported{" "}
-                        {c.field} <em>{textChild(c.competingValue) || "—"}</em>. Canonical value remains{" "}
-                        <em>{textChild(c.keptValue) || "—"}</em> from {c.keptSourceLabel ?? c.keptSource}.
+                        {c.field} <em>{textChild(c.competingValue) || "â€”"}</em>. Canonical value remains{" "}
+                        <em>{textChild(c.keptValue) || "â€”"}</em> from {c.keptSourceLabel ?? c.keptSource}.
                       </>
                     ) : (
                       <>
-                        Kept <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
-                        <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
+                        Kept <em>{textChild(c.keptValue) || "â€”"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
+                        <em>{textChild(c.competingValue) || "â€”"}</em> ({c.competingSourceLabel ?? c.competingSource})
                       </>
                     )}
                   </p>
@@ -836,15 +817,13 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
             <p className="muted">No official producer notes yet.</p>
           )}
         </div>
-        {hasHouseProfile && <div className="enrichment-note-card enrichment-note-house">
-          <h3>AI house profile</h3>
-          <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
-          {houseProfileText ? (
+        {houseProfileText ? (
+          <div className="enrichment-note-card enrichment-note-house">
+            <h3>AI house profile</h3>
+            <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
             <p className="enrichment-house-body">{houseProfileText}</p>
-          ) : (
-            <p className="muted">No house profile yet.</p>
-          )}
-        </div>
+          </div>
+        ) : null}
         {personalText ? (
           <div className="enrichment-note-card">
             <h3>Personal notes</h3>
