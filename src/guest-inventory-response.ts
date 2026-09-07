@@ -31,8 +31,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
     "sub_category",
     "abv",
     "volume_ml",
-    "purchase_date",
-    "opened_date",
+    // purchase_date / opened_date: Keeper form fields only — no Guest feature requires them.
     "notes",
     "image_url",
     "display_image_url",

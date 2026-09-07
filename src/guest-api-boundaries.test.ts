@@ -27,6 +27,15 @@ function cleanup() {
   db.prepare(`DELETE FROM spirits WHERE upc LIKE '${PREFIX}%' OR name LIKE 'GuestBound%'`).run();
   db.prepare(`DELETE FROM wines WHERE upc LIKE '${PREFIX}%' OR name LIKE 'GuestBound%'`).run();
   db.prepare(`DELETE FROM packaged_beer WHERE upc LIKE '${PREFIX}%' OR name LIKE 'GuestBound%'`).run();
+  db.prepare(`DELETE FROM brews WHERE batch_name LIKE 'GuestBound%' OR brewfather_id LIKE '${PREFIX}%'`).run();
+  db.prepare(`DELETE FROM cocktails WHERE name LIKE 'GuestBound%'`).run();
+  // Reset any tap we may have filled for GuestBound coverage.
+  db.prepare(`
+    UPDATE taps SET
+      brewery_batch='', maker='', style='', abv=0, ibu=0, tapped_date=NULL,
+      remaining_l=0, notes='', tasting_notes='', image_url='', flavors='[]', tags='[]'
+    WHERE brewery_batch LIKE 'GuestBound%' OR notes LIKE 'GuestBound%'
+  `).run();
   clearEnrichmentJobsForTests();
   clearProductContentForTests();
   clearProductImagesForTests();
@@ -35,9 +44,9 @@ function cleanup() {
 function insertSpirit() {
   const result = db.prepare(`
     INSERT INTO spirits (
-      name, brand, category, sub_category, abv, volume_ml, fill_level, shelf_location,
-      upc, notes, image_url, stock_count, tasting_notes, flavors, tags, blocked_from_ordering
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      name, brand, category, sub_category, abv, volume_ml, fill_level, purchase_date, opened_date,
+      shelf_location, upc, notes, image_url, stock_count, tasting_notes, flavors, tags, blocked_from_ordering
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     "GuestBound Spirit",
     "Bound Brand",
@@ -46,6 +55,8 @@ function insertSpirit() {
     45,
     750,
     50,
+    "2025-01-15",
+    "2025-06-01",
     "Top shelf B3",
     `${PREFIX}1001`,
     "Cellar note for patrons",
@@ -146,6 +157,8 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
     stock_count: 2,
     fill_level: 0,
     shelf_location: "A1",
+    purchase_date: "2024-01-01",
+    opened_date: "2024-02-01",
     notes: "hi",
     vote_up: 1,
     vote_down: 0,
@@ -159,6 +172,8 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
   assert.equal(spirit.stock_count, undefined);
   assert.equal(spirit.fill_level, undefined);
   assert.equal(spirit.shelf_location, undefined);
+  assert.equal(spirit.purchase_date, undefined);
+  assert.equal(spirit.opened_date, undefined);
   assert.equal(spirit.vote_up, 1);
 
   const empty = serializeGuestInventoryItem("spirits", {
@@ -256,6 +271,8 @@ test("1. Guest spirits inventory returns public fields and omits keeper-only key
   assert.equal(item.image_url, "/api/media/images/guest-bound-spirit.jpg");
   assert.equal(item.out_of_stock, false);
   assert.equal(typeof item.vote_up, "number");
+  assert.equal(item.purchase_date, undefined);
+  assert.equal(item.opened_date, undefined);
   assertNoForbiddenKeys(item, GUEST_FORBIDDEN_INVENTORY_KEYS);
   cleanup();
 });
@@ -310,6 +327,8 @@ test("3. Keeper-authenticated inventory still returns full shelf representation"
   assert.equal(spirit.stock_count, 3);
   assert.equal(spirit.fill_level, 50);
   assert.equal(spirit.shelf_location, "Top shelf B3");
+  assert.equal(spirit.purchase_date, "2025-01-15");
+  assert.equal(spirit.opened_date, "2025-06-01");
 
   const wines = await app.inject({
     method: "GET",
@@ -420,4 +439,160 @@ test("7. Guest client prefers out_of_stock for card availability styling", async
   const appSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../client/src/App.tsx"), "utf8");
   assert.match(appSrc, /typeof item\.out_of_stock === "boolean"/);
   assert.match(appSrc, /item\.out_of_stock/);
+});
+
+test("8. Guest allowlist covers taps, brews, and cocktails without keeper internals", async () => {
+  cleanup();
+  const token = createTestAdminToken();
+
+  const tap = db.prepare("SELECT id, tap_number FROM taps ORDER BY tap_number ASC LIMIT 1").get() as {
+    id: number;
+    tap_number: number;
+  };
+  assert.ok(tap?.id);
+  db.prepare(`
+    UPDATE taps SET
+      brewery_batch=?, maker=?, style=?, abv=?, ibu=?, tapped_date=?,
+      remaining_l=?, keg_size_l=?, notes=?, tasting_notes=?, image_url=?
+    WHERE id=?
+  `).run(
+    "GuestBound Tap Ale",
+    "Bound Taproom",
+    "Pale Ale",
+    5.2,
+    35,
+    "2026-03-01",
+    9.5,
+    19.5,
+    "GuestBound tap note",
+    "Citrus and pine",
+    "/api/media/images/guest-bound-tap.jpg",
+    tap.id
+  );
+
+  const brewId = Number(db.prepare(`
+    INSERT INTO brews (
+      batch_name, style, brew_date, target_og, target_fg, measured_og, measured_fg,
+      calculated_abv, schedule, status, notes, maker, image_url, tasting_notes, hops, brewfather_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "GuestBound House Pale",
+    "APA",
+    "2026-02-01",
+    1.05,
+    1.01,
+    1.049,
+    1.011,
+    5.1,
+    "mash schedule",
+    "Fermenting",
+    "GuestBound brew note",
+    "Bound Brewery",
+    "/api/media/images/guest-bound-brew.jpg",
+    "Biscuit malt",
+    '["Cascade"]',
+    `${PREFIX}brew1`
+  ).lastInsertRowid);
+
+  const cocktailId = Number(db.prepare(`
+    INSERT INTO cocktails (name, collection, ingredients, glassware, garnish, method, notes, season)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "GuestBound Negroni",
+    "GuestBound Classics",
+    "Gin, Campari, Sweet vermouth",
+    "Rocks",
+    "Orange peel",
+    "Stir",
+    "GuestBound cocktail note",
+    "All"
+  ).lastInsertRowid);
+
+  const cases: Array<{
+    table: string;
+    id: number;
+    expectedGuest: Record<string, unknown>;
+    keeperOnly: Record<string, unknown>;
+  }> = [
+    {
+      table: "taps",
+      id: tap.id,
+      expectedGuest: {
+        brewery_batch: "GuestBound Tap Ale",
+        maker: "Bound Taproom",
+        style: "Pale Ale",
+        abv: 5.2,
+        ibu: 35,
+        tasting_notes: "Citrus and pine"
+      },
+      keeperOnly: { remaining_l: 9.5, keg_size_l: 19.5 }
+    },
+    {
+      table: "brews",
+      id: brewId,
+      expectedGuest: {
+        batch_name: "GuestBound House Pale",
+        style: "APA",
+        status: "Fermenting",
+        calculated_abv: 5.1,
+        maker: "Bound Brewery"
+      },
+      keeperOnly: {
+        brewfather_id: `${PREFIX}brew1`,
+        target_og: 1.05,
+        measured_og: 1.049,
+        measured_fg: 1.011
+      }
+    },
+    {
+      table: "cocktails",
+      id: cocktailId,
+      expectedGuest: {
+        name: "GuestBound Negroni",
+        collection: "GuestBound Classics",
+        glassware: "Rocks",
+        method: "Stir",
+        season: "All"
+      },
+      keeperOnly: {}
+    }
+  ];
+
+  for (const entry of cases) {
+    const guestRes = await app.inject({ method: "GET", url: `/api/inventory/${entry.table}` });
+    assert.equal(guestRes.statusCode, 200, entry.table);
+    const guestRows = guestRes.json() as Array<Record<string, unknown>>;
+    assert.ok(guestRows.length > 0, `${entry.table} guest list must not be empty`);
+    const guestItem = guestRows.find((row) => Number(row.id) === entry.id);
+    assert.ok(guestItem, `${entry.table} guest row missing`);
+    for (const [key, value] of Object.entries(entry.expectedGuest)) {
+      assert.equal(guestItem[key], value, `${entry.table}.${key}`);
+    }
+    assertNoForbiddenKeys(guestItem, GUEST_FORBIDDEN_INVENTORY_KEYS);
+    for (const key of Object.keys(entry.keeperOnly)) {
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(guestItem, key),
+        false,
+        `${entry.table} guest leaked ${key}`
+      );
+    }
+
+    const keeperRes = await app.inject({
+      method: "GET",
+      url: `/api/inventory/${entry.table}`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(keeperRes.statusCode, 200, entry.table);
+    const keeperItem = (keeperRes.json() as Array<Record<string, unknown>>)
+      .find((row) => Number(row.id) === entry.id);
+    assert.ok(keeperItem, `${entry.table} keeper row missing`);
+    for (const [key, value] of Object.entries(entry.expectedGuest)) {
+      assert.equal(keeperItem[key], value, `keeper ${entry.table}.${key}`);
+    }
+    for (const [key, value] of Object.entries(entry.keeperOnly)) {
+      assert.equal(keeperItem[key], value, `keeper ${entry.table}.${key}`);
+    }
+  }
+
+  cleanup();
 });
