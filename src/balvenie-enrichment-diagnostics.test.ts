@@ -411,15 +411,14 @@ test("17-19. diagnostics keeper-only; patrons do not see them; no secrets", asyn
     url: `/api/inventory/spirits/${id}/enrichment`
   });
   assert.equal(guest.statusCode, 200);
-  const guestBody = guest.json() as {
-    enrichment: { jobs: Array<{ diagnostics?: unknown; diagnosticSummary?: unknown }> };
-  };
-  const guestMeta = guestBody.enrichment.jobs.find((j) => j.type === "metadata" || true);
-  // Without admin token, diagnostics must be absent.
-  for (const job of guestBody.enrichment.jobs) {
-    assert.equal(job.diagnostics, undefined);
-    assert.equal(job.diagnosticSummary, undefined);
-  }
+  const guestBody = guest.json() as Record<string, unknown>;
+  // Guest enrichment is a tasting/image projection — no jobs/diagnostics tree.
+  assert.equal(guestBody.enrichment, undefined);
+  assert.equal(guestBody.inventory, undefined);
+  assert.equal(guestBody.identity, undefined);
+  const guestBlob = JSON.stringify(guestBody);
+  assert.equal(guestBlob.includes("diagnostics"), false);
+  assert.equal(guestBlob.includes("no_authoritative_sources"), false);
 
   const token = createTestAdminToken();
   const admin = await app.inject({

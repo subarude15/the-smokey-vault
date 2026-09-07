@@ -1,7 +1,8 @@
 /**
  * PR #93 — guest-facing inventory metadata visibility.
  * Guests must not see UPC or raw stock/bottle/packaged counts on Spirits,
- * Wine, or Packaged Beer cards/detail. Keepers still see them. No API/data changes.
+ * Wine, or Packaged Beer cards/detail. Keepers still see them.
+ * Server-side redaction (PR122) complements these UI gates.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -147,8 +148,10 @@ test("M. Guest still sees normal product metadata wiring", () => {
 test("N. Out-of-stock / blocked behavior remains unchanged", () => {
   assert.match(
     appSrc,
-    /const outOfStock = \(module\.id === "packaged_beer" && packagedCount\(item\.count\) <= 0\)\s*\|\|\s*\(module\.id === "spirits" && isSpiritEmpty\(item\)\);/
+    /typeof item\.out_of_stock === "boolean"\s*\?\s*item\.out_of_stock/
   );
+  assert.match(appSrc, /packagedCount\(item\.count\) <= 0/);
+  assert.match(appSrc, /isSpiritEmpty\(item\)/);
   assert.match(appSrc, /const blocked = Number\(item\.blocked_from_ordering \?\? 0\) === 1;/);
   assert.match(appSrc, /outOfStock \? " out-of-stock" : ""/);
   assert.match(appSrc, /blocked \? " blocked-bottle" : ""/);

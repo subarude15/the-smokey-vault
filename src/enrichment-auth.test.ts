@@ -45,12 +45,16 @@ test("public clients can read bottle enrichment without an admin session", async
     assert.equal(res.statusCode, 200);
     const body = res.json() as {
       entityId: number;
-      identity: { name: { value: string } };
-      enrichment: { jobs: unknown[] };
+      tastingNotes?: { official: string | null };
+      identity?: unknown;
+      enrichment?: unknown;
+      inventory?: unknown;
     };
     assert.equal(body.entityId, id);
-    assert.equal(body.identity.name.value, "Auth Enrich Bottle");
-    assert.ok(Array.isArray(body.enrichment.jobs));
+    // Guest enrichment is a redacted tasting/image projection.
+    assert.equal(body.identity, undefined);
+    assert.equal(body.enrichment, undefined);
+    assert.equal(body.inventory, undefined);
 
     const raw = res.body;
     assert.equal(raw.includes("pinHash"), false);
@@ -58,6 +62,7 @@ test("public clients can read bottle enrichment without an admin session", async
     assert.equal(raw.includes("MASTER_PIN"), false);
     assert.equal(raw.includes("SESSION_SECRET"), false);
     assert.equal(raw.includes(getSetting("pinHash") ?? "___none___"), false);
+    assert.equal(raw.includes(UPC), false);
   } finally {
     cleanup(id);
   }

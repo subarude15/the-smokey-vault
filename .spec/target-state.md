@@ -19,7 +19,7 @@ Shipped appliance boundaries for The Smokey Vault. Architects and agents must ke
 - Preserve Keeper/user-owned field values; never weaken provenance to force a match.
 - Packaged beer stays out of the Bottle Library / spirits table and must not invent proof, generic `volume_ml`, origin, or TTB ID.
 - Deletion is per-item, authenticated, transactional, and cleanup-aware — no bulk purge automation.
-- Guest Mode must not expose keeper operational metadata (UPC, stock counts, enrichment diagnostics) once Track B redaction lands; until then, keep UI gates and treat API redaction as required hardening.
+- Guest Mode must not expose keeper operational metadata (UPC, stock counts, enrichment diagnostics); Guest inventory/enrichment responses are allowlisted server-side.
 - Missing authoritative data is a valid outcome.
 
 ## Non-goals

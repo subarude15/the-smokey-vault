@@ -1895,8 +1895,11 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
         const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
-        const outOfStock = (module.id === "packaged_beer" && packagedCount(item.count) <= 0)
-          || (module.id === "spirits" && isSpiritEmpty(item));
+        // Guest inventory responses redact counts and send coarse out_of_stock.
+        const outOfStock = typeof item.out_of_stock === "boolean"
+          ? item.out_of_stock
+          : (module.id === "packaged_beer" && packagedCount(item.count) <= 0)
+            || (module.id === "spirits" && isSpiritEmpty(item));
         const blocked = Number(item.blocked_from_ordering ?? 0) === 1;
         return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}${blocked ? " blocked-bottle" : ""}`} key={item.id} onClick={() => openBottleDetail(item, module.id)}>
         {blocked && <span className="blocked-ribbon">{BLOCKED_RIBBON_LABEL}</span>}
