@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 
 export type FieldView = {
@@ -185,7 +185,6 @@ export function enrichmentHasMissingWork(jobs: JobView[] | undefined): boolean {
   );
 }
 
-
 export function shouldPollEnrichment(jobs: JobView[] | undefined): boolean {
   if (!jobs?.length) return false;
   return jobs.some((j) => j.statusLabel === "waiting" || j.statusLabel === "in_progress");
@@ -270,7 +269,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
     return (
       <div className="enrichment-field enrichment-field-missing">
         <span className="enrichment-field-label">{label}</span>
-        <strong className="enrichment-field-value">â€”</strong>
+        <strong className="enrichment-field-value">—</strong>
         <div className="enrichment-field-meta">
           <span className="chip static miss-chip">Missing</span>
         </div>
@@ -284,13 +283,13 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
       || (typeof field.value === "number" && field.value === 0));
   const value =
     alcoholMissing || field.value == null || field.value === ""
-      ? "â€”"
+      ? "—"
       : typeof field.value === "number"
         ? String(field.value)
         : textChild(field.value);
   const title =
     field.confidence != null
-      ? `${field.sourceLabel ?? "Unknown"} Â· ${field.confidenceLabel ?? "Unknown"} (${field.confidence})`
+      ? `${field.sourceLabel ?? "Unknown"} · ${field.confidenceLabel ?? "Unknown"} (${field.confidence})`
       : undefined;
   const confirmations = (field.contributors ?? []).filter((c) => c.role === "confirmation");
   return (
@@ -325,11 +324,11 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
                       c.matchedCode ? `Matched ${c.matchedCode}` : null
                     ]
                       .filter(Boolean)
-                      .join(" Â· ")
+                      .join(" · ")
                   : undefined
               }
             >
-              Confirmed by {c.sourceLabel} Â· {c.confidenceLabel}
+              Confirmed by {c.sourceLabel} · {c.confidenceLabel}
             </div>
           ))}
         </div>
@@ -340,11 +339,11 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
 
 /**
  * Keeper enrichment / review panel (keepers only).
- * Patrons see BottlePublicContent instead â€” useful notes without plumbing.
+ * Patrons see BottlePublicContent instead — useful notes without plumbing.
  * Offers per-item queue / retry controls; conflict resolution remains deferred.
  */
 
-function imageSourceLabel(sourceType: string | null | undefined, verified: boolean | null | undefined): string {
+function imageSourceLabel(sourceType: string | null | undefined, _verified: boolean | null | undefined): string {
   switch (sourceType) {
     case "user":
       return "User / shelf image";
@@ -369,6 +368,22 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const [queueBusy, setQueueBusy] = useState<string | null>(null);
   const [queueNotice, setQueueNotice] = useState("");
   const [queueError, setQueueError] = useState("");
+
+  // #region agent log
+  fetch("http://127.0.0.1:7894/ingest/c187dba4-1138-40f9-a159-c2b4c82ad1e9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ffa455" },
+    body: JSON.stringify({
+      sessionId: "ffa455",
+      location: "EnrichmentPanel.tsx:render",
+      message: "EnrichmentPanel render",
+      data: { table, itemId, loading, hasView: Boolean(view), hasError: Boolean(error) },
+      timestamp: Date.now(),
+      hypothesisId: "H-hooks",
+      runId: "post-fix"
+    })
+  }).catch(() => {});
+  // #endregion
 
   useEffect(() => {
     let cancelled = false;
@@ -413,6 +428,28 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       if (timer) clearInterval(timer);
     };
   }, [table, itemId]);
+
+  // Must run before any conditional returns (Rules of Hooks).
+  // #region agent log
+  useEffect(() => {
+    fetch("http://127.0.0.1:7894/ingest/c187dba4-1138-40f9-a159-c2b4c82ad1e9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "ffa455" },
+      body: JSON.stringify({
+        sessionId: "ffa455",
+        location: "EnrichmentPanel.tsx:collapse-effect",
+        message: "collapse effect ran",
+        data: { hasView: Boolean(view), loading, hookPhase: "before-returns" },
+        timestamp: Date.now(),
+        hypothesisId: "H-hooks",
+        runId: "post-fix"
+      })
+    }).catch(() => {});
+    if (!view) return;
+    const jobs = Array.isArray(view.enrichment?.jobs) ? view.enrichment.jobs : [];
+    if (!enrichmentHasMissingWork(jobs)) setExpanded(false);
+  }, [view, loading]);
+  // #endregion
 
   async function refreshEnrichment() {
     try {
@@ -466,7 +503,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     return (
       <section className="enrichment-panel">
         <span className="eyebrow">Enrichment</span>
-        <p className="text-slate-300">Loading enrichmentâ€¦</p>
+        <p className="text-slate-300">Loading enrichment…</p>
       </section>
     );
   }
@@ -507,16 +544,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const houseProfileText = textChild(tastingNotes.houseProfile).trim();
   const officialText = textChild(tastingNotes.official).trim();
   const personalText = textChild(tastingNotes.personal).trim();
-  const coreComplete = !enrichmentHasMissingWork(jobs) && 
-    enrichment?.statusLabel !== "partial" && 
-    enrichment?.statusLabel !== "failed";
-    
-  useEffect(() => {
-    if (coreComplete) {
-      setExpanded(false);
-    }
-  }, [coreComplete]);
-
+  const coreComplete = !enrichmentHasMissingWork(jobs);
   const polling = shouldPollEnrichment(jobs);
 
   return (
@@ -527,7 +555,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           <h2>What the vault knows</h2>
         </div>
         <div>
-          {polling ? <span className="guest-badge">Updatingâ€¦</span> : null}
+          {polling ? <span className="guest-badge">Updating…</span> : null}
           <button
             type="button"
             className="secondary"
@@ -539,7 +567,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       </div>
 
       {coreComplete && (
-        <div className="enrichment-core-complete" role="status" style={{ padding: '8px 12px', background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', borderRadius: '6px', marginBottom: '12px', fontSize: '0.875rem', fontWeight: 500 }}>
+        <div className="enrichment-core-complete" role="status" style={{ padding: "8px 12px", background: "rgba(34, 197, 94, 0.1)", color: "#22c55e", borderRadius: "6px", marginBottom: "12px", fontSize: "0.875rem", fontWeight: 500 }}>
           Core enrichment complete (only optional identifiers missing)
         </div>
       )}
@@ -547,353 +575,353 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
       {expanded && (
         <>
           {enrichment.needsReview ? (
-        <div className="enrichment-review-banner" role="status">
-          <strong>Needs review</strong>
-          <p>Trusted sources disagree on identity. Kept values are shown; competing values are listed below. Editing is not available here yet.</p>
-        </div>
-      ) : null}
-
-      <div className="enrichment-item-actions">
-        <button
-          type="button"
-          className="secondary"
-          disabled={Boolean(queueBusy) || !enrichmentHasMissingWork(jobs)}
-          aria-busy={queueBusy === "missing"}
-          onClick={() => void queueEnrichment({ mode: "missing", busyKey: "missing" })}
-        >
-          {queueBusy === "missing"
-            ? "Queueingâ€¦"
-            : enrichmentHasMissingWork(jobs)
-              ? "Queue missing enrichment"
-              : "Nothing missing"}
-        </button>
-        {queueNotice ? (
-          <p className="enrichment-queue-notice" role="status" aria-live="polite">{queueNotice}</p>
-        ) : null}
-        {queueError ? <p className="error enrichment-queue-error">{queueError}</p> : null}
-      </div>
-
-      <div className="enrichment-jobs">
-        {(() => {
-          const allIdle = jobs.length > 0 && jobs.every((j) => j.statusLabel === "not_started");
-          const anyActive = polling;
-          if (!jobs.length) {
-            return <p className="text-slate-300">No enrichment queued</p>;
-          }
-          if (allIdle && !anyActive) {
-            return <p className="text-slate-300">{enrichment.identified ? "Enrichment pending" : "No enrichment queued"}</p>;
-          }
-          return null;
-        })()}
-        {jobs.map((job) => {
-          const showWhy =
-            (job.statusLabel === "no_result" || job.statusLabel === "failed" || job.statusLabel === "partial")
-            && (job.diagnosticSummary || job.diagnostics);
-          const primaryLabel = primaryEnrichmentActionLabel(job.statusLabel);
-          const showRerun = job.statusLabel === "complete";
-          const jobBusyKey = `job:${job.type}`;
-          const jobDisabled =
-            Boolean(queueBusy)
-            || job.statusLabel === "waiting"
-            || job.statusLabel === "in_progress";
-          return (
-            <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
-              <span>{jobTypeDisplay(job.type)}</span>
-              <strong>{jobStatusDisplay(job.statusLabel)}</strong>
-              <div className="enrichment-job-actions">
-                {primaryLabel ? (
-                  <button
-                    type="button"
-                    className="secondary enrichment-job-action"
-                    disabled={jobDisabled}
-                    aria-busy={queueBusy === jobBusyKey}
-                    onClick={() =>
-                      void queueEnrichment({
-                        jobTypes: [job.type as ItemEnrichmentJobType],
-                        mode: job.statusLabel === "not_started" ? "missing" : "retry",
-                        busyKey: jobBusyKey
-                      })
-                    }
-                  >
-                    {queueBusy === jobBusyKey ? "Queueingâ€¦" : primaryLabel}
-                  </button>
-                ) : null}
-                {showRerun ? (
-                  <button
-                    type="button"
-                    className="enrichment-job-rerun"
-                    disabled={jobDisabled}
-                    aria-busy={queueBusy === jobBusyKey}
-                    onClick={() =>
-                      void queueEnrichment({
-                        jobTypes: [job.type as ItemEnrichmentJobType],
-                        mode: "retry",
-                        busyKey: jobBusyKey
-                      })
-                    }
-                  >
-                    {queueBusy === jobBusyKey ? "Queueingâ€¦" : "Re-run"}
-                  </button>
-                ) : null}
-              </div>
-              {job.type === "metadata" && job.lastRunLabel ? (
-                <small className="enrichment-last-run">Last run: {textChild(job.lastRunLabel)}</small>
-              ) : null}
-              {job.type === "metadata" && job.stillMissing?.length ? (
-                <small className="enrichment-still-missing">
-                  Still missing: {job.stillMissing.map((f) => textChild(f)).join(", ")}
-                </small>
-              ) : null}
-              {job.lastError && job.statusLabel === "failed" ? (
-                <small title={job.lastError}>Attempt {job.attempts}</small>
-              ) : null}
-              {showWhy ? (
-                <details className="enrichment-diagnostics">
-                  <summary>Why?</summary>
-                  <p>{textChild(job.diagnosticSummary || job.diagnostics?.summary || "No additional detail")}</p>
-                  {job.type === "image" && job.diagnostics?.imageCandidates?.length ? (
-                    <div className="enrichment-image-candidates">
-                      <ol>
-                        {job.diagnostics.imageCandidates.map((c, index) => {
-                          const dims =
-                            c.width != null && c.height != null
-                              ? `${c.width}Ã—${c.height}`
-                              : "dimensions unknown";
-                          const mime = c.mimeType ? ` Â· ${c.mimeType}` : "";
-                          const sourceLabel = c.sourceType
-                            ? c.sourceType.charAt(0).toUpperCase() + c.sourceType.slice(1)
-                            : "";
-                          const visionLines = visionDetailLines(c.vision);
-                          const visionFail = visionSummaryLine(c.vision);
-                          const scoreLine =
-                            c.score != null
-                              ? `Score: ${c.score} / ${c.threshold ?? 75}`
-                              : null;
-                          const openByDefault =
-                            c.stageReached === "verification"
-                            || c.stageReached === "scoring"
-                            || c.stageReached === "accepted"
-                            || Boolean(c.vision?.ran);
-                          return (
-                            <li key={`${c.urlHost}-${index}`}>
-                              <details open={openByDefault}>
-                                <summary>
-                                  <code>{textChild(c.urlHost)}{textChild(c.urlPath || "")}</code>
-                                  {c.accepted
-                                    ? " Â· accepted"
-                                    : c.rejectionReasons?.[0]
-                                      ? ` Â· ${formatRejectionLabel(c.rejectionReasons[0])}`
-                                      : ""}
-                                </summary>
-                                <p>
-                                  {sourceLabel ? `${sourceLabel} Â· ` : ""}
-                                  {dims}
-                                  {mime}
-                                </p>
-                                {visionFail ? <p>{visionFail}</p> : null}
-                                {visionLines.length ? (
-                                  <div className="enrichment-vision-details">
-                                    <strong>Verification</strong>
-                                    <ul>
-                                      {visionLines.map((line) => (
-                                        <li key={line}>{line}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                ) : null}
-                                {scoreLine ? <p>{scoreLine}</p> : null}
-                                {c.accepted ? (
-                                  <p>Accepted</p>
-                                ) : c.rejectionReasons?.length ? (
-                                  <p>
-                                    Rejected:{" "}
-                                    {c.rejectionReasons.map(formatRejectionLabel).join(", ")}
-                                  </p>
-                                ) : null}
-                              </details>
-                            </li>
-                          );
-                        })}
-                      </ol>
-                    </div>
-                  ) : null}
-                  {job.diagnostics?.stages?.length ? (
-                    <ul>
-                      {job.diagnostics.stages
-                        .filter((s) => s.stage !== "source_reject")
-                        .slice(0, 8)
-                        .map((stage, index) => (
-                          <li key={`${stage.stage}-${index}`}>
-                            <strong>{stage.stage}</strong>
-                            {stage.query ? `: ${textChild(stage.query).slice(0, 80)}` : null}
-                            {stage.candidateCount != null ? ` Â· ${stage.candidateCount} results` : null}
-                            {stage.acceptedCount != null ? ` Â· ${stage.acceptedCount} accepted` : null}
-                            {stage.confirmedCount != null && stage.confirmedCount > 0
-                              ? ` Â· ${stage.confirmedCount} confirmed`
-                              : null}
-                            {stage.conflictCount != null && stage.conflictCount > 0
-                              ? ` Â· ${stage.conflictCount} conflict`
-                              : null}
-                            {stage.reason ? ` Â· ${textChild(stage.reason)}` : null}
-                          </li>
-                        ))}
-                    </ul>
-                  ) : null}
-                  {job.diagnostics?.noResultReason ? (
-                    <p className="enrichment-diagnostics-reason">
-                      Reason: {textChild(job.diagnostics.noResultReason).replace(/_/g, " ")}
-                    </p>
-                  ) : null}
-                </details>
-              ) : null}
+            <div className="enrichment-review-banner" role="status">
+              <strong>Needs review</strong>
+              <p>Trusted sources disagree on identity. Kept values are shown; competing values are listed below. Editing is not available here yet.</p>
             </div>
-          );
-        })}
-      </div>
-
-      {missing.length ? (
-        <p className="enrichment-missing">
-          <span className="eyebrow">Still missing</span>
-          {missing.join(", ")}
-        </p>
-      ) : null}
-
-      <div className="enrichment-section">
-        <span className="eyebrow">Identity</span>
-        <div className="enrichment-field-grid">
-          <FieldRow label="Name" field={identity.name} />
-          <FieldRow label="Brand" field={identity.brand} />
-          <FieldRow label="Product type" field={identity.productType} />
-          <FieldRow label="UPC" field={identity.upc} />
-        </div>
-      </div>
-
-      <div className="enrichment-section">
-        <span className="eyebrow">Product facts</span>
-        <div className="enrichment-field-grid">
-          <FieldRow label="Category" field={metadata.category} />
-          <FieldRow label="ABV" field={metadata.abv} />
-          {table !== "packaged_beer" ? (
-            <>
-              <FieldRow label="Proof" field={metadata.proof} />
-              <FieldRow label="Volume (ml)" field={metadata.volumeMl} />
-              <FieldRow label="Origin" field={metadata.origin} />
-              <FieldRow label="TTB ID" field={metadata.ttbId} />
-            </>
           ) : null}
-        </div>
-      </div>
 
-      {conflicts.length ? (
-        <div className="enrichment-section">
-          <span className="eyebrow">Conflicts</span>
-          <div className="enrichment-conflicts">
-            {conflicts.map((c) => {
-              const governmentCompeting =
-                c.competingSource === "plcb_spirits"
-                || c.competingSource === "plcb_wines"
-                || c.competingSource === "iowa";
+          <div className="enrichment-item-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={Boolean(queueBusy) || !enrichmentHasMissingWork(jobs)}
+              aria-busy={queueBusy === "missing"}
+              onClick={() => void queueEnrichment({ mode: "missing", busyKey: "missing" })}
+            >
+              {queueBusy === "missing"
+                ? "Queueing…"
+                : enrichmentHasMissingWork(jobs)
+                  ? "Queue missing enrichment"
+                  : "Nothing missing"}
+            </button>
+            {queueNotice ? (
+              <p className="enrichment-queue-notice" role="status" aria-live="polite">{queueNotice}</p>
+            ) : null}
+            {queueError ? <p className="error enrichment-queue-error">{queueError}</p> : null}
+          </div>
+
+          <div className="enrichment-jobs">
+            {(() => {
+              const allIdle = jobs.length > 0 && jobs.every((j) => j.statusLabel === "not_started");
+              const anyActive = polling;
+              if (!jobs.length) {
+                return <p className="text-slate-300">No enrichment queued</p>;
+              }
+              if (allIdle && !anyActive) {
+                return <p className="text-slate-300">{enrichment.identified ? "Enrichment pending" : "No enrichment queued"}</p>;
+              }
+              return null;
+            })()}
+            {jobs.map((job) => {
+              const showWhy =
+                (job.statusLabel === "no_result" || job.statusLabel === "failed" || job.statusLabel === "partial")
+                && (job.diagnosticSummary || job.diagnostics);
+              const primaryLabel = primaryEnrichmentActionLabel(job.statusLabel);
+              const showRerun = job.statusLabel === "complete";
+              const jobBusyKey = `job:${job.type}`;
+              const jobDisabled =
+                Boolean(queueBusy)
+                || job.statusLabel === "waiting"
+                || job.statusLabel === "in_progress";
               return (
-                <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
-                  <strong>{c.field}</strong>
-                  <p>
-                    {governmentCompeting ? (
-                      <>
-                        Government conflict: {c.competingSourceLabel ?? c.competingSource} reported{" "}
-                        {c.field} <em>{textChild(c.competingValue) || "â€”"}</em>. Canonical value remains{" "}
-                        <em>{textChild(c.keptValue) || "â€”"}</em> from {c.keptSourceLabel ?? c.keptSource}.
-                      </>
-                    ) : (
-                      <>
-                        Kept <em>{textChild(c.keptValue) || "â€”"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
-                        <em>{textChild(c.competingValue) || "â€”"}</em> ({c.competingSourceLabel ?? c.competingSource})
-                      </>
-                    )}
-                  </p>
+                <div key={job.type} className={`enrichment-job enrichment-job-${job.statusLabel}`}>
+                  <span>{jobTypeDisplay(job.type)}</span>
+                  <strong>{jobStatusDisplay(job.statusLabel)}</strong>
+                  <div className="enrichment-job-actions">
+                    {primaryLabel ? (
+                      <button
+                        type="button"
+                        className="secondary enrichment-job-action"
+                        disabled={jobDisabled}
+                        aria-busy={queueBusy === jobBusyKey}
+                        onClick={() =>
+                          void queueEnrichment({
+                            jobTypes: [job.type as ItemEnrichmentJobType],
+                            mode: job.statusLabel === "not_started" ? "missing" : "retry",
+                            busyKey: jobBusyKey
+                          })
+                        }
+                      >
+                        {queueBusy === jobBusyKey ? "Queueing…" : primaryLabel}
+                      </button>
+                    ) : null}
+                    {showRerun ? (
+                      <button
+                        type="button"
+                        className="enrichment-job-rerun"
+                        disabled={jobDisabled}
+                        aria-busy={queueBusy === jobBusyKey}
+                        onClick={() =>
+                          void queueEnrichment({
+                            jobTypes: [job.type as ItemEnrichmentJobType],
+                            mode: "retry",
+                            busyKey: jobBusyKey
+                          })
+                        }
+                      >
+                        {queueBusy === jobBusyKey ? "Queueing…" : "Re-run"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {job.type === "metadata" && job.lastRunLabel ? (
+                    <small className="enrichment-last-run">Last run: {textChild(job.lastRunLabel)}</small>
+                  ) : null}
+                  {job.type === "metadata" && job.stillMissing?.length ? (
+                    <small className="enrichment-still-missing">
+                      Still missing: {job.stillMissing.map((f) => textChild(f)).join(", ")}
+                    </small>
+                  ) : null}
+                  {job.lastError && job.statusLabel === "failed" ? (
+                    <small title={job.lastError}>Attempt {job.attempts}</small>
+                  ) : null}
+                  {showWhy ? (
+                    <details className="enrichment-diagnostics">
+                      <summary>Why?</summary>
+                      <p>{textChild(job.diagnosticSummary || job.diagnostics?.summary || "No additional detail")}</p>
+                      {job.type === "image" && job.diagnostics?.imageCandidates?.length ? (
+                        <div className="enrichment-image-candidates">
+                          <ol>
+                            {job.diagnostics.imageCandidates.map((c, index) => {
+                              const dims =
+                                c.width != null && c.height != null
+                                  ? `${c.width}×${c.height}`
+                                  : "dimensions unknown";
+                              const mime = c.mimeType ? ` · ${c.mimeType}` : "";
+                              const sourceLabel = c.sourceType
+                                ? c.sourceType.charAt(0).toUpperCase() + c.sourceType.slice(1)
+                                : "";
+                              const visionLines = visionDetailLines(c.vision);
+                              const visionFail = visionSummaryLine(c.vision);
+                              const scoreLine =
+                                c.score != null
+                                  ? `Score: ${c.score} / ${c.threshold ?? 75}`
+                                  : null;
+                              const openByDefault =
+                                c.stageReached === "verification"
+                                || c.stageReached === "scoring"
+                                || c.stageReached === "accepted"
+                                || Boolean(c.vision?.ran);
+                              return (
+                                <li key={`${c.urlHost}-${index}`}>
+                                  <details open={openByDefault}>
+                                    <summary>
+                                      <code>{textChild(c.urlHost)}{textChild(c.urlPath || "")}</code>
+                                      {c.accepted
+                                        ? " · accepted"
+                                        : c.rejectionReasons?.[0]
+                                          ? ` · ${formatRejectionLabel(c.rejectionReasons[0])}`
+                                          : ""}
+                                    </summary>
+                                    <p>
+                                      {sourceLabel ? `${sourceLabel} · ` : ""}
+                                      {dims}
+                                      {mime}
+                                    </p>
+                                    {visionFail ? <p>{visionFail}</p> : null}
+                                    {visionLines.length ? (
+                                      <div className="enrichment-vision-details">
+                                        <strong>Verification</strong>
+                                        <ul>
+                                          {visionLines.map((line) => (
+                                            <li key={line}>{line}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    ) : null}
+                                    {scoreLine ? <p>{scoreLine}</p> : null}
+                                    {c.accepted ? (
+                                      <p>Accepted</p>
+                                    ) : c.rejectionReasons?.length ? (
+                                      <p>
+                                        Rejected:{" "}
+                                        {c.rejectionReasons.map(formatRejectionLabel).join(", ")}
+                                      </p>
+                                    ) : null}
+                                  </details>
+                                </li>
+                              );
+                            })}
+                          </ol>
+                        </div>
+                      ) : null}
+                      {job.diagnostics?.stages?.length ? (
+                        <ul>
+                          {job.diagnostics.stages
+                            .filter((s) => s.stage !== "source_reject")
+                            .slice(0, 8)
+                            .map((stage, index) => (
+                              <li key={`${stage.stage}-${index}`}>
+                                <strong>{stage.stage}</strong>
+                                {stage.query ? `: ${textChild(stage.query).slice(0, 80)}` : null}
+                                {stage.candidateCount != null ? ` · ${stage.candidateCount} results` : null}
+                                {stage.acceptedCount != null ? ` · ${stage.acceptedCount} accepted` : null}
+                                {stage.confirmedCount != null && stage.confirmedCount > 0
+                                  ? ` · ${stage.confirmedCount} confirmed`
+                                  : null}
+                                {stage.conflictCount != null && stage.conflictCount > 0
+                                  ? ` · ${stage.conflictCount} conflict`
+                                  : null}
+                                {stage.reason ? ` · ${textChild(stage.reason)}` : null}
+                              </li>
+                            ))}
+                        </ul>
+                      ) : null}
+                      {job.diagnostics?.noResultReason ? (
+                        <p className="enrichment-diagnostics-reason">
+                          Reason: {textChild(job.diagnostics.noResultReason).replace(/_/g, " ")}
+                        </p>
+                      ) : null}
+                    </details>
+                  ) : null}
                 </div>
               );
             })}
           </div>
-        </div>
-      ) : null}
 
-      <div className="enrichment-section enrichment-notes">
-        <span className="eyebrow">Tasting notes</span>
-        <div className="enrichment-note-card">
-          <h3>Official notes</h3>
-          {officialText ? (
-            <>
-              <p>{officialText}</p>
-              <div className="enrichment-field-meta">
-                {tastingNotes.sourceType ? (
-                  <span className="chip static">{textChild(tastingNotes.sourceType)}</span>
+          {missing.length ? (
+            <p className="enrichment-missing">
+              <span className="eyebrow">Still missing</span>
+              {missing.join(", ")}
+            </p>
+          ) : null}
+
+          <div className="enrichment-section">
+            <span className="eyebrow">Identity</span>
+            <div className="enrichment-field-grid">
+              <FieldRow label="Name" field={identity.name} />
+              <FieldRow label="Brand" field={identity.brand} />
+              <FieldRow label="Product type" field={identity.productType} />
+              <FieldRow label="UPC" field={identity.upc} />
+            </div>
+          </div>
+
+          <div className="enrichment-section">
+            <span className="eyebrow">Product facts</span>
+            <div className="enrichment-field-grid">
+              <FieldRow label="Category" field={metadata.category} />
+              <FieldRow label="ABV" field={metadata.abv} />
+              {table !== "packaged_beer" ? (
+                <>
+                  <FieldRow label="Proof" field={metadata.proof} />
+                  <FieldRow label="Volume (ml)" field={metadata.volumeMl} />
+                  <FieldRow label="Origin" field={metadata.origin} />
+                  <FieldRow label="TTB ID" field={metadata.ttbId} />
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          {conflicts.length ? (
+            <div className="enrichment-section">
+              <span className="eyebrow">Conflicts</span>
+              <div className="enrichment-conflicts">
+                {conflicts.map((c) => {
+                  const governmentCompeting =
+                    c.competingSource === "plcb_spirits"
+                    || c.competingSource === "plcb_wines"
+                    || c.competingSource === "iowa";
+                  return (
+                    <div key={`${c.field}-${c.competingSource}`} className="enrichment-conflict">
+                      <strong>{c.field}</strong>
+                      <p>
+                        {governmentCompeting ? (
+                          <>
+                            Government conflict: {c.competingSourceLabel ?? c.competingSource} reported{" "}
+                            {c.field} <em>{textChild(c.competingValue) || "—"}</em>. Canonical value remains{" "}
+                            <em>{textChild(c.keptValue) || "—"}</em> from {c.keptSourceLabel ?? c.keptSource}.
+                          </>
+                        ) : (
+                          <>
+                            Kept <em>{textChild(c.keptValue) || "—"}</em> ({c.keptSourceLabel ?? c.keptSource}) vs{" "}
+                            <em>{textChild(c.competingValue) || "—"}</em> ({c.competingSourceLabel ?? c.competingSource})
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="enrichment-section enrichment-notes">
+            <span className="eyebrow">Tasting notes</span>
+            <div className="enrichment-note-card">
+              <h3>Official notes</h3>
+              {officialText ? (
+                <>
+                  <p>{officialText}</p>
+                  <div className="enrichment-field-meta">
+                    {tastingNotes.sourceType ? (
+                      <span className="chip static">{textChild(tastingNotes.sourceType)}</span>
+                    ) : null}
+                    {tastingNotes.sourceUrl ? (
+                      <a className="enrichment-link" href={String(tastingNotes.sourceUrl)} target="_blank" rel="noreferrer">
+                        Source
+                      </a>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <p className="text-slate-300">No official producer notes yet.</p>
+              )}
+            </div>
+            {houseProfileText ? (
+              <div className="enrichment-note-card enrichment-note-house">
+                <h3>AI house profile</h3>
+                <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
+                <p className="enrichment-house-body">{houseProfileText}</p>
+              </div>
+            ) : null}
+            {personalText ? (
+              <div className="enrichment-note-card">
+                <h3>Personal notes</h3>
+                <p>{personalText}</p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="enrichment-section">
+            <span className="eyebrow">Product image</span>
+            <div className="enrichment-image-row">
+              <div className="enrichment-image-frame">
+                {image.displayUrl ? (
+                  <img src={String(image.displayUrl)} alt="" />
+                ) : (
+                  <span className="text-slate-300">No image</span>
+                )}
+              </div>
+              <div className="enrichment-image-meta">
+                {image.userPreferred ? (
+                  <span className="chip static">User / shelf image preferred</span>
                 ) : null}
-                {tastingNotes.sourceUrl ? (
-                  <a className="enrichment-link" href={String(tastingNotes.sourceUrl)} target="_blank" rel="noreferrer">
-                    Source
+                {image.sourceType || image.displayUrl ? (
+                  <span className="chip static">
+                    {imageSourceLabel(image.sourceType, image.verified)}
+                  </span>
+                ) : null}
+                {image.verified != null ? (
+                  <span className="chip static">{image.verified ? "Verified" : "Not verified"}</span>
+                ) : image.displayUrl ? (
+                  <span className="chip static">Not verified</span>
+                ) : null}
+                {image.score != null ? (
+                  <span className="chip static" title="Deterministic acceptance score">
+                    Score {Math.round(Number(image.score))}
+                  </span>
+                ) : null}
+                {image.sourceUrl ? (
+                  <a className="enrichment-link" href={String(image.sourceUrl)} target="_blank" rel="noreferrer">
+                    Image source
                   </a>
                 ) : null}
+                {!image.displayUrl && !image.enrichedUrl ? (
+                  <p className="text-slate-300">No enriched image selected.</p>
+                ) : null}
               </div>
-            </>
-          ) : (
-            <p className="text-slate-300">No official producer notes yet.</p>
-          )}
-        </div>
-        {houseProfileText ? (
-          <div className="enrichment-note-card enrichment-note-house">
-            <h3>AI house profile</h3>
-            <p className="enrichment-ai-label">Generated house profile — not producer copy</p>
-            <p className="enrichment-house-body">{houseProfileText}</p>
+            </div>
           </div>
-        ) : null}
-        {personalText ? (
-          <div className="enrichment-note-card">
-            <h3>Personal notes</h3>
-            <p>{personalText}</p>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="enrichment-section">
-        <span className="eyebrow">Product image</span>
-        <div className="enrichment-image-row">
-          <div className="enrichment-image-frame">
-            {image.displayUrl ? (
-              <img src={String(image.displayUrl)} alt="" />
-            ) : (
-              <span className="text-slate-300">No image</span>
-            )}
-          </div>
-          <div className="enrichment-image-meta">
-            {image.userPreferred ? (
-              <span className="chip static">User / shelf image preferred</span>
-            ) : null}
-            {image.sourceType || image.displayUrl ? (
-              <span className="chip static">
-                {imageSourceLabel(image.sourceType, image.verified)}
-              </span>
-            ) : null}
-            {image.verified != null ? (
-              <span className="chip static">{image.verified ? "Verified" : "Not verified"}</span>
-            ) : image.displayUrl ? (
-              <span className="chip static">Not verified</span>
-            ) : null}
-            {image.score != null ? (
-              <span className="chip static" title="Deterministic acceptance score">
-                Score {Math.round(Number(image.score))}
-              </span>
-            ) : null}
-            {image.sourceUrl ? (
-              <a className="enrichment-link" href={String(image.sourceUrl)} target="_blank" rel="noreferrer">
-                Image source
-              </a>
-            ) : null}
-            {!image.displayUrl && !image.enrichedUrl ? (
-              <p className="text-slate-300">No enriched image selected.</p>
-            ) : null}
-          </div>
-        </div>
-      </div>
 
           {error ? <p className="error">{error}</p> : null}
         </>
@@ -901,3 +929,4 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
     </section>
   );
 }
+
