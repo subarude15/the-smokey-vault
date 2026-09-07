@@ -21,6 +21,8 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - CI runs the full test suite, production build, catalog runtime checks, and Docker catalog verification.
 - Packaged-beer correctness through GitHub PR #119 is merged.
 - After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
+- PR #122 hardened the Guest API trust boundary with server-side inventory/enrichment redaction.
+- Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
   - Yuengling Traditional Lager: official notes and image found; no synthetic proof or 750 ml metadata.
@@ -46,6 +48,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
 - Post-#119 on `main`: Keeper enrichment clarity, bottle-detail visual refinement, and EnrichmentPanel Hooks fix (direct commits, not separate GitHub PRs at the time).
 - PR122 — Server-side Guest inventory / enrichment redaction (API trust boundary; coarse `out_of_stock` only).
+- PR53 decision — stale draft closed unmerged; do not resurrect its parallel override architecture. Rebuild only the useful Keeper interaction on current `main`.
 
 ## Next work
 
@@ -59,7 +62,7 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 
 Priority order:
 
-1. **Triage draft PR #53** (enrichment review actions) — Do not merge as-is. It is far behind `main`, conflicts with the current ownership/queue stack, and can fight packaged-beer field allowlists. Close it, or redesign onto `product_field_ownership` + beer allowlists + delete cleanup.
+1. **PR123 — Keeper enrichment actions on current architecture** — Rebuild the useful intent from closed PR #53 directly on current `main`: Keeper-only rerun/retry controls, entity-aware conflict handling, and ownership-safe verification. Reuse current queue controls, metadata allowlists, normalization, provenance, `product_field_ownership`, and deletion cleanup. Do not add `enrichment_field_overrides` or another parallel ownership model.
 2. **Decide PR #97** (Angel’s Share theme) — Architecturally additive. Product call: treat guest-visible fill/keg gauges as an intentional availability carve-out while UPC/stock stay keeper-only; then rebase and merge, or park the PR.
 3. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
 4. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
@@ -67,9 +70,9 @@ Priority order:
 
 ## Open PR status
 
-- **#97** Angel’s Share theme — open; rebase + availability carve-out decision required (Track B #3).
-- **#53** Enrichment review actions — draft; do not merge as-is (Track B #2).
+- **#97** Angel’s Share theme — open; rebase + availability carve-out decision required (Track B #2).
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
+- **#53** Enrichment review actions — closed unmerged and superseded by planned PR123; do not rebase or merge.
 
 ## Relevant code
 
@@ -79,6 +82,7 @@ Priority order:
 - `src/server.ts` — inventory API routes and authorization boundaries.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
+- `src/ingestion/jobs/field-ownership.ts` — durable machine-vs-human ownership; currently strongest for packaged-beer ABV/category.
 - `src/ingestion/enrichment/metadata-fields.ts` — entity-specific metadata requirements.
 - `src/cola_client.ts` and existing UPC helpers — GTIN normalization and validation.
 
