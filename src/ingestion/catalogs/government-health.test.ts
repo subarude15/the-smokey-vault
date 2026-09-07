@@ -137,7 +137,10 @@ test("production default resolves under /app/data without env override", () => {
     },
     () => {
       assert.equal(getGovernmentDataDir(), PRODUCTION_GOVERNMENT_DATA_DIR);
-      assert.equal(getGovernmentDbPath(), "/app/data/government-catalog.sqlite");
+      assert.equal(
+        getGovernmentDbPath(),
+        path.resolve(PRODUCTION_GOVERNMENT_DATA_DIR, "government-catalog.sqlite")
+      );
     }
   );
 });
@@ -165,7 +168,10 @@ test("GOVERNMENT_CATALOG_DATA_DIR is honored when DB path is unset", () => {
     },
     () => {
       assert.equal(getGovernmentDataDir(), "/custom/data-dir");
-      assert.equal(getGovernmentDbPath(), "/custom/data-dir/government-catalog.sqlite");
+      assert.equal(
+        getGovernmentDbPath(),
+        path.resolve("/custom/data-dir", "government-catalog.sqlite")
+      );
     }
   );
 });
