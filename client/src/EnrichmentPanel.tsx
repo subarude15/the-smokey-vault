@@ -861,7 +861,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
             {image.displayUrl ? (
               <img src={String(image.displayUrl)} alt="" />
             ) : (
-              <span className="muted">No image</span>
+              <span className="text-slate-300">No image</span>
             )}
           </div>
           <div className="enrichment-image-meta">
