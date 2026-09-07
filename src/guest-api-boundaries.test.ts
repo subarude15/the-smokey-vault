@@ -698,9 +698,14 @@ test("10. Guest client renders gauges from availability_pct, not raw Keeper quan
   assert.match(appSrc, /readAvailabilityPct\(item\)/);
   assert.match(appSrc, /guestTapAvailabilityLabel/);
   assert.match(appSrc, /guestSpiritAvailabilityLabel/);
+  // Guest availability lines must not interpolate exact pint counts.
   assert.doesNotMatch(
     appSrc,
-    /!admin && module\.id === "taps"[\s\S]*kegPints/
+    /availability-line[\s\S]{0,240}kegPints/
+  );
+  assert.doesNotMatch(
+    appSrc,
+    /availability-line[\s\S]{0,240}pints left/
   );
   assert.match(helperSrc, /availability_pct/);
   assert.match(helperSrc, /never exact pint counts/);
