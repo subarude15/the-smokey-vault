@@ -1355,3 +1355,7 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .legacy-beer-audit-item-title{font-weight:600;color:var(--text);margin-bottom:4px}
 .legacy-beer-audit-list ul{margin:0;padding-left:16px;color:var(--muted);font-size:13px;line-height:1.45}
 .legacy-beer-audit-domain{margin-top:6px;font-size:12px;color:var(--muted)}
+.cleanup-findings{margin:14px 0;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.cleanup-findings h4{margin:0 0 8px;font:600 17px "Playfair Display",serif;color:var(--text)}
+.cleanup-findings ul{margin:0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.55}
+.cleanup-findings code{margin-left:4px;color:var(--text)}

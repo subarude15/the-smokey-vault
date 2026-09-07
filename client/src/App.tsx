@@ -52,6 +52,7 @@ import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
+import { InventoryCleanupPreview } from "./InventoryCleanupPreview";
 import { ScanSession, ScanSessionSummary } from "./ScanSession";
 import {
   type ShelfSessionMode,
@@ -3434,6 +3435,7 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(
       <BulkImport onMessage={setMessage} onQueued={() => go("import")}/>
       <EnrichmentServicesHealth/>
       <EnrichmentMaintenance onMessage={setMessage}/>
+      <InventoryCleanupPreview/>
       <section className="settings-card">
         <span className="eyebrow">GUEST PORTAL</span>
         <h3>Visible tabs</h3>
