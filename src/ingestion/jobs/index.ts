@@ -170,6 +170,17 @@ export {
 } from "./item-enrichment-queue.js";
 
 export {
+  rerunItemEnrichmentJob,
+  verifyEnrichmentField,
+  resolveEnrichmentConflict,
+  verifiableFieldsForEntity,
+  type EnrichmentActionError,
+  type RerunEnrichmentResult,
+  type VerifyFieldResult,
+  type ResolveConflictResult
+} from "./enrichment-actions.js";
+
+export {
   metadataEnrichmentAvailability,
   tastingNotesEnrichmentAvailability,
   imageEnrichmentAvailability,

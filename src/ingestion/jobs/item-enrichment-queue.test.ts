@@ -127,11 +127,11 @@ test("normalize helpers reject invalid jobTypes and mode", () => {
 });
 
 test("primary action labels and missing-work helpers", () => {
-  assert.equal(primaryItemEnrichmentActionLabel("not_started"), "Queue");
-  assert.equal(primaryItemEnrichmentActionLabel("no_result"), "Try again");
-  assert.equal(primaryItemEnrichmentActionLabel("partial"), "Retry missing");
+  assert.equal(primaryItemEnrichmentActionLabel("not_started"), "Run again");
+  assert.equal(primaryItemEnrichmentActionLabel("no_result"), "Run again");
+  assert.equal(primaryItemEnrichmentActionLabel("partial"), "Run again");
   assert.equal(primaryItemEnrichmentActionLabel("failed"), "Retry");
-  assert.equal(primaryItemEnrichmentActionLabel("complete"), null);
+  assert.equal(primaryItemEnrichmentActionLabel("complete"), "Run again");
   assert.equal(primaryItemEnrichmentActionLabel("waiting"), null);
   assert.equal(primaryItemEnrichmentActionLabel("in_progress"), null);
   assert.equal(showsItemEnrichmentRerunAction("complete"), true);
@@ -399,11 +399,14 @@ test("EnrichmentPanel exposes Keeper queue controls and guest App gate", () => {
   assert.match(panel, /Queue missing enrichment/);
   assert.match(panel, /Nothing missing/);
   assert.match(panel, /enrichment\/queue/);
-  assert.match(panel, /Re-run/);
-  assert.match(panel, /Try again/);
-  assert.match(panel, /Retry missing/);
+  assert.match(panel, /enrichment\/rerun/);
+  assert.match(panel, /Run again/);
+  assert.match(panel, /Retry/);
+  assert.match(panel, /Keep current/);
+  assert.match(panel, /Use competing/);
+  assert.match(panel, /Mark .* verified/);
   assert.match(app, /admin && ENRICHMENT_MODULES\.has\(module\.id\) \? <EnrichmentPanel/);
   assert.doesNotMatch(publicContent, /Queue missing enrichment/);
   assert.doesNotMatch(publicContent, /enrichment\/queue/);
-  assert.doesNotMatch(publicContent, /Re-run/);
+  assert.doesNotMatch(publicContent, /Run again/);
 });

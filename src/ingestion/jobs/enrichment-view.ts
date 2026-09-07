@@ -47,6 +47,7 @@ import {
   type JobDiagnosticsPayload
 } from "../enrichment/diagnostics.js";
 import { listAdminAuditEvents } from "./admin-audit.js";
+import { getFieldOwnership } from "./field-ownership.js";
 import {
   ENRICHMENT_JOB_TYPES,
   isEnrichmentEntityType,
@@ -96,6 +97,10 @@ export type ConflictView = {
   competingValue: string | number | null;
   competingSource: string;
   competingSourceLabel: string;
+  /** Keeper may Keep current / Use competing when true. */
+  resolvable: boolean;
+  /** identity = name/brand cache disagreement; ownership = packaged-beer ABV/style. */
+  resolutionKind?: "identity" | "ownership";
 };
 
 export type JobStatusLabel = "complete" | "partial" | "in_progress" | "waiting" | "no_result" | "failed" | "not_started";
@@ -302,15 +307,22 @@ export function jobsHaveActiveWork(jobs: JobView[]): boolean {
 }
 
 function conflictViews(conflicts: FieldConflict[]): ConflictView[] {
-  return conflicts.map((c) => ({
-    field: c.field,
-    keptValue: c.existing.value as string | number | null,
-    keptSource: c.existing.source,
-    keptSourceLabel: sourceLabel(c.existing.source),
-    competingValue: c.incoming.value as string | number | null,
-    competingSource: c.incoming.source,
-    competingSourceLabel: sourceLabel(c.incoming.source)
-  }));
+  return conflicts.map((c) => {
+    const field = c.field;
+    // product_type has no durable per-entity inventory column across all tables.
+    const resolvable = field === "name" || field === "brand";
+    return {
+      field,
+      keptValue: c.existing.value as string | number | null,
+      keptSource: c.existing.source,
+      keptSourceLabel: sourceLabel(c.existing.source),
+      competingValue: c.incoming.value as string | number | null,
+      competingSource: c.incoming.source,
+      competingSourceLabel: sourceLabel(c.incoming.source),
+      resolvable,
+      resolutionKind: resolvable ? ("identity" as const) : undefined
+    };
+  });
 }
 
 /** Collect identity conflicts between vault row and UPC caches (read-only review). */
@@ -636,6 +648,14 @@ function officialRepairConflictViews(
     actionTypePrefix: "beer_official_repair_",
     limit: 40
   });
+  const resolved = new Set(
+    listAdminAuditEvents({
+      actionTypePrefix: "enrichment_conflict_resolved",
+      limit: 40
+    })
+      .filter((e) => Number(e.detail.entityId) === entityId)
+      .map((e) => String(e.detail.field ?? ""))
+  );
   const out: ConflictView[] = [];
   const seen = new Set<string>();
   for (const event of events) {
@@ -643,15 +663,23 @@ function officialRepairConflictViews(
     const fieldName = String(event.detail.field ?? "");
     if (fieldName !== "abv" && fieldName !== "category") continue;
     const decision = String(event.detail.decision ?? event.action_type);
-    if (
-      !decision.includes("repaired_machine_value") &&
-      !decision.includes("preserved_human") &&
-      !decision.includes("unresolved_conflict") &&
-      !event.action_type.includes("preserved_human") &&
-      !event.action_type.includes("applied")
-    ) {
-      continue;
-    }
+    const isUnresolved = decision.includes("unresolved_conflict");
+    const isInformational =
+      decision.includes("repaired_machine_value")
+      || decision.includes("preserved_human")
+      || event.action_type.includes("preserved_human")
+      || event.action_type.includes("applied");
+    if (!isUnresolved && !isInformational) continue;
+
+    // Human-owned or previously resolved ownership conflicts are not actionable.
+    const ownership = getFieldOwnership(
+      entityType,
+      entityId,
+      fieldName as "abv" | "category"
+    );
+    const alreadyHuman = ownership?.ownership === "human" || ownership?.source === "user";
+    if (isUnresolved && (alreadyHuman || resolved.has(fieldName))) continue;
+
     const key = `${fieldName}:${String(event.detail.previousValue)}:${String(event.detail.incomingValue)}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -663,7 +691,9 @@ function officialRepairConflictViews(
       keptSourceLabel: sourceLabel(previousSource),
       competingValue: (event.detail.incomingValue as string | number | null) ?? null,
       competingSource: "official_brewery",
-      competingSourceLabel: sourceLabel("official_brewery")
+      competingSourceLabel: sourceLabel("official_brewery"),
+      resolvable: isUnresolved && !alreadyHuman,
+      resolutionKind: isUnresolved ? "ownership" : undefined
     });
   }
   return out;
