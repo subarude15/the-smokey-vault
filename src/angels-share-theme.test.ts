@@ -22,7 +22,7 @@ test("guestAvailability helpers prefer availability_pct and never invent pints f
   assert.equal(spiritGaugePct({ fill_level: 50 }, true), 50);
   assert.equal(spiritGaugePct({ availability_pct: 50, fill_level: 12 }, false), 50);
   assert.equal(spiritGaugePct({ fill_level: 50 }, false), null);
-  assert.equal(guestSpiritAvailabilityLabel(0), "Last pours only");
+  assert.equal(guestSpiritAvailabilityLabel(0), "Empty");
   assert.equal(guestSpiritAvailabilityLabel(50), "Half");
   assert.equal(guestTapAvailabilityLabel(0), "Kicked");
   assert.equal(guestTapAvailabilityLabel(75), "¾");

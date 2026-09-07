@@ -11,9 +11,9 @@ export function readAvailabilityPct(item: Record<string, unknown>): number | nul
   return null;
 }
 
-/** Spirit fill label for guests: coarse stop text, with "Last pours only" at empty. */
+/** Spirit fill label for guests: same coarse stops as Keeper fill labels. */
 export function guestSpiritAvailabilityLabel(pct: number): string {
-  return pct <= 0 ? "Last pours only" : fillStopLabel(pct);
+  return fillStopLabel(pct);
 }
 
 /** Tap keg label for guests: stop text, never exact pint counts. */

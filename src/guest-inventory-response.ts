@@ -16,6 +16,7 @@ import {
   isTapEmpty,
   nearestFillStop,
   nearestKegStop,
+  openNextSpirit,
   packagedCount
 } from "./catalog.js";
 import type { BottleEnrichmentView } from "./ingestion/jobs/enrichment-view.js";
@@ -181,12 +182,22 @@ export function guestInventoryOutOfStock(
 /**
  * Guest-safe bottle/keg fill gauge (0–100), snapped to existing fill/keg stops.
  * Derived on the server from Keeper quantities — never a passthrough of raw fields.
+ *
+ * Spirits follow open-bottle semantics: an empty open bottle with spare stock
+ * projects as a full available bottle (same meaning as `openNextSpirit`), so
+ * guests never see "empty / last pours" while `out_of_stock` is false.
  */
 export function guestInventoryAvailabilityPct(
   table: string,
   row: Record<string, unknown>
 ): number | undefined {
-  if (table === "spirits") return nearestFillStop(row.fill_level);
+  if (table === "spirits") {
+    const openFill = nearestFillStop(row.fill_level);
+    if (openFill > 0) return openFill;
+    // Empty open bottle + spare(s) → patron can still be poured a full bottle.
+    if (openNextSpirit(row)) return 100;
+    return 0;
+  }
   if (table === "taps") {
     if (isTapEmpty(row)) return 0;
     const remaining = Number(row.remaining_l ?? 0);

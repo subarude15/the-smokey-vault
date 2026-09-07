@@ -147,7 +147,7 @@ after(async () => {
 });
 
 test("serializer unit: guest inventory strips keeper fields and sets out_of_stock", () => {
-  const spirit = serializeGuestInventoryItem("spirits", {
+  const spareReady = serializeGuestInventoryItem("spirits", {
     id: 1,
     name: "Unit Spirit",
     brand: "Unit",
@@ -166,16 +166,17 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
     vote_total: 1,
     vote_score: 1
   });
-  assert.equal(spirit.name, "Unit Spirit");
-  assert.equal(spirit.out_of_stock, false); // spare bottle remaining
-  assert.equal(spirit.availability_pct, 0); // empty open bottle, spare still on shelf
-  assert.equal(spirit.upc, undefined);
-  assert.equal(spirit.stock_count, undefined);
-  assert.equal(spirit.fill_level, undefined);
-  assert.equal(spirit.shelf_location, undefined);
-  assert.equal(spirit.purchase_date, undefined);
-  assert.equal(spirit.opened_date, undefined);
-  assert.equal(spirit.vote_up, 1);
+  assert.equal(spareReady.name, "Unit Spirit");
+  assert.equal(spareReady.out_of_stock, false); // spare bottle remaining
+  // Empty open bottle + spare → guest sees a full available bottle, not 0%/last pours.
+  assert.equal(spareReady.availability_pct, 100);
+  assert.equal(spareReady.upc, undefined);
+  assert.equal(spareReady.stock_count, undefined);
+  assert.equal(spareReady.fill_level, undefined);
+  assert.equal(spareReady.shelf_location, undefined);
+  assert.equal(spareReady.purchase_date, undefined);
+  assert.equal(spareReady.opened_date, undefined);
+  assert.equal(spareReady.vote_up, 1);
 
   const empty = serializeGuestInventoryItem("spirits", {
     id: 2,
@@ -187,6 +188,8 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
   });
   assert.equal(empty.out_of_stock, true);
   assert.equal(empty.availability_pct, 0);
+  assert.equal(empty.fill_level, undefined);
+  assert.equal(empty.stock_count, undefined);
 
   const half = serializeGuestInventoryItem("spirits", {
     id: 4,
@@ -197,9 +200,25 @@ test("serializer unit: guest inventory strips keeper fields and sets out_of_stoc
     stock_count: 1,
     upc: "leak"
   });
+  assert.equal(half.out_of_stock, false);
   assert.equal(half.availability_pct, 50);
   assert.equal(half.fill_level, undefined);
+  assert.equal(half.stock_count, undefined);
   assert.equal(half.upc, undefined);
+
+  // Partial open bottle with spares still reports the open bottle's coarse fill.
+  const halfWithSpare = serializeGuestInventoryItem("spirits", {
+    id: 6,
+    name: "Half Spare",
+    brand: "X",
+    category: "Whiskey",
+    fill_level: 50,
+    stock_count: 3
+  });
+  assert.equal(halfWithSpare.out_of_stock, false);
+  assert.equal(halfWithSpare.availability_pct, 50);
+  assert.equal(halfWithSpare.fill_level, undefined);
+  assert.equal(halfWithSpare.stock_count, undefined);
 
   const tap = serializeGuestInventoryItem("taps", {
     id: 5,
@@ -444,6 +463,10 @@ test("6. Guest out_of_stock derives without leaking exact counts", async () => {
     INSERT INTO spirits (name, brand, category, fill_level, stock_count, upc)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run("GuestBound Empty", "Bound", "Gin", 0, 1, `${PREFIX}1002`);
+  const spareSpirit = db.prepare(`
+    INSERT INTO spirits (name, brand, category, fill_level, stock_count, upc)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run("GuestBound Spare", "Bound", "Rum", 0, 2, `${PREFIX}1003`);
   const emptyBeer = db.prepare(`
     INSERT INTO packaged_beer (brewery, name, style, count, upc, vessel)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -457,6 +480,14 @@ test("6. Guest out_of_stock derives without leaking exact counts", async () => {
   assert.equal(spirit.availability_pct, 0);
   assert.equal(spirit.stock_count, undefined);
   assert.equal(spirit.fill_level, undefined);
+
+  const spare = (spirits.json() as Array<Record<string, unknown>>)
+    .find((row) => row.id === Number(spareSpirit.lastInsertRowid));
+  assert.ok(spare);
+  assert.equal(spare.out_of_stock, false);
+  assert.equal(spare.availability_pct, 100);
+  assert.equal(spare.stock_count, undefined);
+  assert.equal(spare.fill_level, undefined);
 
   const beers = await app.inject({ method: "GET", url: "/api/inventory/packaged_beer" });
   const beer = (beers.json() as Array<Record<string, unknown>>)
