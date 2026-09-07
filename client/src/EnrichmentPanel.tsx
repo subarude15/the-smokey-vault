@@ -311,7 +311,7 @@ function FieldRow({ label, field }: { label: string; field: FieldView | null | u
           </>
         )}
       </div>
-      {field.note ? <div className="enrichment-field-note">{field.note}</div> : null}
+      {field.note ? <div className="enrichment-field-note text-slate-300">{field.note}</div> : null}
       {confirmations.length ? (
         <div className="enrichment-field-confirmations">
           {confirmations.map((c) => (
@@ -578,10 +578,10 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           const allIdle = jobs.length > 0 && jobs.every((j) => j.statusLabel === "not_started");
           const anyActive = polling;
           if (!jobs.length) {
-            return <p className="muted">No enrichment queued</p>;
+            return <p className="text-slate-300">No enrichment queued</p>;
           }
           if (allIdle && !anyActive) {
-            return <p className="muted">{enrichment.identified ? "Enrichment pending" : "No enrichment queued"}</p>;
+            return <p className="text-slate-300">{enrichment.identified ? "Enrichment pending" : "No enrichment queued"}</p>;
           }
           return null;
         })()}
@@ -836,7 +836,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
               </div>
             </>
           ) : (
-            <p className="muted">No official producer notes yet.</p>
+            <p className="text-slate-300">No official producer notes yet.</p>
           )}
         </div>
         {houseProfileText ? (
@@ -889,7 +889,7 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
               </a>
             ) : null}
             {!image.displayUrl && !image.enrichedUrl ? (
-              <p className="muted">No enriched image selected.</p>
+              <p className="text-slate-300">No enriched image selected.</p>
             ) : null}
           </div>
         </div>
