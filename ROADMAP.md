@@ -37,6 +37,7 @@ The Smokey Vault is a private, self-hosted bar, wine cellar, packaged-beer inven
 - PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
 - PR120 — Keeper enrichment clarity: UI improvements for enrichment status clarity.
 - PR121 — Bottle-detail visual refinement: Image containment, responsive titles, collapsed enrichment, and high-contrast UI.
+- PR121 — Bottle-detail visual refinement: Image containment, responsive titles, collapsed enrichment, and high-contrast UI.
 
 ## Next PRs
 
