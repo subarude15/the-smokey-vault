@@ -20,9 +20,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - Node.js 24, TypeScript, Fastify, React, and SQLite.
 - CI runs the full test suite, production build, catalog runtime checks, and Docker catalog verification.
 - Packaged-beer correctness through GitHub PR #119 is merged.
-- Post-#119 main work (not separate GitHub PR numbers):
-  - **main/120** — Keeper enrichment clarity (status UI).
-  - **main/121** — Bottle-detail visual refinement, plus a follow-up Hooks ordering fix for EnrichmentPanel.
+- After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
   - Yuengling Traditional Lager: official notes and image found; no synthetic proof or 750 ml metadata.
@@ -46,10 +44,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR113: packaged-beer discovery, metadata semantics, cache safety, and GTIN validation.
 - PR114–116: safe per-item deletion, cleanup preview, and Bottle Library separation.
 - PR117–119: cross-platform tests, image-test isolation, and Node 24 GitHub Actions.
-- main/120 — Keeper enrichment clarity.
-- main/121 — Bottle-detail visual refinement and EnrichmentPanel Hooks fix.
-
-GitHub pull request numbers stop at **#119** for that line. Later items labeled main/120 and main/121 landed as direct commits on `main`.
+- Post-#119 on `main`: Keeper enrichment clarity, bottle-detail visual refinement, and EnrichmentPanel Hooks fix (direct commits, not separate GitHub PRs at the time).
 
 ## Next work
 

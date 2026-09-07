@@ -2,10 +2,10 @@
 
 **Status: idle**
 
-No active agent task. Last completed product work on `main`:
+No active agent task. Last completed product work on `main` before this docs update:
 
-- main/121 — Bottle-detail visual refinement (`BottlePublicContent`, `EnrichmentPanel`)
-- Follow-up — EnrichmentPanel collapse `useEffect` moved before early returns (Hooks crash fix)
+- Bottle-detail visual refinement (`BottlePublicContent`, `EnrichmentPanel`)
+- EnrichmentPanel collapse `useEffect` moved before early returns (Hooks crash fix)
 
 Next work is defined in `ROADMAP.md` (Track B hardening first; Track A evidence-only discovery).
 
