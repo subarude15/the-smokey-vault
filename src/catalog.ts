@@ -230,7 +230,7 @@ const SPIRIT_TABLE_FAMILIES = new Set([
 ]);
 
 const WHISKEY_MALT = /\b(single\s+malt|scotch\s+malt|islay\s+malt|malt\s+scotch|malt\s+whisk(?:y|ey))\b/i;
-const BEER_TABLE_WORDS = /\b(beer|ale|ipa|lager|stout|porter|pilsner|saison|cider|seltzer|malt\s+beverage)\b/i;
+const BEER_TABLE_WORDS = /\b(beer|ale|ipa|lager|stout|porter|pilsner|saison|cider|seltzer|malt\s+beverage|tripel|dubbel|witbier|gose|lambic|k(?:ö|o)lsch|hefeweizen|bock|shandy)\b/i;
 const WINE_TABLE_WORDS = /\b(wine|sparkling|champagne|prosecco|vermouth|sake|mead|riesling|cabernet|chardonnay|pinot|merlot|syrah|zinfandel|malbec|sauvignon|nebbiolo)\b/i;
 
 function productHaystack(product: Record<string, unknown>) {
@@ -276,6 +276,16 @@ export function packagedBeerRowLooksLikeSpirit(row: Record<string, unknown>) {
   });
   if (table !== "spirits") return false;
   return !BEER_TABLE_WORDS.test(haystack);
+}
+
+/** Affirmative beer identity inside a row physically stored as a spirit. */
+export function spiritInventoryRowLooksLikeBeer(row: Record<string, unknown>) {
+  return inferProductTable({
+    name: row.name,
+    category: row.category ?? row.style,
+    sub_category: row.sub_category,
+    product_type: row.product_type
+  }) === "packaged_beer";
 }
 
 export function isSpiritInventoryFamily(family: string) {

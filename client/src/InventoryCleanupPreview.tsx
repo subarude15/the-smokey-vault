@@ -10,6 +10,11 @@ type CleanupPreview = {
     items: Array<{ entityId: number; name: string; brewery: string; upc: string }>;
     truncated: boolean;
   };
+  beerLikeSpiritRows: {
+    count: number;
+    items: Array<{ entityId: number; name: string; brand: string; category: string; upc: string }>;
+    truncated: boolean;
+  };
   orphanedArtifacts: {
     total: number;
     byTable: Record<string, number>;
@@ -71,6 +76,7 @@ export function InventoryCleanupPreview() {
         <dl className="enrichment-backfill-stats">
           <div><dt>Shelf bottles</dt><dd>{preview.inventory.total}</dd></div>
           <div><dt>Invalid beer barcodes</dt><dd>{preview.invalidPackagedBeerBarcodes.count}</dd></div>
+          <div><dt>Beer filed as spirits</dt><dd>{preview.beerLikeSpiritRows.count}</dd></div>
           <div><dt>Orphaned enrichment rows</dt><dd>{preview.orphanedArtifacts.total}</dd></div>
           <div><dt>Unreferenced lookup rows</dt><dd>{preview.unreferencedLookupCache.total}</dd></div>
           <div><dt>Import Review only</dt><dd>{preview.unlinkedImportReview}</dd></div>
@@ -88,6 +94,16 @@ export function InventoryCleanupPreview() {
             </li>)}
           </ul>
           {preview.invalidPackagedBeerBarcodes.truncated && <small>Showing the first 50.</small>}
+        </div>}
+        {preview.beerLikeSpiritRows.items.length > 0 && <div className="cleanup-findings">
+          <h4>Beer-like records in Spirits &amp; Mixers</h4>
+          <p>These are stored in the spirits table, so they appear in the Bottle Library. Open that collection and remove test records one at a time.</p>
+          <ul>
+            {preview.beerLikeSpiritRows.items.map((item) => <li key={item.entityId}>
+              <strong>{item.name}</strong>{item.brand ? ` — ${item.brand}` : ""}{item.category ? ` · ${item.category}` : ""}
+            </li>)}
+          </ul>
+          {preview.beerLikeSpiritRows.truncated && <small>Showing the first 50.</small>}
         </div>}
         <small className="field-hint">
           Unreferenced lookup rows may still be useful for future scans. This report does not call them safe to delete.

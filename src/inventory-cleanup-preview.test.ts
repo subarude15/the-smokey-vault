@@ -56,6 +56,7 @@ test("cleanup preview is bounded, read-only, and distinguishes referenced aliase
   assert.deepEqual(after, before);
   assert.equal(preview.readOnly, true);
   assert.ok(preview.invalidPackagedBeerBarcodes.items.length <= 50);
+  assert.ok(preview.beerLikeSpiritRows.items.length <= 50);
   assert.ok(preview.orphanedArtifacts.items.length <= 50);
   assert.ok(preview.unreferencedLookupCache.sampleUpcs.length <= 50);
   assert.equal(preview.invalidPackagedBeerBarcodes.count, baseline.invalidPackagedBeerBarcodes.count + 1);

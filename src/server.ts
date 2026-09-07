@@ -9,7 +9,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession, resolveSessionSecret } from "./auth.js";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
-import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite } from "./catalog.js";
+import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
 import { canonicalGtin } from "./cola_client.js";
 import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottlePrompt, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
@@ -417,6 +417,9 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   if (requireAdmin(request, reply)) return;
   const table = request.params.table;
   if (!tables.has(table)) return reply.code(404).send({ error: "Unknown module" });
+  if (table === "spirits" && spiritInventoryRowLooksLikeBeer(request.body)) {
+    return reply.code(400).send({ error: "Beer belongs in Packaged Beer, not Spirits & Mixers" });
+  }
   if (table === "packaged_beer" && String(request.body.upc ?? "").trim()) {
     const upc = canonicalGtin(String(request.body.upc));
     if (!upc) return reply.code(400).send({ error: "Packaged beer UPC must be a valid GTIN" });
@@ -533,6 +536,12 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   }
   const existing = db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(request.params.id) as Record<string, unknown> | undefined;
   if (!existing) return reply.code(404).send({ error: "Item not found" });
+  if (table === "spirits" && (
+    spiritInventoryRowLooksLikeBeer(request.body)
+    || spiritInventoryRowLooksLikeBeer({ ...existing, ...request.body })
+  )) {
+    return reply.code(400).send({ error: "Beer belongs in Packaged Beer, not Spirits & Mixers" });
+  }
   const body = table === "brews"
     ? prepareBrewWrite({ ...request.body }, existing)
     : table === "packaged_beer"
