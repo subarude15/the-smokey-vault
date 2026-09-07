@@ -88,16 +88,22 @@ export function BreweryLabDetail({
     setSaving(true);
     setError("");
     try {
+      const payload: Record<string, unknown> = {
+        display_name: displayName.trim(),
+        guest_description: guestDescription.trim(),
+        tasting_notes: tastingNotes.trim(),
+        flavors: serializeList(flavorList),
+        tags: serializeList(tagList)
+      };
+      // Only send image_url when the Keeper actually changed it; server also
+      // compares against stored image before flipping keeper_owns_image.
+      const previousImage = String(brew.image_url ?? "").trim();
+      if (imageUrl.trim() !== previousImage) {
+        payload.image_url = imageUrl;
+      }
       const next = await api<Item>(`/inventory/brews/${brew.id}`, {
         method: "PUT",
-        body: JSON.stringify({
-          display_name: displayName.trim(),
-          guest_description: guestDescription.trim(),
-          tasting_notes: tastingNotes.trim(),
-          flavors: serializeList(flavorList),
-          tags: serializeList(tagList),
-          image_url: imageUrl
-        })
+        body: JSON.stringify(payload)
       });
       onSaved(next);
       setEditing(false);

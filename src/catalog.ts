@@ -838,3 +838,24 @@ export function brewKeeperOwnsImage(item: Record<string, unknown> | undefined | 
   if (!item) return false;
   return Number(item.keeper_owns_image) === 1;
 }
+
+/**
+ * Stamp `keeper_owns_image` only when image_url actually changes.
+ * Always strips any client-forged ownership flag first.
+ * Unchanged / omitted images leave existing ownership alone (flag omitted from write).
+ */
+export function applyBrewImageOwnershipOnWrite(
+  body: Record<string, unknown>,
+  existing?: Record<string, unknown> | null
+): void {
+  delete body.keeper_owns_image;
+  if (!Object.prototype.hasOwnProperty.call(body, "image_url")) return;
+  const nextImage = String(body.image_url ?? "").trim();
+  if (!existing) {
+    body.keeper_owns_image = nextImage ? 1 : 0;
+    return;
+  }
+  const previousImage = String(existing.image_url ?? "").trim();
+  if (nextImage === previousImage) return;
+  body.keeper_owns_image = nextImage ? 1 : 0;
+}

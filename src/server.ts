@@ -9,7 +9,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession, resolveSessionSecret } from "./auth.js";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
-import { prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
+import { applyBrewImageOwnershipOnWrite, prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
 import { canonicalGtin } from "./cola_client.js";
 import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottlePrompt, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
@@ -443,15 +443,11 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
       : table === "spirits"
         ? prepareSpiritWrite({ ...request.body })
         : { ...request.body };
+  // Decide ownership from the Keeper-submitted URL before localization rewrites it.
+  if (table === "brews") applyBrewImageOwnershipOnWrite(body);
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
-  }
-  // Keeper image edits own the presentation photo; Brewfather sync must not clobber it.
-  if (table === "brews" && Object.prototype.hasOwnProperty.call(body, "image_url")) {
-    body.keeper_owns_image = String(body.image_url ?? "").trim() ? 1 : 0;
-  } else if (table === "brews") {
-    delete body.keeper_owns_image;
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
@@ -566,15 +562,11 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
       : table === "spirits"
         ? prepareSpiritWrite({ ...request.body })
         : { ...request.body };
+  // Compare the Keeper-submitted image to the stored one before localization.
+  if (table === "brews") applyBrewImageOwnershipOnWrite(body, existing);
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
-  }
-  // Stamp Keeper image ownership server-side — clients cannot forge the flag alone.
-  if (table === "brews" && Object.prototype.hasOwnProperty.call(body, "image_url")) {
-    body.keeper_owns_image = String(body.image_url ?? "").trim() ? 1 : 0;
-  } else if (table === "brews") {
-    delete body.keeper_owns_image;
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });

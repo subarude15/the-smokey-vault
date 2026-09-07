@@ -150,6 +150,98 @@ test("Brewfather image fills when empty; Keeper image survives later sync", () =
   assert.equal(afterSync.status, "Ready to Keg");
 });
 
+test("presentation-only edits do not claim Brewfather images; clear reopens sync", async () => {
+  cleanup();
+  const brewfatherId = `${PREFIX}-img-own`;
+  const imageA = "https://brewfather.app/images/pr124-a.jpg";
+  const imageB = "https://brewfather.app/images/pr124-b.jpg";
+  const imageC = "/api/media/images/pr124-keeper-c.jpg";
+  const first = upsertMappedBrew(mapBrewfatherBatch({
+    ...fixture,
+    _id: brewfatherId,
+    img_url: imageA
+  }));
+  let row = db.prepare("SELECT * FROM brews WHERE id=?").get(first.id) as Record<string, unknown>;
+  assert.equal(row.image_url, imageA);
+  assert.equal(Number(row.keeper_owns_image), 0);
+
+  const token = createTestAdminToken();
+
+  // Editing tasting notes while re-sending the same Brewfather image must not claim ownership.
+  const notesOnly = await app.inject({
+    method: "PUT",
+    url: `/api/inventory/brews/${first.id}`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      tasting_notes: "Aroma: citrus\nPalate: pine\nFinish: dry",
+      guest_description: "Patio pale for guests.",
+      image_url: imageA,
+      keeper_owns_image: 1
+    }
+  });
+  assert.equal(notesOnly.statusCode, 200);
+  row = notesOnly.json() as Record<string, unknown>;
+  assert.equal(row.tasting_notes, "Aroma: citrus\nPalate: pine\nFinish: dry");
+  assert.equal(row.image_url, imageA);
+  assert.equal(Number(row.keeper_owns_image), 0, "unchanged Brewfather image must stay machine-owned");
+
+  upsertMappedBrew(mapBrewfatherBatch({
+    ...fixture,
+    _id: brewfatherId,
+    status: "Conditioning",
+    img_url: imageB
+  }));
+  row = db.prepare("SELECT * FROM brews WHERE id=?").get(first.id) as Record<string, unknown>;
+  assert.equal(row.image_url, imageB);
+  assert.equal(Number(row.keeper_owns_image), 0);
+  assert.equal(row.status, "Conditioning");
+
+  // Explicit Keeper replacement claims ownership and blocks Brewfather overwrite.
+  const replace = await app.inject({
+    method: "PUT",
+    url: `/api/inventory/brews/${first.id}`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { image_url: imageC }
+  });
+  assert.equal(replace.statusCode, 200);
+  row = replace.json() as Record<string, unknown>;
+  assert.equal(row.image_url, imageC);
+  assert.equal(Number(row.keeper_owns_image), 1);
+
+  upsertMappedBrew(mapBrewfatherBatch({
+    ...fixture,
+    _id: brewfatherId,
+    status: "Completed",
+    img_url: imageB
+  }));
+  row = db.prepare("SELECT * FROM brews WHERE id=?").get(first.id) as Record<string, unknown>;
+  assert.equal(row.image_url, imageC);
+  assert.equal(Number(row.keeper_owns_image), 1);
+
+  // Explicit clear releases ownership so Brewfather may populate again.
+  const clear = await app.inject({
+    method: "PUT",
+    url: `/api/inventory/brews/${first.id}`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { image_url: "" }
+  });
+  assert.equal(clear.statusCode, 200);
+  row = clear.json() as Record<string, unknown>;
+  assert.equal(String(row.image_url ?? ""), "");
+  assert.equal(Number(row.keeper_owns_image), 0);
+
+  upsertMappedBrew(mapBrewfatherBatch({
+    ...fixture,
+    _id: brewfatherId,
+    status: "Archived",
+    img_url: imageB
+  }));
+  row = db.prepare("SELECT * FROM brews WHERE id=?").get(first.id) as Record<string, unknown>;
+  assert.equal(row.image_url, imageB);
+  assert.equal(Number(row.keeper_owns_image), 0);
+  assert.equal(row.status, "Archived");
+});
+
 test("Guest cannot mutate brew presentation; Keeper can", async () => {
   cleanup();
   const brewId = Number(db.prepare(`
@@ -263,4 +355,5 @@ test("Brewery Lab UI prioritizes guest presentation and Keeper detail editor", (
   assert.match(detail, /ImageField/);
   assert.match(detail, /Brewing details/);
   assert.match(detail, /admin && String\(brew\.brewfather_id/);
+  assert.match(detail, /imageUrl\.trim\(\) !== previousImage/);
 });
