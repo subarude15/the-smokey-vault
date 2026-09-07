@@ -99,6 +99,7 @@ import {
 } from "./speakeasy.js";
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
 import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
+import { previewInventoryCleanup } from "./inventory-cleanup-preview.js";
 
 /**
  * Behind a reverse proxy every request otherwise arrives from the proxy's address, which
@@ -569,6 +570,13 @@ app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id
     return reply.code(409).send({ error: "Enrichment is still running. Wait a moment and try Remove again." });
   }
   return reply.code(204).send();
+});
+
+app.get("/api/admin/inventory/cleanup-preview", {
+  schema: { tags: ["Admin"], summary: "Preview inventory hygiene findings without changing data" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return previewInventoryCleanup();
 });
 
 /**
