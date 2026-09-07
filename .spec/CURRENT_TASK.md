@@ -1,13 +1,9 @@
 ﻿# Current task
 
-**Status: active — finish PR #97 (Angel’s Share + Guest availability carve-out)**
+**Status: idle (PR #97 ready for review)**
 
-Objectives:
+Last completed agent work: rebase + finish **PR #97** (Angel’s Share theme + Guest availability carve-out) on branch `arena/01a07181-the-smokey-vault`.
 
-1. Rebase PR #97 onto current `main` (post-#122/#123).
-2. Preserve Angel’s Share theme (`theme-angels.css`, presets, `?theme=angels`).
-3. Expose Guest-safe derived `availability_pct` for spirits/taps on the server boundary; keep UPC, stock, raw fill/remaining, and exact pints Keeper-only.
-4. Wire Guest UI gauges to the derived contract (theme-independent data; Angel’s Share visual emphasis).
-5. Update tests/docs; leave #97 ready for review (do not merge).
+Next work is defined in `ROADMAP.md` (Track B #1 is review/merge of #97; then remaining hardening items).
 
-When this lands, set this file back to idle and point at `ROADMAP.md` Track B.
+When assigning a new task, replace this file with concrete objectives, file boundaries, and ponytail rules. Do not leave completed PR briefs here.
