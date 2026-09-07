@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS brews (
   schedule TEXT DEFAULT '', status TEXT DEFAULT 'Planned', notes TEXT DEFAULT '', maker TEXT DEFAULT '',
   image_url TEXT DEFAULT '', tasting_notes TEXT DEFAULT '', flavors TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
   base_ingredient TEXT DEFAULT '', hops TEXT DEFAULT '[]', brewfather_id TEXT,
+  display_name TEXT DEFAULT '', guest_description TEXT DEFAULT '', keeper_owns_image INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS packaged_beer (
@@ -224,6 +225,9 @@ ensureColumn("brews", "tags", "ALTER TABLE brews ADD COLUMN tags TEXT DEFAULT '[
 ensureColumn("brews", "base_ingredient", "ALTER TABLE brews ADD COLUMN base_ingredient TEXT DEFAULT ''");
 ensureColumn("brews", "hops", "ALTER TABLE brews ADD COLUMN hops TEXT DEFAULT '[]'");
 ensureColumn("brews", "brewfather_id", "ALTER TABLE brews ADD COLUMN brewfather_id TEXT");
+ensureColumn("brews", "display_name", "ALTER TABLE brews ADD COLUMN display_name TEXT DEFAULT ''");
+ensureColumn("brews", "guest_description", "ALTER TABLE brews ADD COLUMN guest_description TEXT DEFAULT ''");
+ensureColumn("brews", "keeper_owns_image", "ALTER TABLE brews ADD COLUMN keeper_owns_image INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS brews_brewfather_id ON brews(brewfather_id) WHERE brewfather_id IS NOT NULL AND brewfather_id != ''");
 ensureColumn("cocktails", "season", "ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
 ensureColumn("cocktails", "image_url", "ALTER TABLE cocktails ADD COLUMN image_url TEXT DEFAULT ''");

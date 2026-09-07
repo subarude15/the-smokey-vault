@@ -1,4 +1,4 @@
-import { prepareBrewWrite, type BrewStatus } from "./catalog.js";
+import { brewKeeperOwnsImage, prepareBrewWrite, type BrewStatus } from "./catalog.js";
 import { db, getSetting, setSetting } from "./db.js";
 import { localizeImage } from "./images.js";
 
@@ -169,6 +169,12 @@ const UPSERT_FIELDS = [
   "brewfather_id"
 ];
 
+/**
+ * Upsert Brewfather brewing facts only.
+ * Keeper presentation fields (display_name, guest_description, tasting_notes,
+ * flavors, tags, notes) are intentionally omitted from UPSERT_FIELDS.
+ * Keeper-owned images are never overwritten.
+ */
 export function upsertMappedBrew(mapped: Record<string, unknown>): { action: "inserted" | "updated"; id: number } {
   const brewfatherId = text(mapped.brewfather_id);
   if (!brewfatherId) throw new Error("brewfather_id required");
@@ -178,7 +184,12 @@ export function upsertMappedBrew(mapped: Record<string, unknown>): { action: "in
     const abv = Number(mapped.calculated_abv);
     if (Number.isFinite(abv) && abv > 0) body.calculated_abv = abv;
   }
-  if (existing && !text(body.image_url)) delete body.image_url;
+  // Image precedence: Keeper upload > Brewfather image > leave existing / placeholder.
+  if (existing && brewKeeperOwnsImage(existing)) {
+    delete body.image_url;
+  } else if (existing && !text(body.image_url)) {
+    delete body.image_url;
+  }
   const fields = UPSERT_FIELDS.filter((field) => body[field] !== undefined);
   if (existing) {
     db.prepare(`UPDATE brews SET ${fields.map((field) => `${field}=?`).join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=?`)

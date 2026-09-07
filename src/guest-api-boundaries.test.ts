@@ -609,7 +609,8 @@ test("8. Guest allowlist covers taps, brews, and cocktails without keeper intern
         brewfather_id: `${PREFIX}brew1`,
         target_og: 1.05,
         measured_og: 1.049,
-        measured_fg: 1.011
+        measured_fg: 1.011,
+        keeper_owns_image: 0
       }
     },
     {

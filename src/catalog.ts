@@ -772,6 +772,7 @@ export function prepareBrewWrite(body: Record<string, unknown>, existing?: Recor
   if (next.status !== undefined) next.status = normalizeBrewStatus(next.status);
   if (next.hops !== undefined) next.hops = serializeList(parseCommaList(next.hops));
   if (next.flavors !== undefined) next.flavors = serializeList(parseCommaList(next.flavors));
+  if (next.tags !== undefined) next.tags = serializeList(parseList(next.tags));
   const abv = brewAbv({ ...existing, ...next });
   if (abv != null) next.calculated_abv = abv;
   return next;
@@ -812,4 +813,28 @@ export function brewDisplayName(batchName: unknown, style: unknown = ""): string
   const kind = String(style ?? "").trim();
   if (!name || /^(batch|untitled(?:\s+batch)?)$/i.test(name)) return kind || "Untitled batch";
   return name;
+}
+
+/**
+ * Guest/home-bar presentation title.
+ * Keeper `display_name` wins; otherwise fall back to Brewfather batch naming.
+ */
+export function brewPresentationName(item: Record<string, unknown>): string {
+  const override = String(item.display_name ?? "").trim();
+  if (override) return override;
+  return brewDisplayName(item.batch_name, item.style);
+}
+
+/** Guest-facing brew status labels (including Pouring Now when on tap). */
+export function brewGuestStatusLabel(status: unknown, options: { pouring?: boolean } = {}): string {
+  if (options.pouring) return "Pouring Now";
+  const normalized = normalizeBrewStatus(status);
+  if (normalized === "Fermenting") return "Brewing / Fermenting";
+  return normalized;
+}
+
+/** True when Keeper uploaded/replaced the brew presentation image. */
+export function brewKeeperOwnsImage(item: Record<string, unknown> | undefined | null): boolean {
+  if (!item) return false;
+  return Number(item.keeper_owns_image) === 1;
 }

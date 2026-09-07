@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Beer, CircleAlert, FlaskConical, Hop, Thermometer } from "lucide-react";
+import { Beer, CircleAlert, FlaskConical } from "lucide-react";
 import { api, type Item } from "./api";
+import { BreweryLabDetail } from "./BreweryLabDetail";
 import {
-  DEFAULT_KEG_L, brewDisplayName, formatGravity, isTapEmpty, kegFillPercent, normalizeBrewStatus,
-  parseList, pintsRemaining, tapsForBatch
+  DEFAULT_KEG_L, brewGuestStatusLabel, brewPresentationName, isTapEmpty, kegFillPercent,
+  normalizeBrewStatus, parseList, pintsRemaining, tapsForBatch
 } from "./catalog";
 
 const PIPELINE_STATUSES = new Set(["Fermenting", "Conditioning"]);
@@ -26,31 +27,38 @@ function abvText(brew: Item): string {
   return abv > 0 ? `${abv.toFixed(1)}% ABV` : "";
 }
 
-function gravityText(brew: Item): string {
-  const og = formatGravity(brew.measured_og ?? brew.target_og);
-  const fg = formatGravity(brew.measured_fg ?? brew.target_fg);
-  if (og && fg) return `OG ${og} → FG ${fg}`;
-  if (og) return `OG ${og}`;
-  if (fg) return `FG ${fg}`;
-  return "";
+function blurb(brew: Item): string {
+  const about = String(brew.guest_description ?? "").trim();
+  if (about) return about;
+  return String(brew.tasting_notes ?? "").trim();
 }
 
-function BrewStats({ brew }: { brew: Item }) {
-  const hops = parseList(brew.hops);
-  const gravity = gravityText(brew);
+function GuestCardStats({ brew }: { brew: Item }) {
+  const flavors = parseList(brew.flavors).slice(0, 4);
   const abv = abvText(brew);
-  return <div className="lab-stats">
-    {gravity ? <span><Thermometer size={13}/> {gravity}</span> : null}
-    {abv ? <span>{abv}</span> : null}
-    {brew.style ? <span>{String(brew.style)}</span> : null}
-    {hops.length ? <span><Hop size={13}/> {hops.slice(0, 4).join(", ")}</span> : null}
-  </div>;
+  const style = String(brew.style ?? "").trim();
+  const summary = blurb(brew);
+  return (
+    <div className="lab-guest-meta">
+      <div className="lab-stats">
+        {style ? <span>{style}</span> : null}
+        {abv ? <span>{abv}</span> : null}
+      </div>
+      {summary ? <p className="lab-card-blurb">{summary}</p> : null}
+      {flavors.length ? (
+        <div className="chip-row lab-card-flavors">
+          {flavors.map((value) => <span className="chip static" key={value}>{value}</span>)}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperName: string; go: (page: string) => void }) {
   const [brews, setBrews] = useState<Item[]>([]);
   const [taps, setTaps] = useState<Item[]>([]);
   const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     Promise.all([api<Item[]>("/inventory/brews"), api<Item[]>("/inventory/taps")])
@@ -68,6 +76,8 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
   const archived = brews.filter((brew) => normalizeBrewStatus(brew.status) === "Archived");
   const readyToKeg = brews.filter((brew) => !pouringIds.has(brew.id) && normalizeBrewStatus(brew.status) === "Ready to Keg");
 
+  const selected = selectedId == null ? undefined : brews.find((brew) => brew.id === selectedId);
+
   function tapDetail(tapNumber: number) {
     const tap = taps.find((row) => Number(row.tap_number) === tapNumber);
     if (!tap || isTapEmpty(tap)) return null;
@@ -77,12 +87,27 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
     return { tap, remaining, size, pints, kicked: remaining <= 0 };
   }
 
+  if (selected) {
+    return (
+      <BreweryLabDetail
+        brew={selected}
+        tapNumbers={tapsForBatch(taps, selected.batch_name)}
+        admin={admin}
+        onClose={() => setSelectedId(null)}
+        onSaved={(next) => {
+          setBrews((rows) => rows.map((row) => row.id === next.id ? next : row));
+          load();
+        }}
+      />
+    );
+  }
+
   return <>
     <div className="page-title">
       <span className="eyebrow">THE BREWERY LAB</span>
       <h1>From the fermenter to your glass.</h1>
       <p>{admin
-        ? "Live pipeline across taps and Brewfather batches. Edit batches in the Homebrew Log."
+        ? "Guest-friendly batch cards with Keeper-owned tasting notes, photos, and descriptions. Brewfather still syncs the brewing facts underneath."
         : `Everything ${keeperName} is brewing, conditioning, and pouring right now.`}</p>
     </div>
 
@@ -94,12 +119,18 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
       </div>
       {!pouring.length ? <p className="lab-empty">No homebrew on tap right now. {readyToKeg.length ? `${readyToKeg.length} batch${readyToKeg.length === 1 ? "" : "es"} ready to keg.` : ""}</p> :
         <div className="lab-grid">{pouring.map(({ brew, tapNumbers }) => (
-          <article className="lab-card lab-pouring" key={brew.id}>
+          <button
+            type="button"
+            className="lab-card lab-pouring lab-card-button"
+            key={brew.id}
+            onClick={() => setSelectedId(brew.id)}
+          >
             <div className="lab-thumb">{brew.image_url ? <img src={String(brew.image_url)} alt=""/> : <Beer size={26}/>}</div>
             <div className="lab-body">
               <div className="tap-badges">{tapNumbers.map((number) => <span className="tap-badge" key={number}>TAP {number}</span>)}</div>
-              <h3>{brewDisplayName(brew.batch_name, brew.style)}</h3>
-              <BrewStats brew={brew}/>
+              <span className="lab-stage pouring">{brewGuestStatusLabel(brew.status, { pouring: true })}</span>
+              <h3>{brewPresentationName(brew)}</h3>
+              <GuestCardStats brew={brew}/>
               {tapNumbers.map((number) => {
                 const detail = tapDetail(number);
                 if (!detail) return null;
@@ -109,7 +140,7 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
                 </div>;
               })}
             </div>
-          </article>
+          </button>
         ))}</div>}
     </section>
 
@@ -119,15 +150,22 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
       </div>
       {!inTheWorks.length ? <p className="lab-empty">Nothing fermenting or conditioning at the moment.</p> :
         <div className="lab-grid">{inTheWorks.map((brew) => (
-          <article className="lab-card" key={brew.id}>
+          <button
+            type="button"
+            className="lab-card lab-card-button"
+            key={brew.id}
+            onClick={() => setSelectedId(brew.id)}
+          >
             <div className="lab-thumb">{brew.image_url ? <img src={String(brew.image_url)} alt=""/> : <FlaskConical size={26}/>}</div>
             <div className="lab-body">
-              <span className={`lab-stage ${normalizeBrewStatus(brew.status).toLowerCase()}`}>{normalizeBrewStatus(brew.status)}</span>
-              <h3>{brewDisplayName(brew.batch_name, brew.style)}</h3>
-              <BrewStats brew={brew}/>
+              <span className={`lab-stage ${normalizeBrewStatus(brew.status).toLowerCase()}`}>
+                {brewGuestStatusLabel(brew.status)}
+              </span>
+              <h3>{brewPresentationName(brew)}</h3>
+              <GuestCardStats brew={brew}/>
               {stageDaysLabel(brew) ? <small className="lab-stage-days">{stageDaysLabel(brew)}</small> : null}
             </div>
-          </article>
+          </button>
         ))}</div>}
     </section>
 
@@ -135,15 +173,36 @@ export function BreweryLab({ admin, keeperName, go }: { admin: boolean; keeperNa
       <summary>Planned &amp; archived logs ({planned.length + archived.length + readyToKeg.length})</summary>
       {readyToKeg.length > 0 && <>
         <span className="eyebrow">READY TO KEG</span>
-        <ul className="lab-log">{readyToKeg.map((brew) => <li key={brew.id}><strong>{brewDisplayName(brew.batch_name, brew.style)}</strong><span>{gravityText(brew) || String(brew.style ?? "")}</span></li>)}</ul>
+        <ul className="lab-log">{readyToKeg.map((brew) => (
+          <li key={brew.id}>
+            <button type="button" className="lab-log-button" onClick={() => setSelectedId(brew.id)}>
+              <strong>{brewPresentationName(brew)}</strong>
+              <span>{abvText(brew) || String(brew.style ?? "") || brewGuestStatusLabel(brew.status)}</span>
+            </button>
+          </li>
+        ))}</ul>
       </>}
       {planned.length > 0 && <>
         <span className="eyebrow">PLANNED</span>
-        <ul className="lab-log">{planned.map((brew) => <li key={brew.id}><strong>{brewDisplayName(brew.batch_name, brew.style)}</strong><span>{String(brew.style ?? "")}</span></li>)}</ul>
+        <ul className="lab-log">{planned.map((brew) => (
+          <li key={brew.id}>
+            <button type="button" className="lab-log-button" onClick={() => setSelectedId(brew.id)}>
+              <strong>{brewPresentationName(brew)}</strong>
+              <span>{String(brew.style ?? "") || brewGuestStatusLabel(brew.status)}</span>
+            </button>
+          </li>
+        ))}</ul>
       </>}
       {archived.length > 0 && <>
         <span className="eyebrow">ARCHIVE</span>
-        <ul className="lab-log">{archived.map((brew) => <li key={brew.id}><strong>{brewDisplayName(brew.batch_name, brew.style)}</strong><span>{abvText(brew) || String(brew.style ?? "")}</span></li>)}</ul>
+        <ul className="lab-log">{archived.map((brew) => (
+          <li key={brew.id}>
+            <button type="button" className="lab-log-button" onClick={() => setSelectedId(brew.id)}>
+              <strong>{brewPresentationName(brew)}</strong>
+              <span>{abvText(brew) || String(brew.style ?? "")}</span>
+            </button>
+          </li>
+        ))}</ul>
       </>}
       {!planned.length && !archived.length && !readyToKeg.length && <p className="lab-empty">The log is empty.</p>}
     </details>

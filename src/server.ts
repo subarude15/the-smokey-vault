@@ -121,7 +121,7 @@ const publicTables = new Set([...tables, "cocktails"]);
 const tableFields: Record<string, string[]> = {
   spirits: ["name","brand","category","sub_category","abv","volume_ml","fill_level","purchase_date","opened_date","shelf_location","upc","notes","image_url","stock_count","tasting_notes","flavors","tags","base_ingredient","blocked_from_ordering"],
   taps: ["tap_number","keg_size_l","source_type","brewery_batch","style","abv","ibu","tapped_date","remaining_l","maker","notes","image_url","tasting_notes","flavors","tags","base_ingredient"],
-  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","image_url","tasting_notes","flavors","tags","base_ingredient","hops","brewfather_id"],
+  brews: ["batch_name","style","brew_date","target_og","target_fg","measured_og","measured_fg","calculated_abv","schedule","status","notes","maker","image_url","tasting_notes","flavors","tags","base_ingredient","hops","brewfather_id","display_name","guest_description","keeper_owns_image"],
   packaged_beer: ["brewery","name","style","count","pack_date","abv","upc","image_url","notes","tasting_notes","flavors","tags","base_ingredient","vessel"],
   wines: ["producer","name","varietal","vintage","type","style","region","sweetness","body","bottle_count","drink_by_date","pairings","notes","upc","image_url","tasting_notes","flavors","tags","base_ingredient","blocked_from_ordering"]
 };
@@ -447,6 +447,12 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
   }
+  // Keeper image edits own the presentation photo; Brewfather sync must not clobber it.
+  if (table === "brews" && Object.prototype.hasOwnProperty.call(body, "image_url")) {
+    body.keeper_owns_image = String(body.image_url ?? "").trim() ? 1 : 0;
+  } else if (table === "brews") {
+    delete body.keeper_owns_image;
+  }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
   const result = db.prepare(`INSERT INTO ${table} (${values.join(",")}) VALUES (${values.map(() => "?").join(",")})`)
@@ -563,6 +569,12 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
     const { localizeImage } = await import("./images.js");
     body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  }
+  // Stamp Keeper image ownership server-side — clients cannot forge the flag alone.
+  if (table === "brews" && Object.prototype.hasOwnProperty.call(body, "image_url")) {
+    body.keeper_owns_image = String(body.image_url ?? "").trim() ? 1 : 0;
+  } else if (table === "brews") {
+    delete body.keeper_owns_image;
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
