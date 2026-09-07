@@ -80,9 +80,9 @@ import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather
 import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
 import { downscaleVisionImage } from "./vision_image.js";
-import { createReview, deleteReview, deleteReviewsForItem, listReviews, REVIEW_TABLES } from "./reviews.js";
+import { createReview, deleteReview, listReviews, REVIEW_TABLES } from "./reviews.js";
 import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
-import { castVote, deleteVotesForItem, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
+import { castVote, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
 import {
   AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_TIMEOUT_MS, MAX_GALLERY_BYTES,
   parseEnabledTabs, parseTabOrder, serializeEnabledTabs
@@ -93,11 +93,12 @@ import {
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
 import {
   adjustPatronVisits, castDailyVote, createEvent, createEventSubscriber, createMerch, createMessage, createPatron,
-  dailyVoteTallies, deleteDailyVotesForItem, deleteEvent, deleteEventSubscriber, deleteMerch, deleteMessage,
+  dailyVoteTallies, deleteEvent, deleteEventSubscriber, deleteMerch, deleteMessage,
   deletePatron, listEvents, listEventSubscribers, listLeaderboard, listMerch, listMessages, listPatrons,
   markMessageRead, SpeakeasyError, unreadMessageCount, updateEvent, updateMerch, updatePatron
 } from "./speakeasy.js";
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
+import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
 
 /**
  * Behind a reverse proxy every request otherwise arrives from the proxy's address, which
@@ -562,11 +563,11 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
 
 app.delete<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
-  if (!tables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
-  deleteReviewsForItem(request.params.table, Number(request.params.id));
-  deleteVotesForItem(request.params.table, Number(request.params.id));
-  deleteDailyVotesForItem(request.params.table, Number(request.params.id));
-  db.prepare(`DELETE FROM ${request.params.table} WHERE id=?`).run(request.params.id);
+  if (!isInventoryTable(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
+  const result = deleteInventoryItemSafely(request.params.table, Number(request.params.id));
+  if (result.status === "busy") {
+    return reply.code(409).send({ error: "Enrichment is still running. Wait a moment and try Remove again." });
+  }
   return reply.code(204).send();
 });
 
