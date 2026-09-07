@@ -1817,7 +1817,16 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
     return true;
   });
   const activeFilters = maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
-  async function remove(id:number) { if (!confirm("Remove this item from the vault?")) return; await api(`/inventory/${module.id}/${id}`,{method:"DELETE"}); setViewing(undefined); load(); }
+  async function remove(id:number) {
+    if (!confirm("Remove this item from the vault? Its enrichment history and unused lookup cache will also be cleared.")) return;
+    try {
+      await api(`/inventory/${module.id}/${id}`,{method:"DELETE"});
+      setViewing(undefined);
+      await load();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not remove this item.");
+    }
+  }
   async function clearTap(item: Item) {
     if (!confirm("Clear this tap back to None?")) return;
     await api(`/inventory/taps/${item.id}`, { method: "PUT", body: JSON.stringify(emptyTapBeerFields()) });
