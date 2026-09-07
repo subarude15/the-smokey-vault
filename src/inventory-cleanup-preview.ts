@@ -1,5 +1,6 @@
 import { ensureBeerCacheTable } from "./beer_cache.js";
 import { canonicalGtin } from "./cola_client.js";
+import { spiritInventoryRowLooksLikeBeer } from "./catalog.js";
 import { db } from "./db.js";
 import { ensureImportQueueTable } from "./import_queue.js";
 import { verifiedInventoryUpcAliases } from "./inventory-delete.js";
@@ -30,6 +31,11 @@ export type InventoryCleanupPreview = {
   invalidPackagedBeerBarcodes: {
     count: number;
     items: Array<{ entityId: number; name: string; brewery: string; upc: string }>;
+    truncated: boolean;
+  };
+  beerLikeSpiritRows: {
+    count: number;
+    items: Array<{ entityId: number; name: string; brand: string; category: string; upc: string }>;
     truncated: boolean;
   };
   orphanedArtifacts: {
@@ -106,6 +112,15 @@ export function previewInventoryCleanup(): InventoryCleanupPreview {
   `).all() as Array<{ id: number; name: string; brewery: string; upc: string }>;
   const invalid = invalidRows.filter((row) => !canonicalGtin(row.upc));
 
+  const spiritRows = db.prepare(`
+    SELECT id, name, brand, category, sub_category, upc
+    FROM spirits
+    ORDER BY id
+  `).all() as Array<{
+    id: number; name: string; brand: string; category: string; sub_category: string; upc: string;
+  }>;
+  const beerLikeSpirits = spiritRows.filter(spiritInventoryRowLooksLikeBeer);
+
   const artifactCounts: Record<string, number> = {};
   const artifactItems: InventoryCleanupPreview["orphanedArtifacts"]["items"] = [];
   let orphanedEntityGroups = 0;
@@ -174,6 +189,17 @@ export function previewInventoryCleanup(): InventoryCleanupPreview {
         upc: row.upc
       })),
       truncated: invalid.length > SAMPLE_LIMIT
+    },
+    beerLikeSpiritRows: {
+      count: beerLikeSpirits.length,
+      items: beerLikeSpirits.slice(0, SAMPLE_LIMIT).map((row) => ({
+        entityId: row.id,
+        name: row.name,
+        brand: row.brand,
+        category: row.category,
+        upc: row.upc
+      })),
+      truncated: beerLikeSpirits.length > SAMPLE_LIMIT
     },
     orphanedArtifacts: {
       total: orphanedTotal,
