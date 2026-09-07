@@ -47,14 +47,15 @@ function imageHashPath(remoteUrl: string, ext = ".png") {
   return join(imagesDir, `${hash}${ext}`);
 }
 
-function leftoverTemps() {
-  return readdirSync(imagesDir).filter((name) => name.startsWith(".tmp-"));
+function leftoverTemps(remoteUrl: string) {
+  const hash = createHash("sha256").update(remoteUrl).digest("hex").slice(0, 32);
+  return readdirSync(imagesDir).filter((name) => name.startsWith(`.tmp-${hash}-`));
 }
 
 function cleanupLocalized(remoteUrl: string) {
   const path = imageHashPath(remoteUrl);
   if (existsSync(path)) unlinkSync(path);
-  for (const name of leftoverTemps()) unlinkSync(join(imagesDir, name));
+  for (const name of leftoverTemps(remoteUrl)) unlinkSync(join(imagesDir, name));
 }
 
 test("localizeImage writes http and https public images and preserves the hash URL", async () => {
@@ -177,7 +178,7 @@ test("localizeImage rejects Content-Length over the cap before writing", async (
   });
   assert.equal(result, remoteUrl);
   assert.equal(existsSync(imageHashPath(remoteUrl)), false);
-  assert.equal(leftoverTemps().length, 0);
+  assert.equal(leftoverTemps(remoteUrl).length, 0);
   assert.equal(bodyRead, false);
 });
 
@@ -196,7 +197,7 @@ test("localizeImage aborts a streaming body that exceeds the cap, including when
   });
   assert.equal(result, remoteUrl);
   assert.equal(existsSync(imageHashPath(remoteUrl)), false);
-  assert.equal(leftoverTemps().length, 0);
+  assert.equal(leftoverTemps(remoteUrl).length, 0);
 });
 
 test("localizeImage times out a stalled download and leaves no temp file", async () => {
@@ -209,7 +210,7 @@ test("localizeImage times out a stalled download and leaves no temp file", async
   });
   assert.equal(result, remoteUrl);
   assert.equal(existsSync(imageHashPath(remoteUrl)), false);
-  assert.equal(leftoverTemps().length, 0);
+  assert.equal(leftoverTemps(remoteUrl).length, 0);
 });
 
 test("localizeImage times out a body that stalls after the first chunk", async () => {
@@ -243,7 +244,7 @@ test("localizeImage times out a body that stalls after the first chunk", async (
   assert.ok(elapsed < 2000, `stalled body must not hang (took ${elapsed}ms)`);
   assert.equal(destroyed, true);
   assert.equal(existsSync(imageHashPath(remoteUrl)), false);
-  assert.equal(leftoverTemps().length, 0);
+  assert.equal(leftoverTemps(remoteUrl).length, 0);
 });
 
 test("localizeImage rejects non-image content types", async () => {
