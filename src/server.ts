@@ -100,6 +100,7 @@ import {
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
 import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
 import { previewInventoryCleanup } from "./inventory-cleanup-preview.js";
+import { serializeEnrichmentViewForCaller, serializeInventoryItemForCaller } from "./guest-inventory-response.js";
 
 /**
  * Behind a reverse proxy every request otherwise arrives from the proxy's address, which
@@ -323,21 +324,28 @@ function withInventoryDisplayFields(
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
   if (!publicTables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
   const table = request.params.table;
+  const admin = isAdmin(request.headers.authorization);
   const rows = db.prepare(`SELECT * FROM ${table} ORDER BY ${table === "taps" ? "tap_number ASC" : "id DESC"}`).all() as Array<Record<string, unknown>>;
   if (!VOTE_TABLES.has(table)) {
-    return rows.map((row) => withInventoryDisplayFields(table, row));
+    return rows.map((row) =>
+      serializeInventoryItemForCaller(table, withInventoryDisplayFields(table, row), { admin })
+    );
   }
   const tallies = voteTallies(table);
   return rows.map((row) => {
     const tally = tallies[Number(row.id)] ?? summarizeVotes(0, 0);
-    return withInventoryDisplayFields(table, {
-      ...row,
-      vote_up: tally.up,
-      vote_down: tally.down,
-      vote_net: tally.net,
-      vote_total: tally.total,
-      vote_score: tally.score
-    });
+    return serializeInventoryItemForCaller(
+      table,
+      withInventoryDisplayFields(table, {
+        ...row,
+        vote_up: tally.up,
+        vote_down: tally.down,
+        vote_net: tally.net,
+        vote_total: tally.total,
+        vote_score: tally.score
+      }),
+      { admin }
+    );
   });
 });
 
@@ -590,7 +598,8 @@ app.get("/api/admin/inventory/cleanup-preview", {
 
 /**
  * Read-only enrichment / review state.
- * Intentionally public (no requireAdmin): patrons may view provenance and job status.
+ * Guests receive a redacted tasting/image projection only.
+ * Keepers receive the full review model (optional diagnostics when authenticated).
  * There is no mutation surface on this route — conflict resolution, re-runs, and
  * content edits are deferred and must use requireAdmin when added.
  */
@@ -613,7 +622,7 @@ app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/en
     includeDiagnostics: admin
   });
   if (!view) return reply.code(404).send({ error: "Item not found" });
-  return view;
+  return serializeEnrichmentViewForCaller(view, { admin });
 });
 
 /**

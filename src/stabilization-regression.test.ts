@@ -464,10 +464,17 @@ test("patron enrichment GET still allowed; guest UI must not show plumbing", asy
       url: `/api/inventory/spirits/${spirit.id}/enrichment`
     });
     assert.equal(res.statusCode, 200);
-    const body = res.json() as { tastingNotes: { official: string | null; houseProfile: string | null } };
+    const body = res.json() as {
+      tastingNotes: { official: string | null; houseProfile: string | null };
+      enrichment?: unknown;
+      inventory?: unknown;
+    };
     assert.ok(String(body.tastingNotes.official ?? "").includes("Producer tasting"));
     assert.ok(String(body.tastingNotes.houseProfile ?? "").includes("House peat"));
-    // API may expose enrichment metadata; patron React tree must not render the panel.
+    // Guest enrichment response is redacted — no Keeper review tree.
+    assert.equal(body.enrichment, undefined);
+    assert.equal(body.inventory, undefined);
+    // Patron React tree must not render the Keeper panel.
     assert.ok(appSrc.includes("!admin && ENRICHMENT_MODULES"));
   } finally {
     cleanup();

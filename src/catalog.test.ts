@@ -250,6 +250,9 @@ test("spirit stock, open next, empty bottles, and out-of-stock sort", () => {
   assert.equal(isSpiritEmpty({ fill_level: 0, stock_count: 2 }), false);
   assert.equal(isSpiritEmpty({ fill_level: 50, stock_count: 1 }), false);
   assert.equal(isSpiritEmpty({ fill_level: 0 }), true);
+  assert.equal(isSpiritEmpty({ out_of_stock: true }), true);
+  assert.equal(isSpiritEmpty({ out_of_stock: false }), false);
+  assert.equal(isSpiritEmpty({ out_of_stock: true, fill_level: 50, stock_count: 1 }), false);
   assert.deepEqual(openNextSpirit({ fill_level: 0, stock_count: 3 }), { fill_level: 100, stock_count: 2 });
   assert.equal(openNextSpirit({ fill_level: 0, stock_count: 1 }), null);
   assert.equal(openNextSpirit({ fill_level: 25, stock_count: 4 }), null);

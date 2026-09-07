@@ -492,6 +492,14 @@ export function spiritStockLabel(count: unknown): string {
 
 export function isSpiritEmpty(item: Record<string, unknown> | null | undefined): boolean {
   if (!item) return true;
+  // Guest inventory responses redact fill/stock and send coarse out_of_stock instead.
+  if (
+    typeof item.out_of_stock === "boolean"
+    && (item.fill_level == null || String(item.fill_level).trim() === "")
+    && (item.stock_count == null || String(item.stock_count).trim() === "")
+  ) {
+    return item.out_of_stock;
+  }
   const stock = item.stock_count == null || String(item.stock_count).trim() === "" ? 1 : spiritStock(item.stock_count);
   return nearestFillStop(item.fill_level) <= 0 && stock <= 1;
 }

@@ -224,7 +224,7 @@ test("F. Korbel regression — Wine Cellar list exposes local enrichment for car
 
   const res = await app.inject({ method: "GET", url: "/api/inventory/wines" });
   const item = (res.json() as Array<Record<string, unknown>>).find(
-    (r) => String(r.upc) === KORBEL_UPC
+    (r) => String(r.name) === "Korbel Sweet Cuvee California Champagne"
   );
   assert.ok(item);
   assert.equal(cardImageSrc(item!), KORBEL_LOCAL);
@@ -243,7 +243,7 @@ test("G. Captain Morgan regression — Spirits list exposes local enrichment for
 
   const res = await app.inject({ method: "GET", url: "/api/inventory/spirits" });
   const item = (res.json() as Array<Record<string, unknown>>).find(
-    (r) => String(r.upc) === CAPTAIN_UPC
+    (r) => String(r.name) === "Captain Morgan Original Spiced Rum"
   );
   assert.ok(item);
   assert.equal(item!.image_url, "");
