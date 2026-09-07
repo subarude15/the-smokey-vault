@@ -362,6 +362,7 @@ function imageSourceLabel(sourceType: string | null | undefined, verified: boole
 }
 
 export function EnrichmentPanel({ table, itemId }: { table: string; itemId: number }) {
+  const [expanded, setExpanded] = useState(false);
   const [view, setView] = useState<BottleEnrichmentView | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -506,6 +507,16 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
   const houseProfileText = textChild(tastingNotes.houseProfile).trim();
   const officialText = textChild(tastingNotes.official).trim();
   const personalText = textChild(tastingNotes.personal).trim();
+  const coreComplete = !enrichmentHasMissingWork(jobs) && 
+    enrichment?.statusLabel !== "partial" && 
+    enrichment?.statusLabel !== "failed";
+    
+  useEffect(() => {
+    if (coreComplete) {
+      setExpanded(false);
+    }
+  }, [coreComplete]);
+
   const polling = shouldPollEnrichment(jobs);
 
   return (
@@ -515,7 +526,16 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
           <span className="eyebrow">Enrichment review</span>
           <h2>What the vault knows</h2>
         </div>
-        {polling ? <span className="guest-badge">Updatingâ€¦</span> : null}
+        <div>
+          {polling ? <span className="guest-badge">Updatingâ€¦</span> : null}
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "Hide details" : "Show details"}
+          </button>
+        </div>
       </div>
 
       {coreComplete && (
@@ -524,7 +544,9 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         </div>
       )}
 
-      {enrichment.needsReview ? (
+      {expanded && (
+        <>
+          {enrichment.needsReview ? (
         <div className="enrichment-review-banner" role="status">
           <strong>Needs review</strong>
           <p>Trusted sources disagree on identity. Kept values are shown; competing values are listed below. Editing is not available here yet.</p>
@@ -873,7 +895,9 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         </div>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+          {error ? <p className="error">{error}</p> : null}
+        </>
+      )}
     </section>
   );
 }

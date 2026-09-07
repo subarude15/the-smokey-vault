@@ -54,8 +54,12 @@ export function BottlePublicContent({
     <div className="bottle-public-content">
       {enrichedText ? <TastingProfileView text={enrichedText} /> : null}
       {showImage ? (
-        <div className="bottle-public-image">
-          <img src={displayUrl} alt="" />
+        <div className="bottle-public-image bg-slate-900/40">
+          <img 
+            src={displayUrl} 
+            alt="" 
+            className="object-contain max-h-[45vh] w-full"
+          />
         </div>
       ) : null}
     </div>
