@@ -92,6 +92,7 @@ export const MAX_GUESSED_PRODUCT_FETCHES = 4;
 export const OFFICIAL_BEER_PRODUCT_PATH_PREFIXES = [
   "/beer/",
   "/beers/",
+  "/our-beer/",
   "/our-beers/",
   "/products/",
   "/product/",
@@ -471,6 +472,21 @@ export function classifyOfficialBeerPageMatch(args: {
       pathLooksProductish(pathname) ||
       Boolean(args.productName);
     return breweryNearby || exactIn ? "exact_name" : "strong_name";
+  }
+
+  // A known spaced compound may be presented unspaced by the brewery
+  // ("Dirt wolf" → "DirtWolf"). Treat only exact alphanumeric compaction as
+  // strong identity; do not drop, reorder, stem, or typo-correct any token.
+  const compactBeer = beerFold.replace(/[^a-z0-9]/g, "");
+  const compactIdentityMatch =
+    beerTokens.length > 1
+    && compactBeer.length >= 6
+    && [titleFold, h1Fold, productFold].some((value) => {
+      const compact = value.replace(/[^a-z0-9]/g, "");
+      return compact === compactBeer;
+    });
+  if (compactIdentityMatch && (pathLooksProductish(pathname) || Boolean(args.productName))) {
+    return "strong_name";
   }
 
   const titleCoverage = tokenCoverage(beerTokens, args.title || "");
@@ -979,9 +995,11 @@ export function slugifyOfficialBeerName(beerName: string): string {
 
 /**
  * Build a tiny bounded set of same-origin product URL candidates.
- * Constructed via the URL API (never raw host concatenation) and capped at 8.
+ * Constructed via the URL API (never raw host concatenation) and capped at 12.
  *
- * Path order: /beer/, /beers/, /our-beers/, /products/, /product/, /brew/, /brews/
+ * The first four candidates always use the primary hyphenated slug. A single
+ * compact alternate is then tried as a static-crawl hint before less-common
+ * primary prefixes. Page content must still pass exact/strong identity checks.
  */
 export function generateOfficialBeerProductUrlCandidates(args: {
   origin: string;
@@ -997,10 +1015,23 @@ export function generateOfficialBeerProductUrlCandidates(args: {
     return [];
   }
 
+  const compactSlug = slug.includes("-") ? slug.replace(/-/g, "") : "";
+  const commonPrefixes = OFFICIAL_BEER_PRODUCT_PATH_PREFIXES.slice(0, 4);
+  const ordered: Array<{ prefix: string; candidateSlug: string }> = [
+    ...commonPrefixes.map((prefix) => ({ prefix, candidateSlug: slug })),
+    ...(compactSlug && compactSlug !== slug
+      ? commonPrefixes.map((prefix) => ({ prefix, candidateSlug: compactSlug }))
+      : []),
+    ...OFFICIAL_BEER_PRODUCT_PATH_PREFIXES.slice(4).map((prefix) => ({
+      prefix,
+      candidateSlug: slug
+    }))
+  ];
+
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const prefix of OFFICIAL_BEER_PRODUCT_PATH_PREFIXES) {
-    const path = `${prefix}${slug}/`;
+  for (const { prefix, candidateSlug } of ordered) {
+    const path = `${prefix}${candidateSlug}/`;
     let candidate: URL;
     try {
       candidate = new URL(path, originUrl);
@@ -1009,7 +1040,10 @@ export function generateOfficialBeerProductUrlCandidates(args: {
     }
     if (candidate.origin !== originUrl.origin) continue;
     if (candidate.username || candidate.password) continue;
-    if (!candidate.pathname.includes(`/${slug}/`) && !candidate.pathname.endsWith(`/${slug}`)) {
+    if (
+      !candidate.pathname.includes(`/${candidateSlug}/`)
+      && !candidate.pathname.endsWith(`/${candidateSlug}`)
+    ) {
       continue;
     }
     // Reject protocol-relative / host-injection attempts.
@@ -1018,7 +1052,7 @@ export function generateOfficialBeerProductUrlCandidates(args: {
     if (seen.has(href)) continue;
     seen.add(href);
     out.push(href);
-    if (out.length >= 8) break;
+    if (out.length >= 12) break;
   }
   return out;
 }

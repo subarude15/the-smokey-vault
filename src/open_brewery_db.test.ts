@@ -632,7 +632,7 @@ test("Gate A. exact Vault Yards Brawler skips OBDB", async () => {
 test("Gate B. strong beer_cache result skips OBDB", async () => {
   process.env.OPEN_BREWERY_DB_ENABLED = "true";
   delete process.env.CATALOG_BEER_API_KEY;
-  const upc = "080109100123";
+  const upc = "080109100122";
   saveBeerCacheEntry({
     upc,
     brewery: "Yards Brewing Co.",

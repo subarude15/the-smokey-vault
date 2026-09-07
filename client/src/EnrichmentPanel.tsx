@@ -745,10 +745,14 @@ export function EnrichmentPanel({ table, itemId }: { table: string; itemId: numb
         <div className="enrichment-field-grid">
           <FieldRow label="Category" field={metadata.category} />
           <FieldRow label="ABV" field={metadata.abv} />
-          <FieldRow label="Proof" field={metadata.proof} />
-          <FieldRow label="Volume (ml)" field={metadata.volumeMl} />
-          <FieldRow label="Origin" field={metadata.origin} />
-          <FieldRow label="TTB ID" field={metadata.ttbId} />
+          {table !== "packaged_beer" ? (
+            <>
+              <FieldRow label="Proof" field={metadata.proof} />
+              <FieldRow label="Volume (ml)" field={metadata.volumeMl} />
+              <FieldRow label="Origin" field={metadata.origin} />
+              <FieldRow label="TTB ID" field={metadata.ttbId} />
+            </>
+          ) : null}
         </div>
       </div>
 

@@ -70,7 +70,7 @@ export async function runMetadataJob(
       resultPayload: {
         requested: [],
         updated: [],
-        unresolved: unresolvedMetadataFields(before).map(String)
+        unresolved: unresolvedMetadataFields(before, job.entity_type).map(String)
       }
     };
   }
@@ -83,7 +83,7 @@ export async function runMetadataJob(
       resultPayload: {
         requested: [],
         updated: [],
-        unresolved: unresolvedMetadataFields(before).map(String)
+        unresolved: unresolvedMetadataFields(before, job.entity_type).map(String)
       }
     };
   }
@@ -137,11 +137,23 @@ export async function runMetadataJob(
     }
   }
 
-  if (!hasRecommendedMetadataWork(before)) {
+  const needsRecommendedMetadata = hasRecommendedMetadataWork(before, job.entity_type);
+  const needsBeerDomainDiscovery =
+    job.entity_type === "packaged_beer"
+    && !initialOfficialMatched
+    && !initialOfficialWebsiteHost;
+
+  if (!needsRecommendedMetadata && !needsBeerDomainDiscovery) {
+    const officialProgress = Boolean(
+      officialMeta?.productPageStored
+      || officialMeta?.abvUpdated
+      || officialMeta?.styleUpdated
+      || officialMeta?.imageRepairRequested
+    );
     return {
-      skipped: true,
+      skipped: !officialProgress,
       reason:
-        officialMeta?.productPageStored || officialMeta?.abvUpdated || officialMeta?.styleUpdated || officialMeta?.imageRepairRequested
+        officialProgress
           ? "official_brewery_only"
           : "already_complete",
       inventoryUpdated: [
@@ -161,7 +173,10 @@ export async function runMetadataJob(
     };
   }
 
-  const execution = await executeMetadataEnrichment(before, plan, deps);
+  const execution = await executeMetadataEnrichment(before, plan, {
+    ...deps,
+    discoverOfficialDomainWhenComplete: needsBeerDomainDiscovery
+  });
 
   // Transient system/dep failures with zero progress should retry, not look like
   // a successful "nothing found" completion.
@@ -340,6 +355,7 @@ export async function runMetadataJob(
   const afterFinal = candidateFromInventoryRow(job.entity_type, finalRow);
 
   const resultPayload = buildMetadataJobResultPayload({
+    entityType: job.entity_type,
     requested: execution.requested.map(String),
     before,
     after: afterFinal,

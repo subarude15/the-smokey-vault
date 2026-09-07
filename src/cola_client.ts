@@ -169,6 +169,49 @@ export function upcCheckDigit(digits: string) {
   return String((10 - (sum % 10)) % 10);
 }
 
+/** GS1 check digit for GTIN-8/12/13/14 bodies. */
+export function gtinCheckDigit(bodyRaw: string): string {
+  const body = String(bodyRaw ?? "").replace(/\D/g, "");
+  if (!body) return "";
+  let sum = 0;
+  let weight = 3;
+  for (let i = body.length - 1; i >= 0; i -= 1) {
+    sum += Number(body[i]) * weight;
+    weight = weight === 3 ? 1 : 3;
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+/** True only for complete GS1 GTIN-8, GTIN-12, GTIN-13, or GTIN-14 values. */
+export function isValidGtin(raw: string): boolean {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (![8, 12, 13, 14].includes(digits.length)) return false;
+  return gtinCheckDigit(digits.slice(0, -1)) === digits.at(-1);
+}
+
+/** Validate the printed check digit before treating an 8-digit code as UPC-E. */
+export function isValidUpcE(raw: string): boolean {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (digits.length !== 8 || !/^[01]/.test(digits)) return false;
+  const expanded = expandUpcE(digits);
+  return Boolean(expanded) && expanded.at(-1) === digits.at(-1);
+}
+
+/**
+ * Canonical persistence key for verified GTINs (plus checksum-valid UPC-E).
+ * Leading-zero EAN/GTIN aliases reuse the existing primaryCatalogUpc helper.
+ */
+export function canonicalGtin(raw: string): string {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (digits.length === 8 && isValidGtin(digits)) return digits;
+  if (digits.length === 8 && isValidUpcE(digits)) {
+    return primaryCatalogUpc(expandUpcE(digits));
+  }
+  if (!isValidGtin(digits)) return "";
+  if (digits.length === 14 && !digits.startsWith("0")) return digits;
+  return primaryCatalogUpc(digits);
+}
+
 /**
  * Expands UPC-E (6–8 digits) to UPC-A. Eight-digit form is NS + 6 compact digits + check.
  * Six-digit form assumes number system 0.
@@ -214,14 +257,14 @@ export function upcAForm(raw: string) {
   if (!normalized) return "";
   if (normalized.length === 13 && normalized.startsWith("0")) return normalized.slice(1);
   if (normalized.length === 12) return normalized;
-  return normalized.padStart(12, "0").slice(-12);
+  return "";
 }
 
 export function ean13Form(raw: string) {
-  const upcA = upcAForm(raw);
-  if (!upcA) return "";
-  if (upcA.length === 13) return upcA;
-  return `0${upcA}`.slice(-13);
+  const normalized = normalizeUpc(raw);
+  if (normalized.length === 13) return normalized;
+  const upcA = upcAForm(normalized);
+  return upcA.length === 12 ? `0${upcA}` : "";
 }
 
 /** One catalog key: UPC-A when the EAN-13 is a leading-zero twin, otherwise the normalized code. */
@@ -235,11 +278,16 @@ export function primaryCatalogUpc(raw: string) {
 export function normalizeUpc(raw: string) {
   const cleaned = String(raw ?? "").replace(/\D/g, "");
   if (!cleaned) return "";
-  if (cleaned.length === 6 || cleaned.length === 7 || cleaned.length === 8) {
+  if (cleaned.length === 8) {
+    if (isValidGtin(cleaned)) return cleaned;
+    if (!isValidUpcE(cleaned)) return "";
+    return expandUpcE(cleaned);
+  }
+  if (cleaned.length === 6 || cleaned.length === 7) {
     return expandUpcE(cleaned);
   }
   if (cleaned.length === 13) return cleaned;
-  if (cleaned.length === 14 && cleaned.startsWith("0")) return cleaned.slice(1);
+  if (cleaned.length === 14) return cleaned.startsWith("0") ? cleaned.slice(1) : cleaned;
   return cleaned.padStart(12, "0").slice(-12);
 }
 

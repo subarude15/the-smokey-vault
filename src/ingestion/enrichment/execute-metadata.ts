@@ -47,6 +47,8 @@ import {
 } from "./metadata-extract.js";
 import {
   METADATA_ENRICHMENT_FIELDS,
+  metadataEntityTypeForProductType,
+  metadataFieldsForEntityType,
   abvFromProof,
   isMetadataEnrichmentField,
   proofFromAbv,
@@ -114,6 +116,8 @@ export type MetadataEnrichmentDeps = {
   fetchPageHtml?: (url: string) => Promise<string | null>;
   /** Optional government barcode search (defaults to local government catalog). */
   searchGovernmentByBarcode?: (upc: string) => GovernmentLookupResult;
+  /** PR111 discovery-only pass; requests no non-beer metadata fields. */
+  discoverOfficialDomainWhenComplete?: boolean;
 };
 
 function cloneCandidate(candidate: BottleCandidate): BottleCandidate {
@@ -136,11 +140,16 @@ function cloneCandidate(candidate: BottleCandidate): BottleCandidate {
   };
 }
 
-function targetMetadataFields(plan: EnrichmentPlan): MetadataEnrichmentField[] {
+function targetMetadataFields(
+  plan: EnrichmentPlan,
+  entityType: ReturnType<typeof metadataEntityTypeForProductType>
+): MetadataEnrichmentField[] {
+  const allowed = new Set(metadataFieldsForEntityType(entityType));
   const fields: MetadataEnrichmentField[] = [];
   for (const task of plan.tasks) {
     if (task.priority !== "recommended") continue;
     if (!isMetadataEnrichmentField(task.field)) continue;
+    if (!allowed.has(task.field)) continue;
     if (!fields.includes(task.field)) fields.push(task.field);
   }
   return fields;
@@ -409,7 +418,8 @@ export async function executeMetadataEnrichment(
 ): Promise<EnrichmentExecutionResult> {
   const before = cloneCandidate(input);
   const candidate = cloneCandidate(input);
-  const targets = targetMetadataFields(plan);
+  const entityType = metadataEntityTypeForProductType(candidate.product_type.value);
+  const targets = targetMetadataFields(plan, entityType);
   const conflicts: FieldConflict[] = [];
   const errors: EnrichmentExecutionError[] = [];
   const rejects: FieldRejectReason[] = [];
@@ -418,7 +428,10 @@ export async function executeMetadataEnrichment(
   diagnostics.rejectReasons = rejects;
   let acceptedOfficialDomains: string[] = [];
 
-  if (!targets.length) {
+  const discoverOfficialDomainOnly =
+    entityType === "packaged_beer" && deps.discoverOfficialDomainWhenComplete === true;
+
+  if (!targets.length && !discoverOfficialDomainOnly) {
     const empty = summarize(before, candidate, targets, conflicts, errors, diagnostics);
     empty.acceptedOfficialDomains = [];
     return empty;
@@ -493,7 +506,7 @@ export async function executeMetadataEnrichment(
       const searchGov = deps.searchGovernmentByBarcode ?? searchGovernmentByBarcode;
       const governmentLookup = searchGov(upc);
       const government = applyGovernmentCatalogEvidence(candidate, governmentLookup, {
-        targets: [...METADATA_ENRICHMENT_FIELDS] as BottleCandidateFieldName[],
+        targets: [...metadataFieldsForEntityType(entityType)] as BottleCandidateFieldName[],
         conflicts,
         lookupUpc: upc
       });
@@ -525,8 +538,13 @@ export async function executeMetadataEnrichment(
   }
 
   const needed = stillNeeded(candidate, targets);
-  if (needed.length) {
-    const tiers = buildMetadataQueryTiers(identityFromCandidate(candidate), needed);
+  // Packaged beer may still need one bounded generic pass to establish the
+  // official brewery domain for PR111 even when style/ABV are already trusted.
+  // This discovery-only pass requests no spirit-oriented metadata fields.
+  if (needed.length || discoverOfficialDomainOnly) {
+    const tiers = buildMetadataQueryTiers(identityFromCandidate(candidate), needed).filter(
+      (tier) => !discoverOfficialDomainOnly || tier.label !== "regulatory"
+    );
     const rawName = String(candidate.name.value ?? "");
     let allHits: WebSearchHit[] = [];
     let searchError: Error | null = null;

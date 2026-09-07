@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import {
+  canonicalGtin,
   ean13Form,
   normalizeUpc,
   primaryCatalogUpc,
@@ -63,6 +64,7 @@ ensureBeerCacheTable();
  * Built on the shared cola_client helpers (no second conversion implementation).
  */
 export function beerCacheUpcLookupKeys(rawUpc: string): string[] {
+  if (!canonicalGtin(rawUpc)) return [];
   const keys = new Set<string>();
   const normalized = normalizeUpc(rawUpc);
   const primary = primaryCatalogUpc(rawUpc);
@@ -97,7 +99,7 @@ function nonEmptyText(value: unknown): string {
 }
 
 function canonicalBeerCacheUpc(rawUpc: string): string {
-  return primaryCatalogUpc(rawUpc) || normalizeUpc(rawUpc);
+  return canonicalGtin(rawUpc);
 }
 
 /** Load every beer_cache row that is an exact UPC-A/EAN-13 twin of rawUpc. */
