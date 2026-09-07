@@ -49,6 +49,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - Post-#119 on `main`: Keeper enrichment clarity, bottle-detail visual refinement, and EnrichmentPanel Hooks fix (direct commits, not separate GitHub PRs at the time).
 - PR122 — Server-side Guest inventory / enrichment redaction (API trust boundary; coarse `out_of_stock` only).
 - PR53 decision — stale draft closed unmerged; do not resurrect its parallel override architecture. Rebuild only the useful Keeper interaction on current `main`.
+- PR123 — Keeper enrichment actions on current architecture (rerun/retry, ownership-safe verify for packaged-beer ABV/style, resolvable conflict keep/accept without `enrichment_field_overrides`).
 
 ## Next work
 
@@ -62,17 +63,17 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 
 Priority order:
 
-1. **PR123 — Keeper enrichment actions on current architecture** — Rebuild the useful intent from closed PR #53 directly on current `main`: Keeper-only rerun/retry controls, entity-aware conflict handling, and ownership-safe verification. Reuse current queue controls, metadata allowlists, normalization, provenance, `product_field_ownership`, and deletion cleanup. Do not add `enrichment_field_overrides` or another parallel ownership model.
-2. **Decide PR #97** (Angel’s Share theme) — Architecturally additive. Product call: treat guest-visible fill/keg gauges as an intentional availability carve-out while UPC/stock stay keeper-only; then rebase and merge, or park the PR.
-3. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
-4. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
-5. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
+1. **Decide PR #97** (Angel’s Share theme) — Architecturally additive. Product call: treat guest-visible fill/keg gauges as an intentional availability carve-out while UPC/stock stay keeper-only; then rebase and merge, or park the PR.
+2. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
+3. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
+4. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
+5. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
 
 ## Open PR status
 
-- **#97** Angel’s Share theme — open; rebase + availability carve-out decision required (Track B #2).
+- **#97** Angel’s Share theme — open; rebase + availability carve-out decision required (Track B #1).
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
-- **#53** Enrichment review actions — closed unmerged and superseded by planned PR123; do not rebase or merge.
+- **#53** Enrichment review actions — closed unmerged and superseded by PR123; do not rebase or merge.
 
 ## Relevant code
 
