@@ -241,3 +241,13 @@ export {
   consumeOfficialImageRepair,
   clearOfficialImageRepairForTests
 } from "./official-image-repair.js";
+
+export {
+  queueCommercialTapEnrichment,
+  buildCommercialTapEnrichmentView,
+  runCommercialTapEnrichmentJob,
+  getLatestCommercialTapEnrichmentJob,
+  isCommercialTapEnrichmentJob,
+  type QueueCommercialTapEnrichmentResult,
+  type CommercialTapEnrichmentView
+} from "./commercial-tap-enrichment.js";

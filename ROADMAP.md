@@ -75,7 +75,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Draft keg enrichment: show recognizable beer identity and imagery for commercial kegs.** *(next: PR125)*
+1. **Draft keg enrichment: show recognizable beer identity and imagery for commercial kegs.** *(PR125 in progress)*
    - For commercial draft beer, enrich enough metadata to make the tap/keg recognizable: brewery/brand, beer name, style, ABV when confidently available, and at least one useful image/logo.
    - Prefer an official product/brand image when available, but a verified image of the equivalent packaged product (can/bottle artwork) is acceptable because most draft beers are also sold packaged.
    - A brewery/beer logo is an acceptable fallback when product packaging art is unavailable.
@@ -101,6 +101,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
+- `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
+- `src/commercial_tap_enrichment.ts` — commercial tap identity/image enrichment (reuses official beer discovery).
 - `src/server.ts` — inventory API routes and authorization boundaries.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.

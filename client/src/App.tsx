@@ -8,6 +8,7 @@ import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
 import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
+import { CommercialTapEnrichmentPanel } from "./CommercialTapEnrichmentPanel";
 import { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";
 import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
@@ -1935,6 +1936,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         <div className="card-content"><span className="eyebrow">{module.id === "taps" ? `TAP ${item.tap_number}` : String(item[module.secondary] ?? item.style ?? "")}</span><h3>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h3>
           <div className="meta">
             {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
+            {module.id === "taps" && !isTapEmpty(item) && item.maker ? <span>{String(item.maker)}</span> : null}
             {displayCanonicalFamily(String(item.category ?? "")) ? <span>{displayCanonicalFamily(String(item.category ?? ""))}</span> : null}
             {displayCanonicalType(String(item.sub_category ?? "")) ? <span>{displayCanonicalType(String(item.sub_category ?? ""))}</span> : null}
             {module.id === "wines"
@@ -2081,6 +2083,7 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           <h1>{module.id === "taps" ? tapTitle(item) : String(item[module.primary] ?? "Untitled")}</h1>
           <div className="meta">
             {module.id === "taps" && isTapEmpty(item) ? <span>Nothing pouring</span> : null}
+            {module.id === "taps" && !isTapEmpty(item) && item.maker ? <span>{String(item.maker)}</span> : null}
             {displayCanonicalFamily(String(item.category ?? "")) ? <span>{displayCanonicalFamily(String(item.category ?? ""))}</span> : null}
             {displayCanonicalType(String(item.sub_category ?? "")) ? <span>{displayCanonicalType(String(item.sub_category ?? ""))}</span> : null}
             {module.id === "wines"
@@ -2178,6 +2181,23 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
       {item.tasting_notes ? <TastingProfileView text={String(item.tasting_notes)} /> : null}
       {item.notes ? <article className="bottle-notes"><span className="eyebrow">CELLAR NOTES</span><p>{String(item.notes)}</p></article> : null}
       {admin && ENRICHMENT_MODULES.has(module.id) ? <EnrichmentPanel table={module.id} itemId={item.id} /> : null}
+      {admin && module.id === "taps" && !isTapEmpty(item) ? (
+        <CommercialTapEnrichmentPanel
+          tapId={Number(item.id)}
+          sourceType={String(item.source_type ?? "Commercial")}
+          onApplied={() => {
+            void (async () => {
+              try {
+                const rows = await api<Item[]>(`/inventory/taps`);
+                const next = rows.find((row) => Number(row.id) === Number(item.id));
+                if (next) onUpdated?.(next);
+              } catch {
+                // Keep current detail if refresh fails; enrichment status still shows.
+              }
+            })();
+          }}
+        />
+      ) : null}
       {!admin && ENRICHMENT_MODULES.has(module.id) ? (
         <BottlePublicContent
           table={module.id}
