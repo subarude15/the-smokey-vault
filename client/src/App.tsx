@@ -82,6 +82,8 @@ import { StaffPage } from "./StaffPage";
 import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
 import { CocktailCard } from "./CocktailCard";
+import { CocktailRecipeInstructions } from "./CocktailRecipeInstructions";
+import { cocktailMethodSummary } from "./cocktail-instructions";
 import { canFindCocktailPhoto, cocktailImageDiscoveryMessage } from "./cocktail-image-ui";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
@@ -3022,7 +3024,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
           <div>
             <span className="eyebrow">{drink.collection}{drink.season !== "All" ? ` · ${drink.season}` : ""}{fav ? " · FAVORITE" : ""}</span>
             <h2>{drink.name}</h2>
-            <p>{drink.method} · {drink.glassware}</p>
+            <p>{[cocktailMethodSummary(drink.method), drink.glassware].filter(Boolean).join(" · ")}</p>
           </div>
           <button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button>
         </header>
@@ -3049,7 +3051,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
             </button>}
           </div>
           <div className="recipe-details">
-            <div><span>METHOD</span><strong>{drink.method}</strong></div>
+            <CocktailRecipeInstructions method={drink.method}/>
             <div><span>GLASS</span><strong>{drink.glassware}</strong></div>
             <div><span>GARNISH</span><strong>{drink.garnish || "None"}</strong></div>
             {drink.source_url ? <div><span>SOURCE</span><a href={String(drink.source_url)} target="_blank" rel="noreferrer">{String(drink.source_url).replace(/^https?:\/\//, "")}</a></div> : null}
