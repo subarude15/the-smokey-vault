@@ -1,7 +1,7 @@
 # Current task
 
-**Status: active**
+**Status: idle**
 
-**PR140 — Event image crop / resize controls**
+PR140 complete — Event image crop / resize controls (non-destructive focal/zoom framing; event-only Adjust photo; shared ImageField unchanged).
 
-Non-destructive Keeper framing (focal X/Y + zoom) for event artwork. Draft-only adjuster; persist with event save. Do not change shared ImageField globally.
+Next planned product work: **PR141 — Conditional landing-page “Give us your two cents” visibility**.

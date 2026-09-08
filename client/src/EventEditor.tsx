@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Crop } from "lucide-react";
 import { ImageField } from "./ImageField";
 import { EventImageAdjuster } from "./EventImageAdjuster";
-import { EventImageMedia } from "./EventImageMedia";
 import {
   DEFAULT_EVENT_IMAGE_FRAMING,
   normalizeEventImageFraming,
@@ -160,12 +159,6 @@ export function EventEditor({
         />
         {draft.image_url ? (
           <div className="event-image-framing-panel">
-            <EventImageMedia
-              src={draft.image_url}
-              framing={framing}
-              className="event-image-well event-image-preview-card"
-              alt=""
-            />
             <button
               type="button"
               className="secondary event-adjust-photo"
@@ -174,6 +167,9 @@ export function EventEditor({
             >
               <Crop size={17} /> Adjust photo
             </button>
+            <p className="event-image-framing-hint">
+              Reposition and zoom how this photo appears on cards and the event page. The original upload stays unchanged.
+            </p>
           </div>
         ) : null}
       </div>
