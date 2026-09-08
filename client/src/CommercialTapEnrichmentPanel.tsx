@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 
 type CommercialTapEnrichmentView = {
   tapId: number;
@@ -21,21 +21,29 @@ type CommercialTapEnrichmentView = {
   } | null;
 };
 
+
+function eligibilityMessage(reason: string | null | undefined): string {
+  switch (reason) {
+    case "homebrew_excluded":
+      return "Homebrew taps stay with Brewery Lab — commercial enrichment is skipped.";
+    case "homebrew_batch_linked":
+      return "This tap is linked to a Brewery Lab batch — commercial enrichment is skipped.";
+    case "tap_empty":
+      return "Put a beer on this tap first.";
+    case "maker_and_beer_required":
+      return "Add brewery and beer name, then try again.";
+    case "invalid_id":
+      return "That tap could not be found.";
+    default:
+      return "";
+  }
+}
+
 function statusMessage(view: CommercialTapEnrichmentView | null, busy: boolean): string {
   if (busy) return "Looking up official beer details…";
   if (!view) return "";
   if (!view.eligible) {
-    if (view.reason === "homebrew_excluded") {
-      return "Homebrew taps stay with Brewery Lab — commercial enrichment is skipped.";
-    }
-    if (view.reason === "homebrew_batch_linked") {
-      return "This tap is linked to a Brewery Lab batch — commercial enrichment is skipped.";
-    }
-    if (view.reason === "tap_empty") return "Put a beer on this tap first.";
-    if (view.reason === "maker_and_beer_required") {
-      return "Add brewery and beer name, then try again.";
-    }
-    return "Not eligible for commercial beer enrichment.";
+    return eligibilityMessage(view.reason) || "Not eligible for commercial beer enrichment.";
   }
   const job = view.job;
   if (!job) return "Find style, ABV, and artwork from the brewery’s official product page.";
@@ -115,10 +123,18 @@ export function CommercialTapEnrichmentPanel(props: {
     setBusy(true);
     setError("");
     try {
-      await api(`/inventory/taps/${props.tapId}/enrich-beer`, { method: "POST", body: {} });
+      // No JSON body — this endpoint is params-only. Sending `body: {}` made
+      // api() set Content-Type: application/json with a non-JSON body, and
+      // Fastify answered 400 { error: "Bad Request" }.
+      await api(`/inventory/taps/${props.tapId}/enrich-beer`, { method: "POST" });
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not queue enrichment");
+      if (err instanceof ApiError && err.reason) {
+        setError(eligibilityMessage(err.reason) || err.message);
+        await refresh();
+      } else {
+        setError(err instanceof Error ? err.message : "Could not queue enrichment");
+      }
     } finally {
       setBusy(false);
     }

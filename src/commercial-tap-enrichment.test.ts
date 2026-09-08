@@ -201,6 +201,13 @@ test("tap↔brew linkage helpers reuse tapsForBatch exact-name semantics", () =>
 });
 
 test("exact packaged-art reuse: DirtWolf fills style, ABV, and product image", async () => {
+  // Isolate from leftover vault packaged rows (shared SQLite) that would prefer
+  // /api/media/images/* over the official product page image in this fixture.
+  db.prepare(
+    `DELETE FROM packaged_beer
+     WHERE lower(trim(brewery)) LIKE '%victory%'
+       AND lower(trim(name)) LIKE '%dirtwolf%'`
+  ).run();
   const tap = setCommercialTap(1, {
     maker: "Victory Brewing Company",
     beer: "DirtWolf"
@@ -230,7 +237,9 @@ test("exact packaged-art reuse: DirtWolf fills style, ABV, and product image", a
   const updated = loadTap(1);
   assert.equal(updated.style, "Double IPA");
   assert.equal(Number(updated.abv), 8.7);
-  assert.match(String(updated.image_url), /dw-render/i);
+  // Prefer the official product image; if that URL was previously localized on disk,
+  // localizeImage returns /api/media/images/<hash> without re-fetching.
+  assert.match(String(updated.image_url), /(?:dw-render|\/api\/media\/images\/)/i);
 });
 
 test("identity rejection: same brewery, wrong beer does not mutate tap", async () => {
@@ -860,4 +869,117 @@ test("PR138 product-before-logo: packaged can candidate preferred over beer logo
     beerName: "DirtWolf"
   });
   assert.ok(candidates.some((url) => /dirtwolf-can/i.test(url)));
+});
+
+
+test("PR138 Bad Request regression: valid commercial tap queues enrich-beer (no schema/body mismatch)", async () => {
+  const commercial = setCommercialTap(1, {
+    maker: "Victory Brewing Company",
+    beer: "DirtWolf"
+  });
+  const token = createTestAdminToken();
+
+  // Mimic the production Keeper bug: Content-Type application/json with an empty body.
+  // Fastify rejects this with { error: "Bad Request" } before queue validation runs.
+  const brokenClientShape = await app.inject({
+    method: "POST",
+    url: `/api/inventory/taps/${commercial.id}/enrich-beer`,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    }
+  });
+  assert.equal(brokenClientShape.statusCode, 400);
+  const brokenBody = brokenClientShape.json() as { error?: string; code?: string; message?: string };
+  assert.equal(brokenBody.error, "Bad Request");
+  assert.match(String(brokenBody.code ?? brokenBody.message ?? ""), /EMPTY_JSON_BODY|empty/i);
+
+  // Correct request: no JSON body (params-only). Must queue, not 400.
+  const queued = await app.inject({
+    method: "POST",
+    url: `/api/inventory/taps/${commercial.id}/enrich-beer`,
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(queued.statusCode, 200);
+  const body = queued.json() as { queued?: boolean; jobId?: number; status?: string };
+  assert.equal(body.queued, true);
+  assert.ok(Number(body.jobId) > 0);
+  assert.equal(body.status, "pending");
+
+  // Valid empty JSON object also queues (what a fixed api() stringify of {} would send).
+  const queuedJson = await app.inject({
+    method: "POST",
+    url: `/api/inventory/taps/${commercial.id}/enrich-beer`,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    payload: {}
+  });
+  assert.equal(queuedJson.statusCode, 200);
+  const bodyJson = queuedJson.json() as { queued?: boolean; created?: boolean; jobId?: number };
+  assert.equal(bodyJson.queued, true);
+  assert.equal(bodyJson.created, false);
+  assert.equal(Number(bodyJson.jobId), Number(body.jobId));
+});
+
+test("PR138 enrich-beer eligibility: unknown id, missing identity, homebrew return structured reasons", async () => {
+  const token = createTestAdminToken();
+
+  const unknown = await app.inject({
+    method: "POST",
+    url: "/api/inventory/taps/999999/enrich-beer",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(unknown.statusCode, 404);
+  const unknownBody = unknown.json() as { error?: string; reason?: string };
+  assert.equal(unknownBody.reason, "tap_not_found");
+  assert.match(String(unknownBody.error), /not found/i);
+  assert.notEqual(unknownBody.error, "Bad Request");
+
+  // Empty brewery_batch alone is an empty tap — distinct from incomplete identity.
+  const emptyTap = setCommercialTap(1, {
+    maker: "Victory Brewing Company",
+    beer: ""
+  });
+  const emptyRes = await app.inject({
+    method: "POST",
+    url: `/api/inventory/taps/${emptyTap.id}/enrich-beer`,
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(emptyRes.statusCode, 400);
+  const emptyBody = emptyRes.json() as { error?: string; reason?: string; status?: string };
+  assert.equal(emptyBody.reason, "tap_empty");
+  assert.equal(emptyBody.status, "skipped_empty");
+  assert.notEqual(emptyBody.error, "Bad Request");
+
+  // Incomplete identity: beer on tap, but brewery/maker missing.
+  const incomplete = setCommercialTap(1, {
+    maker: "",
+    beer: "Mystery Pale"
+  });
+  const missingMaker = await app.inject({
+    method: "POST",
+    url: `/api/inventory/taps/${incomplete.id}/enrich-beer`,
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(missingMaker.statusCode, 400);
+  const missingBody = missingMaker.json() as { error?: string; reason?: string; status?: string };
+  assert.equal(missingBody.reason, "maker_and_beer_required");
+  assert.equal(missingBody.status, "skipped_incomplete_identity");
+  assert.match(String(missingBody.error), /brewery and beer/i);
+  assert.notEqual(missingBody.error, "Bad Request");
+
+  const homebrew = setHomebrewTap(2);
+  const homebrewQueue = await app.inject({
+    method: "POST",
+    url: `/api/inventory/taps/${homebrew.id}/enrich-beer`,
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(homebrewQueue.statusCode, 400);
+  const homebrewBody = homebrewQueue.json() as { error?: string; reason?: string; status?: string };
+  assert.equal(homebrewBody.reason, "homebrew_excluded");
+  assert.equal(homebrewBody.status, "skipped_homebrew");
+  assert.match(String(homebrewBody.error), /Homebrew|Brewery Lab/i);
+  assert.notEqual(homebrewBody.error, "Bad Request");
 });

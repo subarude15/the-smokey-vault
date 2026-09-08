@@ -797,7 +797,11 @@ app.post<{ Params: { id: string } }>("/api/inventory/taps/:id/enrich-beer", {
   const id = Number(request.params.id);
   const result = queueCommercialTapEnrichment(id);
   if (!result.ok) {
-    return reply.code(result.statusCode).send({ error: result.error });
+    return reply.code(result.statusCode).send({
+      error: result.error,
+      reason: result.reason ?? null,
+      status: result.status ?? null
+    });
   }
   return {
     tapId: id,

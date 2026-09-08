@@ -87,28 +87,58 @@ export function getLatestCommercialTapEnrichmentJob(tapId: number): EnrichmentJo
 
 export type QueueCommercialTapEnrichmentResult =
   | { ok: true; job: EnrichmentJob; created: boolean }
-  | { ok: false; error: string; statusCode: number };
+  | {
+      ok: false;
+      error: string;
+      statusCode: number;
+      /** Matches buildCommercialTapEnrichmentView reason codes when eligibility fails. */
+      reason?: string;
+      /** Aligns with commercial enrichment status vocabulary where applicable. */
+      status?: string;
+    };
 
 export function queueCommercialTapEnrichment(
   tapId: number
 ): QueueCommercialTapEnrichmentResult {
   if (!Number.isFinite(tapId) || tapId <= 0) {
-    return { ok: false, error: "Invalid id", statusCode: 400 };
+    return {
+      ok: false,
+      error: "Invalid tap id",
+      statusCode: 400,
+      reason: "invalid_id",
+      status: "error"
+    };
   }
   const row = loadTapRow(tapId);
-  if (!row) return { ok: false, error: "Tap not found", statusCode: 404 };
+  if (!row) {
+    return {
+      ok: false,
+      error: "Tap not found",
+      statusCode: 404,
+      reason: "tap_not_found",
+      status: "error"
+    };
+  }
   if (isTapEmpty(row)) {
-    return { ok: false, error: "Tap is empty", statusCode: 400 };
+    return {
+      ok: false,
+      error: "Put a beer on this tap first.",
+      statusCode: 400,
+      reason: "tap_empty",
+      status: "skipped_empty"
+    };
   }
   const homebrewExclusion = commercialTapHomebrewExclusion(row);
   if (homebrewExclusion) {
+    const linked = homebrewExclusion === "homebrew_batch_linked";
     return {
       ok: false,
-      error:
-        homebrewExclusion === "homebrew_batch_linked"
-          ? "This tap is linked to a Brewery Lab / homebrew batch"
-          : "Commercial beer enrichment is only for commercial taps",
-      statusCode: 400
+      error: linked
+        ? "This tap is linked to a Brewery Lab batch — commercial enrichment is skipped."
+        : "Homebrew taps stay with Brewery Lab — commercial enrichment is skipped.",
+      statusCode: 400,
+      reason: homebrewExclusion,
+      status: "skipped_homebrew"
     };
   }
   const maker = String(row.maker ?? "").trim();
@@ -116,8 +146,10 @@ export function queueCommercialTapEnrichment(
   if (!maker || !beer) {
     return {
       ok: false,
-      error: "Brewery and beer name are required before enrichment",
-      statusCode: 400
+      error: "Add brewery and beer name, then try again.",
+      statusCode: 400,
+      reason: "maker_and_beer_required",
+      status: "skipped_incomplete_identity"
     };
   }
 
