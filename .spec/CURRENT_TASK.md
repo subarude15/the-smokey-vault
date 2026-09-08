@@ -2,7 +2,7 @@
 
 **Status: idle**
 
-PR130 is complete on this branch: remove duplicate Mixologist landing card.
+PR130 is complete: Remove duplicate Mixologist landing card; What Can I Make? remains the single guest entry into unified cocktail discovery.
 
 Next product work is PR131 — Gallery albums for parties and special nights — as defined in `ROADMAP.md`.
 
