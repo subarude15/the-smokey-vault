@@ -22,6 +22,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - Packaged-beer correctness through GitHub PR #119 is merged.
 - After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
 - PR #122 hardened the Guest API trust boundary with server-side inventory/enrichment redaction.
+- PR #124 made Brewery Lab guest-friendly and Keeper-editable while preserving one-way Brewfather ownership of brewing telemetry.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -51,6 +52,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR53 decision — stale draft closed unmerged; do not resurrect its parallel override architecture. Rebuild only the useful Keeper interaction on current `main`.
 - PR123 — Keeper enrichment actions on current architecture (rerun/retry, ownership-safe verify for packaged-beer ABV/style, resolvable conflict keep/accept without `enrichment_field_overrides`).
 - PR97 — Angel’s Share theme and guest availability carve-out merged. Theme/branding refinement is intentionally deferred until the broader site brand direction is settled.
+- PR124 — Brewery Lab guest-friendly detail/editor experience, Keeper-owned presentation fields/images, and Brewfather-safe sync ownership.
 
 ## Next work
 
@@ -73,20 +75,17 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Brewery Lab: make Brewfather-backed batches understandable and editable in The Smokey Vault.** *(PR124 in progress)*
-   - Keep Brewfather as the source for brewing-specific batch data, but do not expose its raw/API-shaped model as the primary experience.
-   - Add a human-readable presentation layer for people who are not homebrewers: plain-language beer name/style, status, ABV, brew/package dates where useful, concise batch story/description, and clearly labeled brewing details behind an optional deeper view.
-   - Allow Keeper edits for site-owned presentation fields without corrupting Brewfather source data. At minimum support custom display name/description, tasting notes, and photos; consider serving notes or “what to expect” copy where it improves the guest experience.
-   - Define field ownership explicitly so Brewfather sync refreshes machine-owned brewing data while preserving Keeper-written notes, photos, and presentation copy.
-   - Guest Mode should read like a brewery taproom card, not a brewing-software API response.
-
-2. **Draft keg enrichment: show recognizable beer identity and imagery for commercial kegs.**
+1. **Draft keg enrichment: show recognizable beer identity and imagery for commercial kegs.** *(next: PR125)*
    - For commercial draft beer, enrich enough metadata to make the tap/keg recognizable: brewery/brand, beer name, style, ABV when confidently available, and at least one useful image/logo.
    - Prefer an official product/brand image when available, but a verified image of the equivalent packaged product (can/bottle artwork) is acceptable because most draft beers are also sold packaged.
    - A brewery/beer logo is an acceptable fallback when product packaging art is unavailable.
    - Do not require keg-specific artwork or keg-only product pages to succeed.
    - Preserve strict identity matching: packaging format may differ, but brewery + beer identity must match strongly before reusing canned/bottled imagery or metadata.
    - Keep this intentionally lightweight; the goal is a useful guest-facing tap card, not a new generalized enrichment architecture.
+
+2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+   - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
+   - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
 ## Open PR status
 
