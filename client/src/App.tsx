@@ -3545,7 +3545,7 @@ function BuildInfoCard() {
       {info ? (
         <div className="build-info">
           <strong className="build-info-number">Build {info.build}</strong>
-          <span>{info.subtitle}{info.sha ? ` · ${info.sha}` : ""}</span>
+          <span>{info.subtitle}</span>
         </div>
       ) : error ? (
         <p className="field-hint">{error}</p>

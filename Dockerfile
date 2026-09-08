@@ -11,10 +11,13 @@ RUN npm run build && npm prune --omit=dev
 FROM node:24-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
-# Optional build stamp for the Keeper build identifier. CI can pass
-# --build-arg GIT_SHA=$(git rev-parse --short HEAD); unset is fine (SHA is omitted).
+# Build stamp for the Keeper build identifier, injected by CI (docker-publish.yml).
+# All optional: unset values fall back to a local/dev identifier at runtime.
 ARG GIT_SHA=""
-ENV NODE_ENV=production PORT=8080 DB_PATH=/data/smokeyvault.db GOVERNMENT_CATALOG_DB_PATH=/app/data/government-catalog.sqlite GIT_SHA=$GIT_SHA
+ARG BUILD_DATE=""
+ARG BUILD_PR=""
+ENV NODE_ENV=production PORT=8080 DB_PATH=/data/smokeyvault.db GOVERNMENT_CATALOG_DB_PATH=/app/data/government-catalog.sqlite \
+    GIT_SHA=$GIT_SHA BUILD_DATE=$BUILD_DATE BUILD_PR=$BUILD_PR
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
