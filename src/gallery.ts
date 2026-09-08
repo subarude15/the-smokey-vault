@@ -32,9 +32,20 @@ mkdirSync(galleryDir, { recursive: true });
  * Temp uploads live on the SAME filesystem as galleryDir so finalization is an
  * atomic rename (no cross-device EXDEV copy) and a crash never leaves a durable
  * file half-written. Partial temp files are always cleaned up on failure.
+ *
+ * Created lazily on first upload rather than at import time: booting the server
+ * should not eagerly create a nested subdirectory inside the (host-mounted) data
+ * volume, which otherwise breaks non-root host cleanup in the Docker catalog CI.
  */
 export const galleryTmpDir = join(galleryDir, "tmp");
-mkdirSync(galleryTmpDir, { recursive: true });
+let galleryTmpDirReady = false;
+function ensureGalleryTmpDir(): string {
+  if (!galleryTmpDirReady) {
+    mkdirSync(galleryTmpDir, { recursive: true });
+    galleryTmpDirReady = true;
+  }
+  return galleryTmpDir;
+}
 
 /** Bytes sniffed from the front of an upload to validate media type without buffering the whole file. */
 const GALLERY_SNIFF_BYTES = 4096;
@@ -430,7 +441,7 @@ export async function saveGalleryUpload(input: {
     throw new GalleryError(galleryOversizeMessage(limit, limit > MAX_GALLERY_BYTES), 413);
   }
 
-  const tempPath = join(galleryTmpDir, `buf-${randomBytes(16).toString("hex")}.part`);
+  const tempPath = join(ensureGalleryTmpDir(), `buf-${randomBytes(16).toString("hex")}.part`);
   await writeFile(tempPath, input.buffer);
   try {
     return await persistGalleryTempFile({
@@ -464,7 +475,7 @@ export async function saveGalleryUploadFromStream(input: {
   wasTruncated?: () => boolean;
   readFields?: () => { caption?: string; uploadedBy?: string; albumId?: unknown };
 }): Promise<GalleryMedia> {
-  const tempPath = join(galleryTmpDir, `up-${randomBytes(16).toString("hex")}.part`);
+  const tempPath = join(ensureGalleryTmpDir(), `up-${randomBytes(16).toString("hex")}.part`);
   let written = 0;
 
   const limiter = new Transform({
