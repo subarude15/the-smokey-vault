@@ -8,7 +8,6 @@ import {
   displayCanonicalType,
   fillStopLabel,
   isTapEmpty,
-  kegFillPercent,
   kegSizeLabel,
   nearestFillStop,
   openNextSpirit,
@@ -95,7 +94,7 @@ export function TapInventoryCard({
   onClearTap,
   onOpenBreweryLab
 }: CardProps) {
-  const [acting, setActing] = useState<"pour" | "" >("");
+  const [acting, setActing] = useState<"pour" | "">("");
   const [error, setError] = useState("");
   const empty = isTapEmpty(item);
   const homebrew = !empty && isHomebrew(item);
@@ -106,8 +105,9 @@ export function TapInventoryCard({
   const pints = pintsRemaining(remaining);
   const kicked = !empty && ((admin && remaining <= 0) || (!admin && guestPct === 0));
 
-  async function patch(payload: Record<string, unknown>, failed: string) {
+  async function patch(payload: Record<string, unknown>, failed: string, mode: typeof acting) {
     if (!admin || acting) return;
+    setActing(mode);
     setError("");
     try {
       const next = await api<Item>(`/inventory/taps/${item.id}`, {
@@ -117,15 +117,15 @@ export function TapInventoryCard({
       onUpdated(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : failed);
+    } finally {
+      setActing("");
     }
   }
 
-  async function pourPintNow(event: MouseEvent<HTMLButtonElement>) {
+  function pourPintNow(event: MouseEvent<HTMLButtonElement>) {
     stop(event);
-    if (remaining <= 0 || acting) return;
-    setActing("pour");
-    await patch({ remaining_l: pourPint(remaining) }, "Could not pour a pint");
-    setActing("");
+    if (remaining <= 0) return;
+    void patch({ remaining_l: pourPint(remaining) }, "Could not pour a pint", "pour");
   }
 
   const availability = admin
