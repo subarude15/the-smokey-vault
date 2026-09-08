@@ -23,6 +23,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
 - PR #122 hardened the Guest API trust boundary with server-side inventory/enrichment redaction.
 - PR #124 made Brewery Lab guest-friendly and Keeper-editable while preserving one-way Brewfather ownership of brewing telemetry.
+- PR #125 added commercial-tap beer identity/image enrichment with strict official matching, fill-missing Keeper preservation, and explicit Brewery Lab/homebrew exclusion.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -53,6 +54,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR123 — Keeper enrichment actions on current architecture (rerun/retry, ownership-safe verify for packaged-beer ABV/style, resolvable conflict keep/accept without `enrichment_field_overrides`).
 - PR97 — Angel’s Share theme and guest availability carve-out merged. Theme/branding refinement is intentionally deferred until the broader site brand direction is settled.
 - PR124 — Brewery Lab guest-friendly detail/editor experience, Keeper-owned presentation fields/images, and Brewfather-safe sync ownership.
+- PR125 — Commercial tap beer enrichment using official packaged-beer identity/image discovery, strict homebrew exclusion, and Keeper-safe fill-missing updates.
 
 ## Next work
 
@@ -75,13 +77,15 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Draft keg enrichment: show recognizable beer identity and imagery for commercial kegs.** *(PR125 in progress)*
-   - For commercial draft beer, enrich enough metadata to make the tap/keg recognizable: brewery/brand, beer name, style, ABV when confidently available, and at least one useful image/logo.
-   - Prefer an official product/brand image when available, but a verified image of the equivalent packaged product (can/bottle artwork) is acceptable because most draft beers are also sold packaged.
-   - A brewery/beer logo is an acceptable fallback when product packaging art is unavailable.
-   - Do not require keg-specific artwork or keg-only product pages to succeed.
-   - Preserve strict identity matching: packaging format may differ, but brewery + beer identity must match strongly before reusing canned/bottled imagery or metadata.
-   - Keep this intentionally lightweight; the goal is a useful guest-facing tap card, not a new generalized enrichment architecture.
+1. **Events: Keeper editing + shareable event links.** *(next product item; candidate PR126)*
+   - Surface a clear Keeper edit action for existing events so title, date/time, description, image, and publish state can be changed after creation.
+   - Reuse the existing server-side `updateEvent` behavior rather than creating parallel event mutation semantics.
+   - Give each published event a stable guest-facing detail/deep-link route that can be opened directly without Keeper access.
+   - Add an obvious Keeper/guest share action: prefer the platform Web Share API when available, with a copy-link fallback.
+   - A shared link should open the specific event, not merely the generic Events list.
+   - Unpublished events must not become accessible through guessed/shared guest links.
+   - Keep event editing Keeper-authenticated and preserve the existing Guest/Keeper boundary.
+   - Do not add an external event platform or social-network integration just for sharing.
 
 2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
@@ -95,15 +99,17 @@ These are explicitly desired near-term product improvements based on real househ
 
 ## Relevant code
 
-- `client/src/App.tsx` — bottle-detail route and Keeper actions.
+- `client/src/App.tsx` — bottle-detail route, Keeper actions, and current Speakeasy/event UI entry points.
 - `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
+- `src/speakeasy.ts` — event CRUD; `updateEvent` already exists server-side.
+- `src/speakeasy-shared.ts` — event types/shared constraints.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
 - `src/commercial_tap_enrichment.ts` — commercial tap identity/image enrichment (reuses official beer discovery).
-- `src/server.ts` — inventory API routes and authorization boundaries.
+- `src/server.ts` — inventory/API routes and authorization boundaries.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
 - `src/ingestion/jobs/field-ownership.ts` — durable machine-vs-human ownership; currently strongest for packaged-beer ABV/category.
