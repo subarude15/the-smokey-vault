@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
-  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste, Zap
+  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
 import { ImageField } from "./ImageField";
@@ -20,6 +20,14 @@ import {
   spiritGaugePct,
   tapGaugeForDisplay
 } from "./guestAvailability";
+import {
+  THEME_NAMES,
+  applyTheme,
+  cycleTheme,
+  storedTheme,
+  themeLabel,
+  type ThemeName
+} from "./theme";
 import {
   BASE_INGREDIENTS, BEER_STYLES, BEER_VESSELS, BREW_FLAVOR_OPTIONS, DEFAULT_KEG_L, FLAVOR_OPTIONS, HOP_OPTIONS,
   KEG_REMAINING_STOPS, KEG_SIZES, PACK_COUNT_STOPS, SPARKLING_STYLES, SPIRIT_FAMILIES, SPIRIT_TYPES, WINE_FAMILIES,
@@ -140,25 +148,6 @@ const modules: Module[] = [
   ]}
 ];
 
-const themePresets: Record<string, Record<string,string>> = {
-  /* Light: cool stone + smoked copper — avoids cream/terracotta AI cluster */
-  light: { "--bg":"#e9e7e2","--surface":"#f6f5f2","--surface-2":"#dedad3","--text":"#1c1b19","--muted":"#6a6660","--line":"#c9c4bb","--accent":"#8f5a38","--accent-2":"#b8894a" },
-  dark: { "--bg":"#0e0d0b","--surface":"#171511","--surface-2":"#221f1a","--text":"#f3ebe0","--muted":"#a09484","--line":"#353028","--accent":"#c27040","--accent-2":"#d9ae6a" },
-  punk: { "--bg":"#0b0709","--surface":"#1a0e14","--surface-2":"#2a1420","--text":"#f7efe6","--muted":"#c49aaa","--line":"#5c2438","--accent":"#ff2d6a","--accent-2":"#ffe14a" },
-  /* Angel's Share: charred-oak ash + aged brass. Every gauge is guest-visible. See client/src/theme-angels.css */
-  angels: { "--bg":"#121311","--surface":"#191b19","--surface-2":"#222522","--text":"#edeae0","--muted":"#9da398","--line":"#3a3f39","--accent":"#c6a15b","--accent-2":"#e3c686" }
-};
-
-/** `?theme=angels` lets a phone preview jump straight into a theme; it then persists like any other pick. */
-function storedTheme() {
-  if (typeof window !== "undefined") {
-    const forced = new URLSearchParams(window.location.search).get("theme") ?? "";
-    if (themePresets[forced]) return forced;
-  }
-  const value = localStorage.getItem("smokey-theme") ?? "dark";
-  return themePresets[value] ? value : "dark";
-}
-
 const MOBILE_SHORT_LABELS: Record<string, string> = {
   dashboard: "Home",
   taps: "On Tap",
@@ -222,28 +211,6 @@ function mobileQuickNav(
 
 function notInQuickNav<T extends { id: string }>(items: T[], quickNav: { id: string }[]) {
   return items.filter((item) => !quickNav.some((quick) => quick.id === item.id));
-}
-
-function cycleTheme(current: string) {
-  if (current === "light") return "dark";
-  if (current === "dark") return "punk";
-  if (current === "punk") return "angels";
-  return "light";
-}
-
-function themeLabel(theme: string) {
-  if (theme === "punk") return "Punk";
-  if (theme === "angels") return "Angel's Share";
-  return theme[0].toUpperCase() + theme.slice(1);
-}
-
-function applyTheme(theme: string, tokens?: Record<string,string>) {
-  const values = { ...(themePresets[theme] ?? themePresets.dark), ...tokens };
-  Object.entries(values).forEach(([key,value]) => document.documentElement.style.setProperty(key, value));
-  document.documentElement.dataset.theme = theme;
-  const color = values["--bg"] ?? "#11100e";
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", color);
 }
 
 type ScanModuleId = "spirits" | "packaged_beer" | "wines";
@@ -853,7 +820,7 @@ export default function App() {
               {unread > 0 && <span className="topbar-badge">{unread > 99 ? "99+" : unread}</span>}
             </button>}
             {!admin && <button className="icon-button" onClick={() => setUnlock(true)} aria-label="Enter Keeper PIN"><Key size={18}/></button>}
-            <button className="icon-button" onClick={() => setTheme(cycleTheme(theme))} aria-label="Change theme">{theme === "light" ? <Sun/> : theme === "punk" ? <Zap/> : <Moon/>}</button>
+            <button className="icon-button" onClick={() => setTheme(cycleTheme(theme))} aria-label="Change theme">{theme === "light" ? <Sun/> : <Moon/>}</button>
           </div>
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
@@ -3355,7 +3322,7 @@ function lastBrewfatherSyncLabel(iso?: string) {
   return `Last sync was ${days} days ago.`;
 }
 
-function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(v:string)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void;go:(page:string)=>void}) {
+function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setTheme:(v:ThemeName)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void;go:(page:string)=>void}) {
   const [settings,setSettings] = useState<Record<string, string | boolean>>({});
   const [keeperDraft,setKeeperDraft] = useState(DEFAULT_KEEPER_NAME);
   const { notice: message, setNotice: setMessage } = useTransientNotice();
@@ -3487,8 +3454,8 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:string;setTheme:(
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Light and Dark keep the speakeasy look. Punk is the poster/sticker skin. Angel's Share is the dim-room build: brass on charred oak, label serif for names, mono for numbers, and guest-visible fill/keg gauges from the house availability contract. Same screens, different type and chrome. Patron Mode uses the same toggle in the top bar, and `?theme=angels` jumps a phone straight into it.</p>
-        <div className="theme-grid">{(["light","dark","punk","angels"] as const).map((t)=>(
+        <p>Choose Light or Dark. The same screens and guest availability gauges work in both. Patron Mode uses the same toggle in the top bar.</p>
+        <div className="theme-grid">{THEME_NAMES.map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}
           </button>

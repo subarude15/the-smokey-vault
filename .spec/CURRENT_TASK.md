@@ -2,8 +2,8 @@
 
 **Status: idle**
 
-PR126 is complete and merged.
+PR127 is complete on this branch: appearance is Light + Dark only.
 
-Next product work is PR127 — simplify appearance to Light + Dark only — as defined in `ROADMAP.md`.
+Next product work is PR128 — Gallery bulk photo upload for Guests and Keepers — as defined in `ROADMAP.md`.
 
 When assigning a new task, replace this file with concrete objectives, file boundaries, and non-goals.
