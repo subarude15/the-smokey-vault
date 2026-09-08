@@ -2,6 +2,9 @@
 
 **Status: idle**
 
-PR144 complete — Keeper large-video upload path (Guest 150 MB vs env-tunable Keeper `KEEPER_GALLERY_MAX_VIDEO_MB` ceiling resolved server-side; large videos stream to a temp file and finalize with an atomic rename through one shared persistence core with no full-file Buffer; partial/failed uploads leave no temp file or DB row; PR143 posters, magic-byte validation, dedup, and reference-aware cleanup preserved; oversized uploads return 413 with human-readable copy).
+PR145 complete — Cocktail recipe completeness, cocktail photo backfill, and Keeper build identifier:
+- Built-in cocktails render deterministic, practical preparation steps (`resolveCocktailInstructions` / `buildCocktailSteps`) instead of a bare method label; the short method stays as metadata, and AI/custom rich instructions are preserved.
+- `backfillMissingCocktailImages` fills missing built-in cocktail photos in bounded batches at boot via the existing safe fill-missing discovery (never overwriting Keeper/custom images).
+- Lightweight Keeper build identifier (`src/build-info.ts`, `GET /api/admin/build`, Keeper Settings "Build" card).
 
-Next planned product work: **PR145 — Gallery comments + up/down voting**.
+Next planned product work: **PR146 — Gallery comments + up/down voting**.

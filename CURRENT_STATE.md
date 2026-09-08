@@ -5,13 +5,13 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR144** — Keeper large-video upload path. Photos stay capped at 150 MB for Guests and Keepers; only **videos** get a larger, env-tunable Keeper ceiling (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback). The per-type ceiling is enforced server-side on the **sniffed** media type (not filename/MIME) from authorization, so a Keeper photo >150 MB is rejected while a larger video is accepted. Large uploads stream to a temp file under the Gallery filesystem and finalize with an atomic rename through one shared persistence path — never buffering the whole file — with partial/failed uploads leaving no temp file or DB row. PR143 posters, magic-byte validation, dedup, and reference-aware cleanup are preserved; oversized uploads return 413 with human-readable copy.
+- **PR145** — Cocktail recipe completeness, cocktail photo backfill, and Keeper build identifier. Built-in cocktails now render deterministic, practical preparation steps (`resolveCocktailInstructions` / `buildCocktailSteps` in `client/src/cocktail-instructions.ts`) derived from their method/glassware/garnish instead of a bare technique label; the short method stays as metadata, and AI/custom recipes with real prose/numbered instructions are used as-is. `backfillMissingCocktailImages` (in `src/cocktail_image.ts`) fills missing built-in cocktail photos in bounded batches at boot via the existing safe discovery, never overwriting Keeper/custom images. A lightweight build identifier (`src/build-info.ts`, `GET /api/admin/build`) appears in Keeper Settings.
 
 Currently working on:
 - None.
 
 Next planned:
-- **PR145 — Gallery comments + up/down voting** (`ROADMAP.md` Track C).
+- **PR146 — Gallery comments + up/down voting** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
@@ -21,6 +21,9 @@ Next planned:
 - Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
 - Gallery video tiles/covers use persisted lightweight posters; original videos load only in the viewer/download path; poster cleanup follows Gallery media ownership/reference semantics.
 - Gallery upload limits are centralized in `speakeasy-shared` and applied per media type: photos are capped at 150 MB for all roles, and only videos use the larger Keeper ceiling. The per-type ceiling is enforced server-side on the sniffed media type (not client `File.size`/Content-Length/filename). Large Keeper videos stream to `galleryDir/tmp` and finalize via one shared temp-file persistence path (atomic rename, no full-file Buffer); small uploads and the streamed path share that core so they cannot drift.
+- Built-in cocktail instructions are generated deterministically at render time from the seed's method/glassware/garnish (no DB migration; existing prod rows benefit immediately). Generation only fires when `method` is a bare technique label or empty; rich prose/numbered instructions (AI/custom) are preserved and never overwritten. The short method label stays visible as metadata (recipe header + resolver's `methodLabel`).
+- Cocktail photos use one shared discovery path: the Keeper "Find photo" action and the bounded boot backfill both call `findCocktailImage` (fill-missing only; localizes to `/api/media/...`; custom cocktails skipped). No parallel cocktail image system.
+- Build/version identifier is derived from committed `BUILD_PR`/`BUILD_DATE` constants in `src/build-info.ts` (single source, not the UI), with env overrides (`BUILD_PR`/`BUILD_DATE`/`GIT_SHA`); exposed Keeper-only via `GET /api/admin/build`. Bump the two constants per milestone PR.
 - Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
 - Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
@@ -33,7 +36,7 @@ Next planned:
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
 - Keeper large uploads write temp files under `galleryDir/tmp` so finalization is a same-filesystem atomic rename; keep temp storage on the Gallery/data filesystem to avoid cross-device rename failure.
-- Draft **#121** branding docs remain deferred until PR146.
+- Draft **#121** branding docs remain deferred until PR147.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
 
 ## Handoff
