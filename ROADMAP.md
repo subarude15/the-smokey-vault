@@ -83,7 +83,17 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR131 — Gallery albums for parties and special nights.**
+1. **PR132 — Keeper Event Subscriber List.**
+   - Event-update registrations already persist separately from Guest messages in the existing `event_subscribers` table; keep that separation rather than mixing subscriptions into the message inbox.
+   - Add a clear Keeper-only subscriber-management view, preferably within Events, showing name, contact information, notes, joined date, and total count.
+   - Add simple search/filter by name or contact information so the list remains usable as it grows.
+   - Preserve the existing public `POST /api/event-subscribers` registration path and Keeper-authenticated list/delete behavior; do not create a second subscriber store.
+   - Allow Keeper removal with confirmation. Do not silently merge or deduplicate existing rows in this PR.
+   - Add a practical export/copy workflow, preferably CSV download plus a simple copy-contacts action where useful, so the list can be used with external email/text/contact tools.
+   - Keep outbound mass email/SMS, mailing-list providers, automated invitations, and Discord notification changes out of scope for this PR.
+   - Guest registration remains simple and mobile-friendly; subscriber records and contact details must remain Keeper-only.
+
+2. **PR131 — Gallery albums for parties and special nights.**
    - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
    - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
    - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.
@@ -92,7 +102,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Design the schema so an album can be linked to a Speakeasy event later, but do not implement automatic event ↔ album linking in this PR.
    - Preserve current gallery listing/lightbox/download/delete behavior inside albums; do not add face recognition, automatic tagging, cloud photo-service integrations, or a broader media-management redesign.
 
-2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+3. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -106,20 +116,21 @@ These are explicitly desired near-term product improvements based on real househ
 
 - `client/src/App.tsx` — bottle-detail route, Keeper actions, appearance toggle, cocktail UI, and current Speakeasy/event entry points.
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
+- `client/src/EventsPage.tsx` — guest Events UI plus current event subscriber registration/load behavior.
 - `client/src/GalleryPage.tsx` — guest/Keeper gallery grid, lightbox, and multi-select batch upload UI.
 - `client/src/gallery-upload.ts` — pure Gallery batch-selection / per-file status helpers.
 - `client/src/guestAvailability.ts` — guest-safe availability percentage/gauge helpers (product behavior from PR97).
 - `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
-- `src/speakeasy.ts` — event CRUD plus guest-safe published-event detail access.
+- `src/speakeasy.ts` — event CRUD, event subscribers, messages, and guest-safe published-event detail access.
 - `src/speakeasy-shared.ts` — event/gallery types and shared constraints.
 - `src/gallery.ts` — gallery upload validation/persistence via `saveGalleryUpload`.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
 - `src/commercial_tap_enrichment.ts` — commercial tap identity/image enrichment (reuses official beer discovery).
-- `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, and authorization boundaries.
+- `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, event subscribers, and authorization boundaries.
 - `src/cocktails.ts` — cocktail matching/recipe behavior; cocktail rows already support `image_url`.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
