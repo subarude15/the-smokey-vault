@@ -12,16 +12,35 @@ import {
 } from "./gallery-poster.js";
 import {
   clipText,
+  GALLERY_IMAGE_MAX_BYTES,
   galleryOversizeMessage,
   GENERAL_GALLERY_ALBUM_NAME,
+  GUEST_GALLERY_MAX_BYTES,
   MAX_GALLERY_ALBUM_NAME,
-  MAX_GALLERY_BYTES,
   MAX_GALLERY_CAPTION,
   MAX_PATRON_NAME,
   type GalleryAlbum,
   type GalleryMedia,
   type GalleryMediaType
 } from "./speakeasy-shared.js";
+
+/**
+ * Per-media-type upload ceilings. Photos are capped at the same limit for Guests
+ * and Keepers; only videos get the larger, Keeper-configurable ceiling. The type
+ * is decided from sniffed magic bytes, never the filename or declared MIME.
+ */
+export type GalleryUploadLimits = {
+  imageBytes: number;
+  videoBytes: number;
+  /** Affects oversize copy wording only. */
+  isKeeper: boolean;
+};
+
+const GUEST_UPLOAD_LIMITS: GalleryUploadLimits = {
+  imageBytes: GALLERY_IMAGE_MAX_BYTES,
+  videoBytes: GUEST_GALLERY_MAX_BYTES,
+  isKeeper: false,
+};
 
 export { galleryPosterFilename };
 
@@ -350,6 +369,7 @@ async function readGalleryPrefix(path: string, bytes: number): Promise<Buffer> {
  */
 async function persistGalleryTempFile(input: {
   tempPath: string;
+  limits: GalleryUploadLimits;
   contentType?: string | null;
   originalName?: string;
   caption?: string;
@@ -366,6 +386,17 @@ async function persistGalleryTempFile(input: {
     throw new GalleryError("Use a JPEG, PNG, or WebP photo, or an MP4, WebM, or MOV video");
   }
   const mediaType: GalleryMediaType = IMAGE_EXTENSIONS[type] ? "image" : "video";
+
+  // Enforce the ceiling for the *sniffed* type: the large Keeper limit is for
+  // videos only, so a Keeper photo above the image ceiling is still rejected.
+  const typeCeiling = mediaType === "image" ? input.limits.imageBytes : input.limits.videoBytes;
+  if (size > typeCeiling) {
+    throw new GalleryError(
+      galleryOversizeMessage({ ceilingBytes: typeCeiling, isKeeper: input.limits.isKeeper, mediaType }),
+      413,
+    );
+  }
+
   const albumId = resolveUploadAlbumId(input.albumId);
 
   const hash = await hashGalleryFile(input.tempPath);
@@ -423,8 +454,8 @@ async function persistGalleryTempFile(input: {
 
 /**
  * Small-upload / test path. Buffers are acceptable here; the file is written to a
- * temp path and finalized through the shared persistence core. `maxBytes` lets the
- * caller apply the effective (Guest or Keeper) ceiling; it defaults to the Guest limit.
+ * temp path and finalized through the shared persistence core. `limits` lets the
+ * caller apply per-type (image vs video) ceilings; it defaults to the Guest limits.
  */
 export async function saveGalleryUpload(input: {
   buffer: Buffer;
@@ -433,19 +464,17 @@ export async function saveGalleryUpload(input: {
   caption?: string;
   uploadedBy?: string;
   albumId?: unknown;
-  maxBytes?: number;
+  limits?: GalleryUploadLimits;
 }): Promise<GalleryMedia> {
   if (!input.buffer.length) throw new GalleryError("Pick a photo or video first");
-  const limit = input.maxBytes ?? MAX_GALLERY_BYTES;
-  if (input.buffer.length > limit) {
-    throw new GalleryError(galleryOversizeMessage(limit, limit > MAX_GALLERY_BYTES), 413);
-  }
+  const limits = input.limits ?? GUEST_UPLOAD_LIMITS;
 
   const tempPath = join(ensureGalleryTmpDir(), `buf-${randomBytes(16).toString("hex")}.part`);
   await writeFile(tempPath, input.buffer);
   try {
     return await persistGalleryTempFile({
       tempPath,
+      limits,
       contentType: input.contentType,
       originalName: input.originalName,
       caption: input.caption,
@@ -468,8 +497,7 @@ export async function saveGalleryUpload(input: {
  */
 export async function saveGalleryUploadFromStream(input: {
   stream: Readable;
-  byteCeiling: number;
-  oversizeMessage: string;
+  limits: GalleryUploadLimits;
   contentType?: string | null;
   originalName?: string;
   wasTruncated?: () => boolean;
@@ -478,11 +506,21 @@ export async function saveGalleryUploadFromStream(input: {
   const tempPath = join(ensureGalleryTmpDir(), `up-${randomBytes(16).toString("hex")}.part`);
   let written = 0;
 
+  // The stream-level hard cap is the largest ceiling any accepted type could use
+  // (videos). The per-type ceiling (e.g. the 150 MB photo limit) is enforced after
+  // the media type is sniffed from the finished temp file.
+  const streamCeiling = Math.max(input.limits.imageBytes, input.limits.videoBytes);
+  const overflowMessage = galleryOversizeMessage({
+    ceilingBytes: input.limits.videoBytes,
+    isKeeper: input.limits.isKeeper,
+    mediaType: "video",
+  });
+
   const limiter = new Transform({
     transform(chunk: Buffer, _enc, cb) {
       written += chunk.length;
-      if (written > input.byteCeiling) {
-        cb(new GalleryError(input.oversizeMessage, 413));
+      if (written > streamCeiling) {
+        cb(new GalleryError(overflowMessage, 413));
         return;
       }
       cb(null, chunk);
@@ -493,13 +531,14 @@ export async function saveGalleryUploadFromStream(input: {
     await pipeline(input.stream, limiter, createWriteStream(tempPath));
     // The multipart parser also caps the file; a truncated stream means it tripped first.
     if (input.wasTruncated?.()) {
-      throw new GalleryError(input.oversizeMessage, 413);
+      throw new GalleryError(overflowMessage, 413);
     }
     if (written <= 0) throw new GalleryError("Pick a photo or video first");
 
     const fields = input.readFields?.() ?? {};
     return await persistGalleryTempFile({
       tempPath,
+      limits: input.limits,
       contentType: input.contentType,
       originalName: input.originalName,
       caption: fields.caption,

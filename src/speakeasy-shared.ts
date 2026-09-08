@@ -135,6 +135,12 @@ const GALLERY_BYTES_PER_MB = 1024 * 1024;
 export const GUEST_GALLERY_MAX_BYTES = 150 * GALLERY_BYTES_PER_MB;
 
 /**
+ * Photos are always capped at the Guest ceiling for everyone — the larger Keeper
+ * limit is for videos only. Kept as a named alias so intent is explicit at call sites.
+ */
+export const GALLERY_IMAGE_MAX_BYTES = GUEST_GALLERY_MAX_BYTES;
+
+/**
  * Back-compat alias. Existing callers and tests use MAX_GALLERY_BYTES to mean the
  * Guest gallery ceiling, so keep the name pointing at the Guest limit.
  */
@@ -179,10 +185,21 @@ export function formatGalleryLimit(bytes: number): string {
   return `${Number.isInteger(gb) ? gb : Number(gb.toFixed(1))} GB`;
 }
 
-/** Human-readable oversize copy that never leaks raw multipart/Fastify error text. */
-export function galleryOversizeMessage(ceilingBytes: number, isKeeper: boolean): string {
-  const limit = formatGalleryLimit(ceilingBytes);
-  return isKeeper
+/**
+ * Human-readable oversize copy that never leaks raw multipart/Fastify error text.
+ * Photos are capped at the same limit for Guests and Keepers; only videos get the
+ * larger, Keeper-only ceiling.
+ */
+export function galleryOversizeMessage(opts: {
+  ceilingBytes: number;
+  isKeeper: boolean;
+  mediaType?: GalleryMediaType;
+}): string {
+  const limit = formatGalleryLimit(opts.ceilingBytes);
+  if (opts.mediaType === "image") {
+    return `That photo is larger than the ${limit} photo limit.`;
+  }
+  return opts.isKeeper
     ? `That video is larger than the Keeper upload limit (${limit}).`
     : `That file is larger than the ${limit} guest upload limit. Ask a Keeper to add larger videos.`;
 }

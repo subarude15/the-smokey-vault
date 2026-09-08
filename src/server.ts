@@ -96,7 +96,7 @@ import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } fr
 import { castVote, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
 import {
   AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_TIMEOUT_MS,
-  galleryOversizeMessage, GUEST_GALLERY_MAX_BYTES,
+  GUEST_GALLERY_MAX_BYTES,
   KEEPER_GALLERY_MAX_VIDEO_MB_ENV, resolveKeeperGalleryMaxBytes,
   parseEnabledTabs, parseTabOrder, serializeEnabledTabs
 } from "./speakeasy-shared.js";
@@ -1827,10 +1827,18 @@ const keeperGalleryMaxBytes = resolveKeeperGalleryMaxBytes(process.env[KEEPER_GA
 /** Largest request body the upload route accepts, with slack for multipart overhead. */
 const galleryUploadBodyLimit = keeperGalleryMaxBytes + 1024 * 1024;
 
-/** Authorization — not the client or Content-Length — decides the upload ceiling. */
-function effectiveGalleryCeiling(request: FastifyRequest): { bytes: number; isKeeper: boolean } {
+/**
+ * Per-media-type upload ceilings for this request. Photos stay at the Guest limit
+ * for everyone; only videos get the larger Keeper ceiling. Authorization — not the
+ * client, filename, or Content-Length — decides which limits apply.
+ */
+function galleryUploadLimits(request: FastifyRequest): { imageBytes: number; videoBytes: number; isKeeper: boolean } {
   const isKeeper = isAdmin(request.headers.authorization);
-  return { bytes: isKeeper ? keeperGalleryMaxBytes : GUEST_GALLERY_MAX_BYTES, isKeeper };
+  return {
+    imageBytes: GUEST_GALLERY_MAX_BYTES,
+    videoBytes: isKeeper ? keeperGalleryMaxBytes : GUEST_GALLERY_MAX_BYTES,
+    isKeeper,
+  };
 }
 
 function galleryFail(reply: FastifyReply, error: unknown, fallback: string) {
@@ -1897,23 +1905,28 @@ app.get<{ Querystring: { album_id?: string } }>("/api/gallery", {
 });
 
 app.get("/api/gallery/config", {
-  schema: { tags: ["Gallery"], summary: "Effective gallery upload size limit for the caller" }
+  schema: { tags: ["Gallery"], summary: "Effective gallery upload size limits for the caller" }
 }, async (request) => {
-  const { bytes, isKeeper } = effectiveGalleryCeiling(request);
-  // Only the effective ceiling is exposed — no other server configuration leaks.
-  return { max_bytes: bytes, guest_max_bytes: GUEST_GALLERY_MAX_BYTES, is_keeper: isKeeper };
+  const limits = galleryUploadLimits(request);
+  // Only the effective per-type ceilings are exposed — no other server config leaks.
+  return {
+    image_max_bytes: limits.imageBytes,
+    video_max_bytes: limits.videoBytes,
+    guest_max_bytes: GUEST_GALLERY_MAX_BYTES,
+    is_keeper: limits.isKeeper
+  };
 });
 
 app.post("/api/gallery/upload", {
   bodyLimit: galleryUploadBodyLimit,
   schema: { tags: ["Gallery"], summary: "Upload a photo or video to the bar gallery" }
 }, async (request, reply) => {
-  const { bytes: ceiling, isKeeper } = effectiveGalleryCeiling(request);
+  const limits = galleryUploadLimits(request);
   try {
-    // Per-request fileSize overrides the plugin default, enforcing the ceiling as
-    // the multipart parser reads. The stream is written straight to a temp file;
-    // the full upload is never buffered into memory.
-    const file = await request.file({ limits: { fileSize: ceiling } });
+    // The multipart hard cap is the largest allowed type (videos); the per-type
+    // ceiling (e.g. the 150 MB photo limit) is enforced after the media type is
+    // sniffed. The stream is written straight to a temp file, never buffered.
+    const file = await request.file({ limits: { fileSize: Math.max(limits.imageBytes, limits.videoBytes) } });
     if (!file) return reply.code(400).send({ error: "Pick a photo or video first" });
     const field = (key: string) => {
       const entry = file.fields?.[key];
@@ -1922,8 +1935,7 @@ app.post("/api/gallery/upload", {
     };
     const media = await saveGalleryUploadFromStream({
       stream: file.file,
-      byteCeiling: ceiling,
-      oversizeMessage: galleryOversizeMessage(ceiling, isKeeper),
+      limits,
       contentType: file.mimetype,
       originalName: file.filename,
       wasTruncated: () => file.file.truncated,
