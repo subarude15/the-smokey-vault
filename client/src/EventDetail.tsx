@@ -1,5 +1,6 @@
 import { ArrowLeft, CalendarDays, Copy, Link2, Pencil, Share2 } from "lucide-react";
 import type { HouseEvent } from "./catalog";
+import { EventImageMedia } from "./EventImageMedia";
 
 function eventDateLabel(raw: string) {
   const stamp = Date.parse(raw);
@@ -41,9 +42,12 @@ export function EventDetail({
 
       <div className="event-detail-hero">
         {event.image_url ? (
-          <div className="event-detail-image">
-            <img src={event.image_url} alt=""/>
-          </div>
+          <EventImageMedia
+            src={event.image_url}
+            framing={event}
+            className="event-image-well event-detail-image"
+            alt=""
+          />
         ) : null}
         <div>
           <span className="eyebrow">

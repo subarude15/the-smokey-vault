@@ -1,0 +1,11 @@
+{
+  "name": "The Smokey Vault",
+  "install": "export NVM_DIR=\"$HOME/.nvm\"; . \"$NVM_DIR/nvm.sh\"; nvm install 24 >/dev/null; nvm alias default 24 >/dev/null; export PATH=\"$(dirname \"$(nvm which 24)\"):$PATH\"; node --version; npm install",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "export NVM_DIR=\"$HOME/.nvm\"; . \"$NVM_DIR/nvm.sh\"; export PATH=\"$(dirname \"$(nvm which 24)\"):$PATH\"; npm run dev"
+    }
+  ],
+  "ports": [5173, 8080]
+}

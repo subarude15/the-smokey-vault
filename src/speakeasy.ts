@@ -1,6 +1,10 @@
 import { db, getSetting } from "./db.js";
 import { itemExists } from "./reviews.js";
 import {
+  DEFAULT_EVENT_IMAGE_FRAMING,
+  normalizeEventImageFraming
+} from "./event-image-framing.js";
+import {
   clipBody, clipText, LEADERBOARD_SIZE, MAX_CONTACT_INFO, MAX_MESSAGE_BODY, MAX_PATRON_NAME,
   MAX_PATRON_NICKNAME, MESSAGE_ALERT_DELAY_MS, vaultDayDate,
   type DailyVoteResult, type EventSubscriber, type GuestMessage, type HouseEvent, type MerchItem, type Patron
@@ -200,7 +204,8 @@ export function discordWebhookUrl(): string {
 
 /* ---------------------------------- Events ---------------------------------- */
 
-const EVENT_COLUMNS = "id, title, event_date, description, image_url, is_published, created_at";
+const EVENT_COLUMNS =
+  "id, title, event_date, description, image_url, image_focal_x, image_focal_y, image_zoom, is_published, created_at";
 
 export function listEvents(includeUnpublished = false): HouseEvent[] {
   const where = includeUnpublished ? "" : " WHERE is_published=1";
@@ -223,12 +228,20 @@ export function createEvent(input: Record<string, unknown>): HouseEvent {
   const eventDate = clipText(input.event_date, 40);
   if (!title) throw new SpeakeasyError("Give the event a title");
   if (!eventDate) throw new SpeakeasyError("Pick a date for the event");
+  const framing = normalizeEventImageFraming(input);
+  const imageUrl = clipText(input.image_url, 500);
   const result = db.prepare(
-    "INSERT INTO events(title, event_date, description, image_url, is_published) VALUES(?, ?, ?, ?, ?)"
+    `INSERT INTO events(
+      title, event_date, description, image_url,
+      image_focal_x, image_focal_y, image_zoom, is_published
+    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     title, eventDate,
     clipBody(input.description, MAX_MESSAGE_BODY),
-    clipText(input.image_url, 500),
+    imageUrl,
+    imageUrl ? framing.image_focal_x : DEFAULT_EVENT_IMAGE_FRAMING.image_focal_x,
+    imageUrl ? framing.image_focal_y : DEFAULT_EVENT_IMAGE_FRAMING.image_focal_y,
+    imageUrl ? framing.image_zoom : DEFAULT_EVENT_IMAGE_FRAMING.image_zoom,
     input.is_published === undefined || Number(input.is_published) === 1 ? 1 : 0
   );
   return db.prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE id=?`).get(result.lastInsertRowid) as HouseEvent;
@@ -237,12 +250,56 @@ export function createEvent(input: Record<string, unknown>): HouseEvent {
 export function updateEvent(id: number, input: Record<string, unknown>): HouseEvent {
   const existing = db.prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE id=?`).get(id) as HouseEvent | undefined;
   if (!existing) throw new SpeakeasyError("Event not found", 404);
-  db.prepare("UPDATE events SET title=?, event_date=?, description=?, image_url=?, is_published=? WHERE id=?").run(
-    input.title === undefined ? existing.title : clipText(input.title, 120) || existing.title,
-    input.event_date === undefined ? existing.event_date : clipText(input.event_date, 40) || existing.event_date,
-    input.description === undefined ? existing.description : clipBody(input.description, MAX_MESSAGE_BODY),
-    input.image_url === undefined ? existing.image_url : clipText(input.image_url, 500),
-    input.is_published === undefined ? existing.is_published : Number(input.is_published) === 1 ? 1 : 0,
+
+  const nextTitle = input.title === undefined ? existing.title : clipText(input.title, 120) || existing.title;
+  const nextDate = input.event_date === undefined ? existing.event_date : clipText(input.event_date, 40) || existing.event_date;
+  const nextDescription = input.description === undefined
+    ? existing.description
+    : clipBody(input.description, MAX_MESSAGE_BODY);
+  const nextImageUrl = input.image_url === undefined ? existing.image_url : clipText(input.image_url, 500);
+  const nextPublished = input.is_published === undefined
+    ? existing.is_published
+    : Number(input.is_published) === 1 ? 1 : 0;
+
+  const imageChanged = input.image_url !== undefined && nextImageUrl !== existing.image_url;
+  const framingProvided =
+    input.image_focal_x !== undefined ||
+    input.image_focal_y !== undefined ||
+    input.image_zoom !== undefined;
+
+  let nextFraming = {
+    image_focal_x: existing.image_focal_x ?? DEFAULT_EVENT_IMAGE_FRAMING.image_focal_x,
+    image_focal_y: existing.image_focal_y ?? DEFAULT_EVENT_IMAGE_FRAMING.image_focal_y,
+    image_zoom: existing.image_zoom ?? DEFAULT_EVENT_IMAGE_FRAMING.image_zoom
+  };
+
+  if (!nextImageUrl) {
+    nextFraming = { ...DEFAULT_EVENT_IMAGE_FRAMING };
+  } else if (framingProvided) {
+    nextFraming = normalizeEventImageFraming({
+      image_focal_x: input.image_focal_x !== undefined ? input.image_focal_x : nextFraming.image_focal_x,
+      image_focal_y: input.image_focal_y !== undefined ? input.image_focal_y : nextFraming.image_focal_y,
+      image_zoom: input.image_zoom !== undefined ? input.image_zoom : nextFraming.image_zoom
+    });
+  } else if (imageChanged) {
+    // New/replaced image without framing → sane defaults (do not keep stale crop).
+    nextFraming = { ...DEFAULT_EVENT_IMAGE_FRAMING };
+  }
+
+  db.prepare(
+    `UPDATE events SET
+      title=?, event_date=?, description=?, image_url=?,
+      image_focal_x=?, image_focal_y=?, image_zoom=?, is_published=?
+     WHERE id=?`
+  ).run(
+    nextTitle,
+    nextDate,
+    nextDescription,
+    nextImageUrl,
+    nextFraming.image_focal_x,
+    nextFraming.image_focal_y,
+    nextFraming.image_zoom,
+    nextPublished,
     id
   );
   return db.prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE id=?`).get(id) as HouseEvent;

@@ -1,16 +1,33 @@
 import { useEffect, useState } from "react";
+import { Crop } from "lucide-react";
 import { ImageField } from "./ImageField";
+import { EventImageAdjuster } from "./EventImageAdjuster";
+import {
+  DEFAULT_EVENT_IMAGE_FRAMING,
+  normalizeEventImageFraming,
+  type EventImageFraming
+} from "./event-image-framing";
 
 export type EventEditorValues = {
   title: string;
   event_date: string;
   description: string;
   image_url: string;
+  image_focal_x: number;
+  image_focal_y: number;
+  image_zoom: number;
   is_published: boolean;
 };
 
 export function emptyEventDraft(): EventEditorValues {
-  return { title: "", event_date: "", description: "", image_url: "", is_published: true };
+  return {
+    title: "",
+    event_date: "",
+    description: "",
+    image_url: "",
+    ...DEFAULT_EVENT_IMAGE_FRAMING,
+    is_published: true
+  };
 }
 
 export function eventToEditorValues(event: {
@@ -18,15 +35,30 @@ export function eventToEditorValues(event: {
   event_date: string;
   description: string;
   image_url: string;
+  image_focal_x?: number;
+  image_focal_y?: number;
+  image_zoom?: number;
   is_published: 0 | 1 | boolean;
 }): EventEditorValues {
+  const framing = normalizeEventImageFraming(event);
   return {
     title: event.title ?? "",
     event_date: (event.event_date ?? "").slice(0, 10),
     description: event.description ?? "",
     image_url: event.image_url ?? "",
+    image_focal_x: framing.image_focal_x,
+    image_focal_y: framing.image_focal_y,
+    image_zoom: framing.image_zoom,
     is_published: Boolean(event.is_published)
   };
+}
+
+function framingFromDraft(draft: EventEditorValues): EventImageFraming {
+  return normalizeEventImageFraming({
+    image_focal_x: draft.image_focal_x,
+    image_focal_y: draft.image_focal_y,
+    image_zoom: draft.image_zoom
+  });
 }
 
 export function EventEditor({
@@ -45,12 +77,46 @@ export function EventEditor({
   onSave: (values: EventEditorValues) => void | Promise<void>;
 }) {
   const [draft, setDraft] = useState<EventEditorValues>(initial);
+  const [adjusting, setAdjusting] = useState(false);
 
   useEffect(() => {
     setDraft(initial);
-  }, [initial.title, initial.event_date, initial.description, initial.image_url, initial.is_published]);
+    setAdjusting(false);
+  }, [
+    initial.title,
+    initial.event_date,
+    initial.description,
+    initial.image_url,
+    initial.image_focal_x,
+    initial.image_focal_y,
+    initial.image_zoom,
+    initial.is_published
+  ]);
 
   const canSave = draft.title.trim().length > 0 && draft.event_date.trim().length > 0;
+  const framing = framingFromDraft(draft);
+
+  function setImageUrl(image_url: string) {
+    if (!image_url) {
+      setDraft({
+        ...draft,
+        image_url: "",
+        ...DEFAULT_EVENT_IMAGE_FRAMING
+      });
+      setAdjusting(false);
+      return;
+    }
+    if (image_url !== draft.image_url) {
+      // Replacing the photo clears stale crop settings from the previous image.
+      setDraft({
+        ...draft,
+        image_url,
+        ...DEFAULT_EVENT_IMAGE_FRAMING
+      });
+      return;
+    }
+    setDraft({ ...draft, image_url });
+  }
 
   return (
     <section className="settings-card event-composer">
@@ -89,8 +155,23 @@ export function EventEditor({
         <span>Image</span>
         <ImageField
           value={draft.image_url}
-          onChange={(image_url) => setDraft({ ...draft, image_url })}
+          onChange={setImageUrl}
         />
+        {draft.image_url ? (
+          <div className="event-image-framing-panel">
+            <button
+              type="button"
+              className="secondary event-adjust-photo"
+              disabled={busy}
+              onClick={() => setAdjusting(true)}
+            >
+              <Crop size={17} /> Adjust photo
+            </button>
+            <p className="event-image-framing-hint">
+              Reposition and zoom how this photo appears on cards and the event page. The original upload stays unchanged.
+            </p>
+          </div>
+        ) : null}
       </div>
       <label className="event-publish-toggle">
         <input
@@ -113,6 +194,23 @@ export function EventEditor({
           {mode === "create" ? "Save event" : "Save changes"}
         </button>
       </div>
+
+      {adjusting && draft.image_url ? (
+        <EventImageAdjuster
+          imageUrl={draft.image_url}
+          initial={framing}
+          onCancel={() => setAdjusting(false)}
+          onApply={(next) => {
+            setDraft({
+              ...draft,
+              image_focal_x: next.image_focal_x,
+              image_focal_y: next.image_focal_y,
+              image_zoom: next.image_zoom
+            });
+            setAdjusting(false);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

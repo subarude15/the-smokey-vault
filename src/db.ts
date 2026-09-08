@@ -240,6 +240,9 @@ ensureColumn("brews", "guest_description", "ALTER TABLE brews ADD COLUMN guest_d
 ensureColumn("brews", "keeper_owns_image", "ALTER TABLE brews ADD COLUMN keeper_owns_image INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS brews_brewfather_id ON brews(brewfather_id) WHERE brewfather_id IS NOT NULL AND brewfather_id != ''");
 ensureColumn("gallery_media", "album_id", "ALTER TABLE gallery_media ADD COLUMN album_id INTEGER");
+ensureColumn("events", "image_focal_x", "ALTER TABLE events ADD COLUMN image_focal_x REAL NOT NULL DEFAULT 50");
+ensureColumn("events", "image_focal_y", "ALTER TABLE events ADD COLUMN image_focal_y REAL NOT NULL DEFAULT 50");
+ensureColumn("events", "image_zoom", "ALTER TABLE events ADD COLUMN image_zoom REAL NOT NULL DEFAULT 1");
 db.exec("CREATE INDEX IF NOT EXISTS idx_gallery_media_album ON gallery_media(album_id, created_at DESC, id DESC)");
 ensureColumn("cocktails", "season", "ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
 ensureColumn("cocktails", "image_url", "ALTER TABLE cocktails ADD COLUMN image_url TEXT DEFAULT ''");

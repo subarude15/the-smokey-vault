@@ -160,6 +160,12 @@ export type HouseEvent = {
   event_date: string;
   description: string;
   image_url: string;
+  /** 0–100 focal X for cover framing; defaults to 50 for legacy rows. */
+  image_focal_x: number;
+  /** 0–100 focal Y for cover framing; defaults to 50 for legacy rows. */
+  image_focal_y: number;
+  /** 1–3 zoom scale; defaults to 1 for legacy rows. */
+  image_zoom: number;
   is_published: 0 | 1;
   created_at: string;
 };

@@ -91,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR139 are complete; the remaining product sequence continues with event media workflows, then social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR140 are complete; the remaining product sequence continues with landing/feedback visibility, then Gallery media/social polish, with branding last after the UX surfaces are stable.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -109,9 +109,10 @@ These are explicitly desired near-term product improvements based on real househ
    - Added `AGENTS.md` and `CURRENT_STATE.md` so future coding agents can start from the repository without large chat-history handoffs.
    - Aligned roadmap PR numbers with authoritative GitHub PR numbers (former product PR139+ shifted forward by one).
    - Documentation only; no application behavior change.
-5. **PR140 — Event image crop / resize controls**
-   - Give Keepers a simple way to crop or resize event artwork so uploaded photos display cleanly across cards, detail views, and responsive breakpoints.
-   - Preserve the original upload or use a non-destructive derivative path where practical.
+5. **PR140 — Event image crop / resize controls** (done)
+   - Keepers can Adjust photo in the event editor: drag/nudge reposition, zoom, reset, and card/detail previews.
+   - Framing is non-destructive optional metadata (`image_focal_x` / `image_focal_y` / `image_zoom`); original `image_url` is never rewritten for crop.
+   - Cards and detail heroes share the same normalized framing via CSS `object-fit: cover` + `object-position` + scale. Shared `ImageField` upload flows are unchanged.
 6. **PR141 — Conditional landing-page “Give us your two cents” visibility**
    - When the underlying feedback/messages tab is disabled in configuration, remove its matching landing-page card/CTA too.
    - Keep tab visibility and landing-page visibility driven by the same source of truth so they cannot drift.
@@ -147,6 +148,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `client/src/App.tsx` — responsive shell (phone bottom nav / rail), bottle-detail route, Keeper actions, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
 - `client/src/EventsPage.tsx` — guest Events UI, signup form, and Keeper Invite List wiring.
+- `client/src/EventEditor.tsx` / `EventImageAdjuster.tsx` / `EventImageMedia.tsx` / `src/event-image-framing.ts` — PR140 event photo framing (draft Adjust photo; CSS focal/zoom; non-destructive).
+- `client/src/EventDetail.tsx` — guest/Keeper event detail hero with shared framing.
 - `client/src/EventSubscriberList.tsx` — Keeper-only invite list management (search, remove, export, copy).
 - `client/src/event-subscribers.ts` — pure invite-list helpers (contact href, filter, CSV, copy).
 - `client/src/GalleryPage.tsx` — guest/Keeper gallery album browsing, grid, lightbox, and multi-select batch upload UI.

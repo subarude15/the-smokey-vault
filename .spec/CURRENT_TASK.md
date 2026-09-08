@@ -2,6 +2,6 @@
 
 **Status: idle**
 
-PR139 complete — Repository AI agent context / durable handoff setup (`AGENTS.md`, `CURRENT_STATE.md`, roadmap PR-number alignment). Documentation only; no application behavior change.
+PR140 complete — Event image crop / resize controls (non-destructive focal/zoom framing; event-only Adjust photo; shared ImageField unchanged).
 
-Next planned product work: **PR140 — Event image crop / resize controls**.
+Next planned product work: **PR141 — Conditional landing-page “Give us your two cents” visibility**.
