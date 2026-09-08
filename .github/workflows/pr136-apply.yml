@@ -1,0 +1,132 @@
+name: PR136 source patch
+
+on:
+  push:
+    branches: [pr136-cocktail-cards]
+    paths:
+      - .github/workflows/pr136-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'chore: apply PR136 source patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr136-cocktail-cards
+      - name: Patch App.tsx
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('client/src/App.tsx')
+          source = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              'import { SpiritInventoryCard, TapInventoryCard } from "./TapSpiritInventoryCard";\nimport { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";',
+              'import { SpiritInventoryCard, TapInventoryCard } from "./TapSpiritInventoryCard";\nimport { CocktailCard } from "./CocktailCard";\nimport { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";',
+              'CocktailCard import'
+          )
+
+          replace_once(
+              '  const [loadError, setLoadError] = useState("");\n  const mixologistSectionRef = useRef<HTMLElement | null>(null);',
+              '  const [loadError, setLoadError] = useState("");\n  const [favoriteBusy, setFavoriteBusy] = useState<number | null>(null);\n  const mixologistSectionRef = useRef<HTMLElement | null>(null);',
+              'favorite busy state'
+          )
+
+          replace_once(
+              '''  function surprise() {
+    if (!ready.length) return;
+    setSelected(ready[Math.floor(Math.random() * ready.length)]);
+  }
+  return <>''',
+              '''  function surprise() {
+    if (!ready.length) return;
+    setSelected(ready[Math.floor(Math.random() * ready.length)]);
+  }
+  async function toggleCardFavorite(drink: CocktailDrink) {
+    if (!admin || favoriteBusy != null) return;
+    const id = Number(drink.id);
+    setFavoriteBusy(id);
+    setLoadError("");
+    try {
+      await api<CocktailDrink>(`/cocktails/${drink.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ bartender_fav: Number(drink.bartender_fav) <= 0 })
+      });
+      load();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not update favorite.");
+    } finally {
+      setFavoriteBusy(null);
+    }
+  }
+  return <>''',
+              'card favorite action'
+          )
+
+          replace_once(
+              '''      <div className="recipe-grid">{shown.map((drink) => {
+        const lines = cocktailLines(drink);
+        const preview = lines.slice(0, 3);
+        return (
+          <button className="recipe-card" key={drink.id} onClick={() => setSelected(drink)}>
+            {drink.image_url ? <img className="recipe-thumb" src={String(drink.image_url)} alt={drink.name}/> : null}
+            <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness, !admin)}</span>
+            {Number(drink.bartender_fav) > 0 && <span className="fav-tag">Favorite</span>}
+            {drink.season !== "All" && <span className="season-tag">{drink.season}</span>}
+            <h3>{drink.name}</h3>
+            <p>{drink.method} · {drink.glassware}</p>
+            <ul className="ingredient-preview">{preview.map((line) => <li key={line.text} className={line.state}>{line.text}</li>)}</ul>
+            {lines.length > 3 ? <small>+{lines.length - 3} more</small> : null}
+            {drink.missing.length > 0 && <small>Missing: {drink.missing.join(", ")}</small>}
+          </button>
+        );
+      })}</div>''',
+              '''      <div className="recipe-grid cocktail-card-grid">{shown.map((drink) => (
+        <CocktailCard
+          key={drink.id}
+          drink={drink}
+          admin={admin}
+          onOpen={() => setSelected(drink)}
+          onToggleFavorite={admin ? () => { void toggleCardFavorite(drink); } : undefined}
+          favoriteBusy={favoriteBusy === Number(drink.id)}
+        />
+      ))}</div>''',
+              'cocktail grid'
+          )
+
+          replace_once(
+              '<span className="mark" aria-hidden="true">{line.state === "missing" ? "○" : line.state === "substitute" ? "◐" : "●"}</span>',
+              '<span className="mark" aria-hidden="true">{line.state === "missing" ? "✕" : line.state === "substitute" ? "↔" : "✓"}</span>',
+              'ingredient state marks'
+          )
+
+          replace_once(
+              '                    {line.state === "pantry" ? <small> · pantry</small> : null}\n',
+              '                    {line.state === "pantry" ? <small> · pantry</small> : null}\n                    {line.state === "missing" ? <small> · Restock needed</small> : null}\n',
+              'missing ingredient detail'
+          )
+
+          path.write_text(source)
+          PY
+      - name: Commit source patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/src/App.tsx
+          git diff --cached --check
+          git commit -m "feat: wire PR136 cocktail cards"
+          git push origin HEAD:pr136-cocktail-cards
