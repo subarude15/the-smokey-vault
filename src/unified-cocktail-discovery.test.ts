@@ -205,3 +205,29 @@ test("V. no cocktail/inventory/enrichment backend behavior changes in this PR", 
   assert.doesNotMatch(appSrc, /mixologist_enabled/);
   assert.match(cssSrc, /\.mixologist-panel/);
 });
+
+function overviewFeatureGridSlice(): string {
+  return sliceBetween(appSrc, '<section className="feature-grid">', "</section>");
+}
+
+test("W. PR130 guest landing feature grid has exactly one cocktail-discovery card", () => {
+  const grid = overviewFeatureGridSlice();
+  assert.match(grid, /What can I make\?/);
+  assert.match(grid, /go\("cocktails"\)/);
+  assert.equal((grid.match(/go\("cocktails"\)/g) || []).length, 1);
+  assert.doesNotMatch(grid, /Ask the Mixologist/);
+  assert.doesNotMatch(grid, /CUSTOM CREATIONS/);
+  assert.doesNotMatch(grid, /go\("mixologist"\)/);
+  // Remaining guest picks card is unrelated and stays.
+  assert.match(grid, /Give us your 2 cents/);
+  assert.match(grid, /go\("next"\)/);
+});
+
+test("X. PR130 Mixologist panel and mixologist compatibility alias remain", () => {
+  const cocktails = cocktailsSlice();
+  assert.match(cocktails, /<MixologistPanel/);
+  assert.match(appSrc, /mixologist:\s*"cocktails"/);
+  assert.match(appSrc, /next === "mixologist"/);
+  assert.match(appSrc, /setCocktailFocus\("mixologist"\)/);
+  assert.match(appSrc, /focusMixologist=\{cocktailFocus === "mixologist"\}/);
+});
