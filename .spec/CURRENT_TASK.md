@@ -1,7 +1,7 @@
-﻿# Current task
+# Current task
 
-**Status: in progress**
+**Status: idle**
 
-PR133 — Client 401 → Clear Expired Keeper Session.
+PR133 complete — Client 401 → clear expired Keeper session (automatic Keeper → Guest via `handToGuest()`).
 
-When an authenticated Keeper/admin API request receives HTTP 401, emit a central auth-rejected signal and hand the UI back to Guest Mode via the existing `handToGuest()` path (same result as manual Lock Bar and kiosk idle timeout).
+Next planned code work: Track B hardening (Watchtower scoping) or evidence-driven Brewery Lab follow-up when live use proves a concrete gap.
