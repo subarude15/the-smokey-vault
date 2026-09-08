@@ -1,7 +1,7 @@
 # Current task
 
-**Status: idle**
+**Status: active**
 
-PR139 complete — Repository AI agent context / durable handoff setup (`AGENTS.md`, `CURRENT_STATE.md`, roadmap PR-number alignment). Documentation only; no application behavior change.
+**PR140 — Event image crop / resize controls**
 
-Next planned product work: **PR140 — Event image crop / resize controls**.
+Non-destructive Keeper framing (focal X/Y + zoom) for event artwork. Draft-only adjuster; persist with event save. Do not change shared ImageField globally.

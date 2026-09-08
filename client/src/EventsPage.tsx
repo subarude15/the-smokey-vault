@@ -4,6 +4,7 @@ import { api } from "./api";
 import { MAX_CONTACT_INFO, MAX_PATRON_NAME, type EventSubscriber, type HouseEvent } from "./catalog";
 import { EventDetail } from "./EventDetail";
 import { emptyEventDraft, EventEditor, eventToEditorValues, type EventEditorValues } from "./EventEditor";
+import { EventImageMedia } from "./EventImageMedia";
 import { EventSubscriberList } from "./EventSubscriberList";
 import {
   buildEventDeepLink,
@@ -172,6 +173,9 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
           event_date: values.event_date,
           description: values.description,
           image_url: values.image_url,
+          image_focal_x: values.image_focal_x,
+          image_focal_y: values.image_focal_y,
+          image_zoom: values.image_zoom,
           is_published: values.is_published ? 1 : 0
         })
       });
@@ -197,6 +201,9 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
           event_date: values.event_date,
           description: values.description,
           image_url: values.image_url,
+          image_focal_x: values.image_focal_x,
+          image_focal_y: values.image_focal_y,
+          image_zoom: values.image_zoom,
           is_published: values.is_published ? 1 : 0
         })
       });
@@ -300,7 +307,14 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
         key={event.id}
       >
         <button type="button" className="event-card-open" onClick={() => openDetail(event.id)}>
-          {event.image_url ? <img src={event.image_url} alt=""/> : null}
+          {event.image_url ? (
+            <EventImageMedia
+              src={event.image_url}
+              framing={event}
+              className="event-image-well event-card-image"
+              alt=""
+            />
+          ) : null}
           <div>
             <span className="eyebrow"><CalendarDays size={14}/> {eventDateLabel(event.event_date)}</span>
             <h3>{event.title}</h3>
