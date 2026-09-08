@@ -28,6 +28,9 @@ function statusMessage(view: CommercialTapEnrichmentView | null, busy: boolean):
     if (view.reason === "homebrew_excluded") {
       return "Homebrew taps stay with Brewery Lab — commercial enrichment is skipped.";
     }
+    if (view.reason === "homebrew_batch_linked") {
+      return "This tap is linked to a Brewery Lab batch — commercial enrichment is skipped.";
+    }
     if (view.reason === "tap_empty") return "Put a beer on this tap first.";
     if (view.reason === "maker_and_beer_required") {
       return "Add brewery and beer name, then try again.";

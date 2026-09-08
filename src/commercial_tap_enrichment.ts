@@ -6,7 +6,7 @@
  * Homebrew / Brewfather-linked taps are excluded.
  */
 import { beerTextTokens, foldBeerText, parseBeerQuery } from "./beer_search_query.js";
-import { isTapEmpty } from "./catalog.js";
+import { isTapEmpty, tapLinksToAnyBrewBatch } from "./catalog.js";
 import { db } from "./db.js";
 import { localizeImage, type LocalizeImageDeps } from "./images.js";
 import { getEnrichmentSource, upsertEnrichmentSource } from "./ingestion/jobs/enrichment-sources.js";
@@ -74,10 +74,49 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+export type CommercialTapHomebrewExclusion =
+  | "homebrew_excluded"
+  | "homebrew_batch_linked";
+
+/** Source-type gate only (blank source remains legacy-commercial). */
+export function isHomebrewSourceType(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row) return false;
+  return /^homebrew$/i.test(text(row.source_type));
+}
+
+/**
+ * Source-type helper only. Prefer {@link commercialTapHomebrewExclusion} for eligibility —
+ * source_type alone is not enough when a tap links to a Brewery Lab batch.
+ */
 export function isCommercialTap(row: Record<string, unknown> | null | undefined): boolean {
   if (!row) return false;
-  const source = text(row.source_type) || "Commercial";
-  return !/^homebrew$/i.test(source);
+  return !isHomebrewSourceType(row);
+}
+
+function loadBrewRowsForTapLinkage(): Array<Record<string, unknown>> {
+  return db.prepare("SELECT batch_name FROM brews").all() as Array<Record<string, unknown>>;
+}
+
+/**
+ * Reject Homebrew source_type OR an exact Brewery Lab tap↔brew batch link.
+ * Blank source_type with no linked brew stays eligible (legacy commercial).
+ */
+export function commercialTapHomebrewExclusion(
+  row: Record<string, unknown> | null | undefined,
+  brews?: Array<Record<string, unknown>>
+): CommercialTapHomebrewExclusion | null {
+  if (!row || isTapEmpty(row)) return null;
+  if (isHomebrewSourceType(row)) return "homebrew_excluded";
+  const brewRows = brews ?? loadBrewRowsForTapLinkage();
+  if (tapLinksToAnyBrewBatch(row, brewRows)) return "homebrew_batch_linked";
+  return null;
+}
+
+export function isCommercialTapEligible(
+  row: Record<string, unknown> | null | undefined,
+  brews?: Array<Record<string, unknown>>
+): boolean {
+  return commercialTapHomebrewExclusion(row, brews) == null;
 }
 
 export function loadTapRow(tapId: number): Record<string, unknown> | null {
@@ -306,8 +345,9 @@ export async function enrichCommercialTap(
     return emptyResult("skipped_empty", "tap_empty");
   }
 
-  if (!isCommercialTap(row)) {
-    return emptyResult("skipped_homebrew", "homebrew_excluded");
+  const homebrewExclusion = commercialTapHomebrewExclusion(row);
+  if (homebrewExclusion) {
+    return emptyResult("skipped_homebrew", homebrewExclusion);
   }
 
   if (!isOfficialBreweryDiscoveryEnabled()) {

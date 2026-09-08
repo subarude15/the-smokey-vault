@@ -8,8 +8,8 @@ import {
   COMMERCIAL_TAP_ENTITY_TYPE,
   COMMERCIAL_TAP_JOB_TYPE,
   commercialTapEnrichmentResultPayload,
+  commercialTapHomebrewExclusion,
   enrichCommercialTap,
-  isCommercialTap,
   loadTapRow,
   type CommercialTapEnrichmentDeps,
   type CommercialTapEnrichmentResult
@@ -100,10 +100,14 @@ export function queueCommercialTapEnrichment(
   if (isTapEmpty(row)) {
     return { ok: false, error: "Tap is empty", statusCode: 400 };
   }
-  if (!isCommercialTap(row)) {
+  const homebrewExclusion = commercialTapHomebrewExclusion(row);
+  if (homebrewExclusion) {
     return {
       ok: false,
-      error: "Commercial beer enrichment is only for commercial taps",
+      error:
+        homebrewExclusion === "homebrew_batch_linked"
+          ? "This tap is linked to a Brewery Lab / homebrew batch"
+          : "Commercial beer enrichment is only for commercial taps",
       statusCode: 400
     };
   }
@@ -158,12 +162,15 @@ export function buildCommercialTapEnrichmentView(
   if (isTapEmpty(row)) {
     eligible = false;
     reason = "tap_empty";
-  } else if (!isCommercialTap(row)) {
-    eligible = false;
-    reason = "homebrew_excluded";
-  } else if (!String(row.maker ?? "").trim() || !String(row.brewery_batch ?? "").trim()) {
-    eligible = false;
-    reason = "maker_and_beer_required";
+  } else {
+    const homebrewExclusion = commercialTapHomebrewExclusion(row);
+    if (homebrewExclusion) {
+      eligible = false;
+      reason = homebrewExclusion;
+    } else if (!String(row.maker ?? "").trim() || !String(row.brewery_batch ?? "").trim()) {
+      eligible = false;
+      reason = "maker_and_beer_required";
+    }
   }
 
   const job = getLatestCommercialTapEnrichmentJob(tapId);

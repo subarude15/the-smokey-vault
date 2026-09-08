@@ -16,9 +16,12 @@ const {
   enrichCommercialTap,
   extractOfficialLogoFallbackCandidates,
   isCommercialTap,
+  commercialTapHomebrewExclusion,
+  isCommercialTapEligible,
   COMMERCIAL_TAP_ENTITY_TYPE,
   COMMERCIAL_TAP_JOB_TYPE
 } = await import("./commercial_tap_enrichment.js");
+const { tapMatchesBrewBatch, tapLinksToAnyBrewBatch } = await import("./catalog.js");
 const {
   queueCommercialTapEnrichment,
   buildCommercialTapEnrichmentView,
@@ -97,13 +100,14 @@ function setCommercialTap(
     image_url?: string;
     notes?: string;
     remaining_l?: number;
+    source_type?: string;
   }
 ) {
   const row = loadTap(tapNumber);
   db.prepare(
     `UPDATE taps SET
       maker=?, brewery_batch=?, style=?, abv=?, image_url=?, notes=?,
-      source_type='Commercial', remaining_l=?, keg_size_l=19.5,
+      source_type=?, remaining_l=?, keg_size_l=19.5,
       updated_at=CURRENT_TIMESTAMP
      WHERE id=?`
   ).run(
@@ -113,6 +117,7 @@ function setCommercialTap(
     fields.abv ?? 0,
     fields.image_url ?? "",
     fields.notes ?? "",
+    fields.source_type ?? "Commercial",
     fields.remaining_l ?? 19.5,
     row.id
   );
@@ -128,6 +133,16 @@ function setHomebrewTap(tapNumber: number) {
      WHERE id=?`
   ).run("Vault", `${PREFIX} Citra Smash`, "IPA", 6.2, row.id);
   return loadTap(tapNumber);
+}
+
+function insertBrew(batchName: string, brewfatherId?: string) {
+  const result = db
+    .prepare(
+      `INSERT INTO brews (batch_name, style, status, maker, brewfather_id, calculated_abv)
+       VALUES (?, 'IPA', 'Ready to Keg', 'Vault', ?, 6.2)`
+    )
+    .run(batchName, brewfatherId ?? `${PREFIX}-${batchName}`);
+  return Number(result.lastInsertRowid);
 }
 
 function dirtWolfFetch() {
@@ -159,15 +174,28 @@ function cleanup() {
   clearOfficialBeerDiscoveryCache();
   clearEnrichmentJobsForTests();
   clearEnrichmentSourcesForTests();
+  db.prepare(`DELETE FROM brews WHERE brewfather_id LIKE '${PREFIX}%' OR batch_name LIKE '${PREFIX}%'`).run();
   for (const n of [1, 2, 3, 4, 5, 6, 7]) resetTap(n);
 }
 
 afterEach(cleanup);
 
-test("isCommercialTap excludes Homebrew source_type", () => {
+test("isCommercialTap excludes Homebrew source_type only", () => {
   assert.equal(isCommercialTap({ source_type: "Commercial" }), true);
   assert.equal(isCommercialTap({ source_type: "Homebrew" }), false);
   assert.equal(isCommercialTap({ source_type: "" }), true);
+});
+
+test("tap↔brew linkage helpers reuse tapsForBatch exact-name semantics", () => {
+  const tap = { tap_number: 1, brewery_batch: "Vault IPA" };
+  assert.equal(tapMatchesBrewBatch(tap, "Vault IPA"), true);
+  assert.equal(tapMatchesBrewBatch(tap, "vault ipa"), true);
+  assert.equal(tapMatchesBrewBatch(tap, "Vault IPA Extra"), false);
+  assert.equal(
+    tapLinksToAnyBrewBatch(tap, [{ batch_name: "Other" }, { batch_name: "Vault IPA" }]),
+    true
+  );
+  assert.equal(tapLinksToAnyBrewBatch(tap, [{ batch_name: "Other" }]), false);
 });
 
 test("exact packaged-art reuse: DirtWolf fills style, ABV, and product image", async () => {
@@ -280,8 +308,11 @@ test("Keeper preservation: image, style, ABV, and notes survive enrichment", asy
   assert.equal(updated.notes, "Keep these cellar notes");
 });
 
-test("homebrew / Brewfather-linked taps are not processed", async () => {
+test("1. Homebrew source_type is rejected with no mutations", async () => {
   const tap = setHomebrewTap(2);
+  assert.equal(commercialTapHomebrewExclusion(tap), "homebrew_excluded");
+  assert.equal(isCommercialTapEligible(tap), false);
+
   const queued = queueCommercialTapEnrichment(Number(tap.id));
   assert.equal(queued.ok, false);
   if (!queued.ok) {
@@ -297,10 +328,109 @@ test("homebrew / Brewfather-linked taps are not processed", async () => {
     })
   });
   assert.equal(result.status, "skipped_homebrew");
+  assert.equal(result.reason, "homebrew_excluded");
+  assert.deepEqual(result.updatedFields, []);
   const updated = loadTap(2);
   assert.equal(updated.style, "IPA");
   assert.equal(Number(updated.abv), 6.2);
   assert.equal(updated.image_url, "");
+});
+
+test("2. Blank source_type + exact linked brews.batch_name is rejected", async () => {
+  const batch = `${PREFIX} Linked Smash`;
+  insertBrew(batch);
+  const tap = setCommercialTap(1, {
+    maker: "Vault",
+    beer: batch,
+    style: "",
+    abv: 0,
+    source_type: ""
+  });
+  assert.equal(commercialTapHomebrewExclusion(tap), "homebrew_batch_linked");
+
+  const queued = queueCommercialTapEnrichment(Number(tap.id));
+  assert.equal(queued.ok, false);
+  if (!queued.ok) {
+    assert.equal(queued.statusCode, 400);
+    assert.match(queued.error, /Brewery Lab|homebrew batch/i);
+  }
+
+  const result = await enrichCommercialTap(Number(tap.id), {
+    discoveryDeps: { fetchHtml: dirtWolfFetch() },
+    resolveWebsite: async () => ({
+      websiteUrl: "https://victorybeer.com",
+      websiteHost: "victorybeer.com"
+    })
+  });
+  assert.equal(result.status, "skipped_homebrew");
+  assert.equal(result.reason, "homebrew_batch_linked");
+  assert.deepEqual(result.updatedFields, []);
+  const updated = loadTap(1);
+  assert.equal(updated.style, "");
+  assert.equal(Number(updated.abv), 0);
+  assert.equal(updated.image_url, "");
+});
+
+test("3. Commercial source_type + exact linked homebrew batch is rejected", async () => {
+  const batch = `${PREFIX} Mislabeled Commercial`;
+  insertBrew(batch);
+  const tap = setCommercialTap(3, {
+    maker: "Vault",
+    beer: batch,
+    style: "Keeper Style",
+    abv: 5.5,
+    image_url: "",
+    source_type: "Commercial"
+  });
+  assert.equal(commercialTapHomebrewExclusion(tap), "homebrew_batch_linked");
+
+  const queued = queueCommercialTapEnrichment(Number(tap.id));
+  assert.equal(queued.ok, false);
+
+  const result = await enrichCommercialTap(Number(tap.id), {
+    discoveryDeps: { fetchHtml: dirtWolfFetch() },
+    resolveWebsite: async () => ({
+      websiteUrl: "https://victorybeer.com",
+      websiteHost: "victorybeer.com"
+    })
+  });
+  assert.equal(result.status, "skipped_homebrew");
+  assert.equal(result.reason, "homebrew_batch_linked");
+  assert.deepEqual(result.updatedFields, []);
+  const updated = loadTap(3);
+  assert.equal(updated.style, "Keeper Style");
+  assert.equal(Number(updated.abv), 5.5);
+  assert.equal(updated.image_url, "");
+});
+
+test("4. Blank source_type + no linked brew remains legacy-commercial eligible", async () => {
+  const tap = setCommercialTap(1, {
+    maker: "Victory Brewing Company",
+    beer: "DirtWolf",
+    source_type: ""
+  });
+  assert.equal(commercialTapHomebrewExclusion(tap), null);
+  assert.equal(isCommercialTapEligible(tap), true);
+
+  const queued = queueCommercialTapEnrichment(Number(tap.id));
+  assert.equal(queued.ok, true);
+
+  const fetchHtml = dirtWolfFetch();
+  const result = await enrichCommercialTap(Number(tap.id), {
+    discoveryDeps: { fetchHtml },
+    fetchHtml,
+    resolveWebsite: async () => ({
+      websiteUrl: "https://victorybeer.com",
+      websiteHost: "victorybeer.com"
+    }),
+    localizeImageDeps: {
+      request: async () => {
+        throw new Error("localize skipped");
+      }
+    }
+  });
+  assert.equal(result.status, "matched");
+  assert.ok(result.updatedFields.includes("style"));
 });
 
 test("no-result leaves tap untouched", async () => {
