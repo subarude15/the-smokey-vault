@@ -197,7 +197,7 @@ export async function runCommercialTapEnrichmentJob(
   job: EnrichmentJob,
   deps: CommercialTapEnrichmentDeps = {}
 ): Promise<CommercialTapEnrichmentResult> {
-  if (job.entity_type !== COMMERCIAL_TAP_ENTITY_TYPE || job.job_type !== COMMERCIAL_TAP_JOB_TYPE) {
+  if (!isCommercialTapEnrichmentJob(job)) {
     throw new Error(`Unsupported commercial tap job: ${job.entity_type}/${job.job_type}`);
   }
   const result = await enrichCommercialTap(job.entity_id, deps);
@@ -205,7 +205,10 @@ export async function runCommercialTapEnrichmentJob(
   return result;
 }
 
-export function isCommercialTapEnrichmentJob(job: EnrichmentJob): boolean {
+export function isCommercialTapEnrichmentJob(job: {
+  entity_type: string;
+  job_type: string;
+}): boolean {
   return (
     job.entity_type === COMMERCIAL_TAP_ENTITY_TYPE && job.job_type === COMMERCIAL_TAP_JOB_TYPE
   );
