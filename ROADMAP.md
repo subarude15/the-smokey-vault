@@ -89,17 +89,21 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use.
+These are explicitly desired near-term product improvements based on real household use. PR136 is already in progress; the remaining sequence is ordered to finish active interaction patterns first, then media workflows, then social polish, with branding last after the UX surfaces are stable.
 
-1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (next UX PR)
+1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (in progress)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
    - Refine tablet/landscape Keeper ergonomics without creating a separate admin application.
-2. **PR137 — Visual system / Smokey Barrel branding polish**
-   - Final typography, color, surface, and brand expression after interaction patterns are stable.
-   - Reconcile any useful direction from deferred draft PR121; keep Light/Dark as the supported appearance model.
-3. **PR138 — Gallery comments + up/down voting**
-   - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
-   - Design simple abuse/duplicate-vote safeguards appropriate to this private household app; Keeper moderation/removal must remain available.
+2. **PR137 — Cocktail mobile media + structured recipe steps**
+   - Follow directly from PR136 while the unified Cocktail experience is already being refined.
+   - Fix cocktail images not rendering in phone layouts and verify tablet behavior.
+   - Support ordered, multi-stage instructions (for example: shake selected ingredients, add another ingredient, then strain) instead of collapsing recipes to a single basic method label.
+   - Preserve existing imported recipe data where it is already richer than the generic method field.
+3. **PR138 — Keg beer image reliability + Keeper upload rendering**
+   - Close the remaining media/reliability gaps adjacent to the PR135 Taps & Spirits card work while those inventory surfaces are still fresh.
+   - Fix commercial-keg cases where beer artwork is not populated despite an equivalent canned/packaged beer identity being available.
+   - Fix Keeper photo upload so a locally uploaded image renders as media instead of appearing as a hyperlink, including uploads from phones.
+   - Preserve strict beer-identity matching and never overwrite a Keeper-owned image automatically.
 4. **PR139 — Event image crop / resize controls**
    - Give Keepers a simple way to crop or resize event artwork so uploaded photos display cleanly across cards, detail views, and responsive breakpoints.
    - Preserve the original upload or use a non-destructive derivative path where practical.
@@ -110,16 +114,16 @@ These are explicitly desired near-term product improvements based on real househ
    - Generate or display useful poster thumbnails for uploaded videos instead of generic media placeholders.
    - Keep mobile performance in mind; do not force full video download just to render the grid.
 7. **PR142 — Keeper large-video upload path**
+   - Build on the Gallery/video presentation work from PR141 by making larger Keeper video uploads operationally safe and understandable.
    - Allow Keepers to upload substantially larger video files than Guests without removing all operational safeguards.
    - Use explicit Keeper-only limits/configuration, streaming upload handling, and clear failure feedback rather than an unbounded in-memory upload path.
-8. **PR143 — Cocktail mobile media + structured recipe steps**
-   - Fix cocktail images not rendering in phone layouts and verify tablet behavior.
-   - Support ordered, multi-stage instructions (for example: shake selected ingredients, add another ingredient, then strain) instead of collapsing recipes to a single basic method label.
-   - Preserve existing imported recipe data where it is already richer than the generic method field.
-9. **PR144 — Keg beer image reliability + Keeper upload rendering**
-   - Fix remaining commercial-keg cases where beer artwork is not populated despite an equivalent canned/packaged beer identity being available.
-   - Fix Keeper photo upload so a locally uploaded image renders as media instead of appearing as a hyperlink, including uploads from phones.
-   - Preserve strict beer-identity matching and never overwrite a Keeper-owned image automatically.
+8. **PR143 — Gallery comments + up/down voting**
+   - Add social interaction after Gallery media display/upload behavior is stable.
+   - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
+   - Design simple abuse/duplicate-vote safeguards appropriate to this private household app; Keeper moderation/removal must remain available.
+9. **PR144 — Visual system / Smokey Barrel branding polish**
+   - Apply final typography, color, surface, and brand expression only after the interaction, responsive, and media patterns above are stable.
+   - Reconcile any useful direction from deferred draft PR121; keep Light/Dark as the supported appearance model.
 10. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
