@@ -1,27 +1,21 @@
-import { parseCocktailInstructions } from "./cocktail-instructions";
+import { resolveCocktailInstructions } from "./cocktail-instructions";
 
 type CocktailRecipeInstructionsProps = {
   method: unknown;
+  ingredients?: unknown;
+  glassware?: unknown;
+  garnish?: unknown;
 };
 
-export function CocktailRecipeInstructions({ method }: CocktailRecipeInstructionsProps) {
-  const parsed = parseCocktailInstructions(method);
-  if (parsed.kind === "empty") return null;
+export function CocktailRecipeInstructions({ method, ingredients, glassware, garnish }: CocktailRecipeInstructionsProps) {
+  const resolved = resolveCocktailInstructions({ method, ingredients, glassware, garnish });
+  if (resolved.kind === "empty") return null;
 
-  if (parsed.kind === "method") {
-    return (
-      <div className="recipe-instructions recipe-instructions-method">
-        <span className="eyebrow">METHOD</span>
-        <strong>{parsed.label}</strong>
-      </div>
-    );
-  }
-
-  if (parsed.kind === "prose") {
+  if (resolved.kind === "prose") {
     return (
       <div className="recipe-instructions">
         <span className="eyebrow">INSTRUCTIONS</span>
-        <p>{parsed.text}</p>
+        <p>{resolved.text}</p>
       </div>
     );
   }
@@ -30,7 +24,7 @@ export function CocktailRecipeInstructions({ method }: CocktailRecipeInstruction
     <div className="recipe-instructions">
       <span className="eyebrow">INSTRUCTIONS</span>
       <ol>
-        {parsed.steps.map((step, index) => (
+        {resolved.steps.map((step, index) => (
           <li key={`${index}-${step.slice(0, 24)}`}>{step}</li>
         ))}
       </ol>
