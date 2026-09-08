@@ -1,9 +1,7 @@
 ﻿# Current task
 
-**Status: idle**
+**Status: in progress**
 
-PR132 complete — Gallery albums for parties and special nights.
+PR133 — Client 401 → Clear Expired Keeper Session.
 
-Next planned code work: PR133 — Client 401 → clear Keeper session when the bearer expires, instead of waiting for idle lock alone.
-
-Brewery Lab follow-up remains evidence-driven: only open another product PR when live use proves a concrete usability gap.
+When an authenticated Keeper/admin API request receives HTTP 401, emit a central auth-rejected signal and hand the UI back to Guest Mode via the existing `handToGuest()` path (same result as manual Lock Bar and kiosk idle timeout).

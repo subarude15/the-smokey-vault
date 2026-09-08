@@ -3,7 +3,7 @@ import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
   Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
 } from "lucide-react";
-import { api, ApiError, clearToken, downloadExport, Item, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
+import { api, ApiError, clearToken, downloadExport, Item, onKeeperAuthRejected, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
@@ -625,6 +625,8 @@ export default function App() {
     events.forEach((event) => window.addEventListener(event, touch, { passive: true }));
     return () => { clearTimeout(timer); events.forEach((event) => window.removeEventListener(event, touch)); };
   }, [admin, handToGuest]);
+  // Expired/forged Keeper bearer → same Guest handoff as idle lock / Lock Bar.
+  useEffect(() => onKeeperAuthRejected(handToGuest), [handToGuest]);
 
   const navigate = (next: string) => {
     if (next === "mixologist") {
