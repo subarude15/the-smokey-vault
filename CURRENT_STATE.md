@@ -8,10 +8,10 @@ Most recently completed:
 - **PR138** — Keg beer image reliability + Keeper upload rendering (merged). Commercial taps reuse exact vault packaged-beer artwork; Keeper Choose/Take photo stays on durable local media paths and renders as `<img>`; Find beer details empty-JSON Bad Request fixed.
 
 Currently working on:
-- Idle (no active numbered PR assigned in `.spec/CURRENT_TASK.md`).
+- **PR139 — Repository AI agent context / durable handoff setup** (GitHub #139). Adds `AGENTS.md` + `CURRENT_STATE.md`; documentation only.
 
-Next planned:
-- **PR139 — Event image crop / resize controls** (`ROADMAP.md` Track C).
+Next planned (after PR139 merges):
+- **PR140 — Event image crop / resize controls** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
@@ -22,11 +22,12 @@ Next planned:
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
 - Appearance support is Light + Dark only (PR127).
 - App routing remains state-based in `App.tsx` (no React Router for primary navigation).
+- GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR139 docs → next product work is PR140).
 
 ## Known issues / follow-ups
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
-- Draft **#121** branding docs remain deferred until PR144.
+- Draft **#121** branding docs remain deferred until PR145.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
 
 ## Handoff

@@ -1,7 +1,9 @@
 # Current task
 
-**Status: idle**
+**Status: active (docs)**
 
-PR138 complete — Keg beer image reliability + Keeper upload rendering (exact vault packaged-beer artwork reuse for commercial taps; Keeper Choose/Take photo uploads persist and render as media; Keeper ownership and homebrew exclusion preserved).
+**PR139 — Repository AI agent context / durable handoff setup** (GitHub #139).
 
-Next planned code work: **PR139 — Event image crop / resize controls**.
+Documentation-only: `AGENTS.md`, `CURRENT_STATE.md`, roadmap PR-number alignment. No application behavior change.
+
+Next planned product work after PR139 merges: **PR140 — Event image crop / resize controls**.
