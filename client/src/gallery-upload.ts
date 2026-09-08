@@ -156,6 +156,15 @@ export function setGalleryUploadStatus(
   });
 }
 
+/** True only when every remaining selected item uploaded and none were skipped/rejected. */
+export function isGalleryBatchCompleteSuccess(counts: GalleryUploadCounts): boolean {
+  return counts.success > 0
+    && counts.failed === 0
+    && counts.rejected === 0
+    && counts.pending === 0
+    && counts.uploading === 0;
+}
+
 export function formatGalleryBatchSuccessMessage(successCount: number): string {
   if (successCount <= 0) return "Added to the gallery";
   if (successCount === 1) return "Added 1 memory to the gallery";

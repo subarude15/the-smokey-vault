@@ -14,6 +14,7 @@ import {
   formatGalleryUploadProgress,
   formatGalleryUploadSummary,
   galleryUploadsReadyToSend,
+  isGalleryBatchCompleteSuccess,
   mergeGallerySelections,
   prepareGalleryUploadRetry,
   removeGalleryUpload,
@@ -156,10 +157,63 @@ test("status updates and removable rows behave as expected", () => {
   assert.equal(blocked.length, 1);
 });
 
+test("mixed success and rejected does not qualify as complete success", () => {
+  let items = mergeGallerySelections([], [
+    fakeFile("photo1.jpg", 1024),
+    fakeFile("photo2.jpg", 2048, 2),
+    fakeFile("huge.mov", MAX + 1, 3, "video/mp4")
+  ], MAX, (() => {
+    let n = 0;
+    return () => `id-${++n}`;
+  })());
+
+  assert.equal(items.filter((item) => item.status === "pending").length, 2);
+  assert.equal(items.filter((item) => item.status === "rejected").length, 1);
+  assert.equal(isGalleryBatchCompleteSuccess(summarizeGalleryUploads(items)), false);
+
+  items = setGalleryUploadStatus(items, "id-1", "success");
+  items = setGalleryUploadStatus(items, "id-2", "success");
+  const counts = summarizeGalleryUploads(items);
+
+  assert.equal(counts.success, 2);
+  assert.equal(counts.rejected, 1);
+  assert.equal(counts.failed, 0);
+  assert.equal(counts.pending, 0);
+  assert.equal(counts.uploading, 0);
+  assert.equal(isGalleryBatchCompleteSuccess(counts), false);
+  assert.equal(formatGalleryUploadSummary(counts), "2 uploaded · 1 skipped");
+
+  // Removing the rejected row leaves a fully successful batch.
+  items = removeGalleryUpload(items, "id-3");
+  assert.equal(isGalleryBatchCompleteSuccess(summarizeGalleryUploads(items)), true);
+});
+
+test("isGalleryBatchCompleteSuccess requires every remaining item to succeed", () => {
+  assert.equal(isGalleryBatchCompleteSuccess({
+    total: 2, pending: 0, rejected: 0, uploading: 0, success: 2, failed: 0, uploadable: 0, remaining: 0
+  }), true);
+  assert.equal(isGalleryBatchCompleteSuccess({
+    total: 0, pending: 0, rejected: 0, uploading: 0, success: 0, failed: 0, uploadable: 0, remaining: 0
+  }), false);
+  assert.equal(isGalleryBatchCompleteSuccess({
+    total: 2, pending: 0, rejected: 0, uploading: 0, success: 1, failed: 1, uploadable: 0, remaining: 0
+  }), false);
+  assert.equal(isGalleryBatchCompleteSuccess({
+    total: 2, pending: 1, rejected: 0, uploading: 0, success: 1, failed: 0, uploadable: 1, remaining: 1
+  }), false);
+  assert.equal(isGalleryBatchCompleteSuccess({
+    total: 2, pending: 0, rejected: 0, uploading: 1, success: 1, failed: 0, uploadable: 0, remaining: 1
+  }), false);
+  assert.equal(isGalleryBatchCompleteSuccess({
+    total: 3, pending: 0, rejected: 1, uploading: 0, success: 2, failed: 0, uploadable: 0, remaining: 0
+  }), false);
+});
+
 test("GalleryPage wires multi-select and batch upload UX", () => {
   const page = readFileSync(join(root, "client/src/GalleryPage.tsx"), "utf8");
   assert.match(page, /multiple/);
   assert.match(page, /mergeGallerySelections/);
+  assert.match(page, /isGalleryBatchCompleteSuccess/);
   assert.match(page, /gallery\/upload/);
   assert.match(page, /Retry failed/);
   assert.doesNotMatch(page, /capture="environment"[^>]*multiple/);

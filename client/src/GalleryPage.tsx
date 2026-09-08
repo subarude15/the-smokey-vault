@@ -13,6 +13,7 @@ import {
   formatGalleryUploadProgress,
   formatGalleryUploadSummary,
   galleryUploadsReadyToSend,
+  isGalleryBatchCompleteSuccess,
   isVideoFile,
   megabytes,
   mergeGallerySelections,
@@ -252,15 +253,22 @@ function UploadModal({
     const { successDelta, failedDelta, finalItems } = await uploadPending(items);
     const finalCounts = summarizeGalleryUploads(finalItems);
 
-    if (successDelta > 0 && failedDelta === 0 && finalCounts.failed === 0) {
-      done(formatGalleryBatchSuccessMessage(finalCounts.success || successDelta));
+    if (isGalleryBatchCompleteSuccess(finalCounts)) {
+      done(formatGalleryBatchSuccessMessage(finalCounts.success));
       return;
     }
 
     if (successDelta > 0) refresh();
 
-    if (failedDelta > 0) {
+    if (finalCounts.failed > 0) {
       const note = formatGalleryBatchPartialMessage(finalCounts.success, finalCounts.failed);
+      setBatchNote(note);
+      notify(note);
+      return;
+    }
+
+    if (finalCounts.rejected > 0) {
+      const note = formatGalleryUploadSummary(finalCounts);
       setBatchNote(note);
       notify(note);
       return;
@@ -277,8 +285,8 @@ function UploadModal({
     const { successDelta, failedDelta, finalItems } = await uploadPending(prepared);
     const finalCounts = summarizeGalleryUploads(finalItems);
 
-    if (successDelta > 0 && failedDelta === 0 && finalCounts.failed === 0) {
-      done(formatGalleryBatchSuccessMessage(finalCounts.success || successDelta));
+    if (isGalleryBatchCompleteSuccess(finalCounts)) {
+      done(formatGalleryBatchSuccessMessage(finalCounts.success));
       return;
     }
 
@@ -286,6 +294,13 @@ function UploadModal({
 
     if (finalCounts.failed > 0) {
       const note = formatGalleryBatchPartialMessage(finalCounts.success, finalCounts.failed);
+      setBatchNote(note);
+      notify(note);
+      return;
+    }
+
+    if (finalCounts.rejected > 0) {
+      const note = formatGalleryUploadSummary(finalCounts);
       setBatchNote(note);
       notify(note);
     }
