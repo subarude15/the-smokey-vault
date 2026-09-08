@@ -95,7 +95,9 @@ import { createReview, deleteReview, listReviews, REVIEW_TABLES } from "./review
 import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
 import { castVote, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
 import {
-  AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_TIMEOUT_MS, MAX_GALLERY_BYTES,
+  AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_TIMEOUT_MS,
+  galleryOversizeMessage, GUEST_GALLERY_MAX_BYTES,
+  KEEPER_GALLERY_MAX_VIDEO_MB_ENV, resolveKeeperGalleryMaxBytes,
   parseEnabledTabs, parseTabOrder, serializeEnabledTabs
 } from "./speakeasy-shared.js";
 import {
@@ -110,7 +112,7 @@ import {
   listGalleryAlbums,
   moveGalleryMedia,
   renameGalleryAlbum,
-  saveGalleryUpload,
+  saveGalleryUploadFromStream,
   backfillMissingGalleryPosters
 } from "./gallery.js";
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
@@ -1814,11 +1816,28 @@ app.delete<{ Params: { id: string } }>("/api/staff/:id", {
 
 /* ---------------------------------- Bar gallery ----------------------------- */
 
+/**
+ * Effective Keeper upload ceiling, resolved once at boot. Guests always use
+ * GUEST_GALLERY_MAX_BYTES; authenticated Keepers get this larger, env-tunable
+ * ceiling. A malformed KEEPER_GALLERY_MAX_VIDEO_MB falls back to a sane default,
+ * so a bad value can never disable protection.
+ */
+const keeperGalleryMaxBytes = resolveKeeperGalleryMaxBytes(process.env[KEEPER_GALLERY_MAX_VIDEO_MB_ENV]);
+
+/** Largest request body the upload route accepts, with slack for multipart overhead. */
+const galleryUploadBodyLimit = keeperGalleryMaxBytes + 1024 * 1024;
+
+/** Authorization — not the client or Content-Length — decides the upload ceiling. */
+function effectiveGalleryCeiling(request: FastifyRequest): { bytes: number; isKeeper: boolean } {
+  const isKeeper = isAdmin(request.headers.authorization);
+  return { bytes: isKeeper ? keeperGalleryMaxBytes : GUEST_GALLERY_MAX_BYTES, isKeeper };
+}
+
 function galleryFail(reply: FastifyReply, error: unknown, fallback: string) {
   if (error instanceof GalleryError) return reply.code(error.status).send({ error: error.message });
   const message = error instanceof Error ? error.message : fallback;
-  if (/file too large|limit/i.test(message)) {
-    return reply.code(413).send({ error: "That clip is over 150 MB. Trim it down and try again." });
+  if (/file too large|request body|body.*too large|limit/i.test(message)) {
+    return reply.code(413).send({ error: "That upload is too large." });
   }
   app.log.error(error);
   return reply.code(500).send({ error: fallback });
@@ -1877,27 +1896,45 @@ app.get<{ Querystring: { album_id?: string } }>("/api/gallery", {
   }
 });
 
+app.get("/api/gallery/config", {
+  schema: { tags: ["Gallery"], summary: "Effective gallery upload size limit for the caller" }
+}, async (request) => {
+  const { bytes, isKeeper } = effectiveGalleryCeiling(request);
+  // Only the effective ceiling is exposed — no other server configuration leaks.
+  return { max_bytes: bytes, guest_max_bytes: GUEST_GALLERY_MAX_BYTES, is_keeper: isKeeper };
+});
+
 app.post("/api/gallery/upload", {
-  bodyLimit: MAX_GALLERY_BYTES + 1024 * 1024,
+  bodyLimit: galleryUploadBodyLimit,
   schema: { tags: ["Gallery"], summary: "Upload a photo or video to the bar gallery" }
 }, async (request, reply) => {
+  const { bytes: ceiling, isKeeper } = effectiveGalleryCeiling(request);
   try {
-    const file = await request.file({ limits: { fileSize: MAX_GALLERY_BYTES } });
+    // Per-request fileSize overrides the plugin default, enforcing the ceiling as
+    // the multipart parser reads. The stream is written straight to a temp file;
+    // the full upload is never buffered into memory.
+    const file = await request.file({ limits: { fileSize: ceiling } });
     if (!file) return reply.code(400).send({ error: "Pick a photo or video first" });
-    const buffer = await file.toBuffer();
     const field = (key: string) => {
       const entry = file.fields?.[key];
       const single = Array.isArray(entry) ? entry[0] : entry;
       return single && "value" in single ? String(single.value) : "";
     };
-    return reply.code(201).send(await saveGalleryUpload({
-      buffer,
+    const media = await saveGalleryUploadFromStream({
+      stream: file.file,
+      byteCeiling: ceiling,
+      oversizeMessage: galleryOversizeMessage(ceiling, isKeeper),
       contentType: file.mimetype,
       originalName: file.filename,
-      caption: field("caption"),
-      uploadedBy: field("uploaded_by"),
-      albumId: field("album_id")
-    }));
+      wasTruncated: () => file.file.truncated,
+      // Fields are read after the file stream is drained, when trailing parts are available.
+      readFields: () => ({
+        caption: field("caption"),
+        uploadedBy: field("uploaded_by"),
+        albumId: field("album_id")
+      })
+    });
+    return reply.code(201).send(media);
   } catch (error) {
     return galleryFail(reply, error, "Could not save that upload");
   }
