@@ -426,12 +426,30 @@ body.nav-open{overflow:hidden}
 .event-share-fallback>span{font-size:11px;color:var(--muted);font-weight:600}
 @media(max-width:700px){.event-detail-hero{grid-template-columns:1fr}}
 .rsvp-card{margin-top:26px}
+.subscriber-panel{margin-top:34px;padding-top:8px;border-top:1px solid var(--line)}
+.subscriber-panel-lede{margin:6px 0 0;color:var(--muted);font-size:14px;max-width:46ch;line-height:1.45}
+.subscriber-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:4px 0 8px}
+.subscriber-toolbar-actions{display:flex;flex-wrap:wrap;gap:8px}
+.subscriber-search{position:relative;flex:1 1 220px;min-width:0;display:flex;align-items:center}
+.subscriber-search svg{position:absolute;left:12px;color:var(--muted);pointer-events:none}
+.subscriber-search input{width:100%;padding-left:36px}
+.subscriber-export-hint{margin:0 0 14px;color:var(--muted);font-size:12px}
+.subscriber-empty{margin:8px 0 4px;padding:28px 16px}
 .subscriber-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.subscriber-list li{display:flex;align-items:center;gap:14px;padding:13px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
-.subscriber-list strong{display:block;font-size:15px}
-.subscriber-list small{color:var(--muted);font-size:12px}
-.subscriber-list p{flex:1;margin:0;color:var(--muted);font-size:13px}
-.subscriber-list button{margin-left:auto}
+.subscriber-list li{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);min-width:0}
+.subscriber-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}
+.subscriber-list strong{display:block;font-size:15px;overflow-wrap:anywhere}
+.subscriber-contact{color:var(--muted);font-size:13px;overflow-wrap:anywhere;word-break:break-word}
+a.subscriber-contact{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.subscriber-joined{color:var(--muted);font-size:12px}
+.subscriber-notes{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+.subscriber-list .danger{color:#e9796d;border-color:color-mix(in srgb,#e9796d 35%,var(--line));flex:none;white-space:nowrap}
+@media(max-width:700px){
+  .subscriber-list li{flex-direction:column;align-items:stretch}
+  .subscriber-list .danger{align-self:stretch;justify-content:center}
+  .subscriber-toolbar-actions{width:100%}
+  .subscriber-toolbar-actions .secondary{flex:1}
+}
 
 /* ---------------------------------- Merch ---------------------------------- */
 .merch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
