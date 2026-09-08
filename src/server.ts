@@ -86,9 +86,11 @@ import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, 
 
 import {
   acceptLocalizedCocktailImage,
+  backfillMissingCocktailImages,
   enrichImportedRecipeImage,
   findCocktailImage
 } from "./cocktail_image.js";
+import { getBuildInfo } from "./build-info.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
 import { downscaleVisionImage } from "./vision_image.js";
 import { createReview, deleteReview, listReviews, REVIEW_TABLES } from "./reviews.js";
@@ -2057,6 +2059,13 @@ app.post("/api/system/restart", {
   return { ok: true, restarting: true };
 });
 
+app.get("/api/admin/build", {
+  schema: { tags: ["System"], summary: "Keeper build/version identifier" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return getBuildInfo(process.env);
+});
+
 app.get("/api/settings", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const rows = db.prepare("SELECT key,value,updated_at FROM settings WHERE key NOT IN ('pinHash','sessionSecret')").all();
@@ -2215,6 +2224,20 @@ if (!skipListen) {
       }
     })
     .catch((error) => app.log.warn({ error }, "Gallery video poster backfill failed"));
+
+  // Bounded, fill-missing photo backfill for built-in cocktails (PR145). Reuses the
+  // safe per-cocktail discovery; a small batch per boot gradually fills the catalog
+  // without overwriting Keeper/custom images or blocking startup.
+  void backfillMissingCocktailImages({
+    limit: 6,
+    log: (message) => app.log.warn(message),
+  })
+    .then((result) => {
+      if (result.updated > 0) {
+        app.log.info(result, "Cocktail photo backfill finished");
+      }
+    })
+    .catch((error) => app.log.warn({ error }, "Cocktail photo backfill failed"));
 }
 
 export { app, secret as sessionSecret, token as createTestAdminToken };
