@@ -152,6 +152,8 @@ export {
   MAX_STAFF_ROLE,
   MAX_STAFF_BIO,
   MAX_GALLERY_CAPTION,
+  MAX_GALLERY_ALBUM_NAME,
+  GENERAL_GALLERY_ALBUM_NAME,
   MAX_GALLERY_BYTES,
   STAFF_ROLE_SUGGESTIONS,
   appleCashLink,
@@ -176,6 +178,7 @@ export type {
   MerchItem,
   StaffMember,
   GalleryMedia,
+  GalleryAlbum,
   GalleryMediaType,
   DailyVoteResult,
   TipHandle

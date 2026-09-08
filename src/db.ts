@@ -171,6 +171,16 @@ CREATE TABLE IF NOT EXISTS gallery_media (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_gallery_recent ON gallery_media(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS gallery_albums (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  event_id INTEGER,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_albums_name_ci ON gallery_albums(name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_gallery_albums_default ON gallery_albums(is_default);
 `;
 db.exec(schema);
 
@@ -229,6 +239,8 @@ ensureColumn("brews", "display_name", "ALTER TABLE brews ADD COLUMN display_name
 ensureColumn("brews", "guest_description", "ALTER TABLE brews ADD COLUMN guest_description TEXT DEFAULT ''");
 ensureColumn("brews", "keeper_owns_image", "ALTER TABLE brews ADD COLUMN keeper_owns_image INTEGER NOT NULL DEFAULT 0");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS brews_brewfather_id ON brews(brewfather_id) WHERE brewfather_id IS NOT NULL AND brewfather_id != ''");
+ensureColumn("gallery_media", "album_id", "ALTER TABLE gallery_media ADD COLUMN album_id INTEGER");
+db.exec("CREATE INDEX IF NOT EXISTS idx_gallery_media_album ON gallery_media(album_id, created_at DESC, id DESC)");
 ensureColumn("cocktails", "season", "ALTER TABLE cocktails ADD COLUMN season TEXT DEFAULT 'All'");
 ensureColumn("cocktails", "image_url", "ALTER TABLE cocktails ADD COLUMN image_url TEXT DEFAULT ''");
 ensureColumn("cocktails", "source_url", "ALTER TABLE cocktails ADD COLUMN source_url TEXT DEFAULT ''");

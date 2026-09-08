@@ -98,7 +98,18 @@ import {
   parseEnabledTabs, parseTabOrder, serializeEnabledTabs
 } from "./speakeasy-shared.js";
 import {
-  deleteGalleryMedia, galleryFilePath, GALLERY_CONTENT_TYPES, GalleryError, listGallery, saveGalleryUpload
+  createGalleryAlbum,
+  deleteGalleryAlbum,
+  deleteGalleryMedia,
+  galleryFilePath,
+  GALLERY_CONTENT_TYPES,
+  GalleryError,
+  getGalleryAlbum,
+  listGallery,
+  listGalleryAlbums,
+  moveGalleryMedia,
+  renameGalleryAlbum,
+  saveGalleryUpload
 } from "./gallery.js";
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
 import {
@@ -1776,8 +1787,57 @@ function galleryFail(reply: FastifyReply, error: unknown, fallback: string) {
   return reply.code(500).send({ error: fallback });
 }
 
-app.get("/api/gallery", { schema: { tags: ["Gallery"], summary: "Photos and clips from the bar" } }, async () => {
-  return { media: listGallery() };
+app.get("/api/gallery/albums", {
+  schema: { tags: ["Gallery"], summary: "Gallery albums for parties and nights" }
+}, async () => {
+  return { albums: listGalleryAlbums() };
+});
+
+app.post<{ Body: Record<string, unknown> }>("/api/gallery/albums", {
+  schema: { tags: ["Gallery"], summary: "Create a gallery album" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return reply.code(201).send(createGalleryAlbum(request.body ?? {}));
+  } catch (error) {
+    return galleryFail(reply, error, "Could not create that album");
+  }
+});
+
+app.put<{ Params: { id: string }; Body: Record<string, unknown> }>("/api/gallery/albums/:id", {
+  schema: { tags: ["Gallery"], summary: "Rename a gallery album" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return renameGalleryAlbum(Number(request.params.id), request.body ?? {});
+  } catch (error) {
+    return galleryFail(reply, error, "Could not rename that album");
+  }
+});
+
+app.delete<{ Params: { id: string } }>("/api/gallery/albums/:id", {
+  schema: { tags: ["Gallery"], summary: "Delete a gallery album; media moves to General" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return deleteGalleryAlbum(Number(request.params.id));
+  } catch (error) {
+    return galleryFail(reply, error, "Could not delete that album");
+  }
+});
+
+app.get<{ Querystring: { album_id?: string } }>("/api/gallery", {
+  schema: { tags: ["Gallery"], summary: "Photos and clips from the bar" }
+}, async (request, reply) => {
+  const raw = request.query.album_id;
+  if (raw == null || raw === "") return { media: listGallery() };
+  const albumId = Number(raw);
+  if (!Number.isFinite(albumId)) return { media: listGallery() };
+  try {
+    return { media: listGallery(albumId), album: getGalleryAlbum(albumId) };
+  } catch (error) {
+    return galleryFail(reply, error, "Could not load that album");
+  }
 });
 
 app.post("/api/gallery/upload", {
@@ -1798,7 +1858,8 @@ app.post("/api/gallery/upload", {
       contentType: file.mimetype,
       originalName: file.filename,
       caption: field("caption"),
-      uploadedBy: field("uploaded_by")
+      uploadedBy: field("uploaded_by"),
+      albumId: field("album_id")
     }));
   } catch (error) {
     return galleryFail(reply, error, "Could not save that upload");
@@ -1880,6 +1941,21 @@ app.delete<{ Params: { id: string } }>("/api/gallery/:id", {
     return reply.code(204).send();
   } catch (error) {
     return galleryFail(reply, error, "Could not delete that item");
+  }
+});
+
+app.put<{ Params: { id: string }; Body: { album_id?: number | string } }>("/api/gallery/:id/album", {
+  schema: { tags: ["Gallery"], summary: "Move a gallery item to another album" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    const albumId = Number(request.body?.album_id);
+    if (!Number.isFinite(albumId) || albumId <= 0) {
+      return reply.code(400).send({ error: "Pick an album" });
+    }
+    return moveGalleryMedia(Number(request.params.id), albumId);
+  } catch (error) {
+    return galleryFail(reply, error, "Could not move that item");
   }
 });
 

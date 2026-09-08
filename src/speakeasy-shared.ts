@@ -123,6 +123,8 @@ export const MAX_STAFF_NAME = 80;
 export const MAX_STAFF_ROLE = 60;
 export const MAX_STAFF_BIO = 600;
 export const MAX_GALLERY_CAPTION = 280;
+export const MAX_GALLERY_ALBUM_NAME = 80;
+export const GENERAL_GALLERY_ALBUM_NAME = "General";
 
 /** Phone video clips are large; keep the ceiling generous enough for a short 4K take. */
 export const MAX_GALLERY_BYTES = 150 * 1024 * 1024;
@@ -192,12 +194,24 @@ export type StaffMember = {
 
 export type GalleryMediaType = "image" | "video";
 
+export type GalleryAlbum = {
+  id: number;
+  name: string;
+  is_default: 0 | 1;
+  event_id: number | null;
+  created_at: string;
+  updated_at: string;
+  media_count: number;
+  cover_url: string | null;
+};
+
 export type GalleryMedia = {
   id: number;
   filename: string;
   media_type: GalleryMediaType;
   caption: string;
   uploaded_by: string;
+  album_id: number;
   created_at: string;
   url: string;
   download_url: string;
