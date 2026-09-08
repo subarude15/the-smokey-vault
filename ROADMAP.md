@@ -26,6 +26,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #125 added commercial-tap beer identity/image enrichment with strict official matching, fill-missing Keeper preservation, and explicit Brewery Lab/homebrew exclusion.
 - PR #126 added Keeper event editing plus stable guest-facing event deep links with Web Share / copy-link fallback and server-side draft protection.
 - PR #132 added named Gallery albums with a deterministic General fallback, guest/keeper album selection on upload, Keeper album management, and safe media reassignment on album deletion.
+- PR #133 clears Keeper Mode immediately when an authenticated client request receives HTTP 401, instead of leaving Keeper UI until the kiosk idle timeout.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -64,6 +65,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR130 — Remove duplicate Mixologist landing card; keep `What Can I Make?` as the single guest entry into unified cocktail discovery.
 - PR131 — Keeper Event Subscriber List: Invite List management on Events (search, contact links, remove, CSV export, copy contacts) with Guest/Keeper privacy boundary preserved on `event_subscribers`.
 - PR132 — Gallery albums for parties and special nights: named database-backed albums, General default migration/fallback, Guest/Keeper album selection on upload, Keeper create/rename/delete/move controls, and safe non-destructive album deletion.
+- PR133 — Client 401 → automatic Keeper → Guest handoff when an authenticated bearer/session is rejected, reusing `handToGuest()` (same path as idle lock and Lock Bar).
 
 ## Next work
 
@@ -75,18 +77,24 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 
 ### Track B — Hardening (planned)
 
-Priority order:
+Ops / evidence-driven hardening (does not displace the next product PR):
 
 1. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
-2. **PR133 — Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
-3. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
-4. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
+2. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
+3. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
 
 ### Track C — Product usability (next)
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+1. **PR134 — Responsive App Shell & Navigation Structure** (next code PR)
+   - Mobile sticky bottom navigation with `env(safe-area-inset-bottom)` support
+   - Continue using existing `navigate(pageId)` (no React Router rewrite)
+   - Responsive tablet / landscape left rail
+   - Guest vs Keeper navigation partition
+   - Preserve existing PIN unlock and `KIOSK_IDLE_MS`
+   - Structural / ergonomic work only — no branding or theme redesign yet
+2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -98,7 +106,8 @@ These are explicitly desired near-term product improvements based on real househ
 
 ## Relevant code
 
-- `client/src/App.tsx` — bottle-detail route, Keeper actions, appearance toggle, cocktail UI, and current Speakeasy/event entry points.
+- `client/src/api.ts` — shared client fetch helper, Keeper bearer storage, and central authenticated-401 → session-rejected signal.
+- `client/src/App.tsx` — bottle-detail route, Keeper actions, appearance toggle, cocktail UI, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
 - `client/src/EventsPage.tsx` — guest Events UI, signup form, and Keeper Invite List wiring.
 - `client/src/EventSubscriberList.tsx` — Keeper-only invite list management (search, remove, export, copy).

@@ -1,9 +1,7 @@
-﻿# Current task
+# Current task
 
 **Status: idle**
 
-PR132 complete — Gallery albums for parties and special nights.
+PR133 complete — Client 401 → clear expired Keeper session (durable pending rejection covers boot-time mount race; Guest handoff via `handToGuest()`).
 
-Next planned code work: PR133 — Client 401 → clear Keeper session when the bearer expires, instead of waiting for idle lock alone.
-
-Brewery Lab follow-up remains evidence-driven: only open another product PR when live use proves a concrete usability gap.
+Next planned code work: **PR134 — Responsive App Shell & Navigation Structure** (mobile sticky bottom nav, safe-area insets, tablet/landscape rail, Guest/Keeper partition; preserve PIN unlock and `KIOSK_IDLE_MS`; no branding/theme redesign).
