@@ -1,11 +1,9 @@
 ﻿# Current task
 
-**Status: in progress — PR132**
+**Status: idle**
 
-PR132 — Gallery albums for parties and special nights.
+PR132 complete — Gallery albums for parties and special nights.
 
-Add named Gallery albums (database organization only) so Guests and Keepers can browse and upload into albums such as Christmas, St. Patrick’s Day, birthdays, and other bar nights. Preserve hashed-file storage, batch upload, lightbox/download/delete, and migrate existing media into a deterministic General album.
+Next planned code work: PR133 — Client 401 → clear Keeper session when the bearer expires, instead of waiting for idle lock alone.
 
-## Non-goals
-
-Face recognition, AI tagging, cloud photo integrations, nested albums, automatic event ↔ album linking, filesystem album folders, media editing.
+Brewery Lab follow-up remains evidence-driven: only open another product PR when live use proves a concrete usability gap.
