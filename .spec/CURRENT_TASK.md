@@ -1,20 +1,9 @@
 ﻿# Current task
 
-**Status: in progress — PR130**
+**Status: idle**
 
-## Objective
+PR130 is complete on this branch: remove duplicate Mixologist landing card.
 
-PR130 — Remove duplicate Mixologist landing card.
+Next product work is PR131 — Gallery albums for parties and special nights — as defined in `ROADMAP.md`.
 
-Keep `What Can I Make?` as the single guest landing entry into cocktail discovery. Remove the standalone `Ask the Mixologist` feature card. Preserve Mixologist panel, APIs, and `mixologist` → cocktails / focusMixologist compatibility.
-
-## Out of scope
-
-PR131, Mixologist AI behavior, cocktail matching/imagery, landing redesign.
-
-## Done when
-
-- Landing feature grid has one cocktail-discovery card
-- Mixologist still works on the cocktail page
-- Compatibility alias preserved
-- Focused + full tests / build / `git diff --check` pass
+When assigning a new task, replace this file with concrete objectives, file boundaries, and non-goals.
