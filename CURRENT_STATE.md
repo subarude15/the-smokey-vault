@@ -5,13 +5,13 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR143** — Lightweight Gallery video posters. Uploads extract a near-start frame (ffmpeg) and store a compressed WebP sibling beside Gallery media; grids/covers use `poster_url` (or a static fallback) so browsing does not fetch video payloads. Original playback/download stays on the media URL. Poster cleanup follows shared filename reference counts; bounded boot backfill covers legacy rows. Runtime image installs `ffmpeg`.
+- **PR144** — Keeper large-video upload path. Photos stay capped at 150 MB for Guests and Keepers; only **videos** get a larger, env-tunable Keeper ceiling (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback). The per-type ceiling is enforced server-side on the **sniffed** media type (not filename/MIME) from authorization, so a Keeper photo >150 MB is rejected while a larger video is accepted. Large uploads stream to a temp file under the Gallery filesystem and finalize with an atomic rename through one shared persistence path — never buffering the whole file — with partial/failed uploads leaving no temp file or DB row. PR143 posters, magic-byte validation, dedup, and reference-aware cleanup are preserved; oversized uploads return 413 with human-readable copy.
 
 Currently working on:
 - None.
 
 Next planned:
-- **PR144 — Keeper large-video upload path** (`ROADMAP.md` Track C).
+- **PR145 — Gallery comments + up/down voting** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
@@ -20,16 +20,19 @@ Next planned:
 - Event photo framing is event-only metadata (`image_focal_x` / `image_focal_y` / `image_zoom`) applied with CSS — never bake crop into the uploaded file via `ImageField`.
 - Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
 - Gallery video tiles/covers use persisted lightweight posters; original videos load only in the viewer/download path; poster cleanup follows Gallery media ownership/reference semantics.
+- Gallery upload limits are centralized in `speakeasy-shared` and applied per media type: photos are capped at 150 MB for all roles, and only videos use the larger Keeper ceiling. The per-type ceiling is enforced server-side on the sniffed media type (not client `File.size`/Content-Length/filename). Large Keeper videos stream to `galleryDir/tmp` and finalize via one shared temp-file persistence path (atomic rename, no full-file Buffer); small uploads and the streamed path share that core so they cannot drift.
 - Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
 - Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
 - Appearance support is Light + Dark only (PR127).
 - App routing remains state-based in `App.tsx` (no React Router for primary navigation).
 - GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR141 chore → feedback CTA visibility is PR142).
+- `.env` is optional for boot (`SESSION_SECRET` auto-generates into the vault DB); `KEEPER_GALLERY_MAX_VIDEO_MB` tunes the Keeper video ceiling without an image rebuild.
 
 ## Known issues / follow-ups
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
+- Keeper large uploads write temp files under `galleryDir/tmp` so finalization is a same-filesystem atomic rename; keep temp storage on the Gallery/data filesystem to avoid cross-device rename failure.
 - Draft **#121** branding docs remain deferred until PR146.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
 

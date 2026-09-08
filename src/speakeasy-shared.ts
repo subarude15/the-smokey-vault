@@ -126,8 +126,83 @@ export const MAX_GALLERY_CAPTION = 280;
 export const MAX_GALLERY_ALBUM_NAME = 80;
 export const GENERAL_GALLERY_ALBUM_NAME = "General";
 
-/** Phone video clips are large; keep the ceiling generous enough for a short 4K take. */
-export const MAX_GALLERY_BYTES = 150 * 1024 * 1024;
+const GALLERY_BYTES_PER_MB = 1024 * 1024;
+
+/**
+ * Guests keep the conservative upload ceiling. Larger phone/4K videos require
+ * Keeper Mode, which streams to disk under a separate, configurable limit.
+ */
+export const GUEST_GALLERY_MAX_BYTES = 150 * GALLERY_BYTES_PER_MB;
+
+/**
+ * Photos are always capped at the Guest ceiling for everyone — the larger Keeper
+ * limit is for videos only. Kept as a named alias so intent is explicit at call sites.
+ */
+export const GALLERY_IMAGE_MAX_BYTES = GUEST_GALLERY_MAX_BYTES;
+
+/**
+ * Back-compat alias. Existing callers and tests use MAX_GALLERY_BYTES to mean the
+ * Guest gallery ceiling, so keep the name pointing at the Guest limit.
+ */
+export const MAX_GALLERY_BYTES = GUEST_GALLERY_MAX_BYTES;
+
+/** Keeper default upload ceiling (~1 GiB) — generous for a modern phone / 4K clip. */
+export const KEEPER_GALLERY_DEFAULT_MAX_MB = 1024;
+
+/** Absolute safety ceiling; a misconfigured env value can never exceed this. */
+export const KEEPER_GALLERY_HARD_CAP_MB = 8192;
+
+/** Env var the NAS owner can tune to raise/lower the Keeper video ceiling. */
+export const KEEPER_GALLERY_MAX_VIDEO_MB_ENV = "KEEPER_GALLERY_MAX_VIDEO_MB";
+
+const GUEST_GALLERY_FLOOR_MB = Math.floor(GUEST_GALLERY_MAX_BYTES / GALLERY_BYTES_PER_MB);
+
+/**
+ * Resolve the Keeper upload ceiling (bytes) from a raw env string in MB.
+ *
+ * Malformed, negative, zero, NaN, or overflow values fall back to the default,
+ * and the result is clamped to at least the Guest limit and at most the hard cap.
+ * A bad configuration therefore can neither disable protection nor grant an
+ * absurd ceiling, and Guests can never inherit a Keeper-only raise.
+ */
+export function resolveKeeperGalleryMaxBytes(rawEnvMb: string | undefined | null): number {
+  const fallback = KEEPER_GALLERY_DEFAULT_MAX_MB * GALLERY_BYTES_PER_MB;
+  const trimmed = String(rawEnvMb ?? "").trim();
+  if (!trimmed) return fallback;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  const mb = Math.floor(parsed);
+  if (mb <= 0) return fallback;
+  const clampedMb = Math.min(Math.max(mb, GUEST_GALLERY_FLOOR_MB), KEEPER_GALLERY_HARD_CAP_MB);
+  return clampedMb * GALLERY_BYTES_PER_MB;
+}
+
+/** Human size for limit copy: whole MB under 1 GB, otherwise trimmed GB. */
+export function formatGalleryLimit(bytes: number): string {
+  const mb = bytes / GALLERY_BYTES_PER_MB;
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  const gb = mb / 1024;
+  return `${Number.isInteger(gb) ? gb : Number(gb.toFixed(1))} GB`;
+}
+
+/**
+ * Human-readable oversize copy that never leaks raw multipart/Fastify error text.
+ * Photos are capped at the same limit for Guests and Keepers; only videos get the
+ * larger, Keeper-only ceiling.
+ */
+export function galleryOversizeMessage(opts: {
+  ceilingBytes: number;
+  isKeeper: boolean;
+  mediaType?: GalleryMediaType;
+}): string {
+  const limit = formatGalleryLimit(opts.ceilingBytes);
+  if (opts.mediaType === "image") {
+    return `That photo is larger than the ${limit} photo limit.`;
+  }
+  return opts.isKeeper
+    ? `That video is larger than the Keeper upload limit (${limit}).`
+    : `That file is larger than the ${limit} guest upload limit. Ask a Keeper to add larger videos.`;
+}
 
 export const STAFF_ROLE_SUGGESTIONS = [
   "Head Mixologist", "Chief Welcome Officer", "Cellar Security", "Brewmaster",

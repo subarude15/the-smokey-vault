@@ -1,6 +1,9 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { open, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
+import { Transform, type Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { db, dbPath } from "./db.js";
 import {
   ensureGalleryVideoPoster,
@@ -9,9 +12,11 @@ import {
 } from "./gallery-poster.js";
 import {
   clipText,
+  GALLERY_IMAGE_MAX_BYTES,
+  galleryOversizeMessage,
   GENERAL_GALLERY_ALBUM_NAME,
+  GUEST_GALLERY_MAX_BYTES,
   MAX_GALLERY_ALBUM_NAME,
-  MAX_GALLERY_BYTES,
   MAX_GALLERY_CAPTION,
   MAX_PATRON_NAME,
   type GalleryAlbum,
@@ -19,10 +24,50 @@ import {
   type GalleryMediaType
 } from "./speakeasy-shared.js";
 
+/**
+ * Per-media-type upload ceilings. Photos are capped at the same limit for Guests
+ * and Keepers; only videos get the larger, Keeper-configurable ceiling. The type
+ * is decided from sniffed magic bytes, never the filename or declared MIME.
+ */
+export type GalleryUploadLimits = {
+  imageBytes: number;
+  videoBytes: number;
+  /** Affects oversize copy wording only. */
+  isKeeper: boolean;
+};
+
+const GUEST_UPLOAD_LIMITS: GalleryUploadLimits = {
+  imageBytes: GALLERY_IMAGE_MAX_BYTES,
+  videoBytes: GUEST_GALLERY_MAX_BYTES,
+  isKeeper: false,
+};
+
 export { galleryPosterFilename };
 
 export const galleryDir = join(dirname(dbPath), "gallery");
 mkdirSync(galleryDir, { recursive: true });
+
+/**
+ * Temp uploads live on the SAME filesystem as galleryDir so finalization is an
+ * atomic rename (no cross-device EXDEV copy) and a crash never leaves a durable
+ * file half-written. Partial temp files are always cleaned up on failure.
+ *
+ * Created lazily on first upload rather than at import time: booting the server
+ * should not eagerly create a nested subdirectory inside the (host-mounted) data
+ * volume, which otherwise breaks non-root host cleanup in the Docker catalog CI.
+ */
+export const galleryTmpDir = join(galleryDir, "tmp");
+let galleryTmpDirReady = false;
+function ensureGalleryTmpDir(): string {
+  if (!galleryTmpDirReady) {
+    mkdirSync(galleryTmpDir, { recursive: true });
+    galleryTmpDirReady = true;
+  }
+  return galleryTmpDir;
+}
+
+/** Bytes sniffed from the front of an upload to validate media type without buffering the whole file. */
+const GALLERY_SNIFF_BYTES = 4096;
 
 export class GalleryError extends Error {
   status: number;
@@ -295,35 +340,83 @@ function resolveUploadAlbumId(raw?: unknown): number {
   return row?.id ?? general.id;
 }
 
-export async function saveGalleryUpload(input: {
-  buffer: Buffer;
+/** Stream a file's bytes through SHA-256 without loading it into memory. */
+async function hashGalleryFile(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(path), hash);
+  return hash.digest("hex").slice(0, 32);
+}
+
+/** Read a bounded prefix for magic-byte sniffing without buffering the whole file. */
+async function readGalleryPrefix(path: string, bytes: number): Promise<Buffer> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Single authoritative persistence path for both the small buffer upload and the
+ * large streamed Keeper upload, so the two can never drift. Validates media from a
+ * completed temp file (bounded prefix + streamed hash), finalizes with an atomic
+ * rename into Gallery storage, generates the PR143 poster for videos, and inserts
+ * the DB row last. A failed insert removes any file this upload alone created, so a
+ * broken row never points at an incomplete or orphaned file.
+ */
+async function persistGalleryTempFile(input: {
+  tempPath: string;
+  limits: GalleryUploadLimits;
   contentType?: string | null;
   originalName?: string;
   caption?: string;
   uploadedBy?: string;
   albumId?: unknown;
 }): Promise<GalleryMedia> {
-  if (!input.buffer.length) throw new GalleryError("Pick a photo or video first");
-  if (input.buffer.length > MAX_GALLERY_BYTES) {
-    throw new GalleryError("That clip is over 150 MB. Trim it down and try again.", 413);
-  }
+  const { size } = await stat(input.tempPath);
+  if (size <= 0) throw new GalleryError("Pick a photo or video first");
 
-  const type = resolveType(input.buffer, input.contentType, input.originalName);
+  const prefix = await readGalleryPrefix(input.tempPath, GALLERY_SNIFF_BYTES);
+  const type = resolveType(prefix, input.contentType, input.originalName);
   const extension = IMAGE_EXTENSIONS[type] ?? VIDEO_EXTENSIONS[type];
   if (!extension) {
     throw new GalleryError("Use a JPEG, PNG, or WebP photo, or an MP4, WebM, or MOV video");
   }
   const mediaType: GalleryMediaType = IMAGE_EXTENSIONS[type] ? "image" : "video";
+
+  // Enforce the ceiling for the *sniffed* type: the large Keeper limit is for
+  // videos only, so a Keeper photo above the image ceiling is still rejected.
+  const typeCeiling = mediaType === "image" ? input.limits.imageBytes : input.limits.videoBytes;
+  if (size > typeCeiling) {
+    throw new GalleryError(
+      galleryOversizeMessage({ ceilingBytes: typeCeiling, isKeeper: input.limits.isKeeper, mediaType }),
+      413,
+    );
+  }
+
   const albumId = resolveUploadAlbumId(input.albumId);
 
-  const hash = createHash("sha256").update(input.buffer).digest("hex").slice(0, 32);
+  const hash = await hashGalleryFile(input.tempPath);
   const filename = `${hash}${extension}`;
   const target = join(galleryDir, filename);
-  if (!existsSync(target)) writeFileSync(target, input.buffer);
+
+  let createdTarget = false;
+  if (existsSync(target)) {
+    // Identical bytes already stored — drop the temp and reuse the durable file (dedup).
+    await unlink(input.tempPath).catch(() => {});
+  } else {
+    // Same-filesystem rename is atomic: the durable file never appears half-written.
+    await rename(input.tempPath, target);
+    createdTarget = true;
+  }
 
   if (mediaType === "video") {
     const posterPath = join(galleryDir, galleryPosterFilename(filename));
     if (!existsSync(posterPath)) {
+      // PR143: poster generation is best-effort; a valid video still saves if ffmpeg fails.
       await generateGalleryVideoPoster({
         galleryDir,
         videoFilename: filename,
@@ -332,17 +425,131 @@ export async function saveGalleryUpload(input: {
     }
   }
 
-  const caption = clipText(input.caption ?? "", MAX_GALLERY_CAPTION);
-  const uploadedBy = clipText(input.uploadedBy ?? "", MAX_PATRON_NAME) || "Patron";
-  const result = db.prepare(
-    `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
-     VALUES(?,?,?,?,?)`
-  ).run(filename, mediaType, caption, uploadedBy, albumId);
+  try {
+    const caption = clipText(input.caption ?? "", MAX_GALLERY_CAPTION);
+    const uploadedBy = clipText(input.uploadedBy ?? "", MAX_PATRON_NAME) || "Patron";
+    const result = db.prepare(
+      `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
+       VALUES(?,?,?,?,?)`
+    ).run(filename, mediaType, caption, uploadedBy, albumId);
 
-  const row = db.prepare(
-    `SELECT ${MEDIA_COLUMNS} FROM gallery_media WHERE id=?`
-  ).get(result.lastInsertRowid) as MediaRow;
-  return mediaRowToJson(row);
+    const row = db.prepare(
+      `SELECT ${MEDIA_COLUMNS} FROM gallery_media WHERE id=?`
+    ).get(result.lastInsertRowid) as MediaRow;
+    return mediaRowToJson(row);
+  } catch (error) {
+    // A failed insert must not leave an orphan file that only this upload created.
+    if (createdTarget) {
+      await unlink(target).catch(() => {});
+      try {
+        const poster = join(galleryDir, galleryPosterFilename(filename));
+        if (existsSync(poster)) await unlink(poster);
+      } catch {
+        // Best-effort; there is no DB row to reference these files.
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Small-upload / test path. Buffers are acceptable here; the file is written to a
+ * temp path and finalized through the shared persistence core. `limits` lets the
+ * caller apply per-type (image vs video) ceilings; it defaults to the Guest limits.
+ */
+export async function saveGalleryUpload(input: {
+  buffer: Buffer;
+  contentType?: string | null;
+  originalName?: string;
+  caption?: string;
+  uploadedBy?: string;
+  albumId?: unknown;
+  limits?: GalleryUploadLimits;
+}): Promise<GalleryMedia> {
+  if (!input.buffer.length) throw new GalleryError("Pick a photo or video first");
+  const limits = input.limits ?? GUEST_UPLOAD_LIMITS;
+
+  const tempPath = join(ensureGalleryTmpDir(), `buf-${randomBytes(16).toString("hex")}.part`);
+  await writeFile(tempPath, input.buffer);
+  try {
+    return await persistGalleryTempFile({
+      tempPath,
+      limits,
+      contentType: input.contentType,
+      originalName: input.originalName,
+      caption: input.caption,
+      uploadedBy: input.uploadedBy,
+      albumId: input.albumId,
+    });
+  } finally {
+    if (existsSync(tempPath)) {
+      await unlink(tempPath).catch(() => {});
+    }
+  }
+}
+
+/**
+ * Large Keeper upload path. Streams multipart data straight to a temp file under
+ * the Gallery filesystem, enforcing `byteCeiling` as it goes (never buffering the
+ * whole file), then finalizes through the shared persistence core. Partial temp
+ * files are always removed on failure, and an over-limit or interrupted upload
+ * never creates a Gallery row.
+ */
+export async function saveGalleryUploadFromStream(input: {
+  stream: Readable;
+  limits: GalleryUploadLimits;
+  contentType?: string | null;
+  originalName?: string;
+  wasTruncated?: () => boolean;
+  readFields?: () => { caption?: string; uploadedBy?: string; albumId?: unknown };
+}): Promise<GalleryMedia> {
+  const tempPath = join(ensureGalleryTmpDir(), `up-${randomBytes(16).toString("hex")}.part`);
+  let written = 0;
+
+  // The stream-level hard cap is the largest ceiling any accepted type could use
+  // (videos). The per-type ceiling (e.g. the 150 MB photo limit) is enforced after
+  // the media type is sniffed from the finished temp file.
+  const streamCeiling = Math.max(input.limits.imageBytes, input.limits.videoBytes);
+  const overflowMessage = galleryOversizeMessage({
+    ceilingBytes: input.limits.videoBytes,
+    isKeeper: input.limits.isKeeper,
+    mediaType: "video",
+  });
+
+  const limiter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      written += chunk.length;
+      if (written > streamCeiling) {
+        cb(new GalleryError(overflowMessage, 413));
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+
+  try {
+    await pipeline(input.stream, limiter, createWriteStream(tempPath));
+    // The multipart parser also caps the file; a truncated stream means it tripped first.
+    if (input.wasTruncated?.()) {
+      throw new GalleryError(overflowMessage, 413);
+    }
+    if (written <= 0) throw new GalleryError("Pick a photo or video first");
+
+    const fields = input.readFields?.() ?? {};
+    return await persistGalleryTempFile({
+      tempPath,
+      limits: input.limits,
+      contentType: input.contentType,
+      originalName: input.originalName,
+      caption: fields.caption,
+      uploadedBy: fields.uploadedBy,
+      albumId: fields.albumId,
+    });
+  } finally {
+    if (existsSync(tempPath)) {
+      await unlink(tempPath).catch(() => {});
+    }
+  }
 }
 
 /**

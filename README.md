@@ -67,6 +67,10 @@ Frontend: `http://localhost:5173`
 API: `http://localhost:8080`  
 OpenAPI: `http://localhost:8080/api/docs`
 
+## Bar gallery uploads
+
+Photos are capped at 150 MB for everyone. Authenticated Keepers can upload much larger **videos** (modern phone / 4K takes); the Keeper video ceiling defaults to ~1 GiB and is tunable without rebuilding the image via `KEEPER_GALLERY_MAX_VIDEO_MB` (in MB). The limit is enforced server-side from the **sniffed media type** and Keeper authorization (not the browser, filename, or MIME), so a Keeper photo over 150 MB is still rejected while a larger video is accepted. Large Keeper uploads stream to a temp file under the gallery data folder and finalize with an atomic rename, so the server never buffers the whole video in memory. Oversized uploads return HTTP 413, and PR143 video posters are still generated after a successful upload.
+
 ## Appearance
 
 The app supports **Light** and **Dark** appearance modes. Switch them in `Settings → Appearance` or with the sun/moon control in the top bar. Guest-visible bottle and keg availability gauges (coarse percentages, not raw stock counts) work the same in both modes.
