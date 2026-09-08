@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildCocktailSteps,
   cocktailMethodSummary,
+  isCocktailMethodLabel,
   parseCocktailInstructions,
   resolveCocktailInstructions
 } from "../client/src/cocktail-instructions.ts";
@@ -121,4 +122,30 @@ test("empty method still yields generic practical steps (never a blank recipe)",
   assert.equal(resolved.generated, true);
   assert.equal(resolved.methodLabel, null);
   assert.ok(resolved.steps.length >= 3);
+});
+
+test("short instructional prose is preserved, never mistaken for a bare label", () => {
+  // These start with a technique word but are real instructions — they must NOT be regenerated.
+  const proseSamples = [
+    "Shake with ice and strain into a coupe.",
+    "Stir over ice until chilled, then strain.",
+    "Build over ice and top with soda.",
+    "Muddle the mint, then build over crushed ice."
+  ];
+  for (const text of proseSamples) {
+    assert.equal(isCocktailMethodLabel(text), false, `${text} is prose, not a label`);
+    const resolved = resolveCocktailInstructions({ method: text, glassware: "Coupe" });
+    assert.deepEqual(resolved, { kind: "prose", text }, `${text} preserved verbatim`);
+  }
+});
+
+test("genuine technique labels are recognized regardless of case/trailing period", () => {
+  for (const label of ["Build", "Shake", "Stir", "Shake and top", "Shake hard and top", "Muddle and build"]) {
+    assert.equal(isCocktailMethodLabel(label), true, `${label} is a technique label`);
+  }
+  assert.equal(isCocktailMethodLabel("stir."), true, "trailing period tolerated");
+  assert.equal(isCocktailMethodLabel("SHAKE"), true, "case-insensitive");
+  // Not real techniques → treated as prose.
+  assert.equal(isCocktailMethodLabel("Serve immediately"), false);
+  assert.equal(isCocktailMethodLabel("Combine and enjoy"), false);
 });

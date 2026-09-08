@@ -27,14 +27,43 @@ function splitNewlineSteps(text: string): string[] | null {
   return lines.length >= 2 ? lines : null;
 }
 
-/** Short technique labels (Shake / Stir / …) stay method chips; richer text does not. */
+/**
+ * Explicit allowlist of genuine bar technique labels. Only these are treated as
+ * bare method chips eligible for generated steps; anything else (e.g. "Shake with
+ * ice and strain into a coupe.") is real prose and must be preserved as-is.
+ */
+const COCKTAIL_METHOD_LABELS = new Set([
+  "build",
+  "shake",
+  "stir",
+  "muddle",
+  "blend",
+  "layer",
+  "throw",
+  "roll",
+  "swizzle",
+  "whip",
+  "shake and top",
+  "shake hard and top",
+  "muddle and build",
+  "muddle and shake",
+  "stir and strain",
+  "shake and strain",
+  "dry shake",
+  "reverse dry shake",
+  "double strain"
+]);
+
+function normalizeMethodLabel(text: string): string {
+  return text.trim().toLowerCase().replace(/[.\s]+$/, "").replace(/\s+/g, " ");
+}
+
+/** True only for recognized short technique labels (Build / Shake / Stir / …). */
 export function isCocktailMethodLabel(text: string): boolean {
   const value = text.trim();
-  if (!value || value.length > 48 || /[\n\r]/.test(value)) return false;
-  if (/\d+[\.)]\s+/.test(value)) return false;
-  // Multiple sentences → not a single method label.
-  if (/[.!?]+\s+\S/.test(value)) return false;
-  return true;
+  if (!value || /[\n\r]/.test(value)) return false;
+  if (/\d+[.)]\s+/.test(value)) return false;
+  return COCKTAIL_METHOD_LABELS.has(normalizeMethodLabel(value));
 }
 
 /** Card/header summary: only keep compact method labels. */
