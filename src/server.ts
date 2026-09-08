@@ -110,7 +110,8 @@ import {
   listGalleryAlbums,
   moveGalleryMedia,
   renameGalleryAlbum,
-  saveGalleryUpload
+  saveGalleryUpload,
+  backfillMissingGalleryPosters
 } from "./gallery.js";
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
 import {
@@ -1889,7 +1890,7 @@ app.post("/api/gallery/upload", {
       const single = Array.isArray(entry) ? entry[0] : entry;
       return single && "value" in single ? String(single.value) : "";
     };
-    return reply.code(201).send(saveGalleryUpload({
+    return reply.code(201).send(await saveGalleryUpload({
       buffer,
       contentType: file.mimetype,
       originalName: file.filename,
@@ -2154,6 +2155,17 @@ if (!skipListen) {
   }
 
   await app.listen({ port: Number(process.env.PORT ?? 8080), host: "0.0.0.0" });
+
+  void backfillMissingGalleryPosters({
+    limit: 40,
+    log: (message) => app.log.warn(message),
+  })
+    .then((result) => {
+      if (result.attempted > 0) {
+        app.log.info(result, "Gallery video poster backfill finished");
+      }
+    })
+    .catch((error) => app.log.warn({ error }, "Gallery video poster backfill failed"));
 }
 
 export { app, secret as sessionSecret, token as createTestAdminToken };

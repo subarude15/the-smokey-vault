@@ -221,6 +221,8 @@ export type GalleryMedia = {
   created_at: string;
   url: string;
   download_url: string;
+  /** Lightweight poster for video tiles/covers; null when missing or generation failed. */
+  poster_url?: string | null;
 };
 
 export type DailyVoteResult = {

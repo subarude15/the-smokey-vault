@@ -2,6 +2,6 @@
 
 **Status: idle**
 
-PR142 complete — Conditional landing-page “Give us your 2 cents” visibility (Overview CTA shares `pageEnabled("next")` / `whatsnext` with Guest nav). GitHub #141 was a Cloud Agent env chore, so this product work shipped as #142.
+PR143 complete — Gallery video posters (durable WebP siblings via ffmpeg+sharp; grids/covers use `poster_url`; original video only in lightbox/download; reference-aware cleanup; bounded boot backfill for legacy clips).
 
-Next planned product work: **PR143 — Video thumbnails in the Gallery/Library**.
+Next planned product work: **PR144 — Keeper large-video upload path**.

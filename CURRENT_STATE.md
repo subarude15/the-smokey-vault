@@ -5,13 +5,13 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR142** — Conditional landing-page “Give us your 2 cents” visibility. Overview CTA uses the same `pageEnabled("next")` / `PAGE_TAB → whatsnext` rule as Guest nav (via `landingFeedbackCtaEnabled`); no second flag. Keeper Settings access unchanged. (GitHub #141 was a Cloud Agent env chore, so this product work is #142.)
+- **PR143** — Lightweight Gallery video posters. Uploads extract a near-start frame (ffmpeg) and store a compressed WebP sibling beside Gallery media; grids/covers use `poster_url` (or a static fallback) so browsing does not fetch video payloads. Original playback/download stays on the media URL. Poster cleanup follows shared filename reference counts; bounded boot backfill covers legacy rows. Runtime image installs `ffmpeg`.
 
 Currently working on:
 - None.
 
 Next planned:
-- **PR143 — Video thumbnails in the Gallery/Library** (`ROADMAP.md` Track C).
+- **PR144 — Keeper large-video upload path** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
@@ -19,6 +19,7 @@ Next planned:
 - Shared `ImageField` / `images` media path is the default for Keeper uploads; do not add parallel upload systems per feature.
 - Event photo framing is event-only metadata (`image_focal_x` / `image_focal_y` / `image_zoom`) applied with CSS — never bake crop into the uploaded file via `ImageField`.
 - Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
+- Gallery video tiles/covers use persisted lightweight posters; original videos load only in the viewer/download path; poster cleanup follows Gallery media ownership/reference semantics.
 - Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
 - Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
