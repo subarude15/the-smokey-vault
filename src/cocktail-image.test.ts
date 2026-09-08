@@ -111,6 +111,85 @@ test("identity: derivative cocktail rejected", () => {
   );
 });
 
+test("identity: dash suffix modifiers are not stripped from titles/headings", () => {
+  // Hyphen, en-dash, and em-dash suffixes must remain part of identity.
+  assert.equal(
+    softTitleCocktailIdentity("Old Fashioned - Peach"),
+    "old fashioned peach"
+  );
+  assert.equal(
+    softTitleCocktailIdentity("Old Fashioned – Smoked Version"),
+    "old fashioned smoked version"
+  );
+  assert.equal(
+    softTitleCocktailIdentity("Old Fashioned — Maple & Bacon"),
+    "old fashioned maple and bacon"
+  );
+  assert.equal(
+    softTitleCocktailIdentity("Negroni – Strawberry Variation"),
+    "negroni strawberry variation"
+  );
+  assert.notEqual(softTitleCocktailIdentity("Old Fashioned – Smoked Version"), "old fashioned");
+
+  // Site-title separators still drop publisher branding.
+  assert.equal(
+    softTitleCocktailIdentity("Old Fashioned Cocktail Recipe | Liquor.com"),
+    "old fashioned"
+  );
+  assert.equal(
+    softTitleCocktailIdentity("Old Fashioned Cocktail Recipe · Punch"),
+    "old fashioned"
+  );
+
+  // Plain accepted forms still normalize correctly.
+  assert.equal(softTitleCocktailIdentity("Old Fashioned"), "old fashioned");
+  assert.equal(softTitleCocktailIdentity("Old-Fashioned"), "old fashioned");
+  assert.equal(softTitleCocktailIdentity("Old Fashioned Cocktail Recipe"), "old fashioned");
+  assert.equal(softTitleCocktailIdentity("How to Make Old Fashioned"), "old fashioned");
+
+  // Heading with dash modifier must not identify the plain drink (no exact JSON-LD).
+  const smokedHeadingHtml = `
+    <html><head><title>Blog Post</title></head>
+    <body><h1>Old Fashioned – Smoked Version</h1></body></html>`;
+  assert.equal(pageIdentifiesCocktail(smokedHeadingHtml, "Old Fashioned"), false);
+
+  for (const title of [
+    "Old Fashioned - Peach",
+    "Old Fashioned – Smoked Version",
+    "Old Fashioned — Maple & Bacon",
+    "Negroni – Strawberry Variation",
+    "Manhattan — Black Walnut Version",
+    "Margarita – Spicy Jalapeño",
+    "Martini - Espresso Twist"
+  ]) {
+    const html = recipePage({
+      name: title,
+      image: "https://cdn.example/derivative.jpg",
+      title,
+      heading: title
+    });
+    const target = title.startsWith("Negroni")
+      ? "Negroni"
+      : title.startsWith("Manhattan")
+        ? "Manhattan"
+        : title.startsWith("Margarita")
+          ? "Margarita"
+          : title.startsWith("Martini")
+            ? "Martini"
+            : "Old Fashioned";
+    assert.equal(pageIdentifiesCocktail(html, target), false, title);
+  }
+
+  // Exact Recipe JSON-LD for the plain drink still identifies even with a noisy page title.
+  const exactLdNoisyTitle = recipePage({
+    name: "Old Fashioned",
+    image: "https://cdn.example/of.jpg",
+    title: "Old Fashioned – Smoked Version | Example",
+    heading: "Something Else"
+  });
+  assert.equal(pageIdentifiesCocktail(exactLdNoisyTitle, "Old Fashioned"), true);
+});
+
 test("identity: exact cocktail page name accepted via JSON-LD / title", () => {
   const html = recipePage({
     name: "Negroni",

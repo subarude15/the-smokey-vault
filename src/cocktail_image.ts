@@ -200,10 +200,14 @@ export function cocktailNamesMatchExact(candidate: string, target: string): bool
 /**
  * Soften a page title into a candidate drink identity by stripping site branding
  * and generic recipe boilerplate — not drink modifiers.
+ *
+ * Site separators `|`, `·`, and `•` may drop publisher branding
+ * (e.g. "Old Fashioned Cocktail Recipe | Liquor.com").
+ * Do NOT strip after `-` / `–` / `—`: those often carry drink modifiers
+ * ("Old Fashioned – Smoked Version") and must stay part of identity.
  */
 export function softTitleCocktailIdentity(title: string): string {
-  let main = text(title).split(/\s*[|·•]\s*/)[0] ?? text(title);
-  main = main.replace(/\s+[-–—]\s+.+$/, "").trim();
+  const main = (text(title).split(/\s*[|·•]\s*/)[0] ?? text(title)).trim();
   let n = normalizeCocktailName(main);
   n = n.replace(/^(the|a|an)\s+/, "");
   for (let i = 0; i < 3; i++) {
