@@ -129,9 +129,26 @@ function SourceChip({ source }: { source?: LookupSource }) {
 }
 
 /** Mirrors hardened ImageField value coercion. */
+function isLocalMediaValue(value: string, origin = "http://localhost") {
+  const raw = value.trim();
+  if (!raw) return false;
+  if (raw.startsWith("/api/media/images/")) return true;
+  if (raw.startsWith("api/media/images/")) return true;
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const parsed = new URL(raw);
+      if (!parsed.pathname.startsWith("/api/media/images/")) return false;
+      return parsed.origin === new URL(origin).origin;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 function ImageFieldInit({ value }: { value: unknown }) {
   const safeValue = typeof value === "string" ? value : value == null ? "" : String(value);
-  const showUrl = Boolean(safeValue) && !safeValue.startsWith("/api/media/images/");
+  const showUrl = Boolean(safeValue) && !isLocalMediaValue(safeValue);
   return React.createElement("div", null, String(showUrl));
 }
 

@@ -8,7 +8,7 @@
 import { beerTextTokens, foldBeerText, parseBeerQuery } from "./beer_search_query.js";
 import { isTapEmpty, tapLinksToAnyBrewBatch } from "./catalog.js";
 import { db } from "./db.js";
-import { localizeImage, type LocalizeImageDeps } from "./images.js";
+import { canonicalizeLocalImageUrl, isLocalImagePath, localizeImage, type LocalizeImageDeps } from "./images.js";
 import { getEnrichmentSource, upsertEnrichmentSource } from "./ingestion/jobs/enrichment-sources.js";
 import {
   discoverOfficialBeerProductPage,
@@ -250,6 +250,42 @@ export function extractOfficialLogoFallbackCandidates(args: {
   return { beerLogo, breweryLogo };
 }
 
+
+/**
+ * Reuse an already-localized (or localizable) packaged-beer image only when
+ * brewery + beer name fold to an exact identity match. No fuzzy/style matching.
+ */
+export function findExactVaultPackagedBeerImage(
+  breweryName: string,
+  beerName: string
+): { imageUrl: string; packagedBeerId: number } | null {
+  const breweryFold = foldBeerText(breweryName);
+  const beerFold = foldBeerText(beerName);
+  if (!breweryFold || !beerFold) return null;
+
+  const rows = db
+    .prepare(
+      `SELECT id, brewery, name, image_url
+       FROM packaged_beer
+       WHERE trim(coalesce(image_url, '')) != ''`
+    )
+    .all() as Array<{ id: number; brewery: string; name: string; image_url: string }>;
+
+  let fallback: { imageUrl: string; packagedBeerId: number } | null = null;
+  for (const row of rows) {
+    if (foldBeerText(row.brewery) !== breweryFold) continue;
+    if (foldBeerText(row.name) !== beerFold) continue;
+    const imageUrl = text(row.image_url);
+    if (!imageUrl) continue;
+    const local = canonicalizeLocalImageUrl(imageUrl) ?? (isLocalImagePath(imageUrl) ? imageUrl : null);
+    if (local) {
+      return { imageUrl: local, packagedBeerId: Number(row.id) };
+    }
+    if (!fallback) fallback = { imageUrl, packagedBeerId: Number(row.id) };
+  }
+  return fallback;
+}
+
 async function resolveImageForTap(options: {
   discovery: OfficialBeerDiscoveryResult;
   breweryName: string;
@@ -272,6 +308,14 @@ async function resolveImageForTap(options: {
 
   try {
     const page = await fetchHtml(options.discovery.productPageUrl);
+    // Prefer exact product/packaged artwork before logo/wordmark fallbacks.
+    const candidates = extractOfficialBeerImageCandidates({
+      html: page.html,
+      pageUrl: page.finalUrl || options.discovery.productPageUrl,
+      beerName: options.beerName
+    });
+    if (candidates[0]) return { url: candidates[0], kind: "product" };
+
     const logos = extractOfficialLogoFallbackCandidates({
       html: page.html,
       pageUrl: page.finalUrl || options.discovery.productPageUrl,
@@ -279,14 +323,6 @@ async function resolveImageForTap(options: {
       breweryName: options.breweryName
     });
     if (logos.beerLogo) return { url: logos.beerLogo, kind: "beer_logo" };
-
-    // Product-page DOM may still have a usable product candidate if JSON-LD/og missed it.
-    const candidates = extractOfficialBeerImageCandidates({
-      html: page.html,
-      pageUrl: page.finalUrl || options.discovery.productPageUrl,
-      beerName: options.beerName
-    });
-    if (candidates[0]) return { url: candidates[0], kind: "product" };
     if (logos.breweryLogo) return { url: logos.breweryLogo, kind: "brewery_logo" };
   } catch {
     // Fall through to brewery homepage.
@@ -384,6 +420,29 @@ export async function enrichCommercialTap(
   );
 
   if (discovery.status !== "matched" || !ACCEPTED_MATCHES.has(discovery.match)) {
+    // Official page miss: still allow exact vault packaged-beer artwork reuse.
+    if (discovery.status != "disabled" && imageIsEmpty(row.image_url)) {
+      const vault = findExactVaultPackagedBeerImage(breweryName, beerName);
+      if (vault) {
+        const localized =
+          canonicalizeLocalImageUrl(vault.imageUrl) ||
+          (await localizeImage(vault.imageUrl, deps.localizeImageDeps)) ||
+          vault.imageUrl;
+        db.prepare(
+          `UPDATE taps SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+        ).run(localized, tapId);
+        return {
+          status: "matched",
+          match: "none",
+          reason: "exact_vault_packaged_beer_image",
+          productPageUrl: discovery.productPageUrl,
+          updatedFields: ["image_url"],
+          preservedFields: ["maker", "brewery_batch", "notes"],
+          imageKind: "product",
+          discovery
+        };
+      }
+    }
     return emptyResult(
       discovery.status === "disabled" ? "disabled" : "no_result",
       discovery.reason || discovery.status,
@@ -430,19 +489,32 @@ export async function enrichCommercialTap(
     imageKind = "keeper";
     preservedFields.push("image_url");
   } else {
-    const image = await resolveImageForTap({
-      discovery,
-      breweryName,
-      beerName,
-      websiteUrl: website.websiteUrl,
-      deps
-    });
-    if (image.url) {
+    const vault = findExactVaultPackagedBeerImage(breweryName, beerName);
+    if (vault) {
       const localized =
-        (await localizeImage(image.url, deps.localizeImageDeps)) ?? image.url;
+        canonicalizeLocalImageUrl(vault.imageUrl) ||
+        (await localizeImage(vault.imageUrl, deps.localizeImageDeps)) ||
+        vault.imageUrl;
       updates.image_url = localized;
       updatedFields.push("image_url");
-      imageKind = image.kind;
+      imageKind = "product";
+    } else {
+      const image = await resolveImageForTap({
+        discovery,
+        breweryName,
+        beerName,
+        websiteUrl: website.websiteUrl,
+        deps
+      });
+      if (image.url) {
+        const localized =
+          canonicalizeLocalImageUrl(image.url) ||
+          (await localizeImage(image.url, deps.localizeImageDeps)) ||
+          image.url;
+        updates.image_url = localized;
+        updatedFields.push("image_url");
+        imageKind = image.kind;
+      }
     }
   }
 

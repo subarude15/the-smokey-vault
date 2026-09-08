@@ -38,10 +38,13 @@ export function clearToken() {
 /** Carries the status so callers can tell a refused request from an unreachable server. */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** Structured eligibility / domain reason when the server provides one. */
+  readonly reason: string | null;
+  constructor(message: string, status: number, reason: string | null = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.reason = reason;
   }
 }
 
@@ -98,14 +101,31 @@ function rejectKeeperSessionIfAuthenticated(sentAuth: boolean): void {
   notifyKeeperAuthRejected();
 }
 
+function encodeApiBody(body: BodyInit | null | undefined): BodyInit | undefined {
+  if (body == null) return undefined;
+  if (typeof body === "string") return body;
+  if (typeof FormData !== "undefined" && body instanceof FormData) return body;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return body;
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) return body;
+  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) return body;
+  if (ArrayBuffer.isView(body)) return body as BodyInit;
+  if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) return body;
+  // Plain objects were a footgun: Content-Type became application/json while the
+  // runtime sent "[object Object]" / empty, and Fastify answered "Bad Request".
+  if (typeof body === "object") return JSON.stringify(body);
+  return body;
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const sentAuth = Boolean(adminToken);
+  const body = encodeApiBody(options.body);
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
       ...options,
+      body,
       headers: {
-        ...(options.body && !(options.body instanceof FormData) ? { "content-type": "application/json" } : {}),
+        ...(body != null && !(body instanceof FormData) ? { "content-type": "application/json" } : {}),
         ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
         ...options.headers
       }
@@ -118,8 +138,18 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
   if (!response.ok) {
     if (response.status === 401) rejectKeeperSessionIfAuthenticated(sentAuth);
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new ApiError(body.error ?? "Request failed", response.status);
+    const payload = await response.json().catch(() => ({ error: response.statusText })) as {
+      error?: string;
+      message?: string;
+      reason?: string;
+    };
+    // Prefer the intentional server error string. Fastify content-type failures use
+    // error:"Bad Request" with the detail in message — surface message then.
+    const message =
+      payload.error && payload.error !== "Bad Request"
+        ? payload.error
+        : payload.message || payload.error || "Request failed";
+    throw new ApiError(message, response.status, payload.reason ?? null);
   }
   return response.status === 204 ? undefined as T : response.json();
 }

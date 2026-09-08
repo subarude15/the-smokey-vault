@@ -82,7 +82,8 @@ import {
   type ScanSessionUndo
 } from "./scan-session.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
-import { imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
+import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
+
 import {
   acceptLocalizedCocktailImage,
   enrichImportedRecipeImage,
@@ -153,6 +154,25 @@ await app.register(swagger, {
   }
 });
 await app.register(swaggerUi, { routePrefix: "/api/docs" });
+
+
+/** Best-effort app origin for same-origin local-media URL checks. */
+function requestAppOrigin(request: {
+  protocol?: string;
+  headers: Record<string, string | string[] | undefined>;
+}): string | null {
+  const originHeader = request.headers.origin;
+  if (typeof originHeader === "string" && originHeader.trim()) return originHeader.trim();
+  const hostRaw = request.headers["x-forwarded-host"] ?? request.headers.host;
+  const host = Array.isArray(hostRaw) ? hostRaw[0] : hostRaw;
+  if (!host || !String(host).trim()) return null;
+  const protoRaw = request.headers["x-forwarded-proto"];
+  const proto =
+    (Array.isArray(protoRaw) ? protoRaw[0] : protoRaw)?.split(",")[0]?.trim() ||
+    request.protocol ||
+    "http";
+  return `${proto}://${String(host).split(",")[0].trim()}`;
+}
 
 function token(exp = Date.now() + 15 * 60_000) {
   return createAdminToken(secret, exp);
@@ -463,9 +483,15 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
         : { ...request.body };
   // Decide ownership from the Keeper-submitted URL before localization rewrites it.
   if (table === "brews") applyBrewImageOwnershipOnWrite(body);
-  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
-    const { localizeImage } = await import("./images.js");
-    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  if (typeof body.image_url === "string" && body.image_url) {
+    const canonical = canonicalizeLocalImageUrl(body.image_url, {
+      origin: requestAppOrigin(request)
+    });
+    if (canonical) {
+      body.image_url = canonical;
+    } else if (!isLocalImagePath(body.image_url)) {
+      body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+    }
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
@@ -582,9 +608,15 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
         : { ...request.body };
   // Compare the Keeper-submitted image to the stored one before localization.
   if (table === "brews") applyBrewImageOwnershipOnWrite(body, existing);
-  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
-    const { localizeImage } = await import("./images.js");
-    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  if (typeof body.image_url === "string" && body.image_url) {
+    const canonical = canonicalizeLocalImageUrl(body.image_url, {
+      origin: requestAppOrigin(request)
+    });
+    if (canonical) {
+      body.image_url = canonical;
+    } else if (!isLocalImagePath(body.image_url)) {
+      body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+    }
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
@@ -789,7 +821,11 @@ app.post<{ Params: { id: string } }>("/api/inventory/taps/:id/enrich-beer", {
   const id = Number(request.params.id);
   const result = queueCommercialTapEnrichment(id);
   if (!result.ok) {
-    return reply.code(result.statusCode).send({ error: result.error });
+    return reply.code(result.statusCode).send({
+      error: result.error,
+      reason: result.reason ?? null,
+      status: result.status ?? null
+    });
   }
   return {
     tapId: id,
