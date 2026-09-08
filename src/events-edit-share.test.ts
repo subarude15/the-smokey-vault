@@ -17,6 +17,7 @@ const { createEvent, getEvent, listEvents, updateEvent, SpeakeasyError } = await
 const {
   buildEventDeepLink,
   parseEventIdFromSearch,
+  syncEventDeepLinkUrl,
   withEventSearchParam
 } = await import("../client/src/event-deep-link.ts");
 const {
@@ -225,6 +226,64 @@ test("deep-link helpers parse and build ?event= ids", () => {
   );
   assert.equal(withEventSearchParam("?theme=dark", 9), "?theme=dark&event=9");
   assert.equal(withEventSearchParam("?event=9&theme=dark", null), "?theme=dark");
+  assert.equal(withEventSearchParam("?foo=bar&event=123", null), "?foo=bar");
+  assert.equal(withEventSearchParam("?event=123", null), "");
+});
+
+test("leaving Events clears event via replaceState and keeps unrelated params", () => {
+  const calls: Array<{ mode: string; url: string }> = [];
+  const location = { pathname: "/", search: "?foo=bar&event=123" };
+  const history = {
+    replaceState(_state: unknown, _title: string, url?: string | null) {
+      calls.push({ mode: "replace", url: String(url ?? "") });
+      location.search = String(url ?? "").includes("?")
+        ? `?${String(url).split("?")[1] ?? ""}`
+        : "";
+    },
+    pushState(_state: unknown, _title: string, url?: string | null) {
+      calls.push({ mode: "push", url: String(url ?? "") });
+    }
+  };
+
+  syncEventDeepLinkUrl(location, history, null, "replace");
+  assert.deepEqual(calls, [{ mode: "replace", url: "/?foo=bar" }]);
+  assert.equal(parseEventIdFromSearch(location.search), null);
+  assert.match(location.search, /foo=bar/);
+
+  // Idempotent when event is already gone.
+  syncEventDeepLinkUrl(location, history, null, "replace");
+  assert.equal(calls.length, 1);
+});
+
+test("event detail sync still push/replaces and direct deep links stay refresh-safe", () => {
+  const calls: Array<{ mode: string; url: string }> = [];
+  const location = { pathname: "/", search: "" };
+  const history = {
+    replaceState(_state: unknown, _title: string, url?: string | null) {
+      calls.push({ mode: "replace", url: String(url ?? "") });
+      location.search = String(url ?? "").includes("?")
+        ? `?${String(url).split("?")[1] ?? ""}`
+        : "";
+    },
+    pushState(_state: unknown, _title: string, url?: string | null) {
+      calls.push({ mode: "push", url: String(url ?? "") });
+      location.search = String(url ?? "").includes("?")
+        ? `?${String(url).split("?")[1] ?? ""}`
+        : "";
+    }
+  };
+
+  // Opening a card uses push so browser Back returns to the Events list.
+  syncEventDeepLinkUrl(location, history, 5, "push");
+  assert.deepEqual(calls, [{ mode: "push", url: "/?event=5" }]);
+  assert.equal(parseEventIdFromSearch(location.search), 5);
+
+  // Closing detail with Back to events uses replace and clears only event.
+  location.search = "?event=5&theme=dark";
+  syncEventDeepLinkUrl(location, history, null, "replace");
+  assert.equal(calls.at(-1)?.mode, "replace");
+  assert.equal(calls.at(-1)?.url, "/?theme=dark");
+  assert.equal(parseEventIdFromSearch("?event=5"), 5);
 });
 
 test("share helpers prefer Web Share then copy-link fallback", async () => {
@@ -280,6 +339,8 @@ test("Events UI wires Edit event, Share, Copy link, and deep-link helpers", () =
   assert.match(eventsPage, /shareOrCopyEventLink/);
   assert.match(eventsPage, /buildEventDeepLink/);
   assert.match(eventsPage, /parseEventIdFromSearch/);
+  assert.match(eventsPage, /syncEventDeepLinkUrl/);
+  assert.match(eventsPage, /popstate/);
   assert.match(detail, /Share/);
   assert.match(detail, /Copy link/);
   assert.match(detail, /Edit event/);
@@ -287,4 +348,8 @@ test("Events UI wires Edit event, Share, Copy link, and deep-link helpers", () =
   assert.match(editor, /ImageField/);
   assert.match(app, /parseEventIdFromSearch/);
   assert.match(app, /setPage\("events"\)/);
+  // Leaving Events clears ?event= with replaceState via the shared helper.
+  assert.match(app, /syncEventDeepLinkUrl/);
+  assert.match(app, /page === "events"/);
+  assert.match(app, /syncEventDeepLinkUrl\(window\.location, window\.history, null, "replace"\)/);
 });

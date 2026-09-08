@@ -51,7 +51,7 @@ import { ImportReview } from "./ImportReview";
 import { BreweryLab } from "./BreweryLab";
 import { ContactModal, GuestFooter } from "./ContactModal";
 import { EventsPage } from "./EventsPage";
-import { parseEventIdFromSearch } from "./event-deep-link";
+import { parseEventIdFromSearch, syncEventDeepLinkUrl } from "./event-deep-link";
 import { GalleryPage } from "./GalleryPage";
 import { MerchPage } from "./MerchPage";
 import { MessagesInbox } from "./MessagesInbox";
@@ -665,6 +665,14 @@ export default function App() {
     setMoreSheet(false);
     if (navHint) dismissNavHint();
   };
+
+  // Leaving Events must drop ?event= so a later refresh does not reopen the old deep link.
+  // replaceState only — preserves unrelated query keys and does not add a history entry.
+  useEffect(() => {
+    if (page === "events") return;
+    if (parseEventIdFromSearch(window.location.search) == null) return;
+    syncEventDeepLinkUrl(window.location, window.history, null, "replace");
+  }, [page]);
 
   // Legacy page id: never leave a blank Mixologist page behind.
   useEffect(() => {
