@@ -348,8 +348,11 @@ test("Events UI wires Edit event, Share, Copy link, and deep-link helpers", () =
   assert.match(editor, /ImageField/);
   assert.match(app, /parseEventIdFromSearch/);
   assert.match(app, /setPage\("events"\)/);
-  // Leaving Events clears ?event= with replaceState via the shared helper.
+  // Leaving Events clears ?event= with replaceState via the shared helper,
+  // only on an Events → elsewhere transition (not the first dashboard paint).
   assert.match(app, /syncEventDeepLinkUrl/);
-  assert.match(app, /page === "events"/);
+  assert.match(app, /previousPageRef/);
+  assert.match(app, /previous !== "events" \|\| page === "events"/);
   assert.match(app, /syncEventDeepLinkUrl\(window\.location, window\.history, null, "replace"\)/);
+  assert.match(app, /parseEventIdFromSearch\(typeof window !== "undefined" \? window\.location\.search : ""\)/);
 });

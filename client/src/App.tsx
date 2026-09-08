@@ -503,7 +503,11 @@ async function resolveSuggestion(module: Module, hit: BottleSearchHit, upc = "")
 }
 
 export default function App() {
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(() => (
+    parseEventIdFromSearch(typeof window !== "undefined" ? window.location.search : "") != null
+      ? "events"
+      : "dashboard"
+  ));
   const [cocktailFocus, setCocktailFocus] = useState<"mixologist" | null>(null);
   const [admin, setAdmin] = useState(tokenExists());
   const [mobileNav, setMobileNav] = useState(false);
@@ -527,6 +531,7 @@ export default function App() {
   const [unread, setUnread] = useState(0);
   const [contactOpen, setContactOpen] = useState(false);
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
+  const previousPageRef = useRef(page);
   const enabledTabs = house.enabledTabs;
   const tabOrder = parseTabOrder(house.settings.tab_order);
   /** Guest landing page, respecting the keeper's tab order and visibility switches. */
@@ -667,9 +672,12 @@ export default function App() {
   };
 
   // Leaving Events must drop ?event= so a later refresh does not reopen the old deep link.
+  // Only clear on an Events → elsewhere transition (not the initial dashboard paint before deep-link boot).
   // replaceState only — preserves unrelated query keys and does not add a history entry.
   useEffect(() => {
-    if (page === "events") return;
+    const previous = previousPageRef.current;
+    previousPageRef.current = page;
+    if (previous !== "events" || page === "events") return;
     if (parseEventIdFromSearch(window.location.search) == null) return;
     syncEventDeepLinkUrl(window.location, window.history, null, "replace");
   }, [page]);
