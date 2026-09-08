@@ -53,10 +53,11 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR122 — Server-side Guest inventory / enrichment redaction (API trust boundary; coarse `out_of_stock` only).
 - PR53 decision — stale draft closed unmerged; do not resurrect its parallel override architecture. Rebuild only the useful Keeper interaction on current `main`.
 - PR123 — Keeper enrichment actions on current architecture (rerun/retry, ownership-safe verify for packaged-beer ABV/style, resolvable conflict keep/accept without `enrichment_field_overrides`).
-- PR97 — Angel’s Share theme and guest availability carve-out merged. The availability behavior remains intentional; the Angel’s Share visual theme itself is scheduled for removal in PR127.
+- PR97 — Guest availability carve-out merged (coarse percentages/gauges). The Angel’s Share visual theme that shipped alongside it was removed in PR127; availability behavior remains intentional product behavior.
 - PR124 — Brewery Lab guest-friendly detail/editor experience, Keeper-owned presentation fields/images, and Brewfather-safe sync ownership.
 - PR125 — Commercial tap beer enrichment using official packaged-beer identity/image discovery, strict homebrew exclusion, and Keeper-safe fill-missing updates.
 - PR126 — Keeper event editing, published-event deep links, guest-safe event detail access, and Web Share / copy-link behavior.
+- PR127 — Appearance simplified to Light + Dark only; Punk and Angel’s Share themes/CSS/preview removed with safe fallback for obsolete persisted values.
 
 ## Next work
 
@@ -79,16 +80,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR127 — Simplify appearance to Light + Dark only.**
-   - Remove Punk and Angel’s Share from selectable themes and runtime theme handling.
-   - Remove Angel’s Share-specific CSS/imports, query-param preview behavior, theme preset data, docs, and tests that only exist for that visual skin.
-   - Remove Punk-specific styling/preset behavior as well.
-   - Preserve all non-theme product behavior introduced alongside PR97, especially guest-safe availability percentages/gauges; those are product behavior, not part of the theme rollback.
-   - Existing persisted `theme` values of `punk` or `angels` must migrate/fallback safely to a supported theme rather than breaking the app.
-   - Final supported appearance choices: `light` and `dark` only.
-   - This is cleanup/simplification, not a new branding exercise.
-
-2. **PR128 — Gallery bulk photo upload for Guests and Keepers.**
+1. **PR128 — Gallery bulk photo upload for Guests and Keepers.**
    - Extend the existing public gallery upload flow from one media file at a time to multi-select / bulk photo upload.
    - Keep guest uploads allowed exactly as today; Keeper does not need a separate gallery storage path.
    - Support selecting many photos in one action and upload them with clear per-file progress/success/failure feedback so one bad file does not discard the rest of the batch.
@@ -98,7 +90,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Mobile photo-picker UX matters: multi-select from an iPhone/Android photo library should be a first-class path.
    - Do not add face recognition, automatic tagging, or cloud photo-service integrations in this PR.
 
-3. **PR129 — Cocktail recipe-card imagery.**
+2. **PR129 — Cocktail recipe-card imagery.**
    - Cocktails already support `image_url`; improve coverage by finding a useful cocktail image when a recipe has no image.
    - First reuse images from an imported recipe’s authoritative/source page when available and safe; do not overwrite an existing Keeper/imported cocktail image.
    - For built-in/manual recipes with no source image, investigate a conservative image-discovery path using cocktail name + recipe identity. Prefer authoritative recipe/original-source imagery where it can be tied confidently to that exact drink.
@@ -108,21 +100,22 @@ These are explicitly desired near-term product improvements based on real househ
    - Guest recipe cards/detail views should naturally render the discovered/localized image through the existing `image_url` field.
    - No new generic image-enrichment platform unless repository inspection proves a small reusable helper is genuinely needed.
 
-4. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+3. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
 ## Open PR status
 
-- **#121** Google Stitch `DESIGN.md` — draft branding/theme documentation; intentionally deferred while appearance is being simplified to Light/Dark only.
+- **#121** Google Stitch `DESIGN.md` — draft branding/theme documentation; intentionally deferred. Supported appearance is Light/Dark only (PR127).
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
 - **#53** Enrichment review actions — closed unmerged and superseded by PR123; do not rebase or merge.
 
 ## Relevant code
 
-- `client/src/App.tsx` — bottle-detail route, Keeper actions, theme presets/runtime, cocktail UI, and current Speakeasy/event entry points.
+- `client/src/App.tsx` — bottle-detail route, Keeper actions, appearance toggle, cocktail UI, and current Speakeasy/event entry points.
+- `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
 - `client/src/GalleryPage.tsx` — current single-file guest/Keeper gallery upload UI.
-- `client/src/theme-angels.css` — Angel’s Share-only visual layer scheduled for removal in PR127.
+- `client/src/guestAvailability.ts` — guest-safe availability percentage/gauge helpers (product behavior from PR97).
 - `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
