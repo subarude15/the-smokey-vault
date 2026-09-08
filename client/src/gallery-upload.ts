@@ -2,6 +2,7 @@
  * Pure helpers for Gallery multi-select upload state.
  * Upload still goes through the existing single-file POST /api/gallery/upload path.
  */
+import { formatGalleryLimit } from "../../src/speakeasy-shared";
 
 export type GalleryUploadStatus = "pending" | "rejected" | "uploading" | "success" | "failed";
 
@@ -36,9 +37,14 @@ export function megabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
+/** GB-aware size label (shared with the server limit formatter) for large Keeper videos. */
+export function gallerySizeLabel(bytes: number): string {
+  return formatGalleryLimit(bytes);
+}
+
 export function validateGalleryFileSize(file: Pick<File, "size">, maxBytes: number): string | undefined {
   if (file.size > maxBytes) {
-    return `That file is ${megabytes(file.size)}. The limit is ${megabytes(maxBytes)}.`;
+    return `That file is ${gallerySizeLabel(file.size)}. The limit is ${gallerySizeLabel(maxBytes)}.`;
   }
   return undefined;
 }

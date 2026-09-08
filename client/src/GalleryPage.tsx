@@ -39,9 +39,9 @@ import {
   formatGalleryUploadProgress,
   formatGalleryUploadSummary,
   galleryUploadsReadyToSend,
+  gallerySizeLabel,
   isGalleryBatchCompleteSuccess,
   isVideoFile,
-  megabytes,
   mergeGallerySelections,
   prepareGalleryUploadRetry,
   removeGalleryUpload,
@@ -69,6 +69,9 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
   const [createOpen, setCreateOpen] = useState(false);
   const [renameAlbum, setRenameAlbum] = useState<GalleryAlbum | null>(null);
   const [moveItem, setMoveItem] = useState<GalleryMedia | null>(null);
+  // Effective upload ceiling from the server (Keeper gets the larger, env-tunable limit).
+  // The server remains authoritative; this only drives client-side selection UX.
+  const [uploadMaxBytes, setUploadMaxBytes] = useState<number>(MAX_GALLERY_BYTES);
 
   const selectedAlbum = albumById(albums, selectedAlbumId);
 
@@ -113,6 +116,15 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       .then(() => setError(""))
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load the gallery."));
   }, [loadAlbums]);
+
+  // Ask the server for this caller's effective upload ceiling (Keeper vs Guest).
+  useEffect(() => {
+    api<{ max_bytes: number }>("/gallery/config")
+      .then((data) => {
+        if (typeof data.max_bytes === "number" && data.max_bytes > 0) setUploadMaxBytes(data.max_bytes);
+      })
+      .catch(() => setUploadMaxBytes(MAX_GALLERY_BYTES));
+  }, [admin]);
 
   // Single path for opening/clearing an album — one GET /gallery?album_id= per selection.
   useEffect(() => {
@@ -338,6 +350,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       <UploadModal
         albums={albums}
         initialAlbumId={selectedAlbumId ?? defaultAlbumId(albums)}
+        maxBytes={uploadMaxBytes}
         close={() => setUploadOpen(false)}
         refresh={() => void refresh()}
         done={(message) => { setUploadOpen(false); setNotice(message); void refresh(); }}
@@ -586,6 +599,7 @@ function statusLabel(item: PendingGalleryUpload): string {
 function UploadModal({
   albums,
   initialAlbumId,
+  maxBytes,
   close,
   done,
   refresh,
@@ -593,6 +607,7 @@ function UploadModal({
 }: {
   albums: GalleryAlbum[];
   initialAlbumId: number | null;
+  maxBytes: number;
   close: () => void;
   done: (message: string) => void;
   refresh: () => void;
@@ -626,7 +641,7 @@ function UploadModal({
     const picked = Array.from(list);
     setError("");
     setBatchNote("");
-    setItems((prev) => mergeGallerySelections(prev, picked, MAX_GALLERY_BYTES));
+    setItems((prev) => mergeGallerySelections(prev, picked, maxBytes));
     if (cameraRef.current) cameraRef.current.value = "";
     if (pickerRef.current) pickerRef.current.value = "";
   }
@@ -745,7 +760,7 @@ function UploadModal({
         <div>
           <span className="eyebrow">ADD TO THE WALL</span>
           <h2>Share tonight.</h2>
-          <p>Choose several photos or clips from your device. Each item can be up to {megabytes(MAX_GALLERY_BYTES)}.</p>
+          <p>Choose several photos or clips from your device. Each item can be up to {gallerySizeLabel(maxBytes)}.</p>
         </div>
         <button type="button" className="icon-button" onClick={close} aria-label="Close" disabled={busy}><X/></button>
       </header>
@@ -795,7 +810,7 @@ function UploadModal({
                 <div className="gallery-upload-text">
                   <strong className="gallery-upload-name">{item.file.name}</strong>
                   <small>
-                    {isVideoFile(item.file) ? "Video" : "Photo"} · {megabytes(item.file.size)}
+                    {isVideoFile(item.file) ? "Video" : "Photo"} · {gallerySizeLabel(item.file.size)}
                     {item.error ? ` · ${item.error}` : ""}
                   </small>
                 </div>
