@@ -5,12 +5,12 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR138** — Keg beer image reliability + Keeper upload rendering (merged). Commercial taps reuse exact vault packaged-beer artwork; Keeper Choose/Take photo stays on durable local media paths and renders as `<img>`; Find beer details empty-JSON Bad Request fixed.
+- **PR139** — Repository AI agent context / durable handoff setup (merged). Added `AGENTS.md` and `CURRENT_STATE.md`; aligned roadmap numbering so GitHub PR numbers stay authoritative (former product PR139+ shifted forward by one).
 
 Currently working on:
-- **PR139 — Repository AI agent context / durable handoff setup** (GitHub #139). Adds `AGENTS.md` + `CURRENT_STATE.md`; documentation only.
+- None.
 
-Next planned (after PR139 merges):
+Next planned:
 - **PR140 — Event image crop / resize controls** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions

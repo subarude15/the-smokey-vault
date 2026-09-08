@@ -20,7 +20,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - Node.js 24, TypeScript, Fastify, React, and SQLite.
 - CI runs the full test suite, production build, catalog runtime checks, and Docker catalog verification.
 - Packaged-beer correctness through GitHub PR #119 is merged.
-- After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
+- After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before PR139.
 - PR #122 hardened the Guest API trust boundary with server-side inventory/enrichment redaction.
 - PR #124 made Brewery Lab guest-friendly and Keeper-editable while preserving one-way Brewfather ownership of brewing telemetry.
 - PR #125 added commercial-tap beer identity/image enrichment with strict official matching, fill-missing Keeper preservation, and explicit Brewery Lab/homebrew exclusion.
@@ -30,7 +30,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
-- **PR139** (this docs PR) establishes durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`). After it merges, Track C product work continues at **PR140**.
+- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. Track C product work continues at **PR140**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -91,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR138 are complete; **PR139** is the repository AI agent context / durable handoff documentation PR (GitHub #139). After PR139 merges, the remaining product sequence continues with event media workflows, then social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR139 are complete; the remaining product sequence continues with event media workflows, then social polish, with branding last after the UX surfaces are stable.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -105,8 +105,9 @@ These are explicitly desired near-term product improvements based on real househ
    - Commercial keg enrichment now reuses an exact vault packaged-beer image (same brewery + beer) before/without unnecessary network image work, and prefers product/can artwork ahead of logo fallbacks.
    - Keeper Choose/Take photo uploads now stay on the durable `/api/media/images/...` path, hide URL mode after upload, and render as `<img>` media on tap cards after save/reload (including phone uploads). Absolute same-origin media URLs are canonicalized instead of being treated as remote links.
    - Strict beer-identity matching and Keeper image ownership are unchanged; homebrew taps remain excluded from commercial artwork enrichment.
-4. **PR139 — Repository AI agent context / durable handoff setup** (in progress — GitHub #139)
-   - Adds `AGENTS.md` and `CURRENT_STATE.md` so future coding agents can start from the repository without large chat-history handoffs.
+4. **PR139 — Repository AI agent context / durable handoff setup** (done)
+   - Added `AGENTS.md` and `CURRENT_STATE.md` so future coding agents can start from the repository without large chat-history handoffs.
+   - Aligned roadmap PR numbers with authoritative GitHub PR numbers (former product PR139+ shifted forward by one).
    - Documentation only; no application behavior change.
 5. **PR140 — Event image crop / resize controls**
    - Give Keepers a simple way to crop or resize event artwork so uploaded photos display cleanly across cards, detail views, and responsive breakpoints.
@@ -134,7 +135,6 @@ These are explicitly desired near-term product improvements based on real househ
 
 ## Open PR status
 
-- **#139** Repository AI agent context / durable handoff setup — this documentation PR (`AGENTS.md`, `CURRENT_STATE.md`, roadmap PR-number alignment). No application behavior change.
 - **#121** Google Stitch `DESIGN.md` — draft branding/theme documentation; intentionally deferred. Supported appearance is Light/Dark only (PR127).
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
 - **#53** Enrichment review actions — closed unmerged and superseded by PR123; do not rebase or merge.
@@ -203,7 +203,7 @@ Use fresh records for pipeline testing. Review cleanup candidates first, then re
 - Prefer `AGENTS.md` and `CURRENT_STATE.md` for durable agent rules and the short rolling handoff.
 - Prefer this file and `README.md` for product plan and ops.
 - `.spec/target-state.md` describes shipped appliance boundaries.
-- `.spec/CURRENT_TASK.md` is the active agent brief when a task is assigned (currently PR139 docs); otherwise it should say idle.
+- `.spec/CURRENT_TASK.md` is the active agent brief only when a task is assigned; otherwise it should say idle.
 - `GEMINI_CONTEXT.md` is deprecated for planning; do not treat its line counts or test totals as current.
 
 ## Explicitly deferred
