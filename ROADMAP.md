@@ -108,7 +108,13 @@ These are explicitly desired near-term product improvements based on real househ
    - Guest recipe cards/detail views should naturally render the discovered/localized image through the existing `image_url` field.
    - No new generic image-enrichment platform unless repository inspection proves a small reusable helper is genuinely needed.
 
-4. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+4. **PR130 — Remove duplicate Mixologist landing card.**
+   - `What Can I Make?` and `Ask the Mixologist` already share the same unified cocktail discovery page.
+   - Remove the redundant standalone `Ask the Mixologist` feature card from the main guest landing page and keep `What Can I Make?` as the single entry point.
+   - Preserve the Mixologist panel/functionality inside the unified cocktail page and retain any useful `mixologist` → `cocktails` compatibility alias.
+   - Keep this as a small landing-page cleanup; do not redesign cocktail discovery or the home page.
+
+5. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
