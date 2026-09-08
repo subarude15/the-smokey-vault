@@ -307,7 +307,9 @@ describe("enrichment health UI contracts", () => {
     const appSrc = await fs.readFile(new URL("../client/src/App.tsx", import.meta.url), "utf8");
     assert.match(appSrc, /EnrichmentServicesHealth/);
     assert.match(appSrc, /page === "settings" && admin/);
-    assert.match(appSrc, /KEEPER_PAGES/);
+    assert.match(appSrc, /from \"\.\/shell-nav\"/);
+    const shellSrc = await fs.readFile(new URL("../client/src/shell-nav.ts", import.meta.url), "utf8");
+    assert.match(shellSrc, /KEEPER_PAGES/);
   });
 
   it("EnrichmentServicesHealth renders statuses and Check again", async () => {

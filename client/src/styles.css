@@ -311,32 +311,35 @@ body.nav-open{overflow:hidden}
   .more-sheet-lock small{color:var(--muted);font-size:12px}
 }
 
-/* Portrait ≤1050px: quick tabs + More sheet. Landscape ≤1050px: no bar; More is a left overlay drawer. All themes. */
+/* PR134: phone portrait → bottom nav + More. Landscape tablet/desktop → persistent left rail. */
 .more-sheet-overlay,.more-sheet{display:none}
-/* Compact nav is layout, not theme: every data-theme uses the same bar / sheet / drawer rules. */
 @media(max-width:1050px) and (orientation:portrait){
-  .mobile-bottom-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:90;width:100%;max-width:100%;box-sizing:border-box;background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));gap:4px}
-  .mobile-bottom-nav button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:54px;padding:6px 4px;border:0;border-radius:12px;background:transparent;color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.02em;cursor:pointer}
+  .app-shell{
+    --mobile-bottom-nav-clearance: calc(66px + env(safe-area-inset-bottom));
+    display:block;
+  }
+  .sidebar{display:none!important}
+  .mobile-close,.nav-backdrop,.more-topbar{display:none!important}
+  .mobile-bottom-nav{display:flex;align-items:stretch;justify-content:space-between;position:fixed;left:0;right:0;bottom:0;z-index:90;width:100%;max-width:100%;box-sizing:border-box;background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));gap:4px}
+  .mobile-bottom-nav button{position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:48px;padding:6px 4px;border:0;border-radius:12px;background:transparent;color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.02em;cursor:pointer}
   .mobile-bottom-nav button.active{color:var(--accent-2);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .mobile-bottom-nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .mobile-bottom-nav button svg{flex:none}
   .mobile-nav-badge{position:absolute;top:4px;right:calc(50% - 24px);min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:#ff6b00;color:#1a1004;font-size:9px;font-weight:700;display:grid;place-items:center}
-  .has-mobile-nav .page{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
-  .has-mobile-nav .guest-footer{margin-bottom:calc(64px + env(safe-area-inset-bottom))}
-  .more-sheet-overlay{display:block;position:fixed;inset:0;bottom:calc(66px + env(safe-area-inset-bottom));z-index:70;border:0;padding:0;background:#0009;opacity:0;pointer-events:none;transition:opacity .2s ease}
+  /* Clearance on main (not only .page) so GuestFooter after .page stays above the fixed bar. */
+  main.has-mobile-nav{padding-bottom:var(--mobile-bottom-nav-clearance);box-sizing:border-box}
+  .more-sheet-overlay{display:block;position:fixed;inset:0;bottom:var(--mobile-bottom-nav-clearance);z-index:70;border:0;padding:0;background:#0009;opacity:0;pointer-events:none;transition:opacity .2s ease}
   .more-sheet-overlay.open{opacity:1;pointer-events:auto}
-  .more-sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:calc(66px + env(safe-area-inset-bottom));z-index:80;max-height:min(72vh,640px);overflow:hidden;padding:8px 12px 12px;border:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;background:var(--surface);box-shadow:0 -18px 60px #0007;transform:translateY(110%);transition:transform .28s cubic-bezier(.22,1,.36,1);pointer-events:none}
+  .more-sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:var(--mobile-bottom-nav-clearance);z-index:80;max-height:min(72vh,640px);overflow:hidden;padding:8px 12px 12px;border:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;background:var(--surface);box-shadow:0 -18px 60px #0007;transform:translateY(110%);transition:transform .28s cubic-bezier(.22,1,.36,1);pointer-events:none}
   .more-sheet.open{transform:translateY(0);pointer-events:auto}
 }
 @media(max-width:1050px) and (orientation:landscape){
-  .more-topbar{display:inline-flex;align-items:center;gap:6px;width:auto;min-height:36px;padding:0 10px;border:1px solid color-mix(in srgb,var(--accent) 55%,var(--line));background:color-mix(in srgb,var(--accent) 14%,var(--surface));border-radius:8px;font-weight:700;font-size:12px;letter-spacing:.02em;color:var(--text);cursor:pointer}
-  .more-topbar svg{flex:none}
-  .more-topbar.open{border-color:var(--accent);color:var(--accent-2);background:color-mix(in srgb,var(--accent) 18%,var(--surface))}
-  .topbar{z-index:85}
-  .mobile-bottom-nav{display:none!important}
-  .more-sheet-overlay,.more-sheet{display:none!important}
-  .sidebar{top:72px;height:calc(100dvh - 72px);z-index:80;box-shadow:18px 0 48px #0008}
+  .app-shell{display:grid;grid-template-columns:260px minmax(0,1fr);width:100%;max-width:100%;min-width:0}
+  .sidebar{display:flex;position:sticky;top:0;left:auto;width:auto;height:100vh;height:100dvh;z-index:40;box-shadow:none;transform:none}
+  .mobile-close,.nav-backdrop,.more-topbar,.mobile-bottom-nav,.more-sheet-overlay,.more-sheet{display:none!important}
   .sidebar nav{overflow-y:auto}
-  .nav-backdrop{z-index:70;top:72px}
+  .topbar-start{display:flex}
+  .topbar-title{display:block;max-width:min(48vw,280px)}
 }
 
 /* -------------------------------- Ribbons ---------------------------------- */

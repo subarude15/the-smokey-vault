@@ -110,7 +110,10 @@ test("12 legacy single-scan workflow remains available on landing", () => {
 });
 
 test("13 patron permissions remain unchanged — scan is keeper-only", () => {
-  assert.ok(appSrc.includes('GUEST_HIDDEN_PAGES = new Set(["scan"'));
+  assert.ok(appSrc.includes("GUEST_HIDDEN_PAGES") || appSrc.includes('from "./shell-nav"'));
+  const shellSrc = readFileSync(join(root, "client/src/shell-nav.ts"), "utf8");
+  assert.ok(shellSrc.includes('GUEST_HIDDEN_PAGES = new Set(['));
+  assert.ok(shellSrc.includes('"scan"'));
   assert.ok(appSrc.includes("{admin && (page === \"scan\" || shelfSessionMode !== \"idle\")"));
 });
 

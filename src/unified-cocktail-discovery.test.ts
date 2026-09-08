@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const appSrc = readFileSync(join(root, "client/src/App.tsx"), "utf8");
+const shellNavSrc = readFileSync(join(root, "client/src/shell-nav.ts"), "utf8");
 const cssSrc = readFileSync(join(root, "client/src/styles.css"), "utf8");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string): string {
@@ -56,8 +57,8 @@ test("B. standalone AI Mixologist nav item is gone", () => {
 });
 
 test("C. cocktails guest tab still controls unified page visibility", () => {
-  assert.match(appSrc, /cocktails:\s*"cocktails"/);
-  assert.match(appSrc, /mixologist:\s*"cocktails"/);
+  assert.match(shellNavSrc, /cocktails:\s*"cocktails"/);
+  assert.match(shellNavSrc, /mixologist:\s*"cocktails"/);
   assert.match(appSrc, /cocktails:\s*"Cocktails"/);
   assert.doesNotMatch(appSrc, /mixologist_enabled/);
   assert.doesNotMatch(appSrc, /ai_tab|cocktail_ai/);
@@ -226,7 +227,7 @@ test("W. PR130 guest landing feature grid has exactly one cocktail-discovery car
 test("X. PR130 Mixologist panel and mixologist compatibility alias remain", () => {
   const cocktails = cocktailsSlice();
   assert.match(cocktails, /<MixologistPanel/);
-  assert.match(appSrc, /mixologist:\s*"cocktails"/);
+  assert.match(shellNavSrc, /mixologist:\s*"cocktails"/);
   assert.match(appSrc, /next === "mixologist"/);
   assert.match(appSrc, /setCocktailFocus\("mixologist"\)/);
   assert.match(appSrc, /focusMixologist=\{cocktailFocus === "mixologist"\}/);
