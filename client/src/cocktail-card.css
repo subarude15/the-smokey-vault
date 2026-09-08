@@ -29,8 +29,10 @@
 .recipe-instructions{display:flex;flex-direction:column;gap:8px;margin-top:4px}
 .recipe-instructions .eyebrow{margin:0}
 .recipe-instructions p{margin:0;color:var(--text);font-size:15px;line-height:1.55;white-space:pre-wrap}
-.recipe-instructions ol{margin:0;padding-left:1.35em;display:flex;flex-direction:column;gap:10px}
-.recipe-instructions li{color:var(--text);font-size:15px;line-height:1.5}
+/* Avoid flex on ol/li — it drops list-item markers after CSS reset/preflight. */
+.recipe-instructions ol{margin:0;padding-left:1.35em;list-style:decimal outside}
+.recipe-instructions li{display:list-item;list-style:decimal outside;color:var(--text);font-size:15px;line-height:1.5}
+.recipe-instructions li+li{margin-top:10px}
 .recipe-instructions-method strong{font-size:15px;font-weight:600}
 
 /* PR136 tablet workspace ergonomics. */
