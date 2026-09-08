@@ -104,25 +104,54 @@ export function isLocalImagePath(value?: string | null) {
   return Boolean(value && value.startsWith(LOCAL_IMAGE_PATH_PREFIX));
 }
 
+export type CanonicalizeLocalImageOptions = {
+  /**
+   * Application / request origin (e.g. `https://vault.example.com` or `http://127.0.0.1:8787`).
+   * Absolute URLs are only collapsed to `/api/media/images/...` when origins match.
+   */
+  origin?: string | null;
+};
+
+/** Parse an origin string into a comparable URL.origin, or null if invalid. */
+export function resolveAppOrigin(origin?: string | null): string | null {
+  const raw = String(origin ?? "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    try {
+      return new URL(`http://${raw}`).origin;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
  * Normalize app-hosted media URLs to the durable relative path.
- * Absolute same-origin `/api/media/images/...` URLs must not be treated as remote.
+ * Absolute `/api/media/images/...` URLs are local only when their origin matches
+ * the application/request origin — foreign CDNs with the same path stay remote.
  */
-export function canonicalizeLocalImageUrl(value?: string | null): string | null {
+export function canonicalizeLocalImageUrl(
+  value?: string | null,
+  options?: CanonicalizeLocalImageOptions
+): string | null {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
   if (raw.startsWith(LOCAL_IMAGE_PATH_PREFIX)) return raw;
+  if (raw.startsWith("api/media/images/")) return `/${raw}`;
   try {
     if (/^https?:\/\//i.test(raw)) {
       const parsed = new URL(raw);
-      if (parsed.pathname.startsWith(LOCAL_IMAGE_PATH_PREFIX)) {
-        return `${parsed.pathname}${parsed.search}`;
-      }
+      if (!parsed.pathname.startsWith(LOCAL_IMAGE_PATH_PREFIX)) return null;
+      const appOrigin = resolveAppOrigin(options?.origin);
+      // Without a known app origin we cannot prove same-origin — leave remote.
+      if (!appOrigin || parsed.origin !== appOrigin) return null;
+      return `${parsed.pathname}${parsed.search}`;
     }
   } catch {
     // not a URL
   }
-  if (raw.startsWith("api/media/images/")) return `/${raw}`;
   return null;
 }
 

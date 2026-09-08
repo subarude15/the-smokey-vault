@@ -83,6 +83,7 @@ import {
 } from "./scan-session.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
 import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
+
 import {
   acceptLocalizedCocktailImage,
   enrichImportedRecipeImage,
@@ -153,6 +154,25 @@ await app.register(swagger, {
   }
 });
 await app.register(swaggerUi, { routePrefix: "/api/docs" });
+
+
+/** Best-effort app origin for same-origin local-media URL checks. */
+function requestAppOrigin(request: {
+  protocol?: string;
+  headers: Record<string, string | string[] | undefined>;
+}): string | null {
+  const originHeader = request.headers.origin;
+  if (typeof originHeader === "string" && originHeader.trim()) return originHeader.trim();
+  const hostRaw = request.headers["x-forwarded-host"] ?? request.headers.host;
+  const host = Array.isArray(hostRaw) ? hostRaw[0] : hostRaw;
+  if (!host || !String(host).trim()) return null;
+  const protoRaw = request.headers["x-forwarded-proto"];
+  const proto =
+    (Array.isArray(protoRaw) ? protoRaw[0] : protoRaw)?.split(",")[0]?.trim() ||
+    request.protocol ||
+    "http";
+  return `${proto}://${String(host).split(",")[0].trim()}`;
+}
 
 function token(exp = Date.now() + 15 * 60_000) {
   return createAdminToken(secret, exp);
@@ -464,7 +484,9 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
   // Decide ownership from the Keeper-submitted URL before localization rewrites it.
   if (table === "brews") applyBrewImageOwnershipOnWrite(body);
   if (typeof body.image_url === "string" && body.image_url) {
-    const canonical = canonicalizeLocalImageUrl(body.image_url);
+    const canonical = canonicalizeLocalImageUrl(body.image_url, {
+      origin: requestAppOrigin(request)
+    });
     if (canonical) {
       body.image_url = canonical;
     } else if (!isLocalImagePath(body.image_url)) {
@@ -587,7 +609,9 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
   // Compare the Keeper-submitted image to the stored one before localization.
   if (table === "brews") applyBrewImageOwnershipOnWrite(body, existing);
   if (typeof body.image_url === "string" && body.image_url) {
-    const canonical = canonicalizeLocalImageUrl(body.image_url);
+    const canonical = canonicalizeLocalImageUrl(body.image_url, {
+      origin: requestAppOrigin(request)
+    });
     if (canonical) {
       body.image_url = canonical;
     } else if (!isLocalImagePath(body.image_url)) {

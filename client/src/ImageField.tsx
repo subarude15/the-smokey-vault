@@ -18,8 +18,27 @@ function firstImageFile(list?: FileList | null) {
   return Array.from(list ?? []).find((file) => file.type.startsWith("image/") || !file.type) ?? null;
 }
 
+function browserOrigin(explicit?: string | null): string | null {
+  const raw = String(explicit ?? "").trim();
+  if (raw) {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return window.location.origin;
+    }
+  } catch {
+    // non-browser / locked-down environments
+  }
+  return null;
+}
+
 /** True for durable app media paths, including absolute same-origin URLs. */
-export function isLocalMediaValue(value?: string | null): boolean {
+export function isLocalMediaValue(value?: string | null, origin?: string | null): boolean {
   const raw = typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
   if (!raw) return false;
   if (raw.startsWith(LOCAL_MEDIA_PREFIX)) return true;
@@ -27,7 +46,10 @@ export function isLocalMediaValue(value?: string | null): boolean {
   try {
     if (/^https?:\/\//i.test(raw)) {
       const parsed = new URL(raw);
-      return parsed.pathname.startsWith(LOCAL_MEDIA_PREFIX);
+      if (!parsed.pathname.startsWith(LOCAL_MEDIA_PREFIX)) return false;
+      const appOrigin = browserOrigin(origin);
+      // Foreign hosts that happen to use `/api/media/images/...` stay remote.
+      return Boolean(appOrigin && parsed.origin === appOrigin);
     }
   } catch {
     // ignore
@@ -36,7 +58,7 @@ export function isLocalMediaValue(value?: string | null): boolean {
 }
 
 /** Prefer the durable relative media path for inventory persistence. */
-export function toStoredMediaValue(value: string): string {
+export function toStoredMediaValue(value: string, origin?: string | null): string {
   const raw = value.trim();
   if (!raw) return "";
   if (raw.startsWith(LOCAL_MEDIA_PREFIX)) return raw;
@@ -44,7 +66,9 @@ export function toStoredMediaValue(value: string): string {
   try {
     if (/^https?:\/\//i.test(raw)) {
       const parsed = new URL(raw);
-      if (parsed.pathname.startsWith(LOCAL_MEDIA_PREFIX)) {
+      if (!parsed.pathname.startsWith(LOCAL_MEDIA_PREFIX)) return raw;
+      const appOrigin = browserOrigin(origin);
+      if (appOrigin && parsed.origin === appOrigin) {
         return `${parsed.pathname}${parsed.search}`;
       }
     }
@@ -54,6 +78,26 @@ export function toStoredMediaValue(value: string): string {
   return raw;
 }
 
+/**
+ * Complete a media upload attempt. On failure, only report the error — never
+ * call onChange with a captured prior value (that races with newer edits).
+ */
+export async function settleMediaUpload(
+  upload: () => Promise<{ url: string }>,
+  hooks: {
+    onSuccess: (storedUrl: string) => void;
+    onFailure: (message: string) => void;
+    origin?: string | null;
+  }
+): Promise<void> {
+  try {
+    const result = await upload();
+    hooks.onSuccess(toStoredMediaValue(result.url, hooks.origin));
+  } catch (err) {
+    hooks.onFailure(err instanceof Error ? err.message : "Could not upload photo");
+  }
+}
+
 export function ImageField({ value, onChange }: { value: string; onChange: (url: string) => void }) {
   const safeValue = typeof value === "string" ? value : value == null ? "" : String(value);
   const [busy, setBusy] = useState(false);
@@ -61,29 +105,33 @@ export function ImageField({ value, onChange }: { value: string; onChange: (url:
   const [dragOver, setDragOver] = useState(false);
   const [showUrl, setShowUrl] = useState(Boolean(safeValue) && !isLocalMediaValue(safeValue));
   const wellRef = useRef<HTMLDivElement>(null);
-  const previousValueRef = useRef(safeValue);
 
   useEffect(() => {
-    previousValueRef.current = safeValue;
     if (isLocalMediaValue(safeValue)) setShowUrl(false);
   }, [safeValue]);
 
   async function uploadFile(file: File) {
-    const previous = previousValueRef.current;
     setBusy(true);
     setError("");
     try {
-      const body = new FormData();
-      body.append("image", file);
-      const result = await api<{ url: string }>("/media/upload", { method: "POST", body });
-      const stored = toStoredMediaValue(result.url);
-      onChange(stored);
-      setShowUrl(false);
-      if (wellRef.current) wellRef.current.textContent = "\u200B";
-    } catch (err) {
-      // Keep the prior Keeper image when upload fails.
-      onChange(previous);
-      setError(err instanceof Error ? err.message : "Could not upload photo");
+      await settleMediaUpload(
+        async () => {
+          const body = new FormData();
+          body.append("image", file);
+          return api<{ url: string }>("/media/upload", { method: "POST", body });
+        },
+        {
+          onSuccess: (stored) => {
+            onChange(stored);
+            setShowUrl(false);
+            if (wellRef.current) wellRef.current.textContent = "\u200B";
+          },
+          onFailure: (message) => {
+            // Leave parent form state untouched — the existing image is already shown.
+            setError(message);
+          }
+        }
+      );
     } finally {
       setBusy(false);
     }
