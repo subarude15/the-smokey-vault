@@ -99,7 +99,7 @@ import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff
 import {
   adjustPatronVisits, castDailyVote, createEvent, createEventSubscriber, createMerch, createMessage, createPatron,
   dailyVoteTallies, deleteEvent, deleteEventSubscriber, deleteMerch, deleteMessage,
-  deletePatron, listEvents, listEventSubscribers, listLeaderboard, listMerch, listMessages, listPatrons,
+  deletePatron, getEvent, listEvents, listEventSubscribers, listLeaderboard, listMerch, listMessages, listPatrons,
   markMessageRead, SpeakeasyError, unreadMessageCount, updateEvent, updateMerch, updatePatron
 } from "./speakeasy.js";
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
@@ -1567,6 +1567,16 @@ app.delete<{ Params: { id: string } }>("/api/messages/:id", {
 
 app.get("/api/events", { schema: { tags: ["Events"], summary: "Upcoming parties and bashes" } }, async (request) => {
   return listEvents(isAdmin(request.headers.authorization));
+});
+
+app.get<{ Params: { id: string } }>("/api/events/:id", {
+  schema: { tags: ["Events"], summary: "One event (published for guests; drafts for Keepers)" }
+}, async (request, reply) => {
+  try {
+    return getEvent(Number(request.params.id), isAdmin(request.headers.authorization));
+  } catch (error) {
+    return speakeasyFail(reply, error, "Event not found");
+  }
 });
 
 app.post<{ Body: Record<string, unknown> }>("/api/events", { schema: { tags: ["Events"], summary: "Add an event" } }, async (request, reply) => {

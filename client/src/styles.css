@@ -399,14 +399,32 @@ body.nav-open{overflow:hidden}
 
 /* --------------------------------- Events ---------------------------------- */
 .event-composer label,.rsvp-card label{display:block;margin-bottom:12px}
+.event-composer .field-block{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}
+.event-composer .field-block>span{font-size:11px;color:var(--muted);font-weight:600}
+.event-publish-toggle{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;margin:4px 0 14px}
+.event-publish-toggle input{width:18px;min-height:18px;margin:0}
+.event-editor-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
 .event-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,280px),1fr));gap:14px}
 .event-card{position:relative;display:flex;flex-direction:column;gap:12px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.event-card-open{display:flex;flex-direction:column;gap:12px;width:100%;padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
 .event-card img{width:100%;height:150px;object-fit:cover;border-radius:10px}
 .event-card h3{font:600 22px "Playfair Display";margin:6px 0 8px}
 .event-card p{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
 .event-card .eyebrow{display:inline-flex;align-items:center;gap:6px;margin:0}
 .event-card.event-unpublished{opacity:.62;border-style:dashed}
-.event-card .card-actions{position:absolute;top:12px;right:12px;display:flex;gap:6px}
+.event-card .card-actions{position:absolute;top:12px;right:12px;display:flex;gap:6px;z-index:1}
+.event-detail{display:flex;flex-direction:column;gap:22px}
+.event-detail-hero{display:grid;grid-template-columns:minmax(0,280px) minmax(0,1fr);gap:28px;align-items:start}
+.event-detail-image{border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface);aspect-ratio:4/3}
+.event-detail-image img{width:100%;height:100%;object-fit:cover;display:block}
+.event-detail-hero h1{font:600 clamp(32px,4vw,48px) "Playfair Display";margin:8px 0 12px;line-height:1.08}
+.event-detail-hero .eyebrow{display:inline-flex;align-items:center;gap:6px}
+.event-detail-body{margin:0 0 18px;color:var(--muted);font-size:16px;line-height:1.55;max-width:42rem}
+.event-detail-actions{display:flex;flex-wrap:wrap;gap:10px}
+.event-draft-badge{margin:0 0 14px;color:var(--accent-2);font-size:13px;font-weight:600}
+.event-share-fallback{display:flex;flex-direction:column;gap:7px;margin-top:18px;max-width:36rem}
+.event-share-fallback>span{font-size:11px;color:var(--muted);font-weight:600}
+@media(max-width:700px){.event-detail-hero{grid-template-columns:1fr}}
 .rsvp-card{margin-top:26px}
 .subscriber-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .subscriber-list li{display:flex;align-items:center;gap:14px;padding:13px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}

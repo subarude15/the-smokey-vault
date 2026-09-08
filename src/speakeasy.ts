@@ -207,6 +207,17 @@ export function listEvents(includeUnpublished = false): HouseEvent[] {
   return db.prepare(`SELECT ${EVENT_COLUMNS} FROM events${where} ORDER BY event_date ASC, id ASC`).all() as HouseEvent[];
 }
 
+/**
+ * Fetch one event. Guests only see published rows; Keepers may load drafts.
+ * Unpublished/missing events both surface as 404 so IDs are not enumerable publicly.
+ */
+export function getEvent(id: number, includeUnpublished = false): HouseEvent {
+  const event = db.prepare(`SELECT ${EVENT_COLUMNS} FROM events WHERE id=?`).get(id) as HouseEvent | undefined;
+  if (!event) throw new SpeakeasyError("Event not found", 404);
+  if (!includeUnpublished && !event.is_published) throw new SpeakeasyError("Event not found", 404);
+  return event;
+}
+
 export function createEvent(input: Record<string, unknown>): HouseEvent {
   const title = clipText(input.title, 120);
   const eventDate = clipText(input.event_date, 40);
