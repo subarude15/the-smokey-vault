@@ -129,9 +129,24 @@ function SourceChip({ source }: { source?: LookupSource }) {
 }
 
 /** Mirrors hardened ImageField value coercion. */
+function isLocalMediaValue(value: string) {
+  const raw = value.trim();
+  if (!raw) return false;
+  if (raw.startsWith("/api/media/images/")) return true;
+  if (raw.startsWith("api/media/images/")) return true;
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      return new URL(raw).pathname.startsWith("/api/media/images/");
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 function ImageFieldInit({ value }: { value: unknown }) {
   const safeValue = typeof value === "string" ? value : value == null ? "" : String(value);
-  const showUrl = Boolean(safeValue) && !safeValue.startsWith("/api/media/images/");
+  const showUrl = Boolean(safeValue) && !isLocalMediaValue(safeValue);
   return React.createElement("div", null, String(showUrl));
 }
 

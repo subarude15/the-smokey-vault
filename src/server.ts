@@ -82,7 +82,7 @@ import {
   type ScanSessionUndo
 } from "./scan-session.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
-import { imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
+import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
 import {
   acceptLocalizedCocktailImage,
   enrichImportedRecipeImage,
@@ -463,9 +463,13 @@ app.post<{ Params: { table: string }; Body: Record<string, unknown> }>("/api/inv
         : { ...request.body };
   // Decide ownership from the Keeper-submitted URL before localization rewrites it.
   if (table === "brews") applyBrewImageOwnershipOnWrite(body);
-  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
-    const { localizeImage } = await import("./images.js");
-    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  if (typeof body.image_url === "string" && body.image_url) {
+    const canonical = canonicalizeLocalImageUrl(body.image_url);
+    if (canonical) {
+      body.image_url = canonical;
+    } else if (!isLocalImagePath(body.image_url)) {
+      body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+    }
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });
@@ -582,9 +586,13 @@ app.put<{ Params: { table: string; id: string }; Body: Record<string, unknown> }
         : { ...request.body };
   // Compare the Keeper-submitted image to the stored one before localization.
   if (table === "brews") applyBrewImageOwnershipOnWrite(body, existing);
-  if (typeof body.image_url === "string" && body.image_url && !String(body.image_url).startsWith("/api/media/images/")) {
-    const { localizeImage } = await import("./images.js");
-    body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+  if (typeof body.image_url === "string" && body.image_url) {
+    const canonical = canonicalizeLocalImageUrl(body.image_url);
+    if (canonical) {
+      body.image_url = canonical;
+    } else if (!isLocalImagePath(body.image_url)) {
+      body.image_url = await localizeImage(body.image_url) ?? body.image_url;
+    }
   }
   const values = tableFields[table].filter((field) => body[field] !== undefined);
   if (!values.length) return reply.code(400).send({ error: "No valid fields supplied" });

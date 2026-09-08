@@ -98,8 +98,32 @@ export function saveImageBuffer(buffer: Buffer, contentType?: string | null, ori
   return `/api/media/images/${filename}`;
 }
 
+export const LOCAL_IMAGE_PATH_PREFIX = "/api/media/images/";
+
 export function isLocalImagePath(value?: string | null) {
-  return Boolean(value && value.startsWith("/api/media/images/"));
+  return Boolean(value && value.startsWith(LOCAL_IMAGE_PATH_PREFIX));
+}
+
+/**
+ * Normalize app-hosted media URLs to the durable relative path.
+ * Absolute same-origin `/api/media/images/...` URLs must not be treated as remote.
+ */
+export function canonicalizeLocalImageUrl(value?: string | null): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (raw.startsWith(LOCAL_IMAGE_PATH_PREFIX)) return raw;
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const parsed = new URL(raw);
+      if (parsed.pathname.startsWith(LOCAL_IMAGE_PATH_PREFIX)) {
+        return `${parsed.pathname}${parsed.search}`;
+      }
+    }
+  } catch {
+    // not a URL
+  }
+  if (raw.startsWith("api/media/images/")) return `/${raw}`;
+  return null;
 }
 
 export function isAllowedImageContentType(contentType?: string | null) {
@@ -195,7 +219,8 @@ async function writeLimitedStream(
 
 export async function localizeImage(remoteUrl?: string | null, deps: LocalizeImageDeps = {}): Promise<string | null> {
   if (!remoteUrl) return null;
-  if (isLocalImagePath(remoteUrl)) return remoteUrl;
+  const local = canonicalizeLocalImageUrl(remoteUrl);
+  if (local) return local;
 
   const log = (entry: Omit<LocalizeImageLog, "url" | "hostname"> & { url?: string; hostname?: string }) => {
     if (!deps.log) return;

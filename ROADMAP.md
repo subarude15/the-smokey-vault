@@ -89,7 +89,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136 and PR137 are complete; the remaining sequence continues with media workflows, then social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR138 are complete; the remaining sequence continues with event media workflows, then social polish, with branding last after the UX surfaces are stable.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -98,11 +98,11 @@ These are explicitly desired near-term product improvements based on real househ
    - Followed PR136 while the unified Cocktail experience was already being refined.
    - Fixed cocktail card/detail image reliability on phone layouts with constrained cover cropping on tablet/desktop.
    - Present ordered multi-stage instructions from existing `method` text when numbered or newline-delimited; keep generic method labels as a concise fallback. No invented steps; no API schema change.
-3. **PR138 — Keg beer image reliability + Keeper upload rendering**
-   - Close the remaining media/reliability gaps adjacent to the PR135 Taps & Spirits card work while those inventory surfaces are still fresh.
-   - Fix commercial-keg cases where beer artwork is not populated despite an equivalent canned/packaged beer identity being available.
-   - Fix Keeper photo upload so a locally uploaded image renders as media instead of appearing as a hyperlink, including uploads from phones.
-   - Preserve strict beer-identity matching and never overwrite a Keeper-owned image automatically.
+3. **PR138 — Keg beer image reliability + Keeper upload rendering** (done)
+   - Closed the remaining media/reliability gaps adjacent to the PR135 Taps & Spirits card work while those inventory surfaces were still fresh.
+   - Commercial keg enrichment now reuses an exact vault packaged-beer image (same brewery + beer) before/without unnecessary network image work, and prefers product/can artwork ahead of logo fallbacks.
+   - Keeper Choose/Take photo uploads now stay on the durable `/api/media/images/...` path, hide URL mode after upload, and render as `<img>` media on tap cards after save/reload (including phone uploads). Absolute same-origin media URLs are canonicalized instead of being treated as remote links.
+   - Strict beer-identity matching and Keeper image ownership are unchanged; homebrew taps remain excluded from commercial artwork enrichment.
 4. **PR139 — Event image crop / resize controls**
    - Give Keepers a simple way to crop or resize event artwork so uploaded photos display cleanly across cards, detail views, and responsive breakpoints.
    - Preserve the original upload or use a non-destructive derivative path where practical.

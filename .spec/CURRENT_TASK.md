@@ -2,6 +2,6 @@
 
 **Status: idle**
 
-PR135 complete — Taps & Spirits Card / Interaction Ergonomics (Guest-safe card hierarchy plus layered Keeper controls; BottleDetail and existing mutation semantics preserved).
+PR138 complete — Keg beer image reliability + Keeper upload rendering (exact vault packaged-beer artwork reuse for commercial taps; Keeper Choose/Take photo uploads persist and render as media; Keeper ownership and homebrew exclusion preserved).
 
-Next planned code work: **PR136 — Cocktail cards + responsive Keeper workspace refinements**. Final visual and branding polish remains deferred to PR137.
+Next planned code work: **PR139 — Event image crop / resize controls**.
