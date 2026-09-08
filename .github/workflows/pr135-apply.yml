@@ -1,0 +1,32 @@
+name: PR135 one-shot integration
+
+on:
+  push:
+    branches:
+      - chatgpt/pr135-taps-spirits-ergonomics
+    paths:
+      - scripts/pr135-apply.mjs
+      - .github/workflows/pr135-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/pr135-taps-spirits-ergonomics
+          fetch-depth: 0
+      - name: Apply PR135 integration
+        run: node scripts/pr135-apply.mjs
+      - name: Commit integrated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR135: wire tap and spirit inventory cards [skip ci]"
+          git push origin HEAD:chatgpt/pr135-taps-spirits-ergonomics
