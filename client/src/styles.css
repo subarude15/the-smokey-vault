@@ -553,11 +553,26 @@ body.nav-open{overflow:hidden}
 .gallery-tile figcaption small{color:var(--muted);font-size:11px}
 .gallery-stamp{opacity:.75}
 .gallery-delete{position:absolute;top:9px;right:9px;width:32px;height:32px;background:#000000b8}
-.gallery-upload{max-width:520px}
+.gallery-upload{max-width:520px;display:flex;flex-direction:column}
 .gallery-upload label{display:block;margin-bottom:14px}
 .gallery-pick{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .gallery-pick .secondary{flex:1;min-width:190px}
 .gallery-chosen{display:flex;align-items:center;gap:8px;color:var(--accent-2);font-size:13px;margin:0 0 14px}
+.gallery-upload-list{display:flex;flex-direction:column;gap:8px;max-height:min(36vh,280px);overflow:auto;margin:0 0 12px;padding-right:2px;-webkit-overflow-scrolling:touch}
+.gallery-upload-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);min-width:0}
+.gallery-upload-meta{display:flex;align-items:flex-start;gap:8px;min-width:0;flex:1}
+.gallery-upload-kind{flex:0 0 auto;color:var(--accent-2);margin-top:2px}
+.gallery-upload-text{min-width:0;display:flex;flex-direction:column;gap:2px}
+.gallery-upload-name{display:block;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gallery-upload-text small{color:var(--muted);font-size:11px;line-height:1.4;overflow-wrap:anywhere}
+.gallery-upload-side{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.gallery-upload-status{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.gallery-upload-status.is-pending{color:var(--muted)}
+.gallery-upload-status.is-rejected,.gallery-upload-status.is-failed{color:#d98484}
+.gallery-upload-status.is-uploading{color:var(--accent-2)}
+.gallery-upload-status.is-success{color:#89d39a}
+.gallery-upload-summary{margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.4}
+.gallery-upload-actions{position:sticky;bottom:0;background:var(--surface);padding-top:8px;margin-top:4px;z-index:1;flex-wrap:wrap}
 
 /* --------------------------------- Lightbox -------------------------------- */
 .gallery-lightbox{padding:clamp(12px,3vw,40px)}

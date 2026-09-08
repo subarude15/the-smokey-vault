@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Camera, ChevronLeft, ChevronRight, CircleAlert, Download, Film, ImagePlus, Trash2, Upload, X
 } from "lucide-react";
@@ -6,6 +6,23 @@ import { api } from "./api";
 import {
   MAX_GALLERY_BYTES, MAX_GALLERY_CAPTION, MAX_PATRON_NAME, type GalleryMedia, type Patron
 } from "./catalog";
+import {
+  canRemoveGalleryUpload,
+  formatGalleryBatchPartialMessage,
+  formatGalleryBatchSuccessMessage,
+  formatGalleryUploadProgress,
+  formatGalleryUploadSummary,
+  galleryUploadsReadyToSend,
+  isGalleryBatchCompleteSuccess,
+  isVideoFile,
+  megabytes,
+  mergeGallerySelections,
+  prepareGalleryUploadRetry,
+  removeGalleryUpload,
+  setGalleryUploadStatus,
+  summarizeGalleryUploads,
+  type PendingGalleryUpload
+} from "./gallery-upload";
 
 const ACCEPTED = "image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime";
 
@@ -13,10 +30,6 @@ function stamp(iso: string) {
   const parsed = new Date(iso.includes("T") ? iso : `${iso.replace(" ", "T")}Z`);
   if (Number.isNaN(parsed.getTime())) return iso;
   return parsed.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
-function megabytes(bytes: number) {
-  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
 
 export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName: string }) {
@@ -72,7 +85,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
 
     <div className="gallery-toolbar">
       <button type="button" className="primary" onClick={() => setUploadOpen(true)}>
-        <Camera size={17}/> Add a photo or clip
+        <Camera size={17}/> Add photos or clips
       </button>
       <span className="gallery-count">{media.length} {media.length === 1 ? "memory" : "memories"}</span>
     </div>
@@ -96,7 +109,9 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
 
     {uploadOpen && <UploadModal
       close={() => setUploadOpen(false)}
+      refresh={load}
       done={(message) => { setUploadOpen(false); setNotice(message); load(); }}
+      notify={setNotice}
     />}
 
     {active && <div className="modal-backdrop gallery-lightbox" role="dialog" aria-modal="true" aria-label="Gallery viewer">
@@ -124,13 +139,39 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
   </>;
 }
 
-function UploadModal({ close, done }: { close: () => void; done: (message: string) => void }) {
+function statusLabel(item: PendingGalleryUpload): string {
+  switch (item.status) {
+    case "pending": return "Ready";
+    case "rejected": return "Too large";
+    case "uploading": return "Uploading…";
+    case "success": return "Uploaded";
+    case "failed": return "Failed";
+    default: {
+      const _exhaustive: never = item.status;
+      return _exhaustive;
+    }
+  }
+}
+
+function UploadModal({
+  close,
+  done,
+  refresh,
+  notify
+}: {
+  close: () => void;
+  done: (message: string) => void;
+  refresh: () => void;
+  notify: (message: string) => void;
+}) {
   const [names, setNames] = useState<string[]>([]);
-  const [file, setFile] = useState<File | null>(null);
+  const [items, setItems] = useState<PendingGalleryUpload[]>([]);
   const [name, setName] = useState("");
   const [caption, setCaption] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [batchNote, setBatchNote] = useState("");
   const cameraRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
 
@@ -140,66 +181,247 @@ function UploadModal({ close, done }: { close: () => void; done: (message: strin
       .catch(() => setNames([]));
   }, []);
 
+  const counts = summarizeGalleryUploads(items);
+  const uploadable = galleryUploadsReadyToSend(items);
+  const canSubmit = !busy && uploadable.length > 0;
+  const canRetry = !busy && counts.failed > 0 && counts.pending === 0 && counts.uploading === 0;
+
   function choose(list: FileList | null) {
-    const picked = list?.[0] ?? null;
-    if (!picked) return;
-    if (picked.size > MAX_GALLERY_BYTES) {
-      setError(`That file is ${megabytes(picked.size)}. The limit is ${megabytes(MAX_GALLERY_BYTES)}.`);
-      setFile(null);
-      return;
-    }
+    if (!list?.length) return;
+    // Snapshot before clearing the input: FileList is live, and React may run
+    // the setItems updater after value="" empties the list.
+    const picked = Array.from(list);
     setError("");
-    setFile(picked);
+    setBatchNote("");
+    setItems((prev) => mergeGallerySelections(prev, picked, MAX_GALLERY_BYTES));
+    if (cameraRef.current) cameraRef.current.value = "";
+    if (pickerRef.current) pickerRef.current.value = "";
   }
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!file) return;
+  function removeItem(id: string) {
+    setItems((prev) => removeGalleryUpload(prev, id));
+    setBatchNote("");
+  }
+
+  async function uploadPending(current: PendingGalleryUpload[]) {
+    const queue = galleryUploadsReadyToSend(current);
+    if (!queue.length) return { successDelta: 0, failedDelta: 0, finalItems: current };
+
+    const uploadedBy = name.trim() || "Patron";
+    const sharedCaption = caption.trim();
+    let working = current;
+    let successDelta = 0;
+    let failedDelta = 0;
+    const total = queue.length;
+
     setBusy(true);
     setError("");
-    try {
-      const body = new FormData();
-      // Text fields must precede the file so the server sees them while streaming.
-      body.append("uploaded_by", name.trim() || "Patron");
-      body.append("caption", caption.trim());
-      body.append("media", file);
-      await api<GalleryMedia>("/gallery/upload", { method: "POST", body });
-      done("Added to the gallery");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload that");
-    } finally {
-      setBusy(false);
+    setBatchNote("");
+
+    for (let index = 0; index < queue.length; index += 1) {
+      const item = queue[index];
+      setProgress(formatGalleryUploadProgress(index + 1, total));
+      working = setGalleryUploadStatus(working, item.id, "uploading");
+      setItems(working);
+
+      try {
+        const body = new FormData();
+        // Text fields must precede the file so the server sees them while streaming.
+        body.append("uploaded_by", uploadedBy);
+        body.append("caption", sharedCaption);
+        body.append("media", item.file);
+        await api<GalleryMedia>("/gallery/upload", { method: "POST", body });
+        working = setGalleryUploadStatus(working, item.id, "success");
+        successDelta += 1;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not upload that";
+        working = setGalleryUploadStatus(working, item.id, "failed", message);
+        failedDelta += 1;
+      }
+      setItems(working);
+    }
+
+    setBusy(false);
+    setProgress("");
+    return { successDelta, failedDelta, finalItems: working };
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!uploadable.length) return;
+
+    const { successDelta, failedDelta, finalItems } = await uploadPending(items);
+    const finalCounts = summarizeGalleryUploads(finalItems);
+
+    if (isGalleryBatchCompleteSuccess(finalCounts)) {
+      done(formatGalleryBatchSuccessMessage(finalCounts.success));
+      return;
+    }
+
+    if (successDelta > 0) refresh();
+
+    if (finalCounts.failed > 0) {
+      const note = formatGalleryBatchPartialMessage(finalCounts.success, finalCounts.failed);
+      setBatchNote(note);
+      notify(note);
+      return;
+    }
+
+    if (finalCounts.rejected > 0) {
+      const note = formatGalleryUploadSummary(finalCounts);
+      setBatchNote(note);
+      notify(note);
+      return;
+    }
+
+    if (!successDelta && !failedDelta) {
+      setError("Nothing to upload. Remove oversized files or choose photos again.");
+    }
+  }
+
+  async function retryFailed() {
+    const prepared = prepareGalleryUploadRetry(items);
+    setItems(prepared);
+    const { successDelta, failedDelta, finalItems } = await uploadPending(prepared);
+    const finalCounts = summarizeGalleryUploads(finalItems);
+
+    if (isGalleryBatchCompleteSuccess(finalCounts)) {
+      done(formatGalleryBatchSuccessMessage(finalCounts.success));
+      return;
+    }
+
+    if (successDelta > 0) refresh();
+
+    if (finalCounts.failed > 0) {
+      const note = formatGalleryBatchPartialMessage(finalCounts.success, finalCounts.failed);
+      setBatchNote(note);
+      notify(note);
+      return;
+    }
+
+    if (finalCounts.rejected > 0) {
+      const note = formatGalleryUploadSummary(finalCounts);
+      setBatchNote(note);
+      notify(note);
     }
   }
 
   return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Add to the gallery">
-    <form className="modal gallery-upload" onSubmit={submit}>
+    <form className="modal gallery-upload" onSubmit={(event) => void submit(event)}>
       <header className="modal-header">
-        <div><span className="eyebrow">ADD TO THE WALL</span><h2>Share tonight.</h2><p>Photos and short clips, up to {megabytes(MAX_GALLERY_BYTES)}.</p></div>
-        <button type="button" className="icon-button" onClick={close} aria-label="Close"><X/></button>
+        <div>
+          <span className="eyebrow">ADD TO THE WALL</span>
+          <h2>Share tonight.</h2>
+          <p>Choose several photos or clips from your device. Each item can be up to {megabytes(MAX_GALLERY_BYTES)}.</p>
+        </div>
+        <button type="button" className="icon-button" onClick={close} aria-label="Close" disabled={busy}><X/></button>
       </header>
 
       <div className="gallery-pick">
-        <button type="button" className="secondary" onClick={() => cameraRef.current?.click()}><Camera size={17}/> Take a photo or video</button>
-        <button type="button" className="secondary" onClick={() => pickerRef.current?.click()}><ImagePlus size={17}/> Choose from device</button>
-        <input ref={cameraRef} type="file" accept={ACCEPTED} capture="environment" hidden onChange={(e) => choose(e.target.files)}/>
-        <input ref={pickerRef} type="file" accept={ACCEPTED} hidden onChange={(e) => choose(e.target.files)}/>
+        <button type="button" className="secondary" disabled={busy} onClick={() => cameraRef.current?.click()}>
+          <Camera size={17}/> Take a photo or video
+        </button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => pickerRef.current?.click()}>
+          <ImagePlus size={17}/> Choose from device
+        </button>
+        <input
+          ref={cameraRef}
+          type="file"
+          accept={ACCEPTED}
+          capture="environment"
+          hidden
+          onChange={(e) => choose(e.target.files)}
+        />
+        <input
+          ref={pickerRef}
+          type="file"
+          accept={ACCEPTED}
+          multiple
+          hidden
+          onChange={(e) => choose(e.target.files)}
+        />
       </div>
 
-      {file && <p className="gallery-chosen">{file.type.startsWith("video/") ? <Film size={15}/> : <ImagePlus size={15}/>} {file.name} · {megabytes(file.size)}</p>}
+      {items.length > 0 && (
+        <div className="gallery-upload-list" role="list" aria-label="Selected uploads">
+          {items.map((item) => (
+            <div className={`gallery-upload-row is-${item.status}`} role="listitem" key={item.id}>
+              <div className="gallery-upload-meta">
+                <span className="gallery-upload-kind" aria-hidden="true">
+                  {isVideoFile(item.file) ? <Film size={15}/> : <ImagePlus size={15}/>}
+                </span>
+                <div className="gallery-upload-text">
+                  <strong className="gallery-upload-name">{item.file.name}</strong>
+                  <small>
+                    {isVideoFile(item.file) ? "Video" : "Photo"} · {megabytes(item.file.size)}
+                    {item.error ? ` · ${item.error}` : ""}
+                  </small>
+                </div>
+              </div>
+              <div className="gallery-upload-side">
+                <span className={`gallery-upload-status is-${item.status}`}>{statusLabel(item)}</span>
+                {canRemoveGalleryUpload(item) && !busy ? (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remove ${item.file.name}`}
+                    onClick={() => removeItem(item.id)}
+                  >
+                    <X size={14}/>
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(progress || batchNote || counts.total > 0) && (
+        <p className="gallery-upload-summary" aria-live="polite">
+          {progress || batchNote || formatGalleryUploadSummary(counts)}
+        </p>
+      )}
 
       <label><span>Your name</span>
-        <input list="gallery-patron-names" autoComplete="off" value={name} maxLength={MAX_PATRON_NAME} onChange={(e) => setName(e.target.value)} placeholder="Regulars: start typing"/>
+        <input
+          list="gallery-patron-names"
+          autoComplete="off"
+          value={name}
+          maxLength={MAX_PATRON_NAME}
+          disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Regulars: start typing"
+        />
         <datalist id="gallery-patron-names">{names.map((entry) => <option key={entry} value={entry}/>)}</datalist>
       </label>
       <label><span>Caption</span>
-        <input value={caption} maxLength={MAX_GALLERY_CAPTION} onChange={(e) => setCaption(e.target.value)} placeholder="Optional"/>
+        <input
+          value={caption}
+          maxLength={MAX_GALLERY_CAPTION}
+          disabled={busy}
+          onChange={(e) => setCaption(e.target.value)}
+          placeholder="Optional — applied to every item"
+        />
       </label>
 
-      {error ? <p className="error">{error}</p> : null}
-      <footer className="modal-footer">
-        <button type="button" className="secondary" onClick={close}>Cancel</button>
-        <button className="primary" disabled={busy || !file}><Upload size={16}/> {busy ? "Uploading…" : "Add to gallery"}</button>
+      {error ? <p className="error" role="alert">{error}</p> : null}
+      <footer className="modal-footer gallery-upload-actions">
+        <button type="button" className="secondary" onClick={close} disabled={busy}>
+          {counts.failed > 0 && counts.success > 0 ? "Close" : "Cancel"}
+        </button>
+        {canRetry ? (
+          <button type="button" className="secondary" onClick={() => void retryFailed()}>
+            Retry failed
+          </button>
+        ) : null}
+        <button className="primary" disabled={!canSubmit}>
+          <Upload size={16}/>
+          {busy
+            ? (progress || "Uploading…")
+            : uploadable.length > 1
+              ? `Add ${uploadable.length} to gallery`
+              : "Add to gallery"}
+        </button>
       </footer>
     </form>
   </div>;
