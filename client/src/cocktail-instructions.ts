@@ -153,8 +153,20 @@ function methodCategory(method: string): MethodCategory {
   return "generic";
 }
 
+/** Coffee-flavored liqueurs are cold ingredients, not the hot beverage. */
+const COFFEE_LIQUEUR = /coffee liqueur|coffee liquor|espresso liqueur|coffee bean|kahl|tia maria/;
+
+/** True when a single ingredient line genuinely represents a hot beverage/liquid. */
+function ingredientImpliesHot(line: string): boolean {
+  const value = line.toLowerCase();
+  if (/\bhot water\b|\bboiling\b|\bhot tea\b|\bhot milk\b|\bhot cider\b/.test(value)) return true;
+  // "coffee" only counts as hot when it is the beverage — not a coffee liqueur.
+  if (/\bcoffee\b/.test(value)) return !COFFEE_LIQUEUR.test(value);
+  return false;
+}
+
 function isHotBuild(ingredients: string[]): boolean {
-  return ingredients.some((line) => /\bhot water\b|\bcoffee\b|\bboiling\b|\bhot tea\b|\bhot milk\b/i.test(line));
+  return ingredients.some(ingredientImpliesHot);
 }
 
 /**

@@ -139,6 +139,39 @@ test("short instructional prose is preserved, never mistaken for a bare label", 
   }
 });
 
+test("coffee LIQUEUR does not make a Build cocktail hot (cold rocks-glass build)", () => {
+  const isCold = (ingredients: string[]) => {
+    const steps = buildCocktailSteps({ method: "Build", glassware: "Rocks", ingredients }).join(" ");
+    assert.match(steps, /fill a rocks glass with ice/i, `expected iced build for ${ingredients.join(", ")}`);
+    assert.doesNotMatch(steps, /warmed|serve hot/i, `must not be a hot build for ${ingredients.join(", ")}`);
+  };
+  // coffee liqueur alone
+  isCold(["20 ml coffee liqueur"]);
+  // Kahlúa / coffee liqueur phrasing
+  isCold(["20 ml Kahlúa coffee liqueur"]);
+  isCold(["20 ml Kahlúa"]);
+  // White Russian ingredients
+  isCold(["50 ml vodka", "20 ml coffee liqueur", "30 ml cream"]);
+  // Black Russian ingredients
+  isCold(["50 ml vodka", "20 ml coffee liqueur"]);
+});
+
+test("genuine hot beverages still produce a hot Build", () => {
+  const isHot = (ingredients: string[]) => {
+    const steps = buildCocktailSteps({ method: "Build", glassware: "Mug", ingredients }).join(" ");
+    assert.match(steps, /warmed mug|serve hot/i, `expected hot build for ${ingredients.join(", ")}`);
+    assert.doesNotMatch(steps, /with ice/i, `hot build must not add ice for ${ingredients.join(", ")}`);
+  };
+  isHot(["45 ml whiskey", "hot water"]);
+  isHot(["45 ml rum", "hot coffee"]);
+  // Real coffee as the beverage (Irish Coffee style)
+  isHot(["50 ml Irish whiskey", "120 ml coffee", "50 ml cream", "1 tsp sugar"]);
+  isHot(["45 ml whiskey", "brewed coffee"]);
+  isHot(["45 ml rum", "hot tea"]);
+  isHot(["45 ml bourbon", "hot milk"]);
+  isHot(["45 ml rum", "boiling water"]);
+});
+
 test("genuine technique labels are recognized regardless of case/trailing period", () => {
   for (const label of ["Build", "Shake", "Stir", "Shake and top", "Shake hard and top", "Muddle and build"]) {
     assert.equal(isCocktailMethodLabel(label), true, `${label} is a technique label`);
