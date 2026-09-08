@@ -7,7 +7,7 @@ Short project context for maintainers and coding agents. Update this file when a
 The Smokey Vault is a private, self-hosted home-bar appliance for a LAN kiosk and guest phones. It covers:
 
 - Inventory: spirits (Bottle Library), wine cellar, packaged beer, draft taps, and homebrew log
-- Guest Mode: digital bar menu / speakeasy portal (cocktails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
+- Guest Mode: digital bar menu / speakeasy portal (cockails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
 - Keeper Mode: PIN unlock for scanning, enrichment, import review, restock, settings, and safe per-item deletion
 - Cocktail matcher, substitutions, and optional AI mixologist
 - Brewery Lab with optional Brewfather sync
@@ -106,7 +106,16 @@ These are explicitly desired near-term product improvements based on real househ
    - Preserve the Mixologist panel/functionality inside the unified cocktail page and retain any useful `mixologist` → `cocktails` compatibility alias.
    - Keep this as a small landing-page cleanup; do not redesign cocktail discovery or the home page.
 
-4. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+4. **PR131 — Gallery albums for parties and special nights.**
+   - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
+   - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
+   - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.
+   - Allow Keepers to create, rename, and delete albums and move existing media between them; album deletion must not silently destroy media without an explicit, safe disposition.
+   - Guests and Keepers should be able to choose an existing album during upload; do not require a separate storage path per role.
+   - Design the schema so an album can be linked to a Speakeasy event later, but do not implement automatic event ↔ album linking in this PR.
+   - Preserve current gallery listing/lightbox/download/delete behavior inside albums; do not add face recognition, automatic tagging, cloud photo-service integrations, or a broader media-management redesign.
+
+5. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
