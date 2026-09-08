@@ -30,7 +30,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
-- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. Track C product work continues at **PR140**.
+- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. Track C product work continues at **PR143**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -91,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR140 are complete; the remaining product sequence continues with landing/feedback visibility, then Gallery media/social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR142 are complete; the remaining product sequence continues with Gallery media/social polish, with branding last after the UX surfaces are stable.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -113,24 +113,27 @@ These are explicitly desired near-term product improvements based on real househ
    - Keepers can Adjust photo in the event editor: drag/nudge reposition, zoom, reset, and card/detail previews.
    - Framing is non-destructive optional metadata (`image_focal_x` / `image_focal_y` / `image_zoom`); original `image_url` is never rewritten for crop.
    - Cards and detail heroes share the same normalized framing via CSS `object-fit: cover` + `object-position` + scale. Shared `ImageField` upload flows are unchanged.
-6. **PR141 — Conditional landing-page “Give us your two cents” visibility**
-   - When the underlying feedback/messages tab is disabled in configuration, remove its matching landing-page card/CTA too.
-   - Keep tab visibility and landing-page visibility driven by the same source of truth so they cannot drift.
-7. **PR142 — Video thumbnails in the Gallery/Library**
+6. **PR141 — Cloud Agent development environment config** (done)
+   - Tooling/chore PR that consumed GitHub #141 (`cursor/setup-dev-environment-006e`).
+   - No product behavior change; later Track C product items shift forward by one.
+7. **PR142 — Conditional landing-page “Give us your 2 cents” visibility** (done)
+   - Overview “Give us your 2 cents” CTA now follows the same `pageEnabled("next")` / `PAGE_TAB → whatsnext` rule as Guest nav — no second flag.
+   - When `whatsnext` is off, Guests lose both the Feedback destination and the landing CTA; re-enabling restores both. Keeper Settings access is unchanged.
+8. **PR143 — Video thumbnails in the Gallery/Library**
    - Generate or display useful poster thumbnails for uploaded videos instead of generic media placeholders.
    - Keep mobile performance in mind; do not force full video download just to render the grid.
-8. **PR143 — Keeper large-video upload path**
-   - Build on the Gallery/video presentation work from PR142 by making larger Keeper video uploads operationally safe and understandable.
+9. **PR144 — Keeper large-video upload path**
+   - Build on the Gallery/video presentation work from PR143 by making larger Keeper video uploads operationally safe and understandable.
    - Allow Keepers to upload substantially larger video files than Guests without removing all operational safeguards.
    - Use explicit Keeper-only limits/configuration, streaming upload handling, and clear failure feedback rather than an unbounded in-memory upload path.
-9. **PR144 — Gallery comments + up/down voting**
+10. **PR145 — Gallery comments + up/down voting**
    - Add social interaction after Gallery media display/upload behavior is stable.
    - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
    - Design simple abuse/duplicate-vote safeguards appropriate to this private household app; Keeper moderation/removal must remain available.
-10. **PR145 — Visual system / Smokey Barrel branding polish**
+11. **PR146 — Visual system / Smokey Barrel branding polish**
    - Apply final typography, color, surface, and brand expression only after the interaction, responsive, and media patterns above are stable.
    - Reconcile any useful direction from deferred draft #121; keep Light/Dark as the supported appearance model.
-11. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+12. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -142,7 +145,7 @@ These are explicitly desired near-term product improvements based on real househ
 
 ## Relevant code
 
-- `client/src/shell-nav.ts` — pure shell navigation helpers (primary/More selection, Guest/Keeper partition, tab visibility/order).
+- `client/src/shell-nav.ts` — pure shell navigation helpers (primary/More selection, Guest/Keeper partition, tab visibility/order); PR142 `landingFeedbackCtaEnabled` shares `pageEnabled("next")` with Guest nav.
 - `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path.
 - `client/src/api.ts` — shared client fetch helper, Keeper bearer storage, and central authenticated-401 → session-rejected signal.
 - `client/src/App.tsx` — responsive shell (phone bottom nav / rail), bottle-detail route, Keeper actions, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).

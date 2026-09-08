@@ -5,30 +5,31 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR140** — Event image crop / resize controls. Non-destructive focal X/Y + zoom framing for event artwork; Keeper Adjust photo in the event editor draft; cards/detail share CSS framing. Shared `ImageField` unchanged.
+- **PR142** — Conditional landing-page “Give us your 2 cents” visibility. Overview CTA uses the same `pageEnabled("next")` / `PAGE_TAB → whatsnext` rule as Guest nav (via `landingFeedbackCtaEnabled`); no second flag. Keeper Settings access unchanged. (GitHub #141 was a Cloud Agent env chore, so this product work is #142.)
 
 Currently working on:
 - None.
 
 Next planned:
-- **PR141 — Conditional landing-page “Give us your two cents” visibility** (`ROADMAP.md` Track C).
+- **PR143 — Video thumbnails in the Gallery/Library** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
 - Guest inventory/enrichment responses stay server-allowlisted (`guest-inventory-response`); coarse availability only.
 - Shared `ImageField` / `images` media path is the default for Keeper uploads; do not add parallel upload systems per feature.
 - Event photo framing is event-only metadata (`image_focal_x` / `image_focal_y` / `image_zoom`) applied with CSS — never bake crop into the uploaded file via `ImageField`.
+- Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
 - Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
 - Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
 - Appearance support is Light + Dark only (PR127).
 - App routing remains state-based in `App.tsx` (no React Router for primary navigation).
-- GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR139 docs → product crop work is PR140).
+- GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR141 chore → feedback CTA visibility is PR142).
 
 ## Known issues / follow-ups
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
-- Draft **#121** branding docs remain deferred until PR145.
+- Draft **#121** branding docs remain deferred until PR146.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
 
 ## Handoff

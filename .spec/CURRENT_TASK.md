@@ -2,6 +2,6 @@
 
 **Status: idle**
 
-PR140 complete — Event image crop / resize controls (non-destructive focal/zoom framing; event-only Adjust photo; shared ImageField unchanged).
+PR142 complete — Conditional landing-page “Give us your 2 cents” visibility (Overview CTA shares `pageEnabled("next")` / `whatsnext` with Guest nav). GitHub #141 was a Cloud Agent env chore, so this product work shipped as #142.
 
-Next planned product work: **PR141 — Conditional landing-page “Give us your two cents” visibility**.
+Next planned product work: **PR143 — Video thumbnails in the Gallery/Library**.
