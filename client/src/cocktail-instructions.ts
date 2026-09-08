@@ -141,6 +141,14 @@ function garnishStep(garnish: unknown): string {
   return `Garnish with ${lead} and serve.`;
 }
 
+/**
+ * Glasses served "up"/neat with no ice in the serving vessel (flute, coupe,
+ * martini, Nick & Nora). Build/top templates must not add ice to these.
+ */
+function isUpServedGlass(glassware: unknown): boolean {
+  return /\b(flute|coupe|martini|nick)\b/.test(String(glassware ?? "").toLowerCase());
+}
+
 type MethodCategory = "muddle" | "shakeTop" | "shake" | "stir" | "build" | "generic";
 
 function methodCategory(method: string): MethodCategory {
@@ -198,7 +206,9 @@ export function buildCocktailSteps(recipe: CocktailRecipeForSteps): string[] {
       return [
         "Add the non-sparkling ingredients to a shaker with ice.",
         "Shake until well chilled.",
-        `Strain into a ${glass} over fresh ice.`,
+        isUpServedGlass(recipe.glassware)
+          ? `Strain into a chilled ${glass}.`
+          : `Strain into a ${glass} over fresh ice.`,
         "Top with the sparkling ingredient (soda, tonic, or sparkling wine).",
         garnish
       ];
@@ -217,6 +227,13 @@ export function buildCocktailSteps(recipe: CocktailRecipeForSteps): string[] {
           garnish
         ];
       }
+      if (isUpServedGlass(recipe.glassware)) {
+        return [
+          `Add the measured ingredients to a chilled ${glass}.`,
+          "Stir gently to combine.",
+          garnish
+        ];
+      }
       return [
         `Fill a ${glass} with ice.`,
         "Add the measured ingredients.",
@@ -225,6 +242,13 @@ export function buildCocktailSteps(recipe: CocktailRecipeForSteps): string[] {
       ];
     case "generic":
     default:
+      if (isUpServedGlass(recipe.glassware)) {
+        return [
+          `Add the measured ingredients to a chilled ${glass}.`,
+          "Stir gently until combined.",
+          garnish
+        ];
+      }
       return [
         `Fill a ${glass} with ice.`,
         "Add the measured ingredients.",

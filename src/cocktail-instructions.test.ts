@@ -156,6 +156,31 @@ test("coffee LIQUEUR does not make a Build cocktail hot (cold rocks-glass build)
   isCold(["50 ml vodka", "20 ml coffee liqueur"]);
 });
 
+test("up-served glasses (flute/coupe/martini) never get ice in the serving glass", () => {
+  const noIce = (steps: string[], label: string) => {
+    const joined = steps.join(" ");
+    // Ice in the shaker is fine; the serving glass must not be iced.
+    assert.doesNotMatch(joined, /over fresh ice/i, `${label} must not strain over ice: ${joined}`);
+    assert.doesNotMatch(joined, /fill a [\w ]*with ice/i, `${label} must not fill the glass with ice: ${joined}`);
+    assert.match(joined, /chilled/i, `${label} should use a chilled glass`);
+  };
+  // French 75 — Shake and top into a flute (no ice).
+  noIce(buildCocktailSteps({ method: "Shake and top", glassware: "Flute", garnish: "Lemon twist" }), "French 75");
+  // Mimosa — Build into a flute (no ice).
+  noIce(buildCocktailSteps({ method: "Build", glassware: "Flute" }), "Mimosa");
+  // Champagne Cocktail — Build into a flute (no ice).
+  noIce(buildCocktailSteps({ method: "Build", glassware: "Flute", garnish: "Lemon twist" }), "Champagne Cocktail");
+  // Empty method into a coupe (generic) — still no ice.
+  noIce(buildCocktailSteps({ method: "", glassware: "Coupe" }), "generic coupe");
+});
+
+test("iced glasses (highball/rocks) still get ice for Build and Shake-and-top", () => {
+  const mule = buildCocktailSteps({ method: "Build", glassware: "Mug", garnish: "Lime", ingredients: ["45 ml vodka", "ginger beer"] }).join(" ");
+  assert.match(mule, /fill a mug with ice/i);
+  const collins = buildCocktailSteps({ method: "Shake and top", glassware: "Highball" }).join(" ");
+  assert.match(collins, /over fresh ice/i);
+});
+
 test("genuine hot beverages still produce a hot Build", () => {
   const isHot = (ingredients: string[]) => {
     const steps = buildCocktailSteps({ method: "Build", glassware: "Mug", ingredients }).join(" ");
