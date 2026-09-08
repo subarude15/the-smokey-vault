@@ -58,6 +58,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR125 — Commercial tap beer enrichment using official packaged-beer identity/image discovery, strict homebrew exclusion, and Keeper-safe fill-missing updates.
 - PR126 — Keeper event editing, published-event deep links, guest-safe event detail access, and Web Share / copy-link behavior.
 - PR127 — Appearance simplified to Light + Dark only; Punk and Angel’s Share themes/CSS/preview removed with safe fallback for obsolete persisted values.
+- PR128 — Gallery bulk photo/clip upload for Guests and Keepers via multi-select + repeated single-file uploads with per-file status and retry.
 
 ## Next work
 
@@ -80,17 +81,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR128 — Gallery bulk photo upload for Guests and Keepers.**
-   - Extend the existing public gallery upload flow from one media file at a time to multi-select / bulk photo upload.
-   - Keep guest uploads allowed exactly as today; Keeper does not need a separate gallery storage path.
-   - Support selecting many photos in one action and upload them with clear per-file progress/success/failure feedback so one bad file does not discard the rest of the batch.
-   - Reuse `saveGalleryUpload`, existing media-type validation, size limits, filenames, gallery persistence, and public upload safety rules.
-   - Prefer repeated bounded uploads or a narrowly designed batch endpoint; do not introduce archive/ZIP ingestion unless there is a demonstrated need.
-   - Preserve existing single-upload compatibility and Keeper delete controls.
-   - Mobile photo-picker UX matters: multi-select from an iPhone/Android photo library should be a first-class path.
-   - Do not add face recognition, automatic tagging, or cloud photo-service integrations in this PR.
-
-2. **PR129 — Cocktail recipe-card imagery.**
+1. **PR129 — Cocktail recipe-card imagery.**
    - Cocktails already support `image_url`; improve coverage by finding a useful cocktail image when a recipe has no image.
    - First reuse images from an imported recipe’s authoritative/source page when available and safe; do not overwrite an existing Keeper/imported cocktail image.
    - For built-in/manual recipes with no source image, investigate a conservative image-discovery path using cocktail name + recipe identity. Prefer authoritative recipe/original-source imagery where it can be tied confidently to that exact drink.
@@ -100,13 +91,13 @@ These are explicitly desired near-term product improvements based on real househ
    - Guest recipe cards/detail views should naturally render the discovered/localized image through the existing `image_url` field.
    - No new generic image-enrichment platform unless repository inspection proves a small reusable helper is genuinely needed.
 
-3. **PR130 — Remove duplicate Mixologist landing card.**
+2. **PR130 — Remove duplicate Mixologist landing card.**
    - `What Can I Make?` and `Ask the Mixologist` already share the same unified cocktail discovery page.
    - Remove the redundant standalone `Ask the Mixologist` feature card from the main guest landing page and keep `What Can I Make?` as the single entry point.
    - Preserve the Mixologist panel/functionality inside the unified cocktail page and retain any useful `mixologist` → `cocktails` compatibility alias.
    - Keep this as a small landing-page cleanup; do not redesign cocktail discovery or the home page.
 
-4. **PR131 — Gallery albums for parties and special nights.**
+3. **PR131 — Gallery albums for parties and special nights.**
    - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
    - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
    - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.
@@ -115,7 +106,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Design the schema so an album can be linked to a Speakeasy event later, but do not implement automatic event ↔ album linking in this PR.
    - Preserve current gallery listing/lightbox/download/delete behavior inside albums; do not add face recognition, automatic tagging, cloud photo-service integrations, or a broader media-management redesign.
 
-5. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+4. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -129,7 +120,8 @@ These are explicitly desired near-term product improvements based on real househ
 
 - `client/src/App.tsx` — bottle-detail route, Keeper actions, appearance toggle, cocktail UI, and current Speakeasy/event entry points.
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
-- `client/src/GalleryPage.tsx` — current single-file guest/Keeper gallery upload UI.
+- `client/src/GalleryPage.tsx` — guest/Keeper gallery grid, lightbox, and multi-select batch upload UI.
+- `client/src/gallery-upload.ts` — pure Gallery batch-selection / per-file status helpers.
 - `client/src/guestAvailability.ts` — guest-safe availability percentage/gauge helpers (product behavior from PR97).
 - `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
