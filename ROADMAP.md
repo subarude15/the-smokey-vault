@@ -20,7 +20,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - Node.js 24, TypeScript, Fastify, React, and SQLite.
 - CI runs the full test suite, production build, catalog runtime checks, and Docker catalog verification.
 - Packaged-beer correctness through GitHub PR #119 is merged.
-- After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before this docs PR.
+- After #119, Keeper enrichment clarity and bottle-detail visual refinement (plus an EnrichmentPanel Hooks ordering fix) landed as direct commits on `main` before PR139.
 - PR #122 hardened the Guest API trust boundary with server-side inventory/enrichment redaction.
 - PR #124 made Brewery Lab guest-friendly and Keeper-editable while preserving one-way Brewfather ownership of brewing telemetry.
 - PR #125 added commercial-tap beer identity/image enrichment with strict official matching, fill-missing Keeper preservation, and explicit Brewery Lab/homebrew exclusion.
@@ -29,6 +29,8 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #133 clears Keeper Mode immediately when an authenticated client request receives HTTP 401, instead of leaving Keeper UI until the kiosk idle timeout.
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
+- PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
+- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. Track C product work continues at **PR140**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -89,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR138 are complete; the remaining sequence continues with event media workflows, then social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR139 are complete; the remaining product sequence continues with event media workflows, then social polish, with branding last after the UX surfaces are stable.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -103,27 +105,31 @@ These are explicitly desired near-term product improvements based on real househ
    - Commercial keg enrichment now reuses an exact vault packaged-beer image (same brewery + beer) before/without unnecessary network image work, and prefers product/can artwork ahead of logo fallbacks.
    - Keeper Choose/Take photo uploads now stay on the durable `/api/media/images/...` path, hide URL mode after upload, and render as `<img>` media on tap cards after save/reload (including phone uploads). Absolute same-origin media URLs are canonicalized instead of being treated as remote links.
    - Strict beer-identity matching and Keeper image ownership are unchanged; homebrew taps remain excluded from commercial artwork enrichment.
-4. **PR139 — Event image crop / resize controls**
+4. **PR139 — Repository AI agent context / durable handoff setup** (done)
+   - Added `AGENTS.md` and `CURRENT_STATE.md` so future coding agents can start from the repository without large chat-history handoffs.
+   - Aligned roadmap PR numbers with authoritative GitHub PR numbers (former product PR139+ shifted forward by one).
+   - Documentation only; no application behavior change.
+5. **PR140 — Event image crop / resize controls**
    - Give Keepers a simple way to crop or resize event artwork so uploaded photos display cleanly across cards, detail views, and responsive breakpoints.
    - Preserve the original upload or use a non-destructive derivative path where practical.
-5. **PR140 — Conditional landing-page “Give us your two cents” visibility**
+6. **PR141 — Conditional landing-page “Give us your two cents” visibility**
    - When the underlying feedback/messages tab is disabled in configuration, remove its matching landing-page card/CTA too.
    - Keep tab visibility and landing-page visibility driven by the same source of truth so they cannot drift.
-6. **PR141 — Video thumbnails in the Gallery/Library**
+7. **PR142 — Video thumbnails in the Gallery/Library**
    - Generate or display useful poster thumbnails for uploaded videos instead of generic media placeholders.
    - Keep mobile performance in mind; do not force full video download just to render the grid.
-7. **PR142 — Keeper large-video upload path**
-   - Build on the Gallery/video presentation work from PR141 by making larger Keeper video uploads operationally safe and understandable.
+8. **PR143 — Keeper large-video upload path**
+   - Build on the Gallery/video presentation work from PR142 by making larger Keeper video uploads operationally safe and understandable.
    - Allow Keepers to upload substantially larger video files than Guests without removing all operational safeguards.
    - Use explicit Keeper-only limits/configuration, streaming upload handling, and clear failure feedback rather than an unbounded in-memory upload path.
-8. **PR143 — Gallery comments + up/down voting**
+9. **PR144 — Gallery comments + up/down voting**
    - Add social interaction after Gallery media display/upload behavior is stable.
    - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
    - Design simple abuse/duplicate-vote safeguards appropriate to this private household app; Keeper moderation/removal must remain available.
-9. **PR144 — Visual system / Smokey Barrel branding polish**
+10. **PR145 — Visual system / Smokey Barrel branding polish**
    - Apply final typography, color, surface, and brand expression only after the interaction, responsive, and media patterns above are stable.
-   - Reconcile any useful direction from deferred draft PR121; keep Light/Dark as the supported appearance model.
-10. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+   - Reconcile any useful direction from deferred draft #121; keep Light/Dark as the supported appearance model.
+11. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -194,6 +200,7 @@ Use fresh records for pipeline testing. Review cleanup candidates first, then re
 
 ## Agent source of truth
 
+- Prefer `AGENTS.md` and `CURRENT_STATE.md` for durable agent rules and the short rolling handoff.
 - Prefer this file and `README.md` for product plan and ops.
 - `.spec/target-state.md` describes shipped appliance boundaries.
 - `.spec/CURRENT_TASK.md` is the active agent brief only when a task is assigned; otherwise it should say idle.

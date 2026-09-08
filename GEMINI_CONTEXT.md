@@ -6,11 +6,13 @@ Line counts, test totals, API inventories, and “current work” claims that us
 
 ## Source of truth
 
-1. [`ROADMAP.md`](ROADMAP.md) — product plan, non-negotiables, next tracks, deferred work
-2. [`README.md`](README.md) — runbook, Docker/NAS ops, env integrations
-3. [`.spec/target-state.md`](.spec/target-state.md) — shipped appliance boundaries
-4. [`.spec/CURRENT_TASK.md`](.spec/CURRENT_TASK.md) — active agent brief only when a task is assigned
-5. [`.env.example`](.env.example) — integration surface
+1. [`AGENTS.md`](AGENTS.md) — durable coding-agent rules
+2. [`CURRENT_STATE.md`](CURRENT_STATE.md) — short rolling handoff (not a changelog)
+3. [`ROADMAP.md`](ROADMAP.md) — product plan, non-negotiables, next tracks, deferred work
+4. [`README.md`](README.md) — runbook, Docker/NAS ops, env integrations
+5. [`.spec/target-state.md`](.spec/target-state.md) — shipped appliance boundaries
+6. [`.spec/CURRENT_TASK.md`](.spec/CURRENT_TASK.md) — active agent brief only when a task is assigned
+7. [`.env.example`](.env.example) — integration surface
 
 ## Still-valid conventions (short)
 
