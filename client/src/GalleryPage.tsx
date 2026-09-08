@@ -43,6 +43,7 @@ import {
   isGalleryBatchCompleteSuccess,
   isVideoFile,
   mergeGallerySelections,
+  type GalleryUploadLimits,
   prepareGalleryUploadRetry,
   removeGalleryUpload,
   setGalleryUploadStatus,
@@ -69,9 +70,13 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
   const [createOpen, setCreateOpen] = useState(false);
   const [renameAlbum, setRenameAlbum] = useState<GalleryAlbum | null>(null);
   const [moveItem, setMoveItem] = useState<GalleryMedia | null>(null);
-  // Effective upload ceiling from the server (Keeper gets the larger, env-tunable limit).
-  // The server remains authoritative; this only drives client-side selection UX.
-  const [uploadMaxBytes, setUploadMaxBytes] = useState<number>(MAX_GALLERY_BYTES);
+  // Effective per-type upload ceilings from the server (photos stay at 150 MB;
+  // Keepers get a larger video limit). The server remains authoritative; this
+  // only drives client-side selection UX.
+  const [uploadLimits, setUploadLimits] = useState<GalleryUploadLimits>({
+    imageBytes: MAX_GALLERY_BYTES,
+    videoBytes: MAX_GALLERY_BYTES,
+  });
 
   const selectedAlbum = albumById(albums, selectedAlbumId);
 
@@ -117,13 +122,17 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load the gallery."));
   }, [loadAlbums]);
 
-  // Ask the server for this caller's effective upload ceiling (Keeper vs Guest).
+  // Ask the server for this caller's effective per-type upload ceilings.
   useEffect(() => {
-    api<{ max_bytes: number }>("/gallery/config")
+    api<{ image_max_bytes: number; video_max_bytes: number }>("/gallery/config")
       .then((data) => {
-        if (typeof data.max_bytes === "number" && data.max_bytes > 0) setUploadMaxBytes(data.max_bytes);
+        const imageBytes = typeof data.image_max_bytes === "number" && data.image_max_bytes > 0
+          ? data.image_max_bytes : MAX_GALLERY_BYTES;
+        const videoBytes = typeof data.video_max_bytes === "number" && data.video_max_bytes > 0
+          ? data.video_max_bytes : MAX_GALLERY_BYTES;
+        setUploadLimits({ imageBytes, videoBytes });
       })
-      .catch(() => setUploadMaxBytes(MAX_GALLERY_BYTES));
+      .catch(() => setUploadLimits({ imageBytes: MAX_GALLERY_BYTES, videoBytes: MAX_GALLERY_BYTES }));
   }, [admin]);
 
   // Single path for opening/clearing an album — one GET /gallery?album_id= per selection.
@@ -350,7 +359,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       <UploadModal
         albums={albums}
         initialAlbumId={selectedAlbumId ?? defaultAlbumId(albums)}
-        maxBytes={uploadMaxBytes}
+        limits={uploadLimits}
         close={() => setUploadOpen(false)}
         refresh={() => void refresh()}
         done={(message) => { setUploadOpen(false); setNotice(message); void refresh(); }}
@@ -599,7 +608,7 @@ function statusLabel(item: PendingGalleryUpload): string {
 function UploadModal({
   albums,
   initialAlbumId,
-  maxBytes,
+  limits,
   close,
   done,
   refresh,
@@ -607,7 +616,7 @@ function UploadModal({
 }: {
   albums: GalleryAlbum[];
   initialAlbumId: number | null;
-  maxBytes: number;
+  limits: GalleryUploadLimits;
   close: () => void;
   done: (message: string) => void;
   refresh: () => void;
@@ -641,7 +650,7 @@ function UploadModal({
     const picked = Array.from(list);
     setError("");
     setBatchNote("");
-    setItems((prev) => mergeGallerySelections(prev, picked, maxBytes));
+    setItems((prev) => mergeGallerySelections(prev, picked, limits));
     if (cameraRef.current) cameraRef.current.value = "";
     if (pickerRef.current) pickerRef.current.value = "";
   }
@@ -760,7 +769,9 @@ function UploadModal({
         <div>
           <span className="eyebrow">ADD TO THE WALL</span>
           <h2>Share tonight.</h2>
-          <p>Choose several photos or clips from your device. Each item can be up to {gallerySizeLabel(maxBytes)}.</p>
+          <p>Choose several photos or clips from your device. {limits.videoBytes > limits.imageBytes
+            ? `Photos up to ${gallerySizeLabel(limits.imageBytes)}; videos up to ${gallerySizeLabel(limits.videoBytes)}.`
+            : `Each item can be up to ${gallerySizeLabel(limits.imageBytes)}.`}</p>
         </div>
         <button type="button" className="icon-button" onClick={close} aria-label="Close" disabled={busy}><X/></button>
       </header>

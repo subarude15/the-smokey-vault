@@ -55,6 +55,17 @@ export function isVideoFile(file: Pick<File, "type" | "name">): boolean {
 }
 
 /**
+ * Per-media-type client ceilings. Photos are capped at the same limit for Guests
+ * and Keepers; only videos get the larger Keeper ceiling. This mirrors the
+ * server, which stays authoritative and enforces on the sniffed media type.
+ */
+export type GalleryUploadLimits = { imageBytes: number; videoBytes: number };
+
+export function galleryCeilingForFile(file: Pick<File, "type" | "name">, limits: GalleryUploadLimits): number {
+  return isVideoFile(file) ? limits.videoBytes : limits.imageBytes;
+}
+
+/**
  * Merge newly picked files into the batch.
  * - Oversized files stay as rejected rows (valid picks are kept).
  * - Exact same name/size/lastModified is not added twice in one modal session.
@@ -62,7 +73,7 @@ export function isVideoFile(file: Pick<File, "type" | "name">): boolean {
 export function mergeGallerySelections(
   existing: PendingGalleryUpload[],
   incoming: Iterable<File>,
-  maxBytes: number,
+  limits: GalleryUploadLimits,
   makeId: () => string = createPendingId
 ): PendingGalleryUpload[] {
   const known = new Set(existing.map((item) => fileIdentity(item.file)));
@@ -72,7 +83,7 @@ export function mergeGallerySelections(
     const key = fileIdentity(file);
     if (known.has(key)) continue;
     known.add(key);
-    const error = validateGalleryFileSize(file, maxBytes);
+    const error = validateGalleryFileSize(file, galleryCeilingForFile(file, limits));
     next.push({
       id: makeId(),
       file,
