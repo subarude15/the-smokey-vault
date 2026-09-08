@@ -28,6 +28,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #132 added named Gallery albums with a deterministic General fallback, guest/keeper album selection on upload, Keeper album management, and safe media reassignment on album deletion.
 - PR #133 clears Keeper Mode immediately when an authenticated client request receives HTTP 401, instead of leaving Keeper UI until the kiosk idle timeout.
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
+- PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -68,6 +69,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR132 — Gallery albums for parties and special nights: named database-backed albums, General default migration/fallback, Guest/Keeper album selection on upload, Keeper create/rename/delete/move controls, and safe non-destructive album deletion.
 - PR133 — Client 401 → automatic Keeper → Guest handoff when an authenticated bearer/session is rejected, reusing `handToGuest()` (same path as idle lock and Lock Bar).
 - PR134 — Responsive App Shell & Navigation Structure: phone bottom nav (≈4 primary + More, safe-area), landscape tablet/desktop left rail, Guest/Keeper Operations partition, dynamic tab visibility/order preserved; structure only (no branding).
+- PR135 — Taps & Spirits Card / Interaction Ergonomics: purpose-built Tap/Spirit collection cards, Guest-safe coarse availability, explicit Homebrew → Brewery Lab affordance, and inline Keeper pour/edit/stock/block/clear actions reusing existing inventory semantics.
 
 ## Next work
 
@@ -89,10 +91,13 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Taps & Spirits card / interaction ergonomics** (next UX PR after shell structure)
-   - Improve Tap and Spirit card readability and interaction without redesigning branding.
-   - Preserve Guest availability gauges and Keeper-only operational quantities.
-2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (next UX PR)
+   - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
+   - Refine tablet/landscape Keeper ergonomics without creating a separate admin application.
+2. **PR137 — Visual system / Smokey Barrel branding polish**
+   - Final typography, color, surface, and brand expression after interaction patterns are stable.
+   - Reconcile any useful direction from deferred draft PR121; keep Light/Dark as the supported appearance model.
+3. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -105,6 +110,7 @@ These are explicitly desired near-term product improvements based on real househ
 ## Relevant code
 
 - `client/src/shell-nav.ts` — pure shell navigation helpers (primary/More selection, Guest/Keeper partition, tab visibility/order).
+- `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path.
 - `client/src/api.ts` — shared client fetch helper, Keeper bearer storage, and central authenticated-401 → session-rejected signal.
 - `client/src/App.tsx` — responsive shell (phone bottom nav / rail), bottle-detail route, Keeper actions, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
