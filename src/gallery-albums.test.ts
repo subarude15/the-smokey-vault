@@ -39,7 +39,7 @@ function cleanupGallery() {
   ensureDefaultGalleryAlbum();
 }
 
-test("ensureDefaultGalleryAlbum creates General once and migrates orphan media", () => {
+test("ensureDefaultGalleryAlbum creates General once and migrates orphan media", async () => {
   db.prepare("DELETE FROM gallery_media").run();
   db.prepare("DELETE FROM gallery_albums").run();
 
@@ -64,12 +64,12 @@ test("ensureDefaultGalleryAlbum creates General once and migrates orphan media",
   assert.equal(generals.c, 1);
 });
 
-test("list albums includes media counts and puts General first", () => {
+test("list albums includes media counts and puts General first", async () => {
   cleanupGallery();
   const general = ensureDefaultGalleryAlbum();
   const christmas = createGalleryAlbum({ name: "Christmas" });
-  saveGalleryUpload({ buffer: jpeg, contentType: "image/jpeg", albumId: christmas.id });
-  saveGalleryUpload({ buffer: Buffer.concat([jpeg, Buffer.from("x")]), contentType: "image/jpeg", albumId: general.id });
+  await saveGalleryUpload({ buffer: jpeg, contentType: "image/jpeg", albumId: christmas.id });
+  await saveGalleryUpload({ buffer: Buffer.concat([jpeg, Buffer.from("x")]), contentType: "image/jpeg", albumId: general.id });
 
   const albums = listGalleryAlbums();
   assert.equal(albums[0].id, general.id);
@@ -139,7 +139,7 @@ test("Guest cannot create, rename, or delete albums", async () => {
 test("Guest can list albums and album media", async () => {
   cleanupGallery();
   const album = createGalleryAlbum({ name: "Open House" });
-  saveGalleryUpload({ buffer: jpeg, contentType: "image/jpeg", albumId: album.id });
+  await saveGalleryUpload({ buffer: jpeg, contentType: "image/jpeg", albumId: album.id });
 
   const albums = await app.inject({ method: "GET", url: "/api/gallery/albums" });
   assert.equal(albums.statusCode, 200);
@@ -156,7 +156,7 @@ test("deleting a populated album moves media to General and keeps the file", asy
   cleanupGallery();
   const token = createTestAdminToken();
   const album = createGalleryAlbum({ name: "Temporary" });
-  const media = saveGalleryUpload({
+  const media = await saveGalleryUpload({
     buffer: Buffer.concat([jpeg, Buffer.from("temp")]),
     contentType: "image/jpeg",
     albumId: album.id
@@ -221,14 +221,14 @@ test("General album cannot be renamed or deleted; other albums can be renamed", 
 test("upload assigns album_id and invalid album falls back to General", async () => {
   cleanupGallery();
   const album = createGalleryAlbum({ name: "Upload Target" });
-  const assigned = saveGalleryUpload({
+  const assigned = await saveGalleryUpload({
     buffer: jpeg,
     contentType: "image/jpeg",
     albumId: album.id
   });
   assert.equal(assigned.album_id, album.id);
 
-  const fallback = saveGalleryUpload({
+  const fallback = await saveGalleryUpload({
     buffer: Buffer.concat([jpeg, Buffer.from("fb")]),
     contentType: "image/jpeg",
     albumId: 999999
@@ -261,7 +261,7 @@ test("Keeper can move media between albums without changing the stored file", as
   const token = createTestAdminToken();
   const a = createGalleryAlbum({ name: "Album A" });
   const b = createGalleryAlbum({ name: "Album B" });
-  const media = saveGalleryUpload({
+  const media = await saveGalleryUpload({
     buffer: Buffer.concat([jpeg, Buffer.from("move")]),
     contentType: "image/jpeg",
     albumId: a.id
@@ -288,7 +288,7 @@ test("Keeper can move media between albums without changing the stored file", as
   })).statusCode, 401);
 });
 
-test("client album helpers and Gallery UI wire album selection", () => {
+test("client album helpers and Gallery UI wire album selection", async () => {
   assert.equal(albumMemoryLabel(0), "0 memories");
   assert.equal(albumMemoryLabel(1), "1 memory");
   assert.equal(albumMemoryLabel(3), "3 memories");

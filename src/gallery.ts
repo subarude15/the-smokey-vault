@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { db, dbPath } from "./db.js";
 import {
+  ensureGalleryVideoPoster,
+  galleryPosterFilename,
+  generateGalleryVideoPoster,
+} from "./gallery-poster.js";
+import {
   clipText,
   GENERAL_GALLERY_ALBUM_NAME,
   MAX_GALLERY_ALBUM_NAME,
@@ -13,6 +18,8 @@ import {
   type GalleryMedia,
   type GalleryMediaType
 } from "./speakeasy-shared.js";
+
+export { galleryPosterFilename };
 
 export const galleryDir = join(dirname(dbPath), "gallery");
 mkdirSync(galleryDir, { recursive: true });
@@ -148,11 +155,26 @@ export function ensureDefaultGalleryAlbum(): AlbumRow {
 
 ensureDefaultGalleryAlbum();
 
+function posterPublicUrl(videoFilename: string): string | null {
+  try {
+    const poster = galleryPosterFilename(videoFilename);
+    if (!existsSync(join(galleryDir, poster))) return null;
+    return `/api/media/gallery/${poster}`;
+  } catch {
+    return null;
+  }
+}
+
+function albumCoverUrl(filename: string, mediaType: string): string | null {
+  if (mediaType === "video") return posterPublicUrl(filename);
+  return `/api/media/gallery/${filename}`;
+}
+
 function albumToJson(row: AlbumRow): GalleryAlbum {
   const countRow = db.prepare("SELECT COUNT(*) AS c FROM gallery_media WHERE album_id=?").get(row.id) as { c: number };
   const cover = db.prepare(
-    `SELECT filename FROM gallery_media WHERE album_id=? ORDER BY created_at DESC, id DESC LIMIT 1`
-  ).get(row.id) as { filename: string } | undefined;
+    `SELECT filename, media_type FROM gallery_media WHERE album_id=? ORDER BY created_at DESC, id DESC LIMIT 1`
+  ).get(row.id) as { filename: string; media_type: string } | undefined;
   return {
     id: row.id,
     name: row.name,
@@ -161,16 +183,17 @@ function albumToJson(row: AlbumRow): GalleryAlbum {
     created_at: row.created_at,
     updated_at: row.updated_at,
     media_count: countRow.c,
-    cover_url: cover ? `/api/media/gallery/${cover.filename}` : null
+    cover_url: cover ? albumCoverUrl(cover.filename, cover.media_type) : null
   };
 }
 
 export function mediaRowToJson(row: MediaRow): GalleryMedia {
   const albumId = row.album_id ?? ensureDefaultGalleryAlbum().id;
-  return {
+  const mediaType = row.media_type as GalleryMediaType;
+  const base: GalleryMedia = {
     id: row.id,
     filename: row.filename,
-    media_type: row.media_type as GalleryMediaType,
+    media_type: mediaType,
     caption: row.caption,
     uploaded_by: row.uploaded_by,
     album_id: albumId,
@@ -178,6 +201,10 @@ export function mediaRowToJson(row: MediaRow): GalleryMedia {
     url: `/api/media/gallery/${row.filename}`,
     download_url: `/api/media/gallery/${row.filename}/download`
   };
+  if (mediaType === "video") {
+    base.poster_url = posterPublicUrl(row.filename);
+  }
+  return base;
 }
 
 export function listGalleryAlbums(): GalleryAlbum[] {
@@ -268,14 +295,14 @@ function resolveUploadAlbumId(raw?: unknown): number {
   return row?.id ?? general.id;
 }
 
-export function saveGalleryUpload(input: {
+export async function saveGalleryUpload(input: {
   buffer: Buffer;
   contentType?: string | null;
   originalName?: string;
   caption?: string;
   uploadedBy?: string;
   albumId?: unknown;
-}): GalleryMedia {
+}): Promise<GalleryMedia> {
   if (!input.buffer.length) throw new GalleryError("Pick a photo or video first");
   if (input.buffer.length > MAX_GALLERY_BYTES) {
     throw new GalleryError("That clip is over 150 MB. Trim it down and try again.", 413);
@@ -294,6 +321,17 @@ export function saveGalleryUpload(input: {
   const target = join(galleryDir, filename);
   if (!existsSync(target)) writeFileSync(target, input.buffer);
 
+  if (mediaType === "video") {
+    const posterPath = join(galleryDir, galleryPosterFilename(filename));
+    if (!existsSync(posterPath)) {
+      await generateGalleryVideoPoster({
+        galleryDir,
+        videoFilename: filename,
+        log: (message) => console.warn(message),
+      });
+    }
+  }
+
   const caption = clipText(input.caption ?? "", MAX_GALLERY_CAPTION);
   const uploadedBy = clipText(input.uploadedBy ?? "", MAX_PATRON_NAME) || "Patron";
   const result = db.prepare(
@@ -307,6 +345,64 @@ export function saveGalleryUpload(input: {
   return mediaRowToJson(row);
 }
 
+/**
+ * Bounded, idempotent poster backfill for legacy videos missing a sibling WebP.
+ * Safe to call at boot; does not run on guest list requests.
+ *
+ * Pages through video rows by id and only counts missing-poster work against
+ * `limit`, so early videos that already have posters cannot starve later ones.
+ */
+export async function backfillMissingGalleryPosters(opts?: {
+  limit?: number;
+  log?: (message: string) => void;
+}): Promise<{ attempted: number; generated: number }> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? 40, 100));
+  const pageSize = Math.max(limit * 2, 50);
+  let attempted = 0;
+  let generated = 0;
+  let afterId = 0;
+  const seenFilenames = new Set<string>();
+
+  while (attempted < limit) {
+    const rows = db
+      .prepare(
+        `SELECT id, filename FROM gallery_media
+         WHERE media_type = 'video' AND id > ?
+         ORDER BY id ASC
+         LIMIT ?`,
+      )
+      .all(afterId, pageSize) as { id: number; filename: string }[];
+
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      afterId = row.id;
+      if (seenFilenames.has(row.filename)) continue;
+      seenFilenames.add(row.filename);
+
+      let posterName: string;
+      try {
+        posterName = galleryPosterFilename(row.filename);
+      } catch {
+        continue;
+      }
+      if (existsSync(join(galleryDir, posterName))) continue;
+      if (!existsSync(join(galleryDir, row.filename))) continue;
+
+      attempted += 1;
+      const ok = await ensureGalleryVideoPoster({
+        galleryDir,
+        videoFilename: row.filename,
+        log: opts?.log,
+      });
+      if (ok) generated += 1;
+      if (attempted >= limit) break;
+    }
+  }
+
+  return { attempted, generated };
+}
+
 export function moveGalleryMedia(mediaId: number, albumId: number): GalleryMedia {
   ensureDefaultGalleryAlbum();
   getAlbumRow(albumId);
@@ -318,7 +414,9 @@ export function moveGalleryMedia(mediaId: number, albumId: number): GalleryMedia
 }
 
 export function deleteGalleryMedia(id: number) {
-  const row = db.prepare("SELECT filename FROM gallery_media WHERE id=?").get(id) as { filename: string } | undefined;
+  const row = db.prepare("SELECT filename, media_type FROM gallery_media WHERE id=?").get(id) as
+    | { filename: string; media_type: string }
+    | undefined;
   if (!row) throw new GalleryError("That item is already gone", 404);
   db.prepare("DELETE FROM gallery_media WHERE id=?").run(id);
 
@@ -329,6 +427,14 @@ export function deleteGalleryMedia(id: number) {
       if (existsSync(target)) unlinkSync(target);
     } catch {
       // The row is gone either way; a leftover file is not worth failing the request.
+    }
+    if (row.media_type === "video") {
+      try {
+        const poster = join(galleryDir, galleryPosterFilename(row.filename));
+        if (existsSync(poster)) unlinkSync(poster);
+      } catch {
+        // Poster cleanup is best-effort; the DB row is already gone.
+      }
     }
   }
   return { ok: true };

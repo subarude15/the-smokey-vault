@@ -30,7 +30,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
-- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. Track C product work continues at **PR143**.
+- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. Track C continues at **PR144**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -119,9 +119,10 @@ These are explicitly desired near-term product improvements based on real househ
 7. **PR142 — Conditional landing-page “Give us your 2 cents” visibility** (done)
    - Overview “Give us your 2 cents” CTA now follows the same `pageEnabled("next")` / `PAGE_TAB → whatsnext` rule as Guest nav — no second flag.
    - When `whatsnext` is off, Guests lose both the Feedback destination and the landing CTA; re-enabling restores both. Keeper Settings access is unchanged.
-8. **PR143 — Video thumbnails in the Gallery/Library**
-   - Generate or display useful poster thumbnails for uploaded videos instead of generic media placeholders.
-   - Keep mobile performance in mind; do not force full video download just to render the grid.
+8. **PR143 — Video thumbnails in the Gallery/Library** (done)
+   - Uploaded videos get a durable near-start WebP poster (ffmpeg + sharp) stored beside Gallery media.
+   - Album grids and album covers render posters (or a lightweight fallback); the original video loads only in the lightbox/download path.
+   - Poster cleanup follows shared Gallery file reference semantics; missing/legacy posters backfill once at boot without blocking Guest GETs.
 9. **PR144 — Keeper large-video upload path**
    - Build on the Gallery/video presentation work from PR143 by making larger Keeper video uploads operationally safe and understandable.
    - Allow Keepers to upload substantially larger video files than Guests without removing all operational safeguards.

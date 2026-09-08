@@ -92,9 +92,9 @@ test("gallery sniffing trusts magic bytes over the declared type", () => {
   assert.equal(sniffGalleryType(Buffer.alloc(4)), "");
 });
 
-test("an iOS capture sent as octet-stream is still stored as a video", () => {
+test("an iOS capture sent as octet-stream is still stored as a video", async () => {
   wipeGallery();
-  const saved = saveGalleryUpload({ buffer: MP4, contentType: "application/octet-stream", originalName: "IMG_0042.MOV" });
+  const saved = await saveGalleryUpload({ buffer: MP4, contentType: "application/octet-stream", originalName: "IMG_0042.MOV" });
   assert.equal(saved.media_type, "video");
   assert.match(saved.filename, /\.mp4$/);
   assert.equal(saved.url, `/api/media/gallery/${saved.filename}`);
@@ -102,28 +102,28 @@ test("an iOS capture sent as octet-stream is still stored as a video", () => {
   wipeGallery();
 });
 
-test("uploads default to Patron and record captions", () => {
+test("uploads default to Patron and record captions", async () => {
   wipeGallery();
-  const saved = saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "  Last call  " });
+  const saved = await saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "  Last call  " });
   assert.equal(saved.uploaded_by, "Patron");
   assert.equal(saved.caption, "Last call");
   assert.equal(saved.media_type, "image");
 
-  const named = saveGalleryUpload({ buffer: PNG, contentType: "image/png", uploadedBy: "Dana" });
+  const named = await saveGalleryUpload({ buffer: PNG, contentType: "image/png", uploadedBy: "Dana" });
   assert.equal(named.uploaded_by, "Dana");
   wipeGallery();
 });
 
-test("the gallery rejects unsupported files and empty picks", () => {
-  assert.throws(() => saveGalleryUpload({ buffer: Buffer.alloc(0) }), GalleryError);
+test("the gallery rejects unsupported files and empty picks", async () => {
+  await assert.rejects(async () => saveGalleryUpload({ buffer: Buffer.alloc(0) }), GalleryError);
   const pdf = Buffer.concat([Buffer.from("%PDF-1.7", "ascii"), Buffer.alloc(64, 1)]);
-  assert.throws(() => saveGalleryUpload({ buffer: pdf, contentType: "application/pdf", originalName: "menu.pdf" }), GalleryError);
+  await assert.rejects(async () => saveGalleryUpload({ buffer: pdf, contentType: "application/pdf", originalName: "menu.pdf" }), GalleryError);
 });
 
-test("the gallery lists newest first", () => {
+test("the gallery lists newest first", async () => {
   wipeGallery();
-  const older = saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "older" });
-  const newer = saveGalleryUpload({ buffer: PNG, contentType: "image/png", caption: "newer" });
+  const older = await saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "older" });
+  const newer = await saveGalleryUpload({ buffer: PNG, contentType: "image/png", caption: "newer" });
   db.prepare("UPDATE gallery_media SET created_at='2020-01-01 00:00:00' WHERE id=?").run(older.id);
 
   const listed = listGallery();
@@ -132,9 +132,9 @@ test("the gallery lists newest first", () => {
   wipeGallery();
 });
 
-test("deleting gallery media removes the row and the file on disk", () => {
+test("deleting gallery media removes the row and the file on disk", async () => {
   wipeGallery();
-  const saved = saveGalleryUpload({ buffer: WEBM, contentType: "video/webm" });
+  const saved = await saveGalleryUpload({ buffer: WEBM, contentType: "video/webm" });
   const path = join(galleryDir, saved.filename);
   assert.ok(existsSync(path), "file was written");
 
@@ -144,10 +144,10 @@ test("deleting gallery media removes the row and the file on disk", () => {
   assert.throws(() => deleteGalleryMedia(saved.id), GalleryError);
 });
 
-test("two rows sharing one file keep the file until the last row goes", () => {
+test("two rows sharing one file keep the file until the last row goes", async () => {
   wipeGallery();
-  const first = saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "one" });
-  const second = saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "two" });
+  const first = await saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "one" });
+  const second = await saveGalleryUpload({ buffer: JPEG, contentType: "image/jpeg", caption: "two" });
   assert.equal(first.filename, second.filename, "identical bytes dedupe to one file");
   const path = join(galleryDir, first.filename);
 

@@ -292,9 +292,16 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
           <div className="gallery-grid">{media.map((item) => (
             <figure className="gallery-tile" key={item.id}>
               <button type="button" className="gallery-open" onClick={() => setLightboxId(item.id)} aria-label={item.caption || `Open ${item.media_type}`}>
-                {item.media_type === "video"
-                  ? <><video src={item.url} preload="metadata" muted playsInline/><span className="gallery-play"><Film size={18}/></span></>
-                  : <img src={item.url} alt={item.caption || "Bar photo"} loading="lazy"/>}
+                {item.media_type === "video" ? (
+                  <>
+                    {item.poster_url
+                      ? <img src={item.poster_url} alt={item.caption || "Bar clip"} loading="lazy"/>
+                      : <span className="gallery-video-fallback" aria-hidden><Film size={28}/></span>}
+                    <span className="gallery-play"><Film size={18}/></span>
+                  </>
+                ) : (
+                  <img src={item.url} alt={item.caption || "Bar photo"} loading="lazy"/>
+                )}
               </button>
               <figcaption>
                 {item.caption ? <strong>{item.caption}</strong> : null}
