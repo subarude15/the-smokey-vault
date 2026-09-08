@@ -187,9 +187,12 @@ function UploadModal({
 
   function choose(list: FileList | null) {
     if (!list?.length) return;
+    // Snapshot before clearing the input: FileList is live, and React may run
+    // the setItems updater after value="" empties the list.
+    const picked = Array.from(list);
     setError("");
     setBatchNote("");
-    setItems((prev) => mergeGallerySelections(prev, Array.from(list), MAX_GALLERY_BYTES));
+    setItems((prev) => mergeGallerySelections(prev, picked, MAX_GALLERY_BYTES));
     if (cameraRef.current) cameraRef.current.value = "";
     if (pickerRef.current) pickerRef.current.value = "";
   }

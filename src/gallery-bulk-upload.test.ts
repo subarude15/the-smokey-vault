@@ -165,4 +165,7 @@ test("GalleryPage wires multi-select and batch upload UX", () => {
   assert.doesNotMatch(page, /capture="environment"[^>]*multiple/);
   // Camera input must not gain multiple; device picker must.
   assert.match(page, /ref=\{pickerRef\}[^>]*multiple|multiple[^>]*ref=\{pickerRef\}/);
+  // FileList must be snapshotted before the input is cleared.
+  assert.match(page, /const picked = Array\.from\(list\)/);
+  assert.match(page, /mergeGallerySelections\(prev, picked/);
 });
