@@ -34,7 +34,8 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-.cursor/
+.cursor/*
+!.cursor/environment.json
 
 .env.aider
 .aider*
