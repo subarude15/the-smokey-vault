@@ -51,6 +51,7 @@ import { ImportReview } from "./ImportReview";
 import { BreweryLab } from "./BreweryLab";
 import { ContactModal, GuestFooter } from "./ContactModal";
 import { EventsPage } from "./EventsPage";
+import { parseEventIdFromSearch } from "./event-deep-link";
 import { GalleryPage } from "./GalleryPage";
 import { MerchPage } from "./MerchPage";
 import { MessagesInbox } from "./MessagesInbox";
@@ -622,6 +623,11 @@ export default function App() {
     return () => clearInterval(timer);
   }, [admin, page]);
   useEffect(() => {
+    // Stable event deep link (?event=123) opens Events without requiring Keeper unlock.
+    if (parseEventIdFromSearch(window.location.search) != null) {
+      setPage("events");
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const found = extractSharedRecipeUrl({
       url: params.get("url"),

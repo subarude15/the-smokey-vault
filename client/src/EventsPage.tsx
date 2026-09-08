@@ -1,12 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, CircleAlert, Eye, EyeOff, PartyPopper, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarDays, CircleAlert, Eye, EyeOff, PartyPopper, Pencil, Plus, Share2, Trash2 } from "lucide-react";
 import { api } from "./api";
 import { MAX_CONTACT_INFO, MAX_PATRON_NAME, type EventSubscriber, type HouseEvent } from "./catalog";
+import { EventDetail } from "./EventDetail";
+import { emptyEventDraft, EventEditor, eventToEditorValues, type EventEditorValues } from "./EventEditor";
+import {
+  buildEventDeepLink,
+  parseEventIdFromSearch,
+  syncEventDeepLinkUrl
+} from "./event-deep-link";
+import { buildEventSharePayload, shareOrCopyEventLink } from "./event-share";
 
 function eventDateLabel(raw: string) {
   const stamp = Date.parse(raw);
   if (!Number.isFinite(stamp)) return raw;
-  return new Date(stamp).toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric", year: "numeric" });
+  return new Date(stamp).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
 function isUpcoming(raw: string) {
@@ -19,27 +32,154 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
   const [subscribers, setSubscribers] = useState<EventSubscriber[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [draft, setDraft] = useState({ title: "", event_date: "", description: "", image_url: "" });
   const [rsvp, setRsvp] = useState({ name: "", contact_info: "", notes: "" });
   const [busy, setBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    parseEventIdFromSearch(typeof window !== "undefined" ? window.location.search : "")
+  );
+  const [selectedEvent, setSelectedEvent] = useState<HouseEvent | null>(null);
+  const [detailError, setDetailError] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [mode, setMode] = useState<"list" | "detail" | "create" | "edit">("list");
+  const [editorError, setEditorError] = useState("");
+  const [shareFallbackUrl, setShareFallbackUrl] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
 
   const load = useCallback(() => {
     api<HouseEvent[]>("/events")
       .then((rows) => { setEvents(rows); setError(""); })
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load events."));
-    if (admin) api<EventSubscriber[]>("/event-subscribers").then(setSubscribers).catch(() => setSubscribers([]));
+    if (admin) {
+      api<EventSubscriber[]>("/event-subscribers").then(setSubscribers).catch(() => setSubscribers([]));
+    }
   }, [admin]);
+
   useEffect(() => { load(); }, [load]);
 
-  async function addEvent() {
+  const openDetail = useCallback((eventId: number, historyMode: "replace" | "push" = "push") => {
+    setSelectedId(eventId);
+    setMode("detail");
+    setShareFallbackUrl("");
+    setEditorError("");
+    syncEventDeepLinkUrl(window.location, window.history, eventId, historyMode);
+  }, []);
+
+  const closeDetail = useCallback((historyMode: "replace" | "push" = "replace") => {
+    setSelectedId(null);
+    setSelectedEvent(null);
+    setDetailError("");
+    setMode("list");
+    setShareFallbackUrl("");
+    setEditorError("");
+    syncEventDeepLinkUrl(window.location, window.history, null, historyMode);
+  }, []);
+
+  // Open deep-linked event on first paint / when URL already carries ?event=
+  useEffect(() => {
+    const fromUrl = parseEventIdFromSearch(window.location.search);
+    if (fromUrl == null) return;
+    setSelectedId(fromUrl);
+    setMode("detail");
+  }, []);
+
+  // Load the focused event (guest-safe GET; Keeper may see drafts)
+  useEffect(() => {
+    if (selectedId == null || (mode !== "detail" && mode !== "edit")) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    setDetailError("");
+    api<HouseEvent>(`/events/${selectedId}`)
+      .then((event) => {
+        if (cancelled) return;
+        setSelectedEvent(event);
+        setEvents((current) => {
+          const idx = current.findIndex((row) => row.id === event.id);
+          if (idx < 0) return current;
+          const next = current.slice();
+          next[idx] = event;
+          return next;
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSelectedEvent(null);
+        setDetailError(err instanceof Error ? err.message : "Event not found");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedId, mode, admin]);
+
+  // Browser Back from a deep link should return to the Events list
+  useEffect(() => {
+    function onPopState() {
+      const fromUrl = parseEventIdFromSearch(window.location.search);
+      if (fromUrl == null) {
+        setSelectedId(null);
+        setSelectedEvent(null);
+        setMode("list");
+        setShareFallbackUrl("");
+        return;
+      }
+      setSelectedId(fromUrl);
+      setMode("detail");
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const editingInitial = useMemo(() => {
+    if (mode === "edit" && selectedEvent) return eventToEditorValues(selectedEvent);
+    return emptyEventDraft();
+  }, [mode, selectedEvent]);
+
+  async function saveCreate(values: EventEditorValues) {
     setBusy(true);
+    setEditorError("");
     try {
-      await api("/events", { method: "POST", body: JSON.stringify(draft) });
-      setDraft({ title: "", event_date: "", description: "", image_url: "" });
+      const created = await api<HouseEvent>("/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: values.title,
+          event_date: values.event_date,
+          description: values.description,
+          image_url: values.image_url,
+          is_published: values.is_published ? 1 : 0
+        })
+      });
       setNotice("Event added");
       load();
+      openDetail(created.id, "replace");
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not save that event");
+      setEditorError(err instanceof Error ? err.message : "Could not save that event");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit(values: EventEditorValues) {
+    if (!selectedEvent) return;
+    setBusy(true);
+    setEditorError("");
+    try {
+      const updated = await api<HouseEvent>(`/events/${selectedEvent.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          title: values.title,
+          event_date: values.event_date,
+          description: values.description,
+          image_url: values.image_url,
+          is_published: values.is_published ? 1 : 0
+        })
+      });
+      setSelectedEvent(updated);
+      setNotice("Event updated");
+      load();
+      setMode("detail");
+      setShareFallbackUrl("");
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : "Could not update that event");
     } finally {
       setBusy(false);
     }
@@ -47,8 +187,15 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
 
   async function togglePublished(event: HouseEvent) {
     try {
-      await api(`/events/${event.id}`, { method: "PUT", body: JSON.stringify({ is_published: event.is_published ? 0 : 1 }) });
+      await api(`/events/${event.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ is_published: event.is_published ? 0 : 1 })
+      });
       load();
+      if (selectedId === event.id) {
+        const next = await api<HouseEvent>(`/events/${event.id}`).catch(() => null);
+        if (next) setSelectedEvent(next);
+      }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not update that event");
     }
@@ -58,9 +205,48 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
     if (!confirm(`Remove “${event.title}”?`)) return;
     try {
       await api(`/events/${event.id}`, { method: "DELETE" });
+      if (selectedId === event.id) closeDetail();
       load();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not remove that event");
+    }
+  }
+
+  function eventShareUrl(eventId: number) {
+    return buildEventDeepLink(window.location.origin, window.location.pathname || "/", eventId);
+  }
+
+  async function shareEvent(event: HouseEvent, preferCopy = false) {
+    if (!event.is_published) {
+      setNotice("Publish this event before sharing a guest link");
+      return;
+    }
+    setShareBusy(true);
+    setShareFallbackUrl("");
+    const url = eventShareUrl(event.id);
+    const payload = buildEventSharePayload(event, url);
+    try {
+      if (preferCopy) {
+        const result = await shareOrCopyEventLink(payload, {
+          canShare: false,
+          share: undefined
+        });
+        if (result === "copied") setNotice("Link copied");
+        else {
+          setShareFallbackUrl(url);
+          setNotice("Copy the link below");
+        }
+        return;
+      }
+      const result = await shareOrCopyEventLink(payload);
+      if (result === "shared") setNotice("Shared");
+      else if (result === "copied") setNotice("Link copied");
+      else if (result === "fallback") {
+        setShareFallbackUrl(url);
+        setNotice("Copy the link below");
+      }
+    } finally {
+      setShareBusy(false);
     }
   }
 
@@ -81,77 +267,258 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
   const past = events.filter((event) => !isUpcoming(event.event_date));
 
   function eventCard(event: HouseEvent) {
-    return <article className={`event-card${event.is_published ? "" : " event-unpublished"}`} key={event.id}>
-      {event.image_url ? <img src={event.image_url} alt=""/> : null}
-      <div>
-        <span className="eyebrow"><CalendarDays size={14}/> {eventDateLabel(event.event_date)}</span>
-        <h3>{event.title}</h3>
-        {event.description ? <p>{event.description}</p> : null}
-      </div>
-      {admin && <div className="card-actions">
-        <button type="button" className="icon-button" aria-label={event.is_published ? "Hide from guests" : "Publish to guests"} onClick={() => void togglePublished(event)}>
-          {event.is_published ? <Eye size={17}/> : <EyeOff size={17}/>}
+    return (
+      <article
+        className={`event-card${event.is_published ? "" : " event-unpublished"}`}
+        key={event.id}
+      >
+        <button type="button" className="event-card-open" onClick={() => openDetail(event.id)}>
+          {event.image_url ? <img src={event.image_url} alt=""/> : null}
+          <div>
+            <span className="eyebrow"><CalendarDays size={14}/> {eventDateLabel(event.event_date)}</span>
+            <h3>{event.title}</h3>
+            {event.description ? <p>{event.description}</p> : null}
+          </div>
         </button>
-        <button type="button" className="icon-button danger" aria-label="Remove event" onClick={() => void removeEvent(event)}><Trash2 size={17}/></button>
-      </div>}
-    </article>;
+        <div className="card-actions">
+          {event.is_published ? (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Share event"
+              onClick={() => void shareEvent(event)}
+            >
+              <Share2 size={17}/>
+            </button>
+          ) : null}
+          {admin ? (
+            <>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Edit event"
+                onClick={() => {
+                  openDetail(event.id, "replace");
+                  setMode("edit");
+                }}
+              >
+                <Pencil size={17}/>
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={event.is_published ? "Hide from guests" : "Publish to guests"}
+                onClick={() => void togglePublished(event)}
+              >
+                {event.is_published ? <Eye size={17}/> : <EyeOff size={17}/>}
+              </button>
+              <button
+                type="button"
+                className="icon-button danger"
+                aria-label="Remove event"
+                onClick={() => void removeEvent(event)}
+              >
+                <Trash2 size={17}/>
+              </button>
+            </>
+          ) : null}
+        </div>
+      </article>
+    );
+  }
+
+  if (mode === "create" && admin) {
+    return (
+      <>
+        <EventEditor
+          mode="create"
+          initial={emptyEventDraft()}
+          busy={busy}
+          error={editorError}
+          onCancel={() => { setMode("list"); setEditorError(""); }}
+          onSave={saveCreate}
+        />
+        {notice && <div className="toast">{notice}</div>}
+      </>
+    );
+  }
+
+  if ((mode === "detail" || mode === "edit") && selectedId != null) {
+    if (mode === "edit" && admin && selectedEvent) {
+      return (
+        <>
+          <EventEditor
+            mode="edit"
+            initial={editingInitial}
+            busy={busy}
+            error={editorError}
+            onCancel={() => { setMode("detail"); setEditorError(""); }}
+            onSave={saveEdit}
+          />
+          {notice && <div className="toast">{notice}</div>}
+        </>
+      );
+    }
+
+    if (detailLoading && !selectedEvent) {
+      return <div className="empty-state"><PartyPopper size={38}/><h3>Loading event…</h3></div>;
+    }
+
+    if (detailError || !selectedEvent) {
+      return (
+        <section className="event-detail">
+          <button type="button" className="secondary back-button" onClick={() => closeDetail()}>
+            Back to events
+          </button>
+          <div className="ai-error load-error">
+            <CircleAlert/>
+            <div>
+              <strong>Event not found</strong>
+              <span>{detailError || "That event is unavailable."}</span>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <>
+        <EventDetail
+          event={selectedEvent}
+          admin={admin}
+          shareBusy={shareBusy}
+          fallbackUrl={shareFallbackUrl}
+          onBack={() => closeDetail()}
+          onEdit={admin ? () => { setMode("edit"); setEditorError(""); } : undefined}
+          onShare={() => void shareEvent(selectedEvent)}
+          onCopyLink={() => void shareEvent(selectedEvent, true)}
+        />
+        {notice && <div className="toast">{notice}</div>}
+      </>
+    );
   }
 
   return <>
     <div className="page-title">
       <span className="eyebrow">THE CALENDAR</span>
       <h1>Parties, bashes, and tastings.</h1>
-      <p>{admin ? "Publish an event and it shows up on every guest device." : `Join the list and ${keeperName} will send you the address and details.`}</p>
+      <p>
+        {admin
+          ? "Publish an event and it shows up on every guest device."
+          : `Join the list and ${keeperName} will send you the address and details.`}
+      </p>
     </div>
 
-    {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load events</strong><span>{error}</span></div><button className="secondary" onClick={load}>Retry</button></div>}
+    {error && (
+      <div className="ai-error load-error">
+        <CircleAlert/>
+        <div><strong>Could not load events</strong><span>{error}</span></div>
+        <button className="secondary" onClick={load}>Retry</button>
+      </div>
+    )}
 
-    {admin && <section className="settings-card event-composer">
-      <span className="eyebrow">NEW EVENT</span>
-      <h3>Add to the calendar</h3>
-      <label><span>Title</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Holiday bash"/></label>
-      <label><span>Date</span><input type="date" value={draft.event_date} onChange={(e) => setDraft({ ...draft, event_date: e.target.value })}/></label>
-      <label><span>Details</span><textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="Doors at 7. Bring a bottle for the shelf."/></label>
-      <label><span>Image URL</span><input value={draft.image_url} onChange={(e) => setDraft({ ...draft, image_url: e.target.value })} placeholder="Optional"/></label>
-      <button type="button" className="primary" disabled={busy || !draft.title.trim() || !draft.event_date} onClick={() => void addEvent()}><Plus size={17}/> Publish event</button>
-    </section>}
+    {admin && (
+      <div className="toolbar">
+        <button type="button" className="primary" onClick={() => { setMode("create"); setEditorError(""); }}>
+          <Plus size={17}/> Add event
+        </button>
+      </div>
+    )}
 
-    {!events.length ? <div className="empty-state"><PartyPopper size={38}/><h3>Nothing on the calendar</h3><p>{admin ? "Add the first party." : "Check back soon, or join the invite list below."}</p></div> : <>
-      {upcoming.length > 0 && <section>
-        <div className="section-heading"><div><span className="eyebrow">COMING UP</span><h2>Next at the bar</h2></div></div>
-        <div className="event-grid">{upcoming.map(eventCard)}</div>
-      </section>}
-      {past.length > 0 && <details className="archive-block">
-        <summary>Past events ({past.length})</summary>
-        <div className="event-grid">{past.map(eventCard)}</div>
-      </details>}
-    </>}
+    {!events.length ? (
+      <div className="empty-state">
+        <PartyPopper size={38}/>
+        <h3>Nothing on the calendar</h3>
+        <p>{admin ? "Add the first party." : "Check back soon, or join the invite list below."}</p>
+      </div>
+    ) : (
+      <>
+        {upcoming.length > 0 && (
+          <section>
+            <div className="section-heading">
+              <div><span className="eyebrow">COMING UP</span><h2>Next at the bar</h2></div>
+            </div>
+            <div className="event-grid">{upcoming.map(eventCard)}</div>
+          </section>
+        )}
+        {past.length > 0 && (
+          <details className="archive-block">
+            <summary>Past events ({past.length})</summary>
+            <div className="event-grid">{past.map(eventCard)}</div>
+          </details>
+        )}
+      </>
+    )}
 
-    {!admin && <section className="settings-card rsvp-card">
-      <span className="eyebrow">PARTY LIST</span>
-      <h3>Get the invite</h3>
-      <p>We will text or email you the address and the plan for the next bash.</p>
-      <label><span>Name</span><input value={rsvp.name} maxLength={MAX_PATRON_NAME} onChange={(e) => setRsvp({ ...rsvp, name: e.target.value })}/></label>
-      <label><span>Phone or email</span><input value={rsvp.contact_info} maxLength={MAX_CONTACT_INFO} onChange={(e) => setRsvp({ ...rsvp, contact_info: e.target.value })}/></label>
-      <label><span>Anything we should know?</span><textarea value={rsvp.notes} onChange={(e) => setRsvp({ ...rsvp, notes: e.target.value })} placeholder="Plus one, dietary notes, favorite pour…"/></label>
-      <button type="button" className="primary" disabled={busy || !rsvp.name.trim() || !rsvp.contact_info.trim()} onClick={() => void subscribe()}>Add me to the list</button>
-    </section>}
+    {!admin && (
+      <section className="settings-card rsvp-card">
+        <span className="eyebrow">PARTY LIST</span>
+        <h3>Get the invite</h3>
+        <p>We will text or email you the address and the plan for the next bash.</p>
+        <label>
+          <span>Name</span>
+          <input
+            value={rsvp.name}
+            maxLength={MAX_PATRON_NAME}
+            onChange={(e) => setRsvp({ ...rsvp, name: e.target.value })}
+          />
+        </label>
+        <label>
+          <span>Phone or email</span>
+          <input
+            value={rsvp.contact_info}
+            maxLength={MAX_CONTACT_INFO}
+            onChange={(e) => setRsvp({ ...rsvp, contact_info: e.target.value })}
+          />
+        </label>
+        <label>
+          <span>Anything we should know?</span>
+          <textarea
+            value={rsvp.notes}
+            onChange={(e) => setRsvp({ ...rsvp, notes: e.target.value })}
+            placeholder="Plus one, dietary notes, favorite pour…"
+          />
+        </label>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || !rsvp.name.trim() || !rsvp.contact_info.trim()}
+          onClick={() => void subscribe()}
+        >
+          Add me to the list
+        </button>
+      </section>
+    )}
 
-    {admin && subscribers.length > 0 && <section>
-      <div className="section-heading"><div><span className="eyebrow">INVITE LIST</span><h2>{subscribers.length} on the list</h2></div></div>
-      <ul className="subscriber-list">
-        {subscribers.map((subscriber) => (
-          <li key={subscriber.id}>
-            <div><strong>{subscriber.name}</strong><small>{subscriber.contact_info}</small></div>
-            {subscriber.notes ? <p>{subscriber.notes}</p> : null}
-            <button type="button" className="icon-button danger" aria-label={`Remove ${subscriber.name}`} onClick={async () => {
-              await api(`/event-subscribers/${subscriber.id}`, { method: "DELETE" }).catch(() => {});
-              load();
-            }}><Trash2 size={16}/></button>
-          </li>
-        ))}
-      </ul>
-    </section>}
+    {admin && subscribers.length > 0 && (
+      <section>
+        <div className="section-heading">
+          <div><span className="eyebrow">INVITE LIST</span><h2>{subscribers.length} on the list</h2></div>
+        </div>
+        <ul className="subscriber-list">
+          {subscribers.map((subscriber) => (
+            <li key={subscriber.id}>
+              <div>
+                <strong>{subscriber.name}</strong>
+                <small>{subscriber.contact_info}</small>
+              </div>
+              {subscriber.notes ? <p>{subscriber.notes}</p> : null}
+              <button
+                type="button"
+                className="icon-button danger"
+                aria-label={`Remove ${subscriber.name}`}
+                onClick={async () => {
+                  await api(`/event-subscribers/${subscriber.id}`, { method: "DELETE" }).catch(() => {});
+                  load();
+                }}
+              >
+                <Trash2 size={16}/>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
 
     {notice && <div className="toast">{notice}</div>}
   </>;
