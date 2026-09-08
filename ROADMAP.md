@@ -148,6 +148,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `client/src/App.tsx` — responsive shell (phone bottom nav / rail), bottle-detail route, Keeper actions, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
 - `client/src/EventsPage.tsx` — guest Events UI, signup form, and Keeper Invite List wiring.
+- `client/src/EventEditor.tsx` / `EventImageAdjuster.tsx` / `EventImageMedia.tsx` / `src/event-image-framing.ts` — PR140 event photo framing (draft Adjust photo; CSS focal/zoom; non-destructive).
+- `client/src/EventDetail.tsx` — guest/Keeper event detail hero with shared framing.
 - `client/src/EventSubscriberList.tsx` — Keeper-only invite list management (search, remove, export, copy).
 - `client/src/event-subscribers.ts` — pure invite-list helpers (contact href, filter, CSV, copy).
 - `client/src/GalleryPage.tsx` — guest/Keeper gallery album browsing, grid, lightbox, and multi-select batch upload UI.
