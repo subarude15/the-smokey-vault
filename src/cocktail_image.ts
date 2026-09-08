@@ -516,3 +516,43 @@ export async function findCocktailImage(
   }
   return result;
 }
+
+/**
+ * Bounded, fill-missing backfill of built-in cocktail photos (PR145).
+ *
+ * Reuses the existing safe discovery (`findCocktailImage`), which only writes when
+ * a trustworthy image is localized and never overwrites an existing image. Custom
+ * cocktails are skipped so Keeper-owned imagery is left untouched. Safe to run in
+ * the background at boot; a failed lookup simply leaves the cocktail without a photo.
+ */
+export async function backfillMissingCocktailImages(opts?: {
+  limit?: number;
+  log?: (message: string) => void;
+  findImage?: (id: number) => Promise<CocktailImageDiscoveryResult>;
+}): Promise<{ attempted: number; updated: number }> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? 6, 50));
+  const findImage = opts?.findImage ?? ((id: number) => findCocktailImage(id));
+
+  const rows = db
+    .prepare(
+      `SELECT id FROM cocktails
+       WHERE (image_url IS NULL OR trim(image_url) = '')
+         AND collection != 'Custom Cocktails'
+       ORDER BY id ASC
+       LIMIT ?`,
+    )
+    .all(limit) as { id: number }[];
+
+  let attempted = 0;
+  let updated = 0;
+  for (const row of rows) {
+    attempted += 1;
+    try {
+      const result = await findImage(row.id);
+      if (result.status === "updated") updated += 1;
+    } catch (error) {
+      opts?.log?.(`cocktail image backfill failed for #${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { attempted, updated };
+}
