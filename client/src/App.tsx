@@ -9,6 +9,7 @@ import {
   GUEST_LANDING_CANDIDATES,
   includeModuleInCollectionNav,
   firstEnabledPage,
+  landingFeedbackCtaEnabled,
   mobileShortLabel,
   notInPrimaryNav,
   pageEnabled,
@@ -1052,7 +1053,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     </section>}
     <section className="feature-grid">
       <button className="feature-card warm feature-card-lead" onClick={() => go("cocktails")}><div><span className="eyebrow">SURPRISE ME · SEASONAL</span><h2>What can I make?</h2><p>Shelf-matched recipes first — then ask the Mixologist when you want something custom.</p></div><Shuffle size={56}/></button>
-      <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>Give us your 2 cents</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
+      {landingFeedbackCtaEnabled(enabledTabs, admin) && (
+        <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>Give us your 2 cents</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
+      )}
     </section>
   </>;
 }

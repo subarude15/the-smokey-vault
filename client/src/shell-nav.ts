@@ -118,6 +118,21 @@ export function pageEnabled(page: string, tabs: EnabledTabs, admin = false): boo
   return tab ? tabs[tab] === 1 : true;
 }
 
+/**
+ * Overview landing destination for the Guest feedback CTA (“Give us your 2 cents”).
+ * Kept as a named page id so landing + nav share PAGE_TAB → whatsnext.
+ */
+export const LANDING_FEEDBACK_PAGE = "next";
+
+/**
+ * Whether the Overview “Give us your 2 cents” CTA may render.
+ * Same rule as Guest nav for `next` (PAGE_TAB → whatsnext) — no second flag.
+ * Keepers still see it so Settings can re-enable the tab without a dead end.
+ */
+export function landingFeedbackCtaEnabled(tabs: EnabledTabs, admin = false): boolean {
+  return pageEnabled(LANDING_FEEDBACK_PAGE, tabs, admin);
+}
+
 /** Position of a page's controlling tab in the keeper's custom order. */
 export function tabRank(page: string, order: TabKey[]): number {
   const tab = PAGE_TAB[page];

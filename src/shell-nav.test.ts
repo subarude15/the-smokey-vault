@@ -19,6 +19,8 @@ import {
   guestDestinationsCovered,
   includeModuleInCollectionNav,
   isKeeperOnlyPage,
+  LANDING_FEEDBACK_PAGE,
+  landingFeedbackCtaEnabled,
   notInPrimaryNav,
   pageEnabled,
   selectPrimaryNav,
@@ -47,6 +49,36 @@ test("disabled Guest tab disappears from enabled nav selection", () => {
   assert.equal(pageEnabled("gallery", all, false), true);
   assert.equal(pageEnabled("gallery", tabs({ gallery: 0 }), false), false);
   assert.equal(pageEnabled("gallery", tabs({ gallery: 0 }), true), true);
+});
+
+test("Give us your 2 cents landing CTA follows whatsnext via pageEnabled", () => {
+  assert.equal(LANDING_FEEDBACK_PAGE, "next");
+  assert.equal(pageEnabled("next", tabs(), false), true);
+  assert.equal(landingFeedbackCtaEnabled(tabs(), false), true);
+
+  const disabled = tabs({ whatsnext: 0 });
+  assert.equal(pageEnabled("next", disabled, false), false);
+  assert.equal(landingFeedbackCtaEnabled(disabled, false), false);
+  // Same source of truth — CTA helper must not drift from nav visibility.
+  assert.equal(landingFeedbackCtaEnabled(disabled, false), pageEnabled("next", disabled, false));
+
+  assert.equal(pageEnabled("next", tabs({ whatsnext: 1 }), false), true);
+  assert.equal(landingFeedbackCtaEnabled(tabs({ whatsnext: 1 }), false), true);
+
+  // Keepers still reach feedback / Settings re-enable path.
+  assert.equal(pageEnabled("next", disabled, true), true);
+  assert.equal(landingFeedbackCtaEnabled(disabled, true), true);
+});
+
+test("Overview wires landing feedback CTA through shared helper", () => {
+  assert.match(shellSrc, /LANDING_FEEDBACK_PAGE\s*=\s*\"next\"/);
+  assert.match(shellSrc, /landingFeedbackCtaEnabled/);
+  assert.match(shellSrc, /pageEnabled\(LANDING_FEEDBACK_PAGE/);
+  assert.match(appSrc, /landingFeedbackCtaEnabled\(enabledTabs,\s*admin\)/);
+  assert.match(appSrc, /Give us your 2 cents/);
+  // No parallel feature flag for the landing CTA.
+  assert.doesNotMatch(appSrc, /showFeedbackCard|showTwoCents|feedbackEnabled/);
+  assert.doesNotMatch(shellSrc, /showFeedbackCard|showTwoCents|feedbackEnabled/);
 });
 
 test("re-enabled Guest tab returns and order follows tabOrder", () => {
