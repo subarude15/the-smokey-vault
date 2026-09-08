@@ -1,23 +1,49 @@
 ﻿# Current task
 
-**Status: active — PR124**
+**Status: active — PR125**
 
-**PR124 — Brewery Lab guest-friendly details + Keeper-owned presentation fields**
+**PR125 — Commercial keg identity + imagery enrichment**
 
-## Objectives
+## Objective
 
-1. Keep Brewfather one-way sync as the source of brewing telemetry.
-2. Make The Smokey Vault own guest presentation fields on `brews` (`display_name`, `guest_description`, `tasting_notes`, `flavors`, `tags`, Keeper image).
-3. Protect Keeper presentation content (including images) from Brewfather overwrite.
-4. Update Brewery Lab UI to prioritize guest-facing information and add a focused detail/editor experience.
-5. Preserve Guest API trust-boundary redaction.
+Make commercial draft taps recognizable to guests without building a new generalized enrichment system.
 
-## File boundaries
+For commercial kegs/taps, enrich enough data to show:
+- brewery / brand
+- beer name
+- style
+- ABV when confidently available
+- a useful image/logo
 
-- `src/db.ts`, `src/brewfather.ts`, `src/catalog.ts`, `src/server.ts`, `src/guest-inventory-response.ts`
-- `client/src/BreweryLab.tsx`, `client/src/BreweryLabDetail.tsx`, Homebrew Log fields in `client/src/App.tsx`
-- focused tests in `src/brewery-lab-presentation.test.ts`
+Equivalent packaged-product artwork (can/bottle art) is acceptable when brewery + beer identity is a strong match. Brewery/beer logo is an acceptable fallback. Keg-specific artwork is not required.
+
+## Boundaries
+
+1. Reuse existing packaged-beer official discovery, identity, image, provenance, and normalization helpers where practical.
+2. Do not weaken strong/exact identity requirements just because packaging format differs.
+3. Do not require UPC/barcode identity for taps when brewery + beer name provide strong identity.
+4. Do not add a new external data source unless current repository capabilities cannot satisfy the demonstrated need.
+5. Preserve Keeper-entered tap values and images unless the existing ownership semantics explicitly allow machine repair.
+6. Guest API must continue exposing only guest-safe tap fields.
+7. Keep the PR intentionally narrow: useful tap cards, not a generalized tap enrichment platform.
+
+## Likely areas
+
+- `src/server.ts`
+- `src/official_brewery_beer_discovery.ts`
+- existing packaged-beer metadata/image enrichment helpers
+- tap inventory/catalog helpers
+- `src/guest-inventory-response.ts`
+- tap UI in `client/src/`
+- focused tap/keg enrichment tests
+
+Search before adding helpers. Prefer adapting existing official-beer identity/image logic over duplicating it.
 
 ## Non-goals
 
-Commercial keg enrichment, two-way Brewfather, AI tasting notes, packaged-beer/spirit/wine enrichment changes, broad theme redesign.
+- keg-specific product-page crawling
+- broad enrichment ownership redesign
+- changing Brewfather/homebrew behavior from PR124
+- theme/branding work
+- spirit/wine enrichment changes
+- fuzzy image matching
