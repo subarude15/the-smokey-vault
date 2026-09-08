@@ -129,8 +129,9 @@ These are explicitly desired near-term product improvements based on real househ
    - Media validation (magic-byte sniff, supported types, dedup) and PR143 poster generation are preserved; poster failure still lets a valid video save. Oversized uploads return HTTP 413 with human-readable copy.
 10. **PR145 — Cocktail recipe completeness, photo backfill, and Keeper build identifier** (done)
    - Built-in cocktails now render real, practical preparation steps derived deterministically from their structured method/glassware/garnish instead of stopping at a bare technique label ("Build"/"Shake"/"Stir"); the short method stays as secondary metadata. AI-found and custom recipes with full prose/numbered instructions are used as-is and never overwritten.
-   - Built-in cocktails missing a photo are backfilled in bounded batches at boot, reusing the existing safe fill-missing discovery (never overwriting Keeper/custom images; a no-result leaves the cocktail without a photo).
-   - Keeper Settings shows a lightweight, auto-derived build identifier (`Build MMDDYY.PR`, human date · through PRxxx, optional short SHA from `GIT_SHA`) so deployment freshness is easy to confirm.
+   - Built-in cocktails missing a photo are backfilled in bounded batches at boot, reusing the existing safe fill-missing discovery (never overwriting Keeper/custom images; a no-result leaves the cocktail without a photo). A persisted rotation cursor prevents persistent no-results from starving later cocktails.
+   - Only genuine technique labels (allowlist) are replaced with generated steps; real short prose instructions are preserved.
+   - Keeper Settings shows a lightweight build identifier derived from build metadata (`BUILD_DATE`/`BUILD_PR`/`GIT_SHA`) stamped by `docker-publish.yml` — no per-PR source edits — with a deterministic local/dev fallback.
 11. **PR146 — Gallery comments + up/down voting**
    - Add social interaction after Gallery media display/upload behavior is stable.
    - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
@@ -185,7 +186,7 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/cocktails.ts` — cocktail matching/recipe behavior; cocktail rows already support `image_url`.
 - `client/src/cocktail-instructions.ts` — cocktail method parsing plus PR145 deterministic step generation (`resolveCocktailInstructions` / `buildCocktailSteps`) for built-in recipes; rendered by `CocktailRecipeInstructions`.
 - `src/cocktail_image.ts` — safe fill-missing cocktail image discovery (`findCocktailImage`) and the PR145 bounded boot `backfillMissingCocktailImages`.
-- `src/build-info.ts` — lightweight Keeper build identifier (`getBuildInfo`), surfaced by `GET /api/admin/build` and the Keeper Settings "Build" card.
+- `src/build-info.ts` — Keeper build identifier (`getBuildInfo`) derived from build-arg/env metadata (`BUILD_DATE`/`BUILD_PR`/`GIT_SHA`, stamped by `docker-publish.yml`) with a local/dev fallback; surfaced by `GET /api/admin/build` and the Keeper Settings "Build" card.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
 - `src/ingestion/jobs/field-ownership.ts` — durable machine-vs-human ownership; currently strongest for packaged-beer ABV/category.
