@@ -5,13 +5,13 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR141** — Conditional landing-page “Give us your 2 cents” visibility. Overview CTA uses the same `pageEnabled("next")` / `PAGE_TAB → whatsnext` rule as Guest nav (via `landingFeedbackCtaEnabled`); no second flag. Keeper Settings access unchanged.
+- **PR142** — Conditional landing-page “Give us your 2 cents” visibility. Overview CTA uses the same `pageEnabled("next")` / `PAGE_TAB → whatsnext` rule as Guest nav (via `landingFeedbackCtaEnabled`); no second flag. Keeper Settings access unchanged. (GitHub #141 was a Cloud Agent env chore, so this product work is #142.)
 
 Currently working on:
 - None.
 
 Next planned:
-- **PR142 — Video thumbnails in the Gallery/Library** (`ROADMAP.md` Track C).
+- **PR143 — Video thumbnails in the Gallery/Library** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
@@ -24,12 +24,12 @@ Next planned:
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
 - Appearance support is Light + Dark only (PR127).
 - App routing remains state-based in `App.tsx` (no React Router for primary navigation).
-- GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR139 docs → product crop work is PR140).
+- GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR141 chore → feedback CTA visibility is PR142).
 
 ## Known issues / follow-ups
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
-- Draft **#121** branding docs remain deferred until PR145.
+- Draft **#121** branding docs remain deferred until PR146.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
 
 ## Handoff
