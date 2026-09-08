@@ -1,5 +1,5 @@
 /**
- * PR145 — Bounded, fill-missing cocktail photo backfill.
+ * PR145 — Bounded, fill-missing cocktail photo backfill with cursor rotation.
  * Uses an injected discovery function; no live search or remote image hosts.
  */
 import assert from "node:assert/strict";
@@ -7,8 +7,8 @@ import { test } from "node:test";
 
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
 
-const { db } = await import("./db.js");
-const { backfillMissingCocktailImages } = await import("./cocktail_image.js");
+const { db, setSetting } = await import("./db.js");
+const { backfillMissingCocktailImages, COCKTAIL_IMAGE_BACKFILL_CURSOR } = await import("./cocktail_image.js");
 
 const PREFIX = `PR145-BF-${Date.now()}`;
 const PLACEHOLDER = "__pr145_backfill_placeholder__";
@@ -16,12 +16,14 @@ const PLACEHOLDER = "__pr145_backfill_placeholder__";
 /**
  * The seeded catalog ships ~130 image-less cocktails that would otherwise dominate
  * the bounded backfill. Mask every currently-missing row so the test's own inserts
- * are the only missing rows, then restore exactly afterward.
+ * are the only eligible rows, and reset the rotation cursor for determinism.
  */
 function isolateMissingRows(): () => void {
   db.prepare("UPDATE cocktails SET image_url = ? WHERE image_url IS NULL OR trim(image_url) = ''").run(PLACEHOLDER);
+  setSetting(COCKTAIL_IMAGE_BACKFILL_CURSOR, "0");
   return () => {
     db.prepare("UPDATE cocktails SET image_url = '' WHERE image_url = ?").run(PLACEHOLDER);
+    setSetting(COCKTAIL_IMAGE_BACKFILL_CURSOR, "0");
   };
 }
 
@@ -54,7 +56,6 @@ test("backfill only targets built-in cocktails missing an image and fills them",
       limit: 50,
       findImage: async (id) => {
         seen.push(id);
-        // Simulate the real fill-missing write so the row reflects an update.
         db.prepare("UPDATE cocktails SET image_url = ? WHERE id = ? AND trim(image_url) = ''")
           .run("/api/media/images/found.webp", id);
         return { status: "updated", image_url: "/api/media/images/found.webp" };
@@ -74,30 +75,64 @@ test("backfill only targets built-in cocktails missing an image and fills them",
   }
 });
 
-test("backfill is bounded by the limit and a no_result leaves the cocktail without a photo", async () => {
+test("repeated runs rotate past persistent no-results and eventually reach later cocktails", async () => {
   const restore = isolateMissingRows();
-  const ids = [1, 2, 3, 4].map((n) => insertCocktail({ name: `${PREFIX} Bound ${n}` }));
+  // Five eligible cocktails; discovery always returns no result.
+  const ids = [1, 2, 3, 4, 5].map((n) => insertCocktail({ name: `${PREFIX} Rotate ${n}` }));
 
   try {
-    const seen: number[] = [];
-    const result = await backfillMissingCocktailImages({
-      limit: 2,
-      findImage: async (id) => {
-        seen.push(id);
-        return { status: "no_result", reason: "no_trustworthy_source" };
-      }
-    });
+    const runs: number[][] = [];
+    const findImage = async (id: number) => {
+      return { status: "no_result", reason: "no_trustworthy_source" } as const;
+    };
 
-    assert.equal(seen.length, 2, "respects the per-run limit");
-    assert.deepEqual(seen, ids.slice(0, 2), "attempts the lowest-id missing rows first");
-    assert.equal(result.attempted, 2);
-    assert.equal(result.updated, 0, "no_result does not count as updated");
-    for (const id of ids) {
-      assert.equal(imageOf(id), "", "no_result leaves the cocktail without a photo");
+    // Three bounded runs of 2 should cover all five distinct rows despite the first
+    // two always returning no result.
+    for (let i = 0; i < 3; i++) {
+      const seen: number[] = [];
+      await backfillMissingCocktailImages({
+        limit: 2,
+        findImage: async (id) => {
+          seen.push(id);
+          return findImage(id);
+        }
+      });
+      runs.push(seen);
     }
+
+    assert.deepEqual(runs[0], ids.slice(0, 2), "run 1 attempts the first two");
+    assert.deepEqual(runs[1], ids.slice(2, 4), "run 2 advances past the first group (no re-retry)");
+    // Run 1 and run 2 must be disjoint — proof the leading no-results do not starve later rows.
+    assert.equal(runs[0].some((id) => runs[1].includes(id)), false);
+
+    // The later cocktail (ids[4]) is reached only because the cursor advanced.
+    const covered = new Set([...runs[0], ...runs[1], ...runs[2]]);
+    for (const id of ids) {
+      assert.ok(covered.has(id), `cocktail ${id} was eventually attempted`);
+    }
+    assert.ok(runs[2].includes(ids[4]), "the last cocktail is reached on run 3");
+    // Every row is still image-less (all were no-result) — a valid outcome.
+    for (const id of ids) assert.equal(imageOf(id), "");
   } finally {
     restore();
     db.prepare(`DELETE FROM cocktails WHERE id IN (${ids.map(() => "?").join(",")})`).run(...ids);
+  }
+});
+
+test("a no_result leaves the cocktail without a photo and is not counted as updated", async () => {
+  const restore = isolateMissingRows();
+  const id = insertCocktail({ name: `${PREFIX} None` });
+  try {
+    const result = await backfillMissingCocktailImages({
+      limit: 5,
+      findImage: async () => ({ status: "no_result", reason: "no_trustworthy_source" })
+    });
+    assert.equal(result.attempted, 1);
+    assert.equal(result.updated, 0);
+    assert.equal(imageOf(id), "");
+  } finally {
+    restore();
+    db.prepare("DELETE FROM cocktails WHERE id = ?").run(id);
   }
 });
 
