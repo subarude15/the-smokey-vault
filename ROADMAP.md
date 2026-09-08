@@ -29,6 +29,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #133 clears Keeper Mode immediately when an authenticated client request receives HTTP 401, instead of leaving Keeper UI until the kiosk idle timeout.
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
+- PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix). Track C continues at **PR139**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
