@@ -69,7 +69,7 @@ OpenAPI: `http://localhost:8080/api/docs`
 
 ## Bar gallery uploads
 
-Guests can add gallery photos/clips up to a fixed 150 MB. Authenticated Keepers can upload much larger videos (modern phone / 4K takes); the Keeper ceiling defaults to ~1 GiB and is tunable without rebuilding the image via `KEEPER_GALLERY_MAX_VIDEO_MB` (in MB). Large Keeper uploads stream to a temp file under the gallery data folder and finalize with an atomic rename, so the server never buffers the whole video in memory. The effective limit is enforced server-side from Keeper authorization (not the browser), oversized uploads return HTTP 413, and PR143 video posters are still generated after a successful upload.
+Photos are capped at 150 MB for everyone. Authenticated Keepers can upload much larger **videos** (modern phone / 4K takes); the Keeper video ceiling defaults to ~1 GiB and is tunable without rebuilding the image via `KEEPER_GALLERY_MAX_VIDEO_MB` (in MB). The limit is enforced server-side from the **sniffed media type** and Keeper authorization (not the browser, filename, or MIME), so a Keeper photo over 150 MB is still rejected while a larger video is accepted. Large Keeper uploads stream to a temp file under the gallery data folder and finalize with an atomic rename, so the server never buffers the whole video in memory. Oversized uploads return HTTP 413, and PR143 video posters are still generated after a successful upload.
 
 ## Appearance
 

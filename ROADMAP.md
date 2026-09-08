@@ -124,7 +124,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Album grids and album covers render posters (or a lightweight fallback); the original video loads only in the lightbox/download path.
    - Poster cleanup follows shared Gallery file reference semantics; missing/legacy posters backfill once at boot without blocking Guest GETs.
 9. **PR144 — Keeper large-video upload path** (done)
-   - Guests keep the 150 MB ceiling; authenticated Keepers get a larger, env-tunable limit (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback) resolved server-side from authorization, not the client or Content-Length.
+   - Photos stay capped at 150 MB for Guests and Keepers; only videos get a larger, env-tunable Keeper ceiling (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback). The per-type ceiling is enforced server-side on the sniffed media type and authorization — not the client, filename, or Content-Length — so a Keeper photo over 150 MB is rejected while a larger video is accepted.
    - Large uploads stream to a temp file on the Gallery filesystem and finalize with an atomic rename through one shared persistence path; the full file is never buffered in memory, and partial/failed uploads leave no temp file or DB row.
    - Media validation (magic-byte sniff, supported types, dedup) and PR143 poster generation are preserved; poster failure still lets a valid video save. Oversized uploads return HTTP 413 with human-readable copy.
 10. **PR145 — Gallery comments + up/down voting**

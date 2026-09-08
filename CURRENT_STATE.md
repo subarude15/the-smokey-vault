@@ -5,7 +5,7 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR144** — Keeper large-video upload path. Guests keep the 150 MB ceiling; authenticated Keepers get a larger, env-tunable limit (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback) chosen server-side from authorization. Large uploads stream to a temp file under the Gallery filesystem and finalize with an atomic rename through one shared persistence path — never buffering the whole file — with partial/failed uploads leaving no temp file or DB row. PR143 posters, magic-byte validation, dedup, and reference-aware cleanup are preserved; oversized uploads return 413 with human-readable copy.
+- **PR144** — Keeper large-video upload path. Photos stay capped at 150 MB for Guests and Keepers; only **videos** get a larger, env-tunable Keeper ceiling (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback). The per-type ceiling is enforced server-side on the **sniffed** media type (not filename/MIME) from authorization, so a Keeper photo >150 MB is rejected while a larger video is accepted. Large uploads stream to a temp file under the Gallery filesystem and finalize with an atomic rename through one shared persistence path — never buffering the whole file — with partial/failed uploads leaving no temp file or DB row. PR143 posters, magic-byte validation, dedup, and reference-aware cleanup are preserved; oversized uploads return 413 with human-readable copy.
 
 Currently working on:
 - None.
@@ -20,7 +20,7 @@ Next planned:
 - Event photo framing is event-only metadata (`image_focal_x` / `image_focal_y` / `image_zoom`) applied with CSS — never bake crop into the uploaded file via `ImageField`.
 - Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
 - Gallery video tiles/covers use persisted lightweight posters; original videos load only in the viewer/download path; poster cleanup follows Gallery media ownership/reference semantics.
-- Gallery upload limits are centralized in `speakeasy-shared` (Guest vs Keeper); the effective ceiling is decided server-side by authorization (never client `File.size`/Content-Length). Large Keeper videos stream to `galleryDir/tmp` and finalize via one shared temp-file persistence path (atomic rename, no full-file Buffer); small uploads and the streamed path share that core so they cannot drift.
+- Gallery upload limits are centralized in `speakeasy-shared` and applied per media type: photos are capped at 150 MB for all roles, and only videos use the larger Keeper ceiling. The per-type ceiling is enforced server-side on the sniffed media type (not client `File.size`/Content-Length/filename). Large Keeper videos stream to `galleryDir/tmp` and finalize via one shared temp-file persistence path (atomic rename, no full-file Buffer); small uploads and the streamed path share that core so they cannot drift.
 - Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
 - Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
