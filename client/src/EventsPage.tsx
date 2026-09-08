@@ -4,6 +4,7 @@ import { api } from "./api";
 import { MAX_CONTACT_INFO, MAX_PATRON_NAME, type EventSubscriber, type HouseEvent } from "./catalog";
 import { EventDetail } from "./EventDetail";
 import { emptyEventDraft, EventEditor, eventToEditorValues, type EventEditorValues } from "./EventEditor";
+import { EventSubscriberList } from "./EventSubscriberList";
 import {
   buildEventDeepLink,
   parseEventIdFromSearch,
@@ -30,6 +31,8 @@ function isUpcoming(raw: string) {
 export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: string }) {
   const [events, setEvents] = useState<HouseEvent[]>([]);
   const [subscribers, setSubscribers] = useState<EventSubscriber[]>([]);
+  const [subscriberLoading, setSubscriberLoading] = useState(false);
+  const [subscriberError, setSubscriberError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [rsvp, setRsvp] = useState({ name: "", contact_info: "", notes: "" });
@@ -45,14 +48,38 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
   const [shareFallbackUrl, setShareFallbackUrl] = useState("");
   const [shareBusy, setShareBusy] = useState(false);
 
+  useEffect(() => {
+    // Guest signup toasts should not linger after unlocking Keeper Mode (and vice versa).
+    setNotice("");
+  }, [admin]);
+
+  const loadSubscribers = useCallback(() => {
+    if (!admin) {
+      setSubscribers([]);
+      setSubscriberLoading(false);
+      setSubscriberError("");
+      return;
+    }
+    setSubscriberLoading(true);
+    setSubscriberError("");
+    api<EventSubscriber[]>("/event-subscribers")
+      .then((rows) => {
+        setSubscribers(rows);
+        setSubscriberError("");
+      })
+      .catch((err) => {
+        setSubscribers([]);
+        setSubscriberError(err instanceof Error ? err.message : "Could not load the invite list.");
+      })
+      .finally(() => setSubscriberLoading(false));
+  }, [admin]);
+
   const load = useCallback(() => {
     api<HouseEvent[]>("/events")
       .then((rows) => { setEvents(rows); setError(""); })
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load events."));
-    if (admin) {
-      api<EventSubscriber[]>("/event-subscribers").then(setSubscribers).catch(() => setSubscribers([]));
-    }
-  }, [admin]);
+    loadSubscribers();
+  }, [loadSubscribers]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -490,35 +517,16 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
       </section>
     )}
 
-    {admin && subscribers.length > 0 && (
-      <section>
-        <div className="section-heading">
-          <div><span className="eyebrow">INVITE LIST</span><h2>{subscribers.length} on the list</h2></div>
-        </div>
-        <ul className="subscriber-list">
-          {subscribers.map((subscriber) => (
-            <li key={subscriber.id}>
-              <div>
-                <strong>{subscriber.name}</strong>
-                <small>{subscriber.contact_info}</small>
-              </div>
-              {subscriber.notes ? <p>{subscriber.notes}</p> : null}
-              <button
-                type="button"
-                className="icon-button danger"
-                aria-label={`Remove ${subscriber.name}`}
-                onClick={async () => {
-                  await api(`/event-subscribers/${subscriber.id}`, { method: "DELETE" }).catch(() => {});
-                  load();
-                }}
-              >
-                <Trash2 size={16}/>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-    )}
+    {admin ? (
+      <EventSubscriberList
+        subscribers={subscribers}
+        loading={subscriberLoading}
+        error={subscriberError}
+        onRetry={loadSubscribers}
+        onRemoved={(id) => setSubscribers((rows) => rows.filter((row) => row.id !== id))}
+        onNotice={setNotice}
+      />
+    ) : null}
 
     {notice && <div className="toast">{notice}</div>}
   </>;
