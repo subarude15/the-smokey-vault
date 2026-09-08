@@ -48,6 +48,11 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
   const [shareFallbackUrl, setShareFallbackUrl] = useState("");
   const [shareBusy, setShareBusy] = useState(false);
 
+  useEffect(() => {
+    // Guest signup toasts should not linger after unlocking Keeper Mode (and vice versa).
+    setNotice("");
+  }, [admin]);
+
   const loadSubscribers = useCallback(() => {
     if (!admin) {
       setSubscribers([]);
