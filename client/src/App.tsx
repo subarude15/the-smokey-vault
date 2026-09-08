@@ -541,6 +541,10 @@ export default function App() {
     setPage(guestLandingRef.current);
   }, []);
 
+  // Register before request-capable mount effects. api.ts also keeps a durable
+  // pending rejection if a 401 still races ahead of this subscription.
+  useEffect(() => onKeeperAuthRejected(handToGuest), [handToGuest]);
+
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
   useEffect(() => {
     document.body.classList.toggle("nav-open", mobileNav || moreSheet);
@@ -625,8 +629,6 @@ export default function App() {
     events.forEach((event) => window.addEventListener(event, touch, { passive: true }));
     return () => { clearTimeout(timer); events.forEach((event) => window.removeEventListener(event, touch)); };
   }, [admin, handToGuest]);
-  // Expired/forged Keeper bearer → same Guest handoff as idle lock / Lock Bar.
-  useEffect(() => onKeeperAuthRejected(handToGuest), [handToGuest]);
 
   const navigate = (next: string) => {
     if (next === "mixologist") {

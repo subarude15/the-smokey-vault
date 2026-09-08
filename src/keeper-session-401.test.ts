@@ -33,11 +33,14 @@ function jsonResponse(status: number, body: unknown = { error: "Unauthorized" })
 
 beforeEach(() => {
   clearToken();
+  // Drain any durable rejection left from a prior case without a consumer.
+  onKeeperAuthRejected(() => {})();
 });
 
 afterEach(() => {
   while (unsubscribers.length) unsubscribers.pop()?.();
   clearToken();
+  onKeeperAuthRejected(() => {})();
   globalThis.fetch = originalFetch;
 });
 
@@ -209,6 +212,47 @@ test("downloadExport authenticated 401 uses the same auth-rejection path", async
   assert.equal(tokenExists(), false);
 });
 
+test("boot-time 401 before listener registration still reaches handToGuest", async () => {
+  // App boots with a stored bearer → admin initializes true from tokenExists().
+  setToken("expired-boot-token");
+  let admin = tokenExists();
+  assert.equal(admin, true);
+
+  globalThis.fetch = (async () => jsonResponse(401, { error: "Admin session required" })) as typeof fetch;
+
+  // Early mount effect (/house, /settings, …) runs before the rejection listener.
+  await assert.rejects(() => api("/house"), (error: unknown) => {
+    assert.ok(error instanceof ApiError);
+    assert.equal(error.status, 401);
+    return true;
+  });
+  assert.equal(tokenExists(), false);
+  // UI still thinks Keeper Mode — the race the durable pending rejection must cover.
+  assert.equal(admin, true);
+
+  // Later subscription must consume the pending rejection via handToGuest(), not a
+  // second logout path. Without durability this signal would be lost.
+  unsubscribers.push(onKeeperAuthRejected(() => {
+    clearToken();
+    admin = false;
+  }));
+
+  assert.equal(admin, false, "pending rejection must not leave admin stuck in Keeper Mode");
+  assert.equal(tokenExists(), false);
+});
+
+test("boot-time pending rejection is idempotent across concurrent early 401s", async () => {
+  setToken("expired-boot-token");
+  let handoffs = 0;
+  globalThis.fetch = (async () => jsonResponse(401)) as typeof fetch;
+
+  await Promise.allSettled([api("/house"), api("/settings"), api("/messages/unread")]);
+  assert.equal(tokenExists(), false);
+
+  unsubscribers.push(onKeeperAuthRejected(() => { handoffs += 1; }));
+  assert.equal(handoffs, 1);
+});
+
 test("App wires auth rejection to existing handToGuest (not a second reset path)", () => {
   assert.match(appSrc, /onKeeperAuthRejected/);
   assert.match(
@@ -228,6 +272,7 @@ test("App wires auth rejection to existing handToGuest (not a second reset path)
 test("api layer detects 401 centrally and preserves ApiError contract", () => {
   assert.match(apiSrc, /onKeeperAuthRejected/);
   assert.match(apiSrc, /notifyKeeperAuthRejected/);
+  assert.match(apiSrc, /keeperAuthRejectedPending/);
   assert.match(apiSrc, /response\.status === 401/);
   assert.match(apiSrc, /rejectKeeperSessionIfAuthenticated\(sentAuth\)/);
   assert.match(apiSrc, /throw new ApiError/);

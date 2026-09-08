@@ -77,7 +77,7 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 
 ### Track B — Hardening (planned)
 
-Priority order:
+Ops / evidence-driven hardening (does not displace the next product PR):
 
 1. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
 2. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
@@ -87,7 +87,14 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+1. **PR134 — Responsive App Shell & Navigation Structure** (next code PR)
+   - Mobile sticky bottom navigation with `env(safe-area-inset-bottom)` support
+   - Continue using existing `navigate(pageId)` (no React Router rewrite)
+   - Responsive tablet / landscape left rail
+   - Guest vs Keeper navigation partition
+   - Preserve existing PIN unlock and `KIOSK_IDLE_MS`
+   - Structural / ergonomic work only — no branding or theme redesign yet
+2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 

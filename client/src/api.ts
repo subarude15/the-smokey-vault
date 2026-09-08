@@ -20,9 +20,14 @@ function tokenStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> {
 const storage = tokenStorage();
 let adminToken = storage.getItem(TOKEN_KEY) ?? "";
 
+/** True when a 401 rejection happened with no App listener yet (boot-time race). */
+let keeperAuthRejectedPending = false;
+
 export function setToken(token: string) {
   adminToken = token;
   storage.setItem(TOKEN_KEY, token);
+  // A fresh unlock supersedes any prior unconsumed rejection.
+  keeperAuthRejectedPending = false;
 }
 
 export function clearToken() {
@@ -48,20 +53,36 @@ const keeperAuthRejectedListeners = new Set<KeeperAuthRejectedListener>();
 /**
  * Subscribe to Keeper bearer rejection (authenticated request → HTTP 401).
  * Returns an unsubscribe function. Used by App to call handToGuest().
+ * If a rejection already occurred before any listener registered (mount race),
+ * the new listener is invoked once immediately so the signal is not lost.
  */
 export function onKeeperAuthRejected(listener: KeeperAuthRejectedListener): () => void {
   keeperAuthRejectedListeners.add(listener);
+  if (keeperAuthRejectedPending) {
+    keeperAuthRejectedPending = false;
+    try {
+      listener();
+    } catch {
+      // UI listeners must not break the API error path.
+    }
+  }
   return () => { keeperAuthRejectedListeners.delete(listener); };
 }
 
 /**
  * Tear down an invalid Keeper session once: clear the stored token and notify
  * listeners. Concurrent 401s only notify on the first clear (idempotent).
+ * With no listeners yet, the rejection stays pending until App subscribes.
  */
 export function notifyKeeperAuthRejected(): void {
   const stillHadToken = Boolean(adminToken);
   clearToken();
   if (!stillHadToken) return;
+  if (keeperAuthRejectedListeners.size === 0) {
+    keeperAuthRejectedPending = true;
+    return;
+  }
+  keeperAuthRejectedPending = false;
   for (const listener of [...keeperAuthRejectedListeners]) {
     try {
       listener();
