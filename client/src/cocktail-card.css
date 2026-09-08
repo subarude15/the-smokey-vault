@@ -1,0 +1,46 @@
+.cocktail-card-grid{display:grid;grid-template-columns:1fr;gap:12px}
+.cocktail-card{border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden;box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);transition:border-color .2s var(--ease-out),transform .2s var(--ease-spring),opacity .2s var(--ease-out)}
+.cocktail-card:hover{border-color:var(--accent)}
+.cocktail-card:has(.cocktail-card-main:active){transform:scale(.995)}
+.cocktail-card-missing{opacity:.78}
+.cocktail-card-main{width:100%;display:grid;grid-template-columns:92px minmax(0,1fr);gap:14px;align-items:stretch;padding:12px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.cocktail-card-media{min-height:104px;border-radius:12px;overflow:hidden;display:grid;place-items:center;background:var(--surface-2);color:var(--accent-2)}
+.cocktail-card-media img{width:100%;height:100%;object-fit:cover;display:block}
+.cocktail-card-media svg{width:34px;height:34px;opacity:.72}
+.cocktail-card-copy{min-width:0;display:flex;flex-direction:column;justify-content:center}
+.cocktail-card-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px}
+.cocktail-readiness,.cocktail-favorite-tag{display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--line)}
+.cocktail-readiness-ready{color:#7fd59a;border-color:color-mix(in srgb,#7fd59a 44%,var(--line));background:color-mix(in srgb,#7fd59a 10%,var(--surface))}
+.cocktail-readiness-almost{color:var(--accent-2);border-color:color-mix(in srgb,var(--accent-2) 48%,var(--line));background:color-mix(in srgb,var(--accent-2) 10%,var(--surface))}
+.cocktail-readiness-missing{color:#e9796d;border-color:color-mix(in srgb,#e9796d 46%,var(--line));background:color-mix(in srgb,#e9796d 9%,var(--surface))}
+.cocktail-favorite-tag{color:var(--accent-2)}
+.cocktail-card h3{font:600 22px/1.15 "Playfair Display",serif;margin:2px 0 5px;letter-spacing:-.01em}
+.cocktail-card-style,.cocktail-card-missing,.cocktail-card-notes{margin:0;color:var(--muted);font-size:13px;line-height:1.4}
+.cocktail-card-missing{margin-top:5px;color:color-mix(in srgb,#e9796d 78%,var(--text))}
+.cocktail-card-notes{margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cocktail-card-keeper{display:flex;justify-content:flex-end;gap:8px;padding:10px 12px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--surface-2) 52%,var(--surface))}
+.cocktail-card-keeper .secondary{min-height:44px}
+.cocktail-card-keeper .secondary.active{border-color:var(--accent-2);color:var(--accent-2)}
+
+/* PR136 tablet workspace ergonomics. */
+.modal.form-modal,.modal.recipe-modal,.modal.finder-modal{width:min(calc(100% - 24px),42rem);max-width:42rem;margin-inline:auto}
+.modal-footer{justify-content:flex-end}
+.form-modal input:not([type="range"]),.form-modal select,.form-modal button,.recipe-modal button,.finder-modal input,.finder-modal button{min-height:44px}
+.form-modal textarea{min-height:96px}
+.ingredient-list li .mark{font-weight:800}
+.ingredient-list li.missing .mark{color:#e9796d}
+.ingredient-list li.substitute .mark{color:var(--accent-2)}
+
+@media (min-width:720px){
+  .cocktail-card-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .cocktail-card-main{grid-template-columns:1fr;padding:0}
+  .cocktail-card-media{min-height:170px;border-radius:0}
+  .cocktail-card-copy{padding:16px}
+}
+@media (min-width:1180px){.cocktail-card-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){
+  .modal.form-modal,.modal.recipe-modal,.modal.finder-modal{width:min(calc(100% - 12px),42rem)}
+  .cocktail-card-main{grid-template-columns:82px minmax(0,1fr);gap:12px;padding:10px}
+  .cocktail-card-media{min-height:96px}
+  .cocktail-card h3{font-size:20px}
+}

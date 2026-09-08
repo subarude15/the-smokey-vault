@@ -558,14 +558,15 @@ test("UI: Find photo eligibility and messages", () => {
 
 test("UI source: Keeper Find photo only when image missing; cards render image_url", () => {
   const appSrc = readFileSync(join(root, "client/src/App.tsx"), "utf8");
+  const cardSrc = readFileSync(join(root, "client/src/CocktailCard.tsx"), "utf8");
   assert.match(appSrc, /canFindCocktailPhoto/);
   assert.match(appSrc, /Find photo/);
   assert.match(appSrc, /\/cocktails\/\$\{drink\.id\}\/find-image/);
-  assert.match(appSrc, /recipe-thumb/);
+  assert.match(cardSrc, /imageUrl \? <img src=\{imageUrl\}/);
   assert.match(appSrc, /recipe-hero/);
   assert.match(appSrc, /alt=\{drink\.name\}/);
   // Guest path: showFindPhoto gates on admin via canFindCocktailPhoto
   assert.match(appSrc, /showFindPhoto &&/);
-  const cssSrc = readFileSync(join(root, "client/src/styles.css"), "utf8");
-  assert.match(cssSrc, /\.recipe-thumb\{[^}]*object-fit:\s*cover/);
+  const cssSrc = readFileSync(join(root, "client/src/cocktail-card.css"), "utf8");
+  assert.match(cssSrc, /\.cocktail-card-media img\{[^}]*object-fit:cover/);
 });
