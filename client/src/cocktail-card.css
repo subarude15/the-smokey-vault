@@ -4,7 +4,8 @@
 .cocktail-card:has(.cocktail-card-main:active){transform:scale(.995)}
 .cocktail-card-missing{opacity:.78}
 .cocktail-card-main{width:100%;display:grid;grid-template-columns:92px minmax(0,1fr);gap:14px;align-items:stretch;padding:12px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
-.cocktail-card-media{min-height:104px;border-radius:12px;overflow:hidden;display:grid;place-items:center;background:var(--surface-2);color:var(--accent-2)}
+/* Explicit height so phone layouts keep a stable media well (min-height alone lets height:100% imgs collapse). */
+.cocktail-card-media{width:92px;height:104px;min-height:104px;border-radius:12px;overflow:hidden;display:grid;place-items:center;background:var(--surface-2);color:var(--accent-2);align-self:stretch}
 .cocktail-card-media img{width:100%;height:100%;object-fit:cover;display:block}
 .cocktail-card-media svg{width:34px;height:34px;opacity:.72}
 .cocktail-card-copy{min-width:0;display:flex;flex-direction:column;justify-content:center}
@@ -22,6 +23,18 @@
 .cocktail-card-keeper .secondary{min-height:44px}
 .cocktail-card-keeper .secondary.active{border-color:var(--accent-2);color:var(--accent-2)}
 
+/* Detail media: constrained, cover-cropped, not giant on phone. */
+.recipe-modal .recipe-hero{width:100%;max-width:100%;height:auto;max-height:min(220px,40vw);aspect-ratio:16/9;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);margin:0 0 16px}
+
+.recipe-instructions{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.recipe-instructions .eyebrow{margin:0}
+.recipe-instructions p{margin:0;color:var(--text);font-size:15px;line-height:1.55;white-space:pre-wrap}
+/* Avoid flex on ol/li — it drops list-item markers after CSS reset/preflight. */
+.recipe-instructions ol{margin:0;padding-left:1.35em;list-style:decimal outside}
+.recipe-instructions li{display:list-item;list-style:decimal outside;color:var(--text);font-size:15px;line-height:1.5}
+.recipe-instructions li+li{margin-top:10px}
+.recipe-instructions-method strong{font-size:15px;font-weight:600}
+
 /* PR136 tablet workspace ergonomics. */
 .modal.form-modal,.modal.recipe-modal,.modal.finder-modal{width:min(calc(100% - 24px),42rem);max-width:42rem;margin-inline:auto}
 .modal-footer{justify-content:flex-end}
@@ -34,13 +47,15 @@
 @media (min-width:720px){
   .cocktail-card-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
   .cocktail-card-main{grid-template-columns:1fr;padding:0}
-  .cocktail-card-media{min-height:170px;border-radius:0}
+  .cocktail-card-media{width:100%;height:auto;min-height:170px;aspect-ratio:16/10;border-radius:0}
   .cocktail-card-copy{padding:16px}
+  .recipe-modal .recipe-hero{max-height:240px}
 }
 @media (min-width:1180px){.cocktail-card-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:560px){
   .modal.form-modal,.modal.recipe-modal,.modal.finder-modal{width:min(calc(100% - 12px),42rem)}
   .cocktail-card-main{grid-template-columns:82px minmax(0,1fr);gap:12px;padding:10px}
-  .cocktail-card-media{min-height:96px}
+  .cocktail-card-media{width:82px;height:96px;min-height:96px}
   .cocktail-card h3{font-size:20px}
+  .recipe-modal .recipe-hero{max-height:min(180px,42vw);margin-bottom:12px}
 }

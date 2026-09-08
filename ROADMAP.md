@@ -89,16 +89,15 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136 is already in progress; the remaining sequence is ordered to finish active interaction patterns first, then media workflows, then social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136 and PR137 are complete; the remaining sequence continues with media workflows, then social polish, with branding last after the UX surfaces are stable.
 
-1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (in progress)
+1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
    - Refine tablet/landscape Keeper ergonomics without creating a separate admin application.
-2. **PR137 — Cocktail mobile media + structured recipe steps**
-   - Follow directly from PR136 while the unified Cocktail experience is already being refined.
-   - Fix cocktail images not rendering in phone layouts and verify tablet behavior.
-   - Support ordered, multi-stage instructions (for example: shake selected ingredients, add another ingredient, then strain) instead of collapsing recipes to a single basic method label.
-   - Preserve existing imported recipe data where it is already richer than the generic method field.
+2. **PR137 — Cocktail mobile media + structured recipe steps** (done)
+   - Followed PR136 while the unified Cocktail experience was already being refined.
+   - Fixed cocktail card/detail image reliability on phone layouts with constrained cover cropping on tablet/desktop.
+   - Present ordered multi-stage instructions from existing `method` text when numbered or newline-delimited; keep generic method labels as a concise fallback. No invented steps; no API schema change.
 3. **PR138 — Keg beer image reliability + Keeper upload rendering**
    - Close the remaining media/reliability gaps adjacent to the PR135 Taps & Spirits card work while those inventory surfaces are still fresh.
    - Fix commercial-keg cases where beer artwork is not populated despite an equivalent canned/packaged beer identity being available.

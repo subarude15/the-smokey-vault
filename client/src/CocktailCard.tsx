@@ -1,5 +1,6 @@
 import { GlassWater, Star } from "lucide-react";
 import { cocktailReadinessPresentation, missingIngredientSummary } from "./cocktail-card";
+import { cocktailMethodSummary } from "./cocktail-instructions";
 import "./cocktail-card.css";
 
 export type CocktailCardDrink = {
@@ -27,7 +28,7 @@ type CocktailCardProps = {
 export function CocktailCard({ drink, admin, onOpen, onToggleFavorite, favoriteBusy = false }: CocktailCardProps) {
   const readiness = cocktailReadinessPresentation(String(drink.readiness ?? "missing"));
   const imageUrl = String(drink.image_url ?? "").trim();
-  const method = String(drink.method ?? "").trim();
+  const method = cocktailMethodSummary(drink.method);
   const glassware = String(drink.glassware ?? "").trim();
   const collection = String(drink.collection ?? "").trim();
   const season = String(drink.season ?? "").trim();
@@ -39,8 +40,8 @@ export function CocktailCard({ drink, admin, onOpen, onToggleFavorite, favoriteB
   return (
     <article className={`cocktail-card cocktail-card-${readiness.tone}`}>
       <button type="button" className="cocktail-card-main" onClick={onOpen} aria-label={`Open ${drink.name} recipe`}>
-        <div className="cocktail-card-media" aria-hidden="true">
-          {imageUrl ? <img src={imageUrl} alt=""/> : <GlassWater aria-hidden="true"/>}
+        <div className="cocktail-card-media" aria-hidden={imageUrl ? undefined : true}>
+          {imageUrl ? <img src={imageUrl} alt={drink.name}/> : <GlassWater aria-hidden="true"/>}
         </div>
         <div className="cocktail-card-copy">
           <div className="cocktail-card-heading">
