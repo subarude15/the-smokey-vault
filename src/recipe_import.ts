@@ -182,6 +182,8 @@ function parseJsonLdRecipes(html: string, pageUrl: string): ImportedRecipe[] {
 export function parseRecipeHtml(html: string, pageUrl: string): ImportedRecipe {
   const fromLd = parseJsonLdRecipes(html, pageUrl)[0];
   if (fromLd) {
+    // Prefer Recipe JSON-LD image; fall back to OG/twitter on the exact imported page.
+    // Do not scrape arbitrary <img> tags (logos, headers, ads).
     fromLd.image_url ||= metaContent(html, "og:image") || metaContent(html, "twitter:image");
     if (fromLd.image_url) {
       try { fromLd.image_url = new URL(fromLd.image_url, pageUrl).href; } catch { /* keep */ }

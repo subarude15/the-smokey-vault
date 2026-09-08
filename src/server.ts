@@ -82,7 +82,12 @@ import {
   type ScanSessionUndo
 } from "./scan-session.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
-import { imagesDir, localizeImage, saveImageBuffer } from "./images.js";
+import { imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
+import {
+  acceptLocalizedCocktailImage,
+  enrichImportedRecipeImage,
+  findCocktailImage
+} from "./cocktail_image.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
 import { downscaleVisionImage } from "./vision_image.js";
 import { createReview, deleteReview, listReviews, REVIEW_TABLES } from "./reviews.js";
@@ -1320,7 +1325,8 @@ app.post<{ Body: { url?: string } }>("/api/cocktails/import", async (request, re
   try {
     const { html, finalUrl } = await fetchPublicHtml(url);
     try {
-      return { recipe: parseRecipeHtml(html, finalUrl), source: "page" };
+      const recipe = enrichImportedRecipeImage(parseRecipeHtml(html, finalUrl), html, finalUrl);
+      return { recipe, source: "page" };
     } catch (parseError) {
       const { provider, key } = resolveAiConfig();
       if (provider === "ollama" || key) {
@@ -1332,10 +1338,12 @@ app.post<{ Body: { url?: string } }>("/api/cocktails/import", async (request, re
           if (image) {
             try { imageUrl = new URL(image, finalUrl).href; } catch { imageUrl = image; }
           }
-          return {
-            recipe: { ...parsed, image_url: imageUrl, source_url: finalUrl },
-            source: "ai"
-          };
+          const recipe = enrichImportedRecipeImage(
+            { ...parsed, image_url: imageUrl, source_url: finalUrl },
+            html,
+            finalUrl
+          );
+          return { recipe, source: "ai" };
         } catch {
           // Fall through to the original parse error.
         }
@@ -1355,18 +1363,63 @@ app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, rep
   if (!recipe.name || !Array.isArray(recipe.ingredients) || !recipe.ingredients.length || !recipe.method) {
     return reply.code(400).send({ error: "A name, ingredients, and method are required." });
   }
-  const imageUrl = await localizeImage(recipe.image_url) ?? recipe.image_url ?? "";
+  // Image enrichment is additive: localization failure must not block import,
+  // and we never hotlink a failed remote download.
+  let imageUrl = "";
+  try {
+    const localized = await localizeImage(recipe.image_url);
+    imageUrl = acceptLocalizedCocktailImage(localized, recipe.image_url);
+  } catch {
+    imageUrl = isLocalImagePath(recipe.image_url) ? String(recipe.image_url) : "";
+  }
   const fav = recipe.bartender_fav ? 1 : 0;
+  const name = recipe.name.trim();
+  const existing = db.prepare("SELECT image_url FROM cocktails WHERE name=?").get(name) as
+    | { image_url?: string }
+    | undefined;
+  // Existing images always win — never overwrite on re-import / conflict upsert.
+  if (existing && String(existing.image_url ?? "").trim()) {
+    imageUrl = String(existing.image_url).trim();
+  }
   db.prepare(`INSERT INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season,image_url,source_url,bartender_fav)
     VALUES(?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET collection='Custom Cocktails',ingredients=excluded.ingredients,
     glassware=excluded.glassware,garnish=excluded.garnish,method=excluded.method,notes=excluded.notes,season=excluded.season,
-    image_url=excluded.image_url,source_url=excluded.source_url,bartender_fav=excluded.bartender_fav`)
+    image_url=CASE WHEN length(trim(cocktails.image_url)) > 0 THEN cocktails.image_url ELSE excluded.image_url END,
+    source_url=excluded.source_url,bartender_fav=excluded.bartender_fav`)
     .run(
-      recipe.name.trim(), JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "",
+      name, JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "",
       recipe.method, recipe.notes || "", recipe.season || "All", imageUrl, recipe.source_url || "", fav
     );
-  return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(recipe.name.trim()));
+  return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(name));
+});
+
+app.post<{ Params: { id: string } }>("/api/cocktails/:id/find-image", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Find a trustworthy photo for one cocktail (fill-missing only)"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return reply.code(400).send({ error: "Invalid cocktail id" });
+  }
+  const row = db.prepare("SELECT id FROM cocktails WHERE id=?").get(id);
+  if (!row) return reply.code(404).send({ error: "Recipe not found" });
+  try {
+    const result = await findCocktailImage(id);
+    if (result.status === "already_has_image") {
+      return reply.code(200).send(result);
+    }
+    if (result.status === "no_result") {
+      return reply.code(200).send(result);
+    }
+    const cocktail = db.prepare("SELECT * FROM cocktails WHERE id=?").get(id);
+    return reply.code(200).send({ ...result, cocktail });
+  } catch {
+    return reply.code(502).send({ error: "Could not search for a photo" });
+  }
 });
 
 app.put<{ Params: { id: string }; Body: { bartender_fav?: boolean | number } }>("/api/cocktails/:id", async (request, reply) => {

@@ -67,6 +67,7 @@ import { PatronsPage } from "./PatronsPage";
 import { StaffPage } from "./StaffPage";
 import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
+import { canFindCocktailPhoto, cocktailImageDiscoveryMessage } from "./cocktail-image-ui";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
 import { InventoryCleanupPreview } from "./InventoryCleanupPreview";
@@ -1091,7 +1092,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <div className="favorite-row">
         {snap.cocktails.favorites.map((drink) => (
           <button type="button" className="favorite-card" key={drink.id} onClick={() => go("cocktails")}>
-            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt=""/> : <Star/>}</div>
+            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt={drink.name}/> : <Star/>}</div>
             <div>
               <span className="eyebrow">{drink.readiness === "ready" ? "READY TO POUR" : drink.readiness === "almost" ? "ONE ITEM AWAY" : "BUILD THE SHELF"}</span>
               <strong>{drink.name}</strong>
@@ -1106,7 +1107,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <div className="favorite-row">
         {snap.cocktails.offMenu.map((drink) => (
           <button type="button" className="favorite-card" key={drink.id} onClick={() => go("cocktails")}>
-            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt=""/> : <Wine/>}</div>
+            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt={drink.name}/> : <Wine/>}</div>
             <div>
               <span className="eyebrow">OFF THE MENU</span>
               <strong>{drink.name}</strong>
@@ -2976,7 +2977,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
       <div className="favorite-row">
         {favorites.map((drink) => (
           <button type="button" className="favorite-card" key={drink.id} onClick={() => setSelected(drink)}>
-            <div className="card-icon">{drink.image_url ? <img src={String(drink.image_url)} alt=""/> : <Star/>}</div>
+            <div className="card-icon">{drink.image_url ? <img src={String(drink.image_url)} alt={drink.name}/> : <Star/>}</div>
             <div>
               <span className="eyebrow">{readinessLabel(drink.readiness, !admin)}</span>
               <strong>{drink.name}</strong>
@@ -3010,7 +3011,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
         const preview = lines.slice(0, 3);
         return (
           <button className="recipe-card" key={drink.id} onClick={() => setSelected(drink)}>
-            {drink.image_url ? <img className="recipe-thumb" src={String(drink.image_url)} alt=""/> : null}
+            {drink.image_url ? <img className="recipe-thumb" src={String(drink.image_url)} alt={drink.name}/> : null}
             <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness, !admin)}</span>
             {Number(drink.bartender_fav) > 0 && <span className="fav-tag">Favorite</span>}
             {drink.season !== "All" && <span className="season-tag">{drink.season}</span>}
@@ -3042,9 +3043,19 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
   const [removing, setRemoving] = useState(false);
   const [fav, setFav] = useState(Number(drink.bartender_fav) > 0);
   const [substitutesOpen, setSubstitutesOpen] = useState(false);
+  const [imageUrl, setImageUrl] = useState(String(drink.image_url ?? ""));
+  const [findingPhoto, setFindingPhoto] = useState(false);
+  const [photoNotice, setPhotoNotice] = useState("");
   const lines = cocktailLines(drink);
   const groups = substituteGroups(lines);
   const custom = drink.collection === "Custom Cocktails";
+  const showFindPhoto = canFindCocktailPhoto(admin, imageUrl);
+
+  useEffect(() => {
+    setImageUrl(String(drink.image_url ?? ""));
+    setPhotoNotice("");
+  }, [drink.id, drink.image_url]);
+
   async function remove() {
     if (!custom || !admin || !confirm("Remove this custom recipe?")) return;
     setRemoving(true);
@@ -3070,6 +3081,35 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
       setError(err instanceof Error ? err.message : "Could not update favorite");
     }
   }
+  async function findPhoto() {
+    if (!showFindPhoto || findingPhoto) return;
+    setFindingPhoto(true);
+    setPhotoNotice("");
+    setError("");
+    try {
+      const result = await api<{
+        status: "updated" | "no_result" | "already_has_image";
+        image_url?: string;
+        reason?: string;
+      }>(`/cocktails/${drink.id}/find-image`, { method: "POST", body: "{}" });
+      if (result.status === "updated" && result.image_url) {
+        setImageUrl(result.image_url);
+        setPhotoNotice(cocktailImageDiscoveryMessage("updated"));
+        onChanged();
+      } else if (result.status === "already_has_image") {
+        if (result.image_url) setImageUrl(result.image_url);
+        setPhotoNotice(cocktailImageDiscoveryMessage("already_has_image"));
+        onChanged();
+      } else {
+        setPhotoNotice(cocktailImageDiscoveryMessage("no_result"));
+      }
+    } catch (err) {
+      setPhotoNotice(cocktailImageDiscoveryMessage("error"));
+      setError(err instanceof Error ? err.message : "Could not search for a photo");
+    } finally {
+      setFindingPhoto(false);
+    }
+  }
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`${drink.name} recipe`}>
       <section className="modal recipe-modal">
@@ -3081,7 +3121,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
           </div>
           <button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button>
         </header>
-        {drink.image_url ? <img className="recipe-hero" src={String(drink.image_url)} alt=""/> : null}
+        {imageUrl ? <img className="recipe-hero" src={imageUrl} alt={drink.name}/> : null}
         <div className="recipe-modal-body">
           <div>
             <span className="eyebrow">INGREDIENTS</span>
@@ -3111,8 +3151,14 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
         </div>
         {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
         {drink.missing.length > 0 && <p className="recipe-warning">Missing from the shelf: {drink.missing.join(", ")}</p>}
+        {photoNotice ? <p className="field-hint" aria-live="polite">{photoNotice}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
+          {showFindPhoto && (
+            <button type="button" className="secondary" disabled={findingPhoto} onClick={() => void findPhoto()}>
+              {findingPhoto ? <><LoaderCircle className="spinner" size={16}/> Searching…</> : <><Camera size={16}/> Find photo</>}
+            </button>
+          )}
           {admin && <button type="button" className={fav ? "primary" : "secondary"} onClick={toggleFav}><Star size={16}/> {fav ? "Bartender favorite" : "Mark favorite"}</button>}
           {admin && custom && <button type="button" className="secondary danger" disabled={removing} onClick={remove}><Trash2 size={16}/> Remove</button>}
           <button className="primary" onClick={close}>Cheers</button>
@@ -3209,7 +3255,7 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
           <button type="button" className="primary" disabled={loading || !url.trim()} onClick={() => void parse()}>{loading ? "Reading the page…" : "Read recipe"}</button>
         </div>
         {recipe && <div className="import-preview">
-          {recipe.image_url ? <img src={recipe.image_url} alt=""/> : null}
+          {recipe.image_url ? <img src={recipe.image_url} alt={recipe.name}/> : null}
           <div>
             <span className="eyebrow">{source === "ai" ? "READ WITH AI" : "FROM THE PAGE"}</span>
             <h3>{recipe.name}</h3>

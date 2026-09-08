@@ -7,7 +7,7 @@ Short project context for maintainers and coding agents. Update this file when a
 The Smokey Vault is a private, self-hosted home-bar appliance for a LAN kiosk and guest phones. It covers:
 
 - Inventory: spirits (Bottle Library), wine cellar, packaged beer, draft taps, and homebrew log
-- Guest Mode: digital bar menu / speakeasy portal (cockails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
+- Guest Mode: digital bar menu / speakeasy portal (cocktails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
 - Keeper Mode: PIN unlock for scanning, enrichment, import review, restock, settings, and safe per-item deletion
 - Cocktail matcher, substitutions, and optional AI mixologist
 - Brewery Lab with optional Brewfather sync
@@ -59,6 +59,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR126 — Keeper event editing, published-event deep links, guest-safe event detail access, and Web Share / copy-link behavior.
 - PR127 — Appearance simplified to Light + Dark only; Punk and Angel’s Share themes/CSS/preview removed with safe fallback for obsolete persisted values.
 - PR128 — Gallery bulk photo/clip upload for Guests and Keepers via multi-select + repeated single-file uploads with per-file status and retry.
+- PR129 — Cocktail recipe-card imagery: import-source / exact-match photo discovery, fill-missing only, Keeper “Find photo”, and localized `image_url` on cards/detail.
 
 ## Next work
 
@@ -81,23 +82,13 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR129 — Cocktail recipe-card imagery.**
-   - Cocktails already support `image_url`; improve coverage by finding a useful cocktail image when a recipe has no image.
-   - First reuse images from an imported recipe’s authoritative/source page when available and safe; do not overwrite an existing Keeper/imported cocktail image.
-   - For built-in/manual recipes with no source image, investigate a conservative image-discovery path using cocktail name + recipe identity. Prefer authoritative recipe/original-source imagery where it can be tied confidently to that exact drink.
-   - Do not use an unrelated stock image simply because it looks like the same cocktail style.
-   - Localize accepted remote images using the existing image persistence/safety infrastructure.
-   - Add a per-cocktail Keeper action (for example “Find photo”) rather than bulk-changing the whole recipe library without review.
-   - Guest recipe cards/detail views should naturally render the discovered/localized image through the existing `image_url` field.
-   - No new generic image-enrichment platform unless repository inspection proves a small reusable helper is genuinely needed.
-
-2. **PR130 — Remove duplicate Mixologist landing card.**
+1. **PR130 — Remove duplicate Mixologist landing card.**
    - `What Can I Make?` and `Ask the Mixologist` already share the same unified cocktail discovery page.
    - Remove the redundant standalone `Ask the Mixologist` feature card from the main guest landing page and keep `What Can I Make?` as the single entry point.
    - Preserve the Mixologist panel/functionality inside the unified cocktail page and retain any useful `mixologist` → `cocktails` compatibility alias.
    - Keep this as a small landing-page cleanup; do not redesign cocktail discovery or the home page.
 
-3. **PR131 — Gallery albums for parties and special nights.**
+2. **PR131 — Gallery albums for parties and special nights.**
    - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
    - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
    - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.
@@ -106,7 +97,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Design the schema so an album can be linked to a Speakeasy event later, but do not implement automatic event ↔ album linking in this PR.
    - Preserve current gallery listing/lightbox/download/delete behavior inside albums; do not add face recognition, automatic tagging, cloud photo-service integrations, or a broader media-management redesign.
 
-4. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+3. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
