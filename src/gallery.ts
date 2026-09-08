@@ -348,40 +348,58 @@ export async function saveGalleryUpload(input: {
 /**
  * Bounded, idempotent poster backfill for legacy videos missing a sibling WebP.
  * Safe to call at boot; does not run on guest list requests.
+ *
+ * Pages through video rows by id and only counts missing-poster work against
+ * `limit`, so early videos that already have posters cannot starve later ones.
  */
 export async function backfillMissingGalleryPosters(opts?: {
   limit?: number;
   log?: (message: string) => void;
 }): Promise<{ attempted: number; generated: number }> {
   const limit = Math.max(1, Math.min(opts?.limit ?? 40, 100));
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT filename FROM gallery_media
-       WHERE media_type = 'video'
-       ORDER BY id ASC
-       LIMIT ?`,
-    )
-    .all(limit) as { filename: string }[];
-
+  const pageSize = Math.max(limit * 2, 50);
   let attempted = 0;
   let generated = 0;
-  for (const row of rows) {
-    let posterName: string;
-    try {
-      posterName = galleryPosterFilename(row.filename);
-    } catch {
-      continue;
+  let afterId = 0;
+  const seenFilenames = new Set<string>();
+
+  while (attempted < limit) {
+    const rows = db
+      .prepare(
+        `SELECT id, filename FROM gallery_media
+         WHERE media_type = 'video' AND id > ?
+         ORDER BY id ASC
+         LIMIT ?`,
+      )
+      .all(afterId, pageSize) as { id: number; filename: string }[];
+
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      afterId = row.id;
+      if (seenFilenames.has(row.filename)) continue;
+      seenFilenames.add(row.filename);
+
+      let posterName: string;
+      try {
+        posterName = galleryPosterFilename(row.filename);
+      } catch {
+        continue;
+      }
+      if (existsSync(join(galleryDir, posterName))) continue;
+      if (!existsSync(join(galleryDir, row.filename))) continue;
+
+      attempted += 1;
+      const ok = await ensureGalleryVideoPoster({
+        galleryDir,
+        videoFilename: row.filename,
+        log: opts?.log,
+      });
+      if (ok) generated += 1;
+      if (attempted >= limit) break;
     }
-    if (existsSync(join(galleryDir, posterName))) continue;
-    if (!existsSync(join(galleryDir, row.filename))) continue;
-    attempted += 1;
-    const ok = await ensureGalleryVideoPoster({
-      galleryDir,
-      videoFilename: row.filename,
-      log: opts?.log,
-    });
-    if (ok) generated += 1;
   }
+
   return { attempted, generated };
 }
 

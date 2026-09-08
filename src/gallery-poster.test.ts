@@ -182,6 +182,109 @@ test("backfill generates a missing poster once without touching images", async (
   wipeGallery();
 });
 
+test("backfill skips ahead of complete early rows so later missing posters are not starved", async (t) => {
+  if (!sampleMp4) {
+    t.skip("sample mp4 unavailable");
+    return;
+  }
+  wipeGallery();
+  const album = ensureDefaultGalleryAlbum();
+  const limit = 3;
+  const insert = db.prepare(
+    `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
+     VALUES(?,?,?,?,?)`,
+  );
+
+  for (let i = 0; i < limit; i++) {
+    const filename = `early${i}.mp4`;
+    writeFileSync(join(galleryDir, filename), Buffer.from(`early-video-${i}`));
+    writeFileSync(join(galleryDir, galleryPosterFilename(filename)), Buffer.from("fake-poster"));
+    insert.run(filename, "video", `early ${i}`, "Patron", album.id);
+  }
+
+  const lateName = "latemissing.mp4";
+  writeFileSync(join(galleryDir, lateName), sampleMp4);
+  insert.run(lateName, "video", "late", "Patron", album.id);
+  assert.equal(existsSync(join(galleryDir, galleryPosterFilename(lateName))), false);
+
+  const result = await backfillMissingGalleryPosters({ limit });
+  assert.equal(result.attempted, 1);
+  assert.equal(result.generated, 1);
+  assert.ok(
+    existsSync(join(galleryDir, galleryPosterFilename(lateName))),
+    "later missing poster must be generated even when earlier rows already have posters",
+  );
+  wipeGallery();
+});
+
+test("backfill does no work when every video already has a poster", async () => {
+  wipeGallery();
+  const album = ensureDefaultGalleryAlbum();
+  for (let i = 0; i < 5; i++) {
+    const filename = `complete${i}.mp4`;
+    writeFileSync(join(galleryDir, filename), Buffer.from(`video-${i}`));
+    writeFileSync(join(galleryDir, galleryPosterFilename(filename)), Buffer.from("poster"));
+    db.prepare(
+      `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
+       VALUES(?,?,?,?,?)`,
+    ).run(filename, "video", `done ${i}`, "Patron", album.id);
+  }
+
+  const result = await backfillMissingGalleryPosters({ limit: 3 });
+  assert.equal(result.attempted, 0);
+  assert.equal(result.generated, 0);
+  wipeGallery();
+});
+
+test("backfill skips missing source files and invalid filenames without counting them", async () => {
+  wipeGallery();
+  const album = ensureDefaultGalleryAlbum();
+  db.prepare(
+    `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
+     VALUES(?,?,?,?,?)`,
+  ).run("ghost.mp4", "video", "missing file", "Patron", album.id);
+  // Bypass galleryPosterFilename guards by inserting a path-like name directly.
+  db.prepare(
+    `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
+     VALUES(?,?,?,?,?)`,
+  ).run("../escape.mp4", "video", "unsafe", "Patron", album.id);
+
+  const result = await backfillMissingGalleryPosters({ limit: 10 });
+  assert.equal(result.attempted, 0);
+  assert.equal(result.generated, 0);
+  wipeGallery();
+});
+
+test("backfill remains bounded even when many posters are missing", async (t) => {
+  if (!sampleMp4) {
+    t.skip("sample mp4 unavailable");
+    return;
+  }
+  wipeGallery();
+  const album = ensureDefaultGalleryAlbum();
+  const limit = 2;
+  for (let i = 0; i < 5; i++) {
+    const filename = `needposter${i}.mp4`;
+    writeFileSync(join(galleryDir, filename), sampleMp4);
+    db.prepare(
+      `INSERT INTO gallery_media(filename, media_type, caption, uploaded_by, album_id)
+       VALUES(?,?,?,?,?)`,
+    ).run(filename, "video", `need ${i}`, "Patron", album.id);
+  }
+
+  const result = await backfillMissingGalleryPosters({ limit });
+  assert.equal(result.attempted, limit);
+  assert.ok(result.generated <= limit);
+  assert.equal(result.generated, limit);
+
+  let posters = 0;
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(join(galleryDir, galleryPosterFilename(`needposter${i}.mp4`)))) posters += 1;
+  }
+  assert.equal(posters, limit);
+  wipeGallery();
+});
+
 test("Gallery grid uses poster images instead of embedding video sources", () => {
   const page = readFileSync(join(root, "client/src/GalleryPage.tsx"), "utf8");
   assert.match(page, /item\.poster_url/);
