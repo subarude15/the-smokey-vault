@@ -60,6 +60,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR127 — Appearance simplified to Light + Dark only; Punk and Angel’s Share themes/CSS/preview removed with safe fallback for obsolete persisted values.
 - PR128 — Gallery bulk photo/clip upload for Guests and Keepers via multi-select + repeated single-file uploads with per-file status and retry.
 - PR129 — Cocktail recipe-card imagery: import-source / exact-match photo discovery, fill-missing only, Keeper “Find photo”, and localized `image_url` on cards/detail.
+- PR130 — Remove duplicate Mixologist landing card; keep `What Can I Make?` as the single guest entry into unified cocktail discovery.
 
 ## Next work
 
@@ -82,13 +83,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR130 — Remove duplicate Mixologist landing card.**
-   - `What Can I Make?` and `Ask the Mixologist` already share the same unified cocktail discovery page.
-   - Remove the redundant standalone `Ask the Mixologist` feature card from the main guest landing page and keep `What Can I Make?` as the single entry point.
-   - Preserve the Mixologist panel/functionality inside the unified cocktail page and retain any useful `mixologist` → `cocktails` compatibility alias.
-   - Keep this as a small landing-page cleanup; do not redesign cocktail discovery or the home page.
-
-2. **PR131 — Gallery albums for parties and special nights.**
+1. **PR131 — Gallery albums for parties and special nights.**
    - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
    - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
    - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.
@@ -97,7 +92,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Design the schema so an album can be linked to a Speakeasy event later, but do not implement automatic event ↔ album linking in this PR.
    - Preserve current gallery listing/lightbox/download/delete behavior inside albums; do not add face recognition, automatic tagging, cloud photo-service integrations, or a broader media-management redesign.
 
-3. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
