@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
+import { once } from "node:events";
 import { Readable } from "node:stream";
 import { dbPath } from "./db.js";
 import {
@@ -241,6 +242,16 @@ async function writeLimitedStream(
     });
     return bytes;
   } catch (error) {
+    // The write stream's fd opens/flushes asynchronously; destroy() alone does not
+    // guarantee the file is gone. Wait for it to fully close before unlinking so a
+    // late open cannot recreate the temp file after cleanup (avoids a leftover-temp race).
+    if (!out.closed) {
+      try {
+        await once(out, "close");
+      } catch {
+        // ignore — we only need to know the fd is no longer open
+      }
+    }
     removeTemp(destPath);
     throw error;
   }
