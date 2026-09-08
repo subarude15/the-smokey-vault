@@ -314,7 +314,10 @@ body.nav-open{overflow:hidden}
 /* PR134: phone portrait → bottom nav + More. Landscape tablet/desktop → persistent left rail. */
 .more-sheet-overlay,.more-sheet{display:none}
 @media(max-width:1050px) and (orientation:portrait){
-  .app-shell{display:block}
+  .app-shell{
+    --mobile-bottom-nav-clearance: calc(66px + env(safe-area-inset-bottom));
+    display:block;
+  }
   .sidebar{display:none!important}
   .mobile-close,.nav-backdrop,.more-topbar{display:none!important}
   .mobile-bottom-nav{display:flex;align-items:stretch;justify-content:space-between;position:fixed;left:0;right:0;bottom:0;z-index:90;width:100%;max-width:100%;box-sizing:border-box;background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));gap:4px}
@@ -323,11 +326,11 @@ body.nav-open{overflow:hidden}
   .mobile-bottom-nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .mobile-bottom-nav button svg{flex:none}
   .mobile-nav-badge{position:absolute;top:4px;right:calc(50% - 24px);min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:#ff6b00;color:#1a1004;font-size:9px;font-weight:700;display:grid;place-items:center}
-  .has-mobile-nav .page{padding-bottom:calc(88px + env(safe-area-inset-bottom))}
-  .has-mobile-nav .guest-footer{margin-bottom:calc(64px + env(safe-area-inset-bottom))}
-  .more-sheet-overlay{display:block;position:fixed;inset:0;bottom:calc(66px + env(safe-area-inset-bottom));z-index:70;border:0;padding:0;background:#0009;opacity:0;pointer-events:none;transition:opacity .2s ease}
+  /* Clearance on main (not only .page) so GuestFooter after .page stays above the fixed bar. */
+  main.has-mobile-nav{padding-bottom:var(--mobile-bottom-nav-clearance);box-sizing:border-box}
+  .more-sheet-overlay{display:block;position:fixed;inset:0;bottom:var(--mobile-bottom-nav-clearance);z-index:70;border:0;padding:0;background:#0009;opacity:0;pointer-events:none;transition:opacity .2s ease}
   .more-sheet-overlay.open{opacity:1;pointer-events:auto}
-  .more-sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:calc(66px + env(safe-area-inset-bottom));z-index:80;max-height:min(72vh,640px);overflow:hidden;padding:8px 12px 12px;border:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;background:var(--surface);box-shadow:0 -18px 60px #0007;transform:translateY(110%);transition:transform .28s cubic-bezier(.22,1,.36,1);pointer-events:none}
+  .more-sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:var(--mobile-bottom-nav-clearance);z-index:80;max-height:min(72vh,640px);overflow:hidden;padding:8px 12px 12px;border:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;background:var(--surface);box-shadow:0 -18px 60px #0007;transform:translateY(110%);transition:transform .28s cubic-bezier(.22,1,.36,1);pointer-events:none}
   .more-sheet.open{transform:translateY(0);pointer-events:auto}
 }
 @media(max-width:1050px) and (orientation:landscape){

@@ -153,6 +153,26 @@ test("phone bottom-nav and safe-area CSS; rail for landscape/desktop", () => {
   );
   assert.match(cssSrc, /\.app-shell\{[^}]*grid-template-columns:\s*260px\s+minmax\(0,\s*1fr\)/);
   assert.match(appSrc, /phoneShell && <nav className=\"mobile-bottom-nav\"/);
+  // Main (not only .page) carries phone clearance so GuestFooter after .page stays usable.
+  assert.match(cssSrc, /--mobile-bottom-nav-clearance:\s*calc\(66px\s*\+\s*env\(safe-area-inset-bottom\)\)/);
+  assert.match(cssSrc, /main\.has-mobile-nav\{[^}]*padding-bottom:\s*var\(--mobile-bottom-nav-clearance\)/);
+  assert.doesNotMatch(cssSrc, /\.has-mobile-nav \.page\{[^}]*padding-bottom:\s*calc\(88px/);
+  assert.doesNotMatch(cssSrc, /\.has-mobile-nav \.guest-footer\{[^}]*margin-bottom/);
+});
+
+test("More hint only renders when More overflow exists", () => {
+  assert.match(appSrc, /navHint && phoneShell && showMoreNav/);
+  assert.match(appSrc, /showMoreNav && <button/);
+  const withOverflow = nav(["dashboard", "taps", "cocktails", "gallery", "events", "patrons"]);
+  const primary = selectPrimaryNav(withOverflow, false, []);
+  const more = notInPrimaryNav(withOverflow, primary);
+  assert.equal(shouldShowMoreNav(more, []), true);
+  const tight = nav(["dashboard", "taps", "cocktails", "gallery"]);
+  const tightPrimary = selectPrimaryNav(tight, false, []);
+  const tightMore = notInPrimaryNav(tight, tightPrimary);
+  assert.equal(shouldShowMoreNav(tightMore, []), false);
+  assert.equal(tightPrimary.length, 4);
+  assert.equal(tightMore.length, 0);
 });
 
 test("event deep-link, mixologist legacy, and bottle-detail helpers remain intact", () => {

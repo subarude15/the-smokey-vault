@@ -696,7 +696,7 @@ export default function App() {
           </div>
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
-        {navHint && phoneShell && <div className="nav-hint-banner" role="status">
+        {navHint && phoneShell && showMoreNav && <div className="nav-hint-banner" role="status">
           <Menu size={16}/>
           <span>The rest of the house lives in <strong>More</strong> — tap the tab below.</span>
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
