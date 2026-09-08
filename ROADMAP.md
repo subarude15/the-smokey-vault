@@ -30,7 +30,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
-- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. Track C continues at **PR144**.
+- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. **PR144** adds a streamed, Guest-vs-Keeper-limited large-video upload path. Track C continues at **PR145**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -91,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR142 are complete; the remaining product sequence continues with Gallery media/social polish, with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR144 are complete; the remaining product sequence continues with Gallery social polish (PR145), with branding last after the UX surfaces are stable.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -123,10 +123,10 @@ These are explicitly desired near-term product improvements based on real househ
    - Uploaded videos get a durable near-start WebP poster (ffmpeg + sharp) stored beside Gallery media.
    - Album grids and album covers render posters (or a lightweight fallback); the original video loads only in the lightbox/download path.
    - Poster cleanup follows shared Gallery file reference semantics; missing/legacy posters backfill once at boot without blocking Guest GETs.
-9. **PR144 — Keeper large-video upload path**
-   - Build on the Gallery/video presentation work from PR143 by making larger Keeper video uploads operationally safe and understandable.
-   - Allow Keepers to upload substantially larger video files than Guests without removing all operational safeguards.
-   - Use explicit Keeper-only limits/configuration, streaming upload handling, and clear failure feedback rather than an unbounded in-memory upload path.
+9. **PR144 — Keeper large-video upload path** (done)
+   - Guests keep the 150 MB ceiling; authenticated Keepers get a larger, env-tunable limit (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback) resolved server-side from authorization, not the client or Content-Length.
+   - Large uploads stream to a temp file on the Gallery filesystem and finalize with an atomic rename through one shared persistence path; the full file is never buffered in memory, and partial/failed uploads leave no temp file or DB row.
+   - Media validation (magic-byte sniff, supported types, dedup) and PR143 poster generation are preserved; poster failure still lets a valid video save. Oversized uploads return HTTP 413 with human-readable copy.
 10. **PR145 — Gallery comments + up/down voting**
    - Add social interaction after Gallery media display/upload behavior is stable.
    - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
@@ -165,7 +165,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
 - `src/speakeasy.ts` — event CRUD, event subscribers, messages, and guest-safe published-event detail access.
 - `src/speakeasy-shared.ts` — event/gallery types and shared constraints.
-- `src/gallery.ts` — gallery album/media persistence, upload validation, movement, and safe deletion behavior.
+- `src/gallery.ts` — gallery album/media persistence, upload validation, movement, and safe deletion behavior. One shared temp-file persistence core backs both the small buffer path (`saveGalleryUpload`) and the streamed large-video path (`saveGalleryUploadFromStream`); PR144 keeper videos stream to `galleryDir/tmp` and finalize with an atomic rename.
+- `src/speakeasy-shared.ts` — Gallery limit source of truth: `GUEST_GALLERY_MAX_BYTES`, `resolveKeeperGalleryMaxBytes` (bounded `KEEPER_GALLERY_MAX_VIDEO_MB` parsing), `formatGalleryLimit`, and `galleryOversizeMessage`.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
