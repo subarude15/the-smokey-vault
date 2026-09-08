@@ -91,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR144 are complete; the remaining product sequence continues with Gallery social polish (PR145), with branding last after the UX surfaces are stable.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR144 are complete; the remaining product sequence continues with Gallery social polish (PR145), visual-system consolidation (PR146), then live-use cocktail completeness and deployment visibility work before a focused cross-surface UX audit.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -132,9 +132,30 @@ These are explicitly desired near-term product improvements based on real househ
    - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
    - Design simple abuse/duplicate-vote safeguards appropriate to this private household app; Keeper moderation/removal must remain available.
 11. **PR146 — Visual system / Smokey Barrel branding polish**
-   - Apply final typography, color, surface, and brand expression only after the interaction, responsive, and media patterns above are stable.
+   - Apply final typography, color, surface, and brand expression after the major interaction, responsive, and media patterns are stable.
    - Reconcile any useful direction from deferred draft #121; keep Light/Dark as the supported appearance model.
-12. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+   - Treat this as visual-system consolidation, not permission to redesign established information architecture or reintroduce discarded theme modes.
+12. **PR147 — Cocktail recipe completeness + legacy normalization**
+   - Fix the live-use gap where some existing/manual/imported cocktails show only a generic method such as “Build” while AI-found recipes contain complete ordered instructions.
+   - Preserve authored recipe data exactly; normalize and present structured steps only from data already present in recipe fields or trusted import source content. Never invent missing preparation steps.
+   - Ensure ingredient quantities, garnish, glassware, preparation text, and ordered steps surface consistently when those values exist, with a concise fallback when they genuinely do not.
+   - Include migration/backfill behavior only where deterministic from existing stored data; Keeper-authored values remain authoritative.
+13. **PR148 — Cocktail artwork completion + Keeper repair workflow**
+   - Close the live-use gap where older/manual cocktails can remain imageless while AI-found/imported recipes have artwork.
+   - Build on PR129’s exact-match discovery and localization path rather than creating a parallel image system.
+   - Provide a clear Keeper repair action for missing cocktail artwork and preserve any Keeper-selected/uploaded image unless explicitly replaced.
+   - Keep exact recipe identity matching, safe remote-image validation, and local durable media paths unchanged.
+14. **PR149 — Keeper build/version visibility**
+   - Add a simple Keeper-visible build identifier so production can be compared with the repository/deployment state at a glance.
+   - Prefer build-time generated metadata rather than a manually maintained value; include a compact date-based build stamp plus the latest PR/revision encompassed by the image when available (for example, a display shaped like `090826144`).
+   - Surface the value in Keeper/Admin settings or another low-noise operational location; do not expose secrets, environment contents, or sensitive infrastructure metadata to Guests.
+   - Define a deterministic fallback when PR metadata is unavailable so local/dev builds remain identifiable.
+15. **PR150 — Live-use Guest/Keeper UX audit + focused cleanup**
+   - Perform a phone + tablet/landscape walkthrough of the primary Guest and Keeper surfaces after PR145–PR149 settle.
+   - Fix concrete inconsistency, dead-end, overflow, media, copy, and action-discoverability issues found during that walkthrough; do not turn the audit into a speculative feature bundle.
+   - Verify navigation, detail views, empty/loading/error states, image/video behavior, Keeper-only controls, and Guest privacy boundaries across Cocktails, Gallery, Events, Taps, Spirits, Brewery Lab, and Settings.
+   - Prefer a small set of evidence-backed fixes with regression tests over broad redesign.
+16. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
