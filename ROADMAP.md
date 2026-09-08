@@ -24,6 +24,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #122 hardened the Guest API trust boundary with server-side inventory/enrichment redaction.
 - PR #124 made Brewery Lab guest-friendly and Keeper-editable while preserving one-way Brewfather ownership of brewing telemetry.
 - PR #125 added commercial-tap beer identity/image enrichment with strict official matching, fill-missing Keeper preservation, and explicit Brewery Lab/homebrew exclusion.
+- PR #126 added Keeper event editing plus stable guest-facing event deep links with Web Share / copy-link fallback and server-side draft protection.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -55,6 +56,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR97 — Angel’s Share theme and guest availability carve-out merged. The availability behavior remains intentional; the Angel’s Share visual theme itself is scheduled for removal in PR127.
 - PR124 — Brewery Lab guest-friendly detail/editor experience, Keeper-owned presentation fields/images, and Brewfather-safe sync ownership.
 - PR125 — Commercial tap beer enrichment using official packaged-beer identity/image discovery, strict homebrew exclusion, and Keeper-safe fill-missing updates.
+- PR126 — Keeper event editing, published-event deep links, guest-safe event detail access, and Web Share / copy-link behavior.
 
 ## Next work
 
@@ -73,21 +75,11 @@ Priority order:
 3. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
 4. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
 
-### Track C — Product usability (next four PRs)
+### Track C — Product usability (next)
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR126 — Events: Keeper editing + shareable event links.**
-   - Surface a clear Keeper edit action for existing events so title, date/time, description, image, and publish state can be changed after creation.
-   - Reuse the existing server-side `updateEvent` behavior rather than creating parallel event mutation semantics.
-   - Give each published event a stable guest-facing detail/deep-link route that can be opened directly without Keeper access.
-   - Add an obvious share action: use the platform Web Share API when available, with a copy-link fallback.
-   - A shared link should open the specific event, not merely the generic Events list.
-   - Unpublished events must not become accessible through guessed/shared guest links.
-   - Keep event editing Keeper-authenticated and preserve the existing Guest/Keeper boundary.
-   - Do not add an external event platform or social-network integration just for sharing.
-
-2. **PR127 — Simplify appearance to Light + Dark only.**
+1. **PR127 — Simplify appearance to Light + Dark only.**
    - Remove Punk and Angel’s Share from selectable themes and runtime theme handling.
    - Remove Angel’s Share-specific CSS/imports, query-param preview behavior, theme preset data, docs, and tests that only exist for that visual skin.
    - Remove Punk-specific styling/preset behavior as well.
@@ -96,7 +88,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Final supported appearance choices: `light` and `dark` only.
    - This is cleanup/simplification, not a new branding exercise.
 
-3. **PR128 — Gallery bulk photo upload for Guests and Keepers.**
+2. **PR128 — Gallery bulk photo upload for Guests and Keepers.**
    - Extend the existing public gallery upload flow from one media file at a time to multi-select / bulk photo upload.
    - Keep guest uploads allowed exactly as today; Keeper does not need a separate gallery storage path.
    - Support selecting many photos in one action and upload them with clear per-file progress/success/failure feedback so one bad file does not discard the rest of the batch.
@@ -106,7 +98,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Mobile photo-picker UX matters: multi-select from an iPhone/Android photo library should be a first-class path.
    - Do not add face recognition, automatic tagging, or cloud photo-service integrations in this PR.
 
-4. **PR129 — Cocktail recipe-card imagery.**
+3. **PR129 — Cocktail recipe-card imagery.**
    - Cocktails already support `image_url`; improve coverage by finding a useful cocktail image when a recipe has no image.
    - First reuse images from an imported recipe’s authoritative/source page when available and safe; do not overwrite an existing Keeper/imported cocktail image.
    - For built-in/manual recipes with no source image, investigate a conservative image-discovery path using cocktail name + recipe identity. Prefer authoritative recipe/original-source imagery where it can be tied confidently to that exact drink.
@@ -116,7 +108,7 @@ These are explicitly desired near-term product improvements based on real househ
    - Guest recipe cards/detail views should naturally render the discovered/localized image through the existing `image_url` field.
    - No new generic image-enrichment platform unless repository inspection proves a small reusable helper is genuinely needed.
 
-5. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+4. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -134,14 +126,14 @@ These are explicitly desired near-term product improvements based on real househ
 - `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
-- `src/speakeasy.ts` — event CRUD; `updateEvent` already exists server-side.
+- `src/speakeasy.ts` — event CRUD plus guest-safe published-event detail access.
 - `src/speakeasy-shared.ts` — event/gallery types and shared constraints.
 - `src/gallery.ts` — gallery upload validation/persistence via `saveGalleryUpload`.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
 - `src/commercial_tap_enrichment.ts` — commercial tap identity/image enrichment (reuses official beer discovery).
-- `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, and authorization boundaries.
+- `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, and authorization boundaries.
 - `src/cocktails.ts` — cocktail matching/recipe behavior; cocktail rows already support `image_url`.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
