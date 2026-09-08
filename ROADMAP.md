@@ -61,7 +61,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR128 — Gallery bulk photo/clip upload for Guests and Keepers via multi-select + repeated single-file uploads with per-file status and retry.
 - PR129 — Cocktail recipe-card imagery: import-source / exact-match photo discovery, fill-missing only, Keeper “Find photo”, and localized `image_url` on cards/detail.
 - PR130 — Remove duplicate Mixologist landing card; keep `What Can I Make?` as the single guest entry into unified cocktail discovery.
-- PR132 — Keeper Event Subscriber List: Invite List management on Events (search, contact links, remove, CSV export, copy contacts) with Guest/Keeper privacy boundary preserved on `event_subscribers`.
+- PR131 — Keeper Event Subscriber List: Invite List management on Events (search, contact links, remove, CSV export, copy contacts) with Guest/Keeper privacy boundary preserved on `event_subscribers`.
 
 ## Next work
 
@@ -84,7 +84,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR131 — Gallery albums for parties and special nights.**
+1. **PR132 — Gallery albums for parties and special nights.**
    - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
    - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
    - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.

@@ -58,8 +58,20 @@ export function buildSubscriberContactsText(subscribers: SubscriberLike[]): stri
   return subscribers.map(formatSubscriberContactLine).join("\n");
 }
 
-export function escapeCsvField(value: string): string {
+/**
+ * Neutralize spreadsheet formula injection for CSV export only.
+ * If the first non-whitespace character is =, +, -, or @, prefix with '.
+ * Does not mutate stored subscriber data or on-screen display.
+ */
+export function sanitizeCsvCell(value: string): string {
   const text = String(value ?? "");
+  const firstSignificant = text.match(/\S/)?.[0];
+  if (firstSignificant && "=+@-".includes(firstSignificant)) return `'${text}`;
+  return text;
+}
+
+export function escapeCsvField(value: string): string {
+  const text = sanitizeCsvCell(value);
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
 }

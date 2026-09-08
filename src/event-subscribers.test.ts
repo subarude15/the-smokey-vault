@@ -1,5 +1,5 @@
 /**
- * PR132 — Keeper event subscriber (invite list) privacy + pure helpers.
+ * PR131 — Keeper event subscriber (invite list) privacy + pure helpers.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,6 +22,7 @@ const {
   escapeCsvField,
   filterEventSubscribers,
   formatSubscriberContactLine,
+  sanitizeCsvCell,
   subscriberContactHref
 } = await import("../client/src/event-subscribers.ts");
 
@@ -176,6 +177,61 @@ test("CSV escaping and contact copy formatting stay stable", () => {
   );
 });
 
+test("CSV export neutralizes spreadsheet formula injection", () => {
+  assert.equal(sanitizeCsvCell("=SUM(1+1)"), "'=SUM(1+1)");
+  assert.equal(sanitizeCsvCell("+123"), "'+123");
+  assert.equal(sanitizeCsvCell("-123"), "'-123");
+  assert.equal(sanitizeCsvCell("@something"), "'@something");
+  assert.equal(sanitizeCsvCell("   =HYPERLINK(...)"), "'   =HYPERLINK(...)");
+
+  // Ordinary values stay unchanged.
+  assert.equal(sanitizeCsvCell("Jane Doe"), "Jane Doe");
+  assert.equal(sanitizeCsvCell("jane@example.com"), "jane@example.com");
+  assert.equal(sanitizeCsvCell("610-555-1234"), "610-555-1234");
+  assert.equal(sanitizeCsvCell("Bring ice"), "Bring ice");
+
+  // Leading + phones are formula-safe in CSV only; UI/tel: paths are unaffected.
+  assert.equal(escapeCsvField("+1 (610) 555-1234"), "'+1 (610) 555-1234");
+  assert.equal(escapeCsvField("=SUM(1+1)"), "'=SUM(1+1)");
+  assert.equal(escapeCsvField("   =HYPERLINK(...)"), "'   =HYPERLINK(...)");
+
+  const csv = buildSubscribersCsv([
+    {
+      id: 1,
+      name: "=SUM(1+1)",
+      contact_info: "+123",
+      notes: "   =HYPERLINK(...)",
+      created_at: "-123"
+    },
+    {
+      id: 2,
+      name: "Jane Doe",
+      contact_info: "jane@example.com",
+      notes: "Bring ice",
+      created_at: "2026-09-07 12:00:00"
+    },
+    {
+      id: 3,
+      name: "@something",
+      contact_info: "610-555-1234",
+      notes: "",
+      created_at: "2026-09-06"
+    }
+  ]);
+  const lines = csv.split("\n");
+  assert.equal(lines[0], "Name,Contact,Notes,Joined");
+  assert.equal(lines[1], "'=SUM(1+1),'+123,'   =HYPERLINK(...),'-123");
+  assert.equal(lines[2], "Jane Doe,jane@example.com,Bring ice,2026-09-07 12:00:00");
+  assert.equal(lines[3], "'@something,610-555-1234,,2026-09-06");
+
+  // On-screen contact helpers are unchanged by CSV sanitization.
+  assert.equal(subscriberContactHref("+1 (610) 555-1234"), "tel:16105551234");
+  assert.equal(
+    formatSubscriberContactLine({ name: "Mike", contact_info: "+1 (610) 555-1234" }),
+    "Mike — +1 (610) 555-1234"
+  );
+});
+
 test("Keeper Invite List UI is wired on Events and stays out of messages", () => {
   const eventsPage = readFileSync(join(root, "client/src/EventsPage.tsx"), "utf8");
   const listUi = readFileSync(join(root, "client/src/EventSubscriberList.tsx"), "utf8");
@@ -195,6 +251,7 @@ test("Keeper Invite List UI is wired on Events and stays out of messages", () =>
   assert.match(listUi, /Remove \$\{subscriber\.name\} from the invite list/);
   assert.match(helpers, /subscriberContactHref/);
   assert.match(helpers, /buildSubscribersCsv/);
+  assert.match(helpers, /sanitizeCsvCell/);
   assert.doesNotMatch(messages, /event-subscribers/);
   assert.doesNotMatch(messages, /EventSubscriber/);
   assert.match(server, /app\.get\("\/api\/event-subscribers"/);
