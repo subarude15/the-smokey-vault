@@ -3054,7 +3054,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
             </button>}
           </div>
           <div className="recipe-details">
-            <CocktailRecipeInstructions method={drink.method}/>
+            <CocktailRecipeInstructions method={drink.method} ingredients={drink.ingredients} glassware={drink.glassware} garnish={drink.garnish}/>
             <div><span>GLASS</span><strong>{drink.glassware}</strong></div>
             <div><span>GARNISH</span><strong>{drink.garnish || "None"}</strong></div>
             {drink.source_url ? <div><span>SOURCE</span><a href={String(drink.source_url)} target="_blank" rel="noreferrer">{String(drink.source_url).replace(/^https?:\/\//, "")}</a></div> : null}
@@ -3513,9 +3513,47 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setThem
           <Power size={17}/> {restarting ? "Restarting…" : "Safe restart"}
         </button>
       </section>
+      <BuildInfoCard/>
     </div>
     {message&&<div className="toast">{message}</div>}
   </>;
+}
+
+type BuildInfoResponse = {
+  build: string;
+  date: string;
+  dateLabel: string;
+  subtitle: string;
+  pr: number;
+  sha: string | null;
+};
+
+/** Keeper-only deployment identifier so Nick can confirm the live build is current. */
+function BuildInfoCard() {
+  const [info, setInfo] = useState<BuildInfoResponse | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api<BuildInfoResponse>("/admin/build")
+      .then(setInfo)
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load build info"));
+  }, []);
+  return (
+    <section className="settings-card">
+      <span className="eyebrow">DEPLOYMENT</span>
+      <h3>Build</h3>
+      <p>Confirm the live app includes the latest updates.</p>
+      {info ? (
+        <div className="build-info">
+          <strong className="build-info-number">Build {info.build}</strong>
+          <span>{info.subtitle}</span>
+        </div>
+      ) : error ? (
+        <p className="field-hint">{error}</p>
+      ) : (
+        <p className="field-hint">Loading…</p>
+      )}
+    </section>
+  );
 }
 
 const BULK_IMPORT_SAMPLE = `upc,name,kind

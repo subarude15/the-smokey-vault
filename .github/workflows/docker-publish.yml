@@ -30,6 +30,15 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
+      # Derive the Keeper build identifier automatically (no source edits per PR):
+      # build date + the PR number parsed from the merge commit message ("… (#145)").
+      - id: buildmeta
+        env:
+          HEAD_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          pr="$(printf '%s' "$HEAD_MSG" | grep -oE '#[0-9]+' | head -n1 | tr -d '#' || true)"
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -37,5 +46,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ steps.buildmeta.outputs.date }}
+            BUILD_PR=${{ steps.buildmeta.outputs.pr }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

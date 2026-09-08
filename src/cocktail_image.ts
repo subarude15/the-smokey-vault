@@ -6,7 +6,7 @@
  * for an exact-named cocktail recipe page and extract Recipe JSON-LD / OG image.
  * Always localize through existing image safety helpers before saving.
  */
-import { db } from "./db.js";
+import { db, getSetting, setSetting } from "./db.js";
 import { isLocalImagePath, localizeImage, type LocalizeImageDeps } from "./images.js";
 import { searchWebHits, type WebSearchHit } from "./ingestion/web-search.js";
 import {
@@ -515,4 +515,73 @@ export async function findCocktailImage(
     return { status: "already_has_image", image_url: text(after.image_url) };
   }
   return result;
+}
+
+/** Settings key holding the id of the last cocktail attempted by the boot image backfill. */
+export const COCKTAIL_IMAGE_BACKFILL_CURSOR = "cocktailImageBackfillCursor";
+
+/** Ordered batch of eligible cocktail ids starting just after `cursor`, wrapping around. */
+export function selectCocktailImageBackfillBatch(cursor: number, limit: number): number[] {
+  const eligible = "(image_url IS NULL OR trim(image_url) = '') AND collection != 'Custom Cocktails'";
+  const after = db
+    .prepare(`SELECT id FROM cocktails WHERE ${eligible} AND id > ? ORDER BY id ASC LIMIT ?`)
+    .all(cursor, limit) as { id: number }[];
+
+  const ids = after.map((row) => row.id);
+  if (ids.length < limit) {
+    // Wrap to the front so persistent no-results near the start cannot starve later rows.
+    const seen = new Set(ids);
+    const wrapped = db
+      .prepare(`SELECT id FROM cocktails WHERE ${eligible} AND id <= ? ORDER BY id ASC LIMIT ?`)
+      .all(cursor, limit) as { id: number }[];
+    for (const row of wrapped) {
+      if (seen.has(row.id)) continue;
+      ids.push(row.id);
+      if (ids.length >= limit) break;
+    }
+  }
+  return ids;
+}
+
+/**
+ * Bounded, fill-missing backfill of built-in cocktail photos (PR145).
+ *
+ * Reuses the existing safe discovery (`findCocktailImage`), which only writes when
+ * a trustworthy image is localized and never overwrites an existing image. Custom
+ * cocktails are skipped so Keeper-owned imagery is left untouched.
+ *
+ * A persisted cursor (last attempted id) advances every run and wraps around, so
+ * each boot works through the next slice of eligible cocktails instead of retrying
+ * the same leading rows forever. Cocktails that return no result stay eligible and
+ * are revisited only after the cursor has rotated through the rest — preventing
+ * starvation. Safe to run in the background at boot.
+ */
+export async function backfillMissingCocktailImages(opts?: {
+  limit?: number;
+  log?: (message: string) => void;
+  findImage?: (id: number) => Promise<CocktailImageDiscoveryResult>;
+}): Promise<{ attempted: number; updated: number }> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? 6, 50));
+  const findImage = opts?.findImage ?? ((id: number) => findCocktailImage(id));
+
+  const cursorRaw = Number(getSetting(COCKTAIL_IMAGE_BACKFILL_CURSOR) ?? 0);
+  const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? Math.floor(cursorRaw) : 0;
+
+  const ids = selectCocktailImageBackfillBatch(cursor, limit);
+
+  let attempted = 0;
+  let updated = 0;
+  for (const id of ids) {
+    attempted += 1;
+    // Advance the cursor before the (possibly slow/failing) lookup so a crash mid-run
+    // still moves forward on the next boot rather than re-attempting the same row.
+    setSetting(COCKTAIL_IMAGE_BACKFILL_CURSOR, String(id));
+    try {
+      const result = await findImage(id);
+      if (result.status === "updated") updated += 1;
+    } catch (error) {
+      opts?.log?.(`cocktail image backfill failed for #${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { attempted, updated };
 }

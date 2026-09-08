@@ -30,7 +30,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #134 reorganized the App shell into phone bottom navigation and tablet/desktop left rail with a clear Guest/Keeper Operations partition, without changing page behavior or branding.
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
-- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. **PR144** adds a streamed, Guest-vs-Keeper-limited large-video upload path. Track C continues at **PR145**.
+- **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. **PR144** adds a streamed, Guest-vs-Keeper-limited large-video upload path. **PR145** completes built-in cocktail instructions, backfills cocktail photos, and adds a Keeper build identifier. Track C continues at **PR146**.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -91,7 +91,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR144 are complete; the remaining product sequence continues with Gallery social polish (PR145), visual-system consolidation (PR146), then live-use cocktail completeness and deployment visibility work before a focused cross-surface UX audit.
+These are explicitly desired near-term product improvements based on real household use. PR136–PR145 are complete; the remaining product sequence continues with Gallery social polish (PR146), branding / visual-system consolidation (PR147), then a focused live-use cross-surface UX audit.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -127,35 +127,25 @@ These are explicitly desired near-term product improvements based on real househ
    - Photos stay capped at 150 MB for Guests and Keepers; only videos get a larger, env-tunable Keeper ceiling (`KEEPER_GALLERY_MAX_VIDEO_MB`, default ~1 GiB, bounded fallback). The per-type ceiling is enforced server-side on the sniffed media type and authorization — not the client, filename, or Content-Length — so a Keeper photo over 150 MB is rejected while a larger video is accepted.
    - Large uploads stream to a temp file on the Gallery filesystem and finalize with an atomic rename through one shared persistence path; the full file is never buffered in memory, and partial/failed uploads leave no temp file or DB row.
    - Media validation (magic-byte sniff, supported types, dedup) and PR143 poster generation are preserved; poster failure still lets a valid video save. Oversized uploads return HTTP 413 with human-readable copy.
-10. **PR145 — Gallery comments + up/down voting**
+10. **PR145 — Cocktail recipe completeness, photo backfill, and Keeper build identifier** (done)
+   - Built-in cocktails now render real, practical preparation steps derived deterministically from their structured method/glassware/garnish instead of stopping at a bare technique label ("Build"/"Shake"/"Stir"); the short method stays as secondary metadata. AI-found and custom recipes with full prose/numbered instructions are used as-is and never overwritten.
+   - Built-in cocktails missing a photo are backfilled in bounded batches at boot, reusing the existing safe fill-missing discovery (never overwriting Keeper/custom images; a no-result leaves the cocktail without a photo). A persisted rotation cursor prevents persistent no-results from starving later cocktails.
+   - Only genuine technique labels (allowlist) are replaced with generated steps; real short prose instructions are preserved.
+   - Keeper Settings shows a lightweight build identifier derived from build metadata (`BUILD_DATE`/`BUILD_PR`/`GIT_SHA`) stamped by `docker-publish.yml` — no per-PR source edits — with a deterministic local/dev fallback.
+11. **PR146 — Gallery comments + up/down voting**
    - Add social interaction after Gallery media display/upload behavior is stable.
    - Let guests comment on Gallery media and cast an up-vote or down-vote from the media detail/lightbox experience.
    - Design simple abuse/duplicate-vote safeguards appropriate to this private household app; Keeper moderation/removal must remain available.
-11. **PR146 — Visual system / Smokey Barrel branding polish**
-   - Apply final typography, color, surface, and brand expression after the major interaction, responsive, and media patterns are stable.
+12. **PR147 — Visual system / Smokey Barrel branding polish**
+   - Apply final typography, color, surface, and brand expression only after the major interaction, responsive, and media patterns are stable.
    - Reconcile any useful direction from deferred draft #121; keep Light/Dark as the supported appearance model.
    - Treat this as visual-system consolidation, not permission to redesign established information architecture or reintroduce discarded theme modes.
-12. **PR147 — Cocktail recipe completeness + legacy normalization**
-   - Fix the live-use gap where some existing/manual/imported cocktails show only a generic method such as “Build” while AI-found recipes contain complete ordered instructions.
-   - Preserve authored recipe data exactly; normalize and present structured steps only from data already present in recipe fields or trusted import source content. Never invent missing preparation steps.
-   - Ensure ingredient quantities, garnish, glassware, preparation text, and ordered steps surface consistently when those values exist, with a concise fallback when they genuinely do not.
-   - Include migration/backfill behavior only where deterministic from existing stored data; Keeper-authored values remain authoritative.
-13. **PR148 — Cocktail artwork completion + Keeper repair workflow**
-   - Close the live-use gap where older/manual cocktails can remain imageless while AI-found/imported recipes have artwork.
-   - Build on PR129’s exact-match discovery and localization path rather than creating a parallel image system.
-   - Provide a clear Keeper repair action for missing cocktail artwork and preserve any Keeper-selected/uploaded image unless explicitly replaced.
-   - Keep exact recipe identity matching, safe remote-image validation, and local durable media paths unchanged.
-14. **PR149 — Keeper build/version visibility**
-   - Add a simple Keeper-visible build identifier so production can be compared with the repository/deployment state at a glance.
-   - Prefer build-time generated metadata rather than a manually maintained value; include a compact date-based build stamp plus the latest PR/revision encompassed by the image when available (for example, a display shaped like `090826144`).
-   - Surface the value in Keeper/Admin settings or another low-noise operational location; do not expose secrets, environment contents, or sensitive infrastructure metadata to Guests.
-   - Define a deterministic fallback when PR metadata is unavailable so local/dev builds remain identifiable.
-15. **PR150 — Live-use Guest/Keeper UX audit + focused cleanup**
-   - Perform a phone + tablet/landscape walkthrough of the primary Guest and Keeper surfaces after PR145–PR149 settle.
+13. **PR148 — Live-use Guest/Keeper UX audit + focused cleanup**
+   - Perform a phone + tablet/landscape walkthrough of the primary Guest and Keeper surfaces after PR145–PR147 settle.
    - Fix concrete inconsistency, dead-end, overflow, media, copy, and action-discoverability issues found during that walkthrough; do not turn the audit into a speculative feature bundle.
    - Verify navigation, detail views, empty/loading/error states, image/video behavior, Keeper-only controls, and Guest privacy boundaries across Cocktails, Gallery, Events, Taps, Spirits, Brewery Lab, and Settings.
    - Prefer a small set of evidence-backed fixes with regression tests over broad redesign.
-16. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+14. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -194,6 +184,9 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/commercial_tap_enrichment.ts` — commercial tap identity/image enrichment (reuses official beer discovery).
 - `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, event subscribers, and authorization boundaries.
 - `src/cocktails.ts` — cocktail matching/recipe behavior; cocktail rows already support `image_url`.
+- `client/src/cocktail-instructions.ts` — cocktail method parsing plus PR145 deterministic step generation (`resolveCocktailInstructions` / `buildCocktailSteps`) for built-in recipes; rendered by `CocktailRecipeInstructions`.
+- `src/cocktail_image.ts` — safe fill-missing cocktail image discovery (`findCocktailImage`) and the PR145 bounded boot `backfillMissingCocktailImages`.
+- `src/build-info.ts` — Keeper build identifier (`getBuildInfo`) derived from build-arg/env metadata (`BUILD_DATE`/`BUILD_PR`/`GIT_SHA`, stamped by `docker-publish.yml`) with a local/dev fallback; surfaced by `GET /api/admin/build` and the Keeper Settings "Build" card.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
 - `src/ingestion/jobs/field-ownership.ts` — durable machine-vs-human ownership; currently strongest for packaged-beer ABV/category.

@@ -157,6 +157,9 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .next-empty{color:var(--muted);margin:0}
 @media(max-width:360px){.hero{grid-template-columns:1fr;grid-template-areas:"copy" "orbit" "lede";justify-items:start}.hero-orbit{width:124px;height:124px;margin:10px 0 0}.hero-orbit span{font-size:26px}.hero-wordmark{font-size:32px}}
 .settings-card .eyebrow{margin:0}
+.build-info{display:flex;flex-direction:column;gap:4px}
+.build-info-number{font:600 22px "JetBrains Mono",ui-monospace,monospace;letter-spacing:.5px}
+.build-info span{color:var(--muted);font-size:13px}
 .enrichment-maintenance .enrichment-refresh{margin-bottom:12px}
 .enrichment-services-health .enrichment-refresh{margin-top:14px}
 .enrichment-health-pending{font-size:13px;color:var(--muted);margin-top:12px}
