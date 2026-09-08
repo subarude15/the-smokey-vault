@@ -90,33 +90,44 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
     }
   }, []);
 
-  const load = useCallback(() => {
-    loadAlbums()
-      .then((next) => {
-        setError("");
-        if (selectedAlbumId != null) {
-          if (!next.some((album) => album.id === selectedAlbumId)) {
-            setSelectedAlbumId(null);
-            setMedia([]);
-            return;
-          }
-          return loadMedia(selectedAlbumId);
-        }
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the gallery."));
+  /** Refresh albums (and the open album's media) without racing the selection effect. */
+  const refresh = useCallback(async () => {
+    try {
+      const next = await loadAlbums();
+      setError("");
+      if (selectedAlbumId == null) return;
+      if (!next.some((album) => album.id === selectedAlbumId)) {
+        setSelectedAlbumId(null);
+        setMedia([]);
+        return;
+      }
+      await loadMedia(selectedAlbumId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load the gallery.");
+    }
   }, [loadAlbums, loadMedia, selectedAlbumId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Album list on mount / when loadAlbums identity is stable.
+  useEffect(() => {
+    loadAlbums()
+      .then(() => setError(""))
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the gallery."));
+  }, [loadAlbums]);
 
+  // Single path for opening/clearing an album — one GET /gallery?album_id= per selection.
   useEffect(() => {
     if (selectedAlbumId == null) {
       setMedia([]);
       setLightboxId(null);
       return;
     }
+    let cancelled = false;
     loadMedia(selectedAlbumId).catch((err) => {
-      setError(err instanceof Error ? err.message : "Could not load that album.");
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : "Could not load that album.");
+      }
     });
+    return () => { cancelled = true; };
   }, [selectedAlbumId, loadMedia]);
 
   const lightboxIndex = media.findIndex((item) => item.id === lightboxId);
@@ -139,7 +150,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       await api(`/gallery/${item.id}`, { method: "DELETE" });
       if (lightboxId === item.id) setLightboxId(null);
       setNotice("Deleted");
-      load();
+      void refresh();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not delete that item");
     }
@@ -158,7 +169,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       await api(`/gallery/albums/${album.id}`, { method: "DELETE" });
       if (selectedAlbumId === album.id) setSelectedAlbumId(null);
       setNotice(`Deleted “${album.name}”`);
-      load();
+      void refresh();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not delete that album");
     }
@@ -183,7 +194,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       <div className="ai-error load-error">
         <CircleAlert/>
         <div><strong>Could not load the gallery</strong><span>{error}</span></div>
-        <button className="secondary" onClick={load}>Retry</button>
+        <button className="secondary" onClick={() => void refresh()}>Retry</button>
       </div>
     )}
 
@@ -227,7 +238,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
                     <small>{albumMemoryLabel(album.media_count)}</small>
                   </div>
                 </button>
-                {admin ? (
+                {admin && !album.is_default ? (
                   <div className="gallery-album-actions">
                     <button
                       type="button"
@@ -237,16 +248,14 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
                     >
                       <Pencil size={16}/>
                     </button>
-                    {!album.is_default ? (
-                      <button
-                        type="button"
-                        className="icon-button danger"
-                        aria-label={`Delete ${album.name}`}
-                        onClick={() => void deleteAlbum(album)}
-                      >
-                        <Trash2 size={16}/>
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      className="icon-button danger"
+                      aria-label={`Delete ${album.name}`}
+                      onClick={() => void deleteAlbum(album)}
+                    >
+                      <Trash2 size={16}/>
+                    </button>
                   </div>
                 ) : null}
               </article>
@@ -264,7 +273,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
             <button type="button" className="primary" onClick={() => setUploadOpen(true)}>
               <Camera size={17}/> Add photos or clips
             </button>
-            {admin ? (
+            {admin && !selectedAlbum.is_default ? (
               <button type="button" className="secondary" onClick={() => setRenameAlbum(selectedAlbum)}>
                 <Pencil size={17}/> Rename
               </button>
@@ -323,8 +332,8 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
         albums={albums}
         initialAlbumId={selectedAlbumId ?? defaultAlbumId(albums)}
         close={() => setUploadOpen(false)}
-        refresh={load}
-        done={(message) => { setUploadOpen(false); setNotice(message); load(); }}
+        refresh={() => void refresh()}
+        done={(message) => { setUploadOpen(false); setNotice(message); void refresh(); }}
         notify={setNotice}
       />
     )}
@@ -349,7 +358,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
       />
     ) : null}
 
-    {renameAlbum && admin ? (
+    {renameAlbum && admin && !renameAlbum.is_default ? (
       <AlbumNameModal
         title="Rename album"
         eyebrow="PARTY ALBUM"
@@ -363,7 +372,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
           });
           setRenameAlbum(null);
           setNotice(`Renamed to “${updated.name}”`);
-          load();
+          void refresh();
         }}
       />
     ) : null}
@@ -377,7 +386,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
           setMoveItem(null);
           setLightboxId(null);
           setNotice(`Moved to “${albumName}”`);
-          load();
+          void refresh();
         }}
         onError={(message) => setNotice(message)}
       />

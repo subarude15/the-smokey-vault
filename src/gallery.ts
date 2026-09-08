@@ -208,7 +208,10 @@ export function createGalleryAlbum(input: Record<string, unknown>): GalleryAlbum
 
 export function renameGalleryAlbum(id: number, input: Record<string, unknown>): GalleryAlbum {
   ensureDefaultGalleryAlbum();
-  getAlbumRow(id);
+  const album = getAlbumRow(id);
+  if (album.is_default) {
+    throw new GalleryError("The General album cannot be renamed");
+  }
   const name = normalizeAlbumName(input.name);
   if (albumExistsCaseInsensitive(name, id)) {
     throw new GalleryError("An album with that name already exists");

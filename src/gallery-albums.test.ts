@@ -180,17 +180,41 @@ test("deleting a populated album moves media to General and keeps the file", asy
   assert.equal(existsSync(path), true);
 });
 
-test("General album cannot be deleted", async () => {
+test("General album cannot be renamed or deleted; other albums can be renamed", async () => {
   cleanupGallery();
   const token = createTestAdminToken();
   const general = ensureDefaultGalleryAlbum();
-  const res = await app.inject({
+  assert.equal(general.name, GENERAL_GALLERY_ALBUM_NAME);
+
+  const renameDenied = await app.inject({
+    method: "PUT",
+    url: `/api/gallery/albums/${general.id}`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { name: "Misc" }
+  });
+  assert.equal(renameDenied.statusCode, 400);
+  assert.match(String((renameDenied.json() as { error?: string }).error), /cannot be renamed/i);
+  assert.throws(() => renameGalleryAlbum(general.id, { name: "Misc" }), /cannot be renamed/);
+  assert.equal(ensureDefaultGalleryAlbum().name, GENERAL_GALLERY_ALBUM_NAME);
+
+  const other = createGalleryAlbum({ name: "Christmas" });
+  const renamed = await app.inject({
+    method: "PUT",
+    url: `/api/gallery/albums/${other.id}`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { name: "Birthday Bash" }
+  });
+  assert.equal(renamed.statusCode, 200);
+  assert.equal((renamed.json() as { name: string }).name, "Birthday Bash");
+
+  const deleteDenied = await app.inject({
     method: "DELETE",
     url: `/api/gallery/albums/${general.id}`,
     headers: { authorization: `Bearer ${token}` }
   });
-  assert.equal(res.statusCode, 400);
+  assert.equal(deleteDenied.statusCode, 400);
   assert.equal(ensureDefaultGalleryAlbum().id, general.id);
+  assert.equal(ensureDefaultGalleryAlbum().name, GENERAL_GALLERY_ALBUM_NAME);
   assert.throws(() => deleteGalleryAlbum(general.id), /General album cannot be deleted/);
 });
 
@@ -284,5 +308,8 @@ test("client album helpers and Gallery UI wire album selection", () => {
   assert.match(page, /Move/);
   assert.match(page, /multiple/);
   assert.match(page, /Albums/);
+  assert.match(page, /!album\.is_default/);
+  assert.match(page, /!selectedAlbum\.is_default/);
+  assert.match(page, /refresh/);
   assert.doesNotMatch(page, /album folders|filesystem folder/i);
 });
