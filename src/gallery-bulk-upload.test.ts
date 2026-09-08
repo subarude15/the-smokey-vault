@@ -26,6 +26,7 @@ import {
 
 const root = process.cwd();
 const MAX = 150 * 1024 * 1024;
+const LIMITS = { imageBytes: MAX, videoBytes: MAX };
 
 function fakeFile(name: string, size: number, lastModified = 1, type = "image/jpeg"): File {
   const buffer = Buffer.alloc(Math.min(size, 16));
@@ -43,7 +44,7 @@ test("multiple selected files can be represented in one batch", () => {
     fakeFile("a.jpg", 1024),
     fakeFile("b.jpg", 2048),
     fakeFile("clip.mov", 4096, 2, "video/quicktime")
-  ], MAX, () => `id-${Math.random()}`);
+  ], LIMITS, () => `id-${Math.random()}`);
 
   assert.equal(batch.length, 3);
   assert.equal(batch[0].status, "pending");
@@ -57,7 +58,7 @@ test("oversized files are rejected independently without discarding valid picks"
   const huge = fakeFile("huge.mov", MAX + 1, 2, "video/mp4");
   const alsoOk = fakeFile("also.jpg", 2048, 3);
 
-  const batch = mergeGallerySelections([], [ok, huge, alsoOk], MAX, (() => {
+  const batch = mergeGallerySelections([], [ok, huge, alsoOk], LIMITS, (() => {
     let n = 0;
     return () => `id-${++n}`;
   })());
@@ -85,8 +86,8 @@ test("duplicate selections are not added twice in the same modal session", () =>
   const again = fakeFile("dup.jpg", 5000, 42);
   const different = fakeFile("dup.jpg", 5000, 43);
 
-  let batch = mergeGallerySelections([], [first], MAX, () => "a");
-  batch = mergeGallerySelections(batch, [again, different], MAX, (() => {
+  let batch = mergeGallerySelections([], [first], LIMITS, () => "a");
+  batch = mergeGallerySelections(batch, [again, different], LIMITS, (() => {
     let n = 0;
     return () => `b-${++n}`;
   })());
@@ -135,7 +136,7 @@ test("retry prepares failed items only and leaves successes alone", () => {
 });
 
 test("status updates and removable rows behave as expected", () => {
-  let items = mergeGallerySelections([], [fakeFile("a.jpg", 10), fakeFile("b.jpg", 20, 2)], MAX, (() => {
+  let items = mergeGallerySelections([], [fakeFile("a.jpg", 10), fakeFile("b.jpg", 20, 2)], LIMITS, (() => {
     let n = 0;
     return () => `id-${++n}`;
   })());
@@ -162,7 +163,7 @@ test("mixed success and rejected does not qualify as complete success", () => {
     fakeFile("photo1.jpg", 1024),
     fakeFile("photo2.jpg", 2048, 2),
     fakeFile("huge.mov", MAX + 1, 3, "video/mp4")
-  ], MAX, (() => {
+  ], LIMITS, (() => {
     let n = 0;
     return () => `id-${++n}`;
   })());

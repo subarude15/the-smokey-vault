@@ -1,6 +1,6 @@
 /**
  * PR144 — Keeper large-video upload path.
- * Streaming upload, Guest vs Keeper limits, cleanup, validation, and PR143 poster compatibility.
+ * Streaming upload, Guest vs Keeper limits (videos only), cleanup, validation, and PR143 poster compatibility.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
@@ -23,6 +23,7 @@ const {
   saveGalleryUploadFromStream,
 } = await import("./gallery.js");
 const {
+  GALLERY_IMAGE_MAX_BYTES,
   GUEST_GALLERY_MAX_BYTES,
   KEEPER_GALLERY_DEFAULT_MAX_MB,
   KEEPER_GALLERY_HARD_CAP_MB,
@@ -42,6 +43,9 @@ const jpegMagic = Buffer.from([0xff, 0xd8, 0xff, 0xd9, 0x00, 0x01, 0x02, 0x03, 0
 /** Minimal ftyp box — recognized as an mp4 video but not decodable, so poster extraction fails. */
 const fakeMp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom", "ascii"), Buffer.alloc(64, 3)]);
 const sampleMp4 = existsSync("/tmp/sample.mp4") ? readFileSync("/tmp/sample.mp4") : null;
+
+/** Generous limits (both types high) for tests that are not exercising a ceiling. */
+const wideLimits = { imageBytes: 10 * MB, videoBytes: 10 * MB, isKeeper: true };
 
 function wipeGallery() {
   db.prepare("DELETE FROM gallery_media").run();
@@ -120,11 +124,15 @@ test("formatGalleryLimit renders MB under 1 GB and trimmed GB above", () => {
   assert.equal(formatGalleryLimit(1536 * MB), "1.5 GB");
 });
 
-test("galleryOversizeMessage keeps copy human and role-aware", () => {
-  assert.match(galleryOversizeMessage(GUEST_GALLERY_MAX_BYTES, false), /guest upload limit/i);
-  assert.match(galleryOversizeMessage(1024 * MB, true), /Keeper upload limit/i);
-  // Never leaks raw multipart/Fastify error phrasing.
-  assert.doesNotMatch(galleryOversizeMessage(1024 * MB, true), /FST_|multipart|request entity/i);
+test("galleryOversizeMessage is media-type and role aware, never leaking raw errors", () => {
+  assert.match(galleryOversizeMessage({ ceilingBytes: GUEST_GALLERY_MAX_BYTES, isKeeper: false }), /guest upload limit/i);
+  assert.match(galleryOversizeMessage({ ceilingBytes: 1024 * MB, isKeeper: true }), /Keeper upload limit/i);
+  // Photos share one message regardless of role.
+  assert.match(
+    galleryOversizeMessage({ ceilingBytes: GALLERY_IMAGE_MAX_BYTES, isKeeper: true, mediaType: "image" }),
+    /photo limit/i,
+  );
+  assert.doesNotMatch(galleryOversizeMessage({ ceilingBytes: 1024 * MB, isKeeper: true }), /FST_|multipart|request entity/i);
 });
 
 /* ------------------------------ Streaming path ----------------------------- */
@@ -134,8 +142,7 @@ test("large path streams to a temp file and finalizes without buffering the whol
   const payload = Buffer.concat([jpegMagic, Buffer.alloc(3 * MB, 9)]);
   const media = await saveGalleryUploadFromStream({
     stream: fromBytes(payload),
-    byteCeiling: 10 * MB,
-    oversizeMessage: "too big",
+    limits: wideLimits,
     contentType: "image/jpeg",
     originalName: "big.jpg",
     readFields: () => ({ caption: "Late night", uploadedBy: "Nick", albumId: undefined }),
@@ -153,14 +160,14 @@ test("large path streams to a temp file and finalizes without buffering the whol
 test("exceeding the ceiling returns 413, removes the temp file, and creates no row", async () => {
   wipeGallery();
   const before = rowCount();
-  const message = galleryOversizeMessage(100, true);
+  const limits = { imageBytes: 100, videoBytes: 100, isKeeper: true };
+  const expected = galleryOversizeMessage({ ceilingBytes: 100, isKeeper: true, mediaType: "video" });
   await assert.rejects(
     saveGalleryUploadFromStream({
       stream: fromBytes(Buffer.concat([jpegMagic, Buffer.alloc(5000, 1)])),
-      byteCeiling: 100,
-      oversizeMessage: message,
+      limits,
     }),
-    (error: unknown) => error instanceof GalleryError && error.status === 413 && error.message === message,
+    (error: unknown) => error instanceof GalleryError && error.status === 413 && error.message === expected,
   );
   assert.equal(tmpPartCount(), 0, "partial temp file removed after over-limit abort");
   assert.equal(rowCount(), before, "no Gallery row created for an over-limit upload");
@@ -173,8 +180,7 @@ test("a stream that fails mid-upload leaves no temp file and no row", async () =
   await assert.rejects(
     saveGalleryUploadFromStream({
       stream: failingStream(Buffer.concat([jpegMagic, Buffer.alloc(2048, 2)])),
-      byteCeiling: 10 * MB,
-      oversizeMessage: "too big",
+      limits: wideLimits,
     }),
     /network dropped mid-upload/,
   );
@@ -187,7 +193,7 @@ test("a zero-byte upload is rejected with no row", async () => {
   wipeGallery();
   const before = rowCount();
   await assert.rejects(
-    saveGalleryUploadFromStream({ stream: Readable.from([]), byteCeiling: 10 * MB, oversizeMessage: "too big" }),
+    saveGalleryUploadFromStream({ stream: Readable.from([]), limits: wideLimits }),
     (error: unknown) => error instanceof GalleryError && /photo or video/i.test(error.message),
   );
   assert.equal(tmpPartCount(), 0);
@@ -201,8 +207,7 @@ test("unsupported media is rejected, temp cleaned, and no row created", async ()
   await assert.rejects(
     saveGalleryUploadFromStream({
       stream: fromBytes(Buffer.alloc(4096, 0x42)),
-      byteCeiling: 10 * MB,
-      oversizeMessage: "too big",
+      limits: wideLimits,
       contentType: "application/octet-stream",
       originalName: "notes.bin",
     }),
@@ -217,8 +222,7 @@ test("magic bytes win over a misleading extension and declared type", async () =
   wipeGallery();
   const media = await saveGalleryUploadFromStream({
     stream: fromBytes(Buffer.concat([jpegMagic, Buffer.alloc(1024, 5)])),
-    byteCeiling: 10 * MB,
-    oversizeMessage: "too big",
+    limits: wideLimits,
     // Lies: claims mp4 by name and header, but the bytes are a JPEG.
     contentType: "video/mp4",
     originalName: "trick.mp4",
@@ -234,13 +238,50 @@ test("album and caption from streamed fields persist", async () => {
   const albumId = Number(album.lastInsertRowid);
   const media = await saveGalleryUploadFromStream({
     stream: fromBytes(Buffer.concat([jpegMagic, Buffer.alloc(512, 7)])),
-    byteCeiling: 10 * MB,
-    oversizeMessage: "too big",
+    limits: wideLimits,
     contentType: "image/jpeg",
     readFields: () => ({ caption: "Keg #2", uploadedBy: "Guest", albumId }),
   });
   assert.equal(media.album_id, albumId);
   assert.equal(media.caption, "Keg #2");
+  wipeGallery();
+});
+
+/* -------------------- Videos-only Keeper ceiling (core PR) ------------------ */
+
+test("a Keeper photo above the image ceiling is rejected even with a high video ceiling", async () => {
+  wipeGallery();
+  const before = rowCount();
+  // Image ceiling tiny, video ceiling huge — a photo must still be rejected.
+  const limits = { imageBytes: 100, videoBytes: 10 * MB, isKeeper: true };
+  await assert.rejects(
+    saveGalleryUploadFromStream({
+      stream: fromBytes(Buffer.concat([jpegMagic, Buffer.alloc(5000, 1)])),
+      limits,
+      contentType: "image/jpeg",
+      originalName: "huge-photo.jpg",
+    }),
+    (error: unknown) => error instanceof GalleryError && error.status === 413 && /photo limit/i.test(error.message),
+  );
+  assert.equal(tmpPartCount(), 0, "temp cleaned after rejected oversize photo");
+  assert.equal(rowCount(), before, "no row for an oversize photo");
+  wipeGallery();
+});
+
+test("a Keeper video above the image ceiling is accepted up to the video ceiling", async () => {
+  wipeGallery();
+  // Same limits as the photo case: image ceiling tiny, video ceiling huge.
+  const limits = { imageBytes: 100, videoBytes: 10 * MB, isKeeper: true };
+  const payload = Buffer.concat([fakeMp4, Buffer.alloc(5000, 3)]); // > image ceiling, < video ceiling
+  assert.ok(payload.length > limits.imageBytes && payload.length < limits.videoBytes);
+  const media = await saveGalleryUploadFromStream({
+    stream: fromBytes(payload),
+    limits,
+    contentType: "video/mp4",
+    originalName: "long-clip.mp4",
+  });
+  assert.equal(media.media_type, "video", "video accepted above the photo ceiling");
+  assert.ok(existsSync(join(galleryDir, media.filename)));
   wipeGallery();
 });
 
@@ -250,8 +291,7 @@ test("a streamed video with unreadable frames still saves with a null poster (PR
   wipeGallery();
   const media = await saveGalleryUploadFromStream({
     stream: fromBytes(fakeMp4),
-    byteCeiling: 10 * MB,
-    oversizeMessage: "too big",
+    limits: wideLimits,
     contentType: "video/mp4",
     originalName: "clip.mp4",
   });
@@ -270,8 +310,7 @@ test("a real streamed video generates a PR143 poster and shared-ref cleanup remo
   wipeGallery();
   const first = await saveGalleryUploadFromStream({
     stream: fromBytes(sampleMp4),
-    byteCeiling: 10 * MB,
-    oversizeMessage: "too big",
+    limits: wideLimits,
     contentType: "video/mp4",
     originalName: "party.mp4",
     readFields: () => ({ caption: "one" }),
@@ -288,8 +327,7 @@ test("a real streamed video generates a PR143 poster and shared-ref cleanup remo
   // Identical bytes dedup to the same durable file/poster.
   const second = await saveGalleryUploadFromStream({
     stream: fromBytes(sampleMp4),
-    byteCeiling: 10 * MB,
-    oversizeMessage: "too big",
+    limits: wideLimits,
     contentType: "video/mp4",
     originalName: "party.mp4",
     readFields: () => ({ caption: "two" }),
@@ -324,11 +362,12 @@ function multipartUpload(fields: Record<string, string>, file: { name: string; t
   return { boundary, body: Buffer.concat(parts) };
 }
 
-test("GET /gallery/config exposes Guest ceiling to guests and the larger Keeper ceiling to Keepers", async () => {
+test("GET /gallery/config caps photos at 150 MB for everyone and raises only the video ceiling for Keepers", async () => {
   const guest = await app.inject({ method: "GET", url: "/api/gallery/config" });
   assert.equal(guest.statusCode, 200);
-  const guestBody = guest.json() as { max_bytes: number; guest_max_bytes: number; is_keeper: boolean };
-  assert.equal(guestBody.max_bytes, GUEST_GALLERY_MAX_BYTES);
+  const guestBody = guest.json() as { image_max_bytes: number; video_max_bytes: number; is_keeper: boolean };
+  assert.equal(guestBody.image_max_bytes, GALLERY_IMAGE_MAX_BYTES);
+  assert.equal(guestBody.video_max_bytes, GUEST_GALLERY_MAX_BYTES);
   assert.equal(guestBody.is_keeper, false);
 
   const keeper = await app.inject({
@@ -337,10 +376,11 @@ test("GET /gallery/config exposes Guest ceiling to guests and the larger Keeper 
     headers: { authorization: `Bearer ${createTestAdminToken()}` },
   });
   assert.equal(keeper.statusCode, 200);
-  const keeperBody = keeper.json() as { max_bytes: number; guest_max_bytes: number; is_keeper: boolean };
+  const keeperBody = keeper.json() as { image_max_bytes: number; video_max_bytes: number; is_keeper: boolean };
   assert.equal(keeperBody.is_keeper, true);
-  assert.equal(keeperBody.max_bytes, resolveKeeperGalleryMaxBytes(process.env[KEEPER_GALLERY_MAX_VIDEO_MB_ENV]));
-  assert.ok(keeperBody.max_bytes > guestBody.max_bytes, "Keeper ceiling exceeds Guest ceiling");
+  assert.equal(keeperBody.image_max_bytes, GALLERY_IMAGE_MAX_BYTES, "photos stay at 150 MB for Keepers too");
+  assert.equal(keeperBody.video_max_bytes, resolveKeeperGalleryMaxBytes(process.env[KEEPER_GALLERY_MAX_VIDEO_MB_ENV]));
+  assert.ok(keeperBody.video_max_bytes > keeperBody.image_max_bytes, "only the video ceiling is raised");
 });
 
 test("guest upload within the Guest limit succeeds over HTTP", async () => {
@@ -401,25 +441,42 @@ function fakeFile(name: string, size: number, type = "video/mp4"): File {
   return file;
 }
 
-test("Guest selection ceiling rejects a video the Keeper ceiling would accept", () => {
-  const keeperCeiling = 1024 * MB;
-  const bigVideo = fakeFile("night.mp4", 400 * MB);
+test("frontend rejects a Keeper photo over 150 MB while accepting a Keeper video over 150 MB", () => {
+  const limits = { imageBytes: GUEST_GALLERY_MAX_BYTES, videoBytes: 1024 * MB };
+  const bigPhoto = fakeFile("panorama.jpg", 300 * MB, "image/jpeg");
+  const bigVideo = fakeFile("night.mp4", 300 * MB, "video/mp4");
 
-  const guestBatch = mergeGallerySelections([], [bigVideo], GUEST_GALLERY_MAX_BYTES, (() => {
+  const batch = mergeGallerySelections([], [bigPhoto, bigVideo], limits, (() => {
+    let n = 0;
+    return () => `id-${++n}`;
+  })());
+
+  const photoRow = batch.find((item) => item.file.name === "panorama.jpg");
+  const videoRow = batch.find((item) => item.file.name === "night.mp4");
+  assert.equal(photoRow?.status, "rejected", "300 MB photo exceeds the 150 MB photo ceiling");
+  assert.match(photoRow?.error ?? "", /150 MB/);
+  assert.equal(videoRow?.status, "pending", "300 MB video is under the 1 GB Keeper video ceiling");
+});
+
+test("frontend Guest ceilings reject a large video that a Keeper could upload", () => {
+  const guestLimits = { imageBytes: GUEST_GALLERY_MAX_BYTES, videoBytes: GUEST_GALLERY_MAX_BYTES };
+  const keeperLimits = { imageBytes: GUEST_GALLERY_MAX_BYTES, videoBytes: 1024 * MB };
+  const bigVideo = fakeFile("bash.mp4", 400 * MB, "video/mp4");
+
+  const guestBatch = mergeGallerySelections([], [bigVideo], guestLimits, (() => {
     let n = 0;
     return () => `g-${++n}`;
   })());
   assert.equal(guestBatch[0].status, "rejected");
-  assert.match(guestBatch[0].error ?? "", /limit/i);
 
-  const keeperBatch = mergeGallerySelections([], [bigVideo], keeperCeiling, (() => {
+  const keeperBatch = mergeGallerySelections([], [bigVideo], keeperLimits, (() => {
     let n = 0;
     return () => `k-${++n}`;
   })());
-  assert.equal(keeperBatch[0].status, "pending", "Keeper ceiling accepts the larger video");
+  assert.equal(keeperBatch[0].status, "pending");
 });
 
-test("validateGalleryFileSize reflects Guest vs Keeper ceilings", () => {
+test("validateGalleryFileSize reports the ceiling it was given", () => {
   const file = fakeFile("clip.mp4", 300 * MB);
   assert.match(validateGalleryFileSize(file, GUEST_GALLERY_MAX_BYTES) ?? "", /limit/i);
   assert.equal(validateGalleryFileSize(file, 1024 * MB), undefined);
