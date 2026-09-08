@@ -25,6 +25,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #124 made Brewery Lab guest-friendly and Keeper-editable while preserving one-way Brewfather ownership of brewing telemetry.
 - PR #125 added commercial-tap beer identity/image enrichment with strict official matching, fill-missing Keeper preservation, and explicit Brewery Lab/homebrew exclusion.
 - PR #126 added Keeper event editing plus stable guest-facing event deep links with Web Share / copy-link fallback and server-side draft protection.
+- PR #132 added named Gallery albums with a deterministic General fallback, guest/keeper album selection on upload, Keeper album management, and safe media reassignment on album deletion.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -62,6 +63,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR129 — Cocktail recipe-card imagery: import-source / exact-match photo discovery, fill-missing only, Keeper “Find photo”, and localized `image_url` on cards/detail.
 - PR130 — Remove duplicate Mixologist landing card; keep `What Can I Make?` as the single guest entry into unified cocktail discovery.
 - PR131 — Keeper Event Subscriber List: Invite List management on Events (search, contact links, remove, CSV export, copy contacts) with Guest/Keeper privacy boundary preserved on `event_subscribers`.
+- PR132 — Gallery albums for parties and special nights: named database-backed albums, General default migration/fallback, Guest/Keeper album selection on upload, Keeper create/rename/delete/move controls, and safe non-destructive album deletion.
 
 ## Next work
 
@@ -76,7 +78,7 @@ Do not pre-plan official-beer discovery work. Open a focused PR only when a fres
 Priority order:
 
 1. **Scope Watchtower** on the NAS compose (labels / `WATCHTOWER_LABEL_ENABLE`) so it cannot recreate unrelated containers.
-2. **Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
+2. **PR133 — Client 401 → clear Keeper session** when the bearer expires, instead of waiting for idle lock alone.
 3. **Ownership expansion only when a real overwrite bug appears** — Durable ownership today is strongest for packaged-beer ABV/category. Do not start a large enrichment redesign for polish.
 4. **Broader conflict verification** — Identity `product_type` and non-ownership metadata verification remain deferred until durable semantics exist without a parallel override table.
 
@@ -84,16 +86,7 @@ Priority order:
 
 These are explicitly desired near-term product improvements based on real household use.
 
-1. **PR132 — Gallery albums for parties and special nights.**
-   - Add named Gallery albums so photos and clips can be grouped by party/event, for example Christmas, St. Patrick’s Day, birthdays, or other bar nights.
-   - Treat these as Gallery albums in the UI rather than filesystem folders; keep media storage/persistence database-driven and preserve the existing safe hashed-file behavior.
-   - Existing gallery media must migrate/fallback safely into a general/default album or remain visibly accessible rather than disappearing.
-   - Allow Keepers to create, rename, and delete albums and move existing media between them; album deletion must not silently destroy media without an explicit, safe disposition.
-   - Guests and Keepers should be able to choose an existing album during upload; do not require a separate storage path per role.
-   - Design the schema so an album can be linked to a Speakeasy event later, but do not implement automatic event ↔ album linking in this PR.
-   - Preserve current gallery listing/lightbox/download/delete behavior inside albums; do not add face recognition, automatic tagging, cloud photo-service integrations, or a broader media-management redesign.
-
-2. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+1. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -110,7 +103,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `client/src/EventsPage.tsx` — guest Events UI, signup form, and Keeper Invite List wiring.
 - `client/src/EventSubscriberList.tsx` — Keeper-only invite list management (search, remove, export, copy).
 - `client/src/event-subscribers.ts` — pure invite-list helpers (contact href, filter, CSV, copy).
-- `client/src/GalleryPage.tsx` — guest/Keeper gallery grid, lightbox, and multi-select batch upload UI.
+- `client/src/GalleryPage.tsx` — guest/Keeper gallery album browsing, grid, lightbox, and multi-select batch upload UI.
+- `client/src/gallery-albums.ts` — pure Gallery album selection/sorting/display helpers.
 - `client/src/gallery-upload.ts` — pure Gallery batch-selection / per-file status helpers.
 - `client/src/guestAvailability.ts` — guest-safe availability percentage/gauge helpers (product behavior from PR97).
 - `client/src/BreweryLab.tsx` / `client/src/BreweryLabDetail.tsx` — guest-facing brew cards and Keeper presentation editor.
@@ -118,7 +112,7 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
 - `src/speakeasy.ts` — event CRUD, event subscribers, messages, and guest-safe published-event detail access.
 - `src/speakeasy-shared.ts` — event/gallery types and shared constraints.
-- `src/gallery.ts` — gallery upload validation/persistence via `saveGalleryUpload`.
+- `src/gallery.ts` — gallery album/media persistence, upload validation, movement, and safe deletion behavior.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
