@@ -81,6 +81,7 @@ import { PatronsPage } from "./PatronsPage";
 import { StaffPage } from "./StaffPage";
 import { SubstitutesDrawer, type SubstituteGroup } from "./SubstitutesDrawer";
 import { TipJarPage } from "./TipJarPage";
+import { CocktailCard } from "./CocktailCard";
 import { canFindCocktailPhoto, cocktailImageDiscoveryMessage } from "./cocktail-image-ui";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
@@ -2793,6 +2794,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
   const [collection, setCollection] = useState("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<CocktailDrink>();
+  const [favoriteBusy, setFavoriteBusy] = useState<number>();
   const [importer, setImporter] = useState(Boolean(sharedUrl));
   const [loadError, setLoadError] = useState("");
   const mixologistSectionRef = useRef<HTMLElement | null>(null);
@@ -2843,6 +2845,22 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
   function surprise() {
     if (!ready.length) return;
     setSelected(ready[Math.floor(Math.random() * ready.length)]);
+  }
+  async function toggleFavorite(drink: CocktailDrink) {
+    if (!admin || favoriteBusy !== undefined) return;
+    setFavoriteBusy(drink.id);
+    setLoadError("");
+    try {
+      const next = await api<CocktailDrink>(`/cocktails/${drink.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ bartender_fav: Number(drink.bartender_fav) <= 0 })
+      });
+      setDrinks((rows) => rows.map((row) => row.id === drink.id ? { ...row, bartender_fav: next.bartender_fav } : row).sort(compareCocktails));
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not update favorite.");
+    } finally {
+      setFavoriteBusy(undefined);
+    }
   }
   return <>
     <PageTitle
@@ -2900,23 +2918,16 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
       </div>
     </section>
     {!shown.length ? <Empty icon={Wine} title="No matching cocktails" text={search.trim() ? "Nothing matches that search — or ask the Mixologist for something custom." : season === "All" ? "Stock a few more bottles and check back, or ask the Mixologist for something custom." : `No ${season.toLowerCase()} recipes match this filter — or ask the Mixologist for something custom.`} actions={<button type="button" className="secondary" onClick={scrollToMixologist}><Sparkles size={16}/> Ask the Mixologist</button>}/> :
-      <div className="recipe-grid">{shown.map((drink) => {
-        const lines = cocktailLines(drink);
-        const preview = lines.slice(0, 3);
-        return (
-          <button className="recipe-card" key={drink.id} onClick={() => setSelected(drink)}>
-            {drink.image_url ? <img className="recipe-thumb" src={String(drink.image_url)} alt={drink.name}/> : null}
-            <span className={`status ${drink.readiness}`}>{readinessLabel(drink.readiness, !admin)}</span>
-            {Number(drink.bartender_fav) > 0 && <span className="fav-tag">Favorite</span>}
-            {drink.season !== "All" && <span className="season-tag">{drink.season}</span>}
-            <h3>{drink.name}</h3>
-            <p>{drink.method} · {drink.glassware}</p>
-            <ul className="ingredient-preview">{preview.map((line) => <li key={line.text} className={line.state}>{line.text}</li>)}</ul>
-            {lines.length > 3 ? <small>+{lines.length - 3} more</small> : null}
-            {drink.missing.length > 0 && <small>Missing: {drink.missing.join(", ")}</small>}
-          </button>
-        );
-      })}</div>}
+      <div className="cocktail-card-grid">{shown.map((drink) => (
+        <CocktailCard
+          key={drink.id}
+          drink={drink}
+          admin={admin}
+          onOpen={() => setSelected(drink)}
+          onToggleFavorite={() => void toggleFavorite(drink)}
+          favoriteBusy={favoriteBusy === drink.id}
+        />
+      ))}</div>}
     <div className="mixologist-divider" role="separator" aria-hidden="true" />
     <MixologistPanel admin={admin} sectionRef={mixologistSectionRef} promptRef={mixologistPromptRef}/>
     {selected && <RecipeModal
@@ -3022,12 +3033,13 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
             <ul className="ingredient-list">
               {lines.map((line) => (
                 <li key={line.text} className={line.state}>
-                  <span className="mark" aria-hidden="true">{line.state === "missing" ? "○" : line.state === "substitute" ? "◐" : "●"}</span>
+                  <span className="mark" aria-hidden="true">{line.state === "missing" ? "✕" : line.state === "substitute" ? "↔" : "✓"}</span>
                   <span>
                     {line.text}
                     {line.state === "substitute" && line.using ? <small> using {line.using}</small> : null}
                     {line.state === "have" && line.using ? <small> · {line.using}</small> : null}
                     {line.state === "pantry" ? <small> · pantry</small> : null}
+                    {line.state === "missing" ? <small>Restock needed</small> : null}
                   </span>
                 </li>
               ))}
