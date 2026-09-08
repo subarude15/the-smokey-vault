@@ -22,6 +22,7 @@ import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSugg
 import { GuestReviews } from "./GuestReviews";
 import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
 import { CommercialTapEnrichmentPanel } from "./CommercialTapEnrichmentPanel";
+import { SpiritInventoryCard, TapInventoryCard } from "./TapSpiritInventoryCard";
 import { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";
 import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
@@ -713,6 +714,7 @@ export default function App() {
             openItem={shelfViewItem?.moduleId === module.id ? shelfViewItem.item : undefined}
             onOpenItemConsumed={() => setShelfViewItem(null)}
             ensureCollection={() => navigate(module.id)}
+            openBreweryLab={() => navigate("brewery")}
             seedCreate={module.id === "taps" ? tapSeed : undefined}
             onSeedConsumed={() => setTapSeed(undefined)}
             onPutOnTap={admin && module.id === "brews" ? async (brew) => {
@@ -1556,10 +1558,11 @@ function ScanPage({
   </>;
 }
 
-function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, openItem, onOpenItemConsumed, seedCreate, onSeedConsumed, onPutOnTap, ensureCollection }: {
+function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, openItem, onOpenItemConsumed, seedCreate, onSeedConsumed, onPutOnTap, ensureCollection, openBreweryLab }: {
   module: Module; admin: boolean; scanDraft?: ScanDraft; finishScanReview: (outcome: ScanReviewOutcome) => void; openScanner: () => void;
   openItem?: Item; onOpenItemConsumed?: () => void;
   seedCreate?: Item; onSeedConsumed?: () => void; onPutOnTap?: (item: Item) => void;
+  openBreweryLab?: () => void;
   /** Safety net: keep/return the user on this module's collection after closing detail. */
   ensureCollection?: () => void;
 }) {
@@ -1778,6 +1781,28 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
         const archived = module.id === "brews" && normalizeBrewStatus(item.status) === "Archived";
+        if (module.id === "taps") {
+          return <TapInventoryCard
+            key={item.id}
+            item={item}
+            admin={admin}
+            onOpenDetail={() => openBottleDetail(item, module.id)}
+            onEdit={() => setEditing(item)}
+            onUpdated={(next) => setItems((current) => current.map((row) => Number(row.id) === Number(next.id) ? next : row))}
+            onClearTap={() => { void clearTap(item); }}
+            onOpenBreweryLab={openBreweryLab}
+          />;
+        }
+        if (module.id === "spirits") {
+          return <SpiritInventoryCard
+            key={item.id}
+            item={item}
+            admin={admin}
+            onOpenDetail={() => openBottleDetail(item, module.id)}
+            onEdit={() => setEditing(item)}
+            onUpdated={(next) => setItems((current) => current.map((row) => Number(row.id) === Number(next.id) ? next : row))}
+          />;
+        }
         // Guest inventory responses redact counts and send coarse out_of_stock.
         const outOfStock = typeof item.out_of_stock === "boolean"
           ? item.out_of_stock

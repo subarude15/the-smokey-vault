@@ -2,6 +2,6 @@
 
 **Status: idle**
 
-PR134 complete — Responsive App Shell & Navigation Structure (phone bottom nav + More, landscape/desktop rail, Guest/Keeper Operations partition; helpers in `client/src/shell-nav.ts`).
+PR135 complete — Taps & Spirits Card / Interaction Ergonomics (Guest-safe card hierarchy plus layered Keeper controls; BottleDetail and existing mutation semantics preserved).
 
-Next planned code work: **Taps & Spirits card / interaction ergonomics** (structure already landed; branding remains deferred).
+Next planned code work: **PR136 — Cocktail cards + responsive Keeper workspace refinements**. Final visual and branding polish remains deferred to PR137.
