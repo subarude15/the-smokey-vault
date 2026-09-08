@@ -2,6 +2,6 @@
 
 **Status: idle**
 
-PR133 complete — Client 401 → clear expired Keeper session (durable pending rejection covers boot-time mount race; Guest handoff via `handToGuest()`).
+PR134 complete — Responsive App Shell & Navigation Structure (phone bottom nav + More, landscape/desktop rail, Guest/Keeper Operations partition; helpers in `client/src/shell-nav.ts`).
 
-Next planned code work: **PR134 — Responsive App Shell & Navigation Structure** (mobile sticky bottom nav, safe-area insets, tablet/landscape rail, Guest/Keeper partition; preserve PIN unlock and `KIOSK_IDLE_MS`; no branding/theme redesign).
+Next planned code work: **Taps & Spirits card / interaction ergonomics** (structure already landed; branding remains deferred).

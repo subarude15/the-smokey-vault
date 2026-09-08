@@ -4,6 +4,19 @@ import {
   Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, onKeeperAuthRejected, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
+import {
+  GUEST_HIDDEN_PAGES,
+  GUEST_LANDING_CANDIDATES,
+  includeModuleInCollectionNav,
+  firstEnabledPage,
+  mobileShortLabel,
+  notInPrimaryNav,
+  pageEnabled,
+  selectPrimaryNav,
+  shouldShowMoreNav,
+  sortKeeperOperations,
+  tabRank
+} from "./shell-nav";
 import { ImageField } from "./ImageField";
 import { BottleSuggest, hitFitsModule, type BottleSearchHit } from "./BottleSuggest";
 import { GuestReviews } from "./GuestReviews";
@@ -149,29 +162,6 @@ const modules: Module[] = [
   ]}
 ];
 
-const MOBILE_SHORT_LABELS: Record<string, string> = {
-  dashboard: "Home",
-  taps: "On Tap",
-  cocktails: "Drinks",
-  gallery: "Gallery",
-  events: "Events",
-  patrons: "Regulars",
-  staff: "Crew",
-  tipjar: "Tips",
-  merch: "Merch",
-  next: "Feedback",
-  brewery: "Brewery",
-  spirits: "Spirits",
-  wines: "Wine",
-  brews: "Brews",
-  packaged_beer: "Beer",
-  scan: "Scan",
-  import: "Import",
-  messages: "Inbox",
-  restock: "Restock",
-  settings: "Settings"
-};
-
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia(query).matches : false
@@ -184,34 +174,6 @@ function useMediaQuery(query: string) {
     return () => media.removeEventListener("change", onChange);
   }, [query]);
   return matches;
-}
-
-function mobileQuickNav(
-  collectionNav: { id: string; label: string; icon: typeof Bottle }[],
-  admin: boolean,
-  keeperNav: { id: string; label: string; icon: typeof Bottle; badge?: number }[]
-) {
-  const preferred = admin ? ["dashboard", "scan", "taps", "cocktails"] : ["dashboard", "taps", "cocktails", "gallery"];
-  const items: { id: string; label: string; icon: typeof Bottle; badge?: number }[] = [];
-  for (const id of preferred) {
-    const fromCollection = collectionNav.find((item) => item.id === id);
-    if (fromCollection) items.push(fromCollection);
-    else if (admin) {
-      const fromKeeper = keeperNav.find((item) => item.id === id);
-      if (fromKeeper) items.push(fromKeeper);
-    }
-    if (items.length >= 3) break;
-  }
-  while (items.length < 3) {
-    const next = collectionNav.find((item) => !items.some((row) => row.id === item.id));
-    if (!next) break;
-    items.push(next);
-  }
-  return items.slice(0, 3);
-}
-
-function notInQuickNav<T extends { id: string }>(items: T[], quickNav: { id: string }[]) {
-  return items.filter((item) => !quickNav.some((quick) => quick.id === item.id));
 }
 
 type ScanModuleId = "spirits" | "packaged_beer" | "wines";
@@ -359,31 +321,6 @@ function useHouse() {
   return useContext(HouseContext);
 }
 
-const GUEST_HIDDEN_PAGES = new Set(["scan", "import", "restock", "settings", "messages"]);
-
-/** Admin-only pages are never gated by the guest tab switches. */
-const KEEPER_PAGES = new Set(["scan", "import", "restock", "settings", "messages"]);
-
-/** Which guest tab switch controls each page. */
-const PAGE_TAB: Record<string, TabKey> = {
-  dashboard: "overview",
-  cocktails: "cocktails",
-  mixologist: "cocktails",
-  spirits: "cellar",
-  wines: "cellar",
-  packaged_beer: "cellar",
-  taps: "brewery",
-  brews: "brewery",
-  brewery: "brewery",
-  patrons: "patrons",
-  staff: "staff",
-  gallery: "gallery",
-  events: "events",
-  tipjar: "tipjar",
-  merch: "merch",
-  next: "whatsnext"
-};
-
 /** Guest-facing names for the tab switches in Settings. */
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "Overview",
@@ -398,33 +335,6 @@ const TAB_LABELS: Record<TabKey, string> = {
   merch: "Merch",
   whatsnext: "Give us your 2 cents"
 };
-
-/**
- * Guest devices only see pages whose tab is switched on. The keeper keeps access to
- * everything so a tab can be switched back on from the page it controls.
- */
-function pageEnabled(page: string, tabs: EnabledTabs, admin = false): boolean {
-  if (admin || KEEPER_PAGES.has(page)) return true;
-  const tab = PAGE_TAB[page];
-  return tab ? tabs[tab] === 1 : true;
-}
-
-/**
- * Position of a page's controlling tab in the keeper's custom order. Pages that share a
- * tab all return the same rank, so a stable sort keeps their relative order intact.
- */
-function tabRank(page: string, order: TabKey[]): number {
-  const tab = PAGE_TAB[page];
-  const index = tab ? order.indexOf(tab) : -1;
-  return index < 0 ? order.length : index;
-}
-
-/** Falls back to the first guest-visible page whose tab is switched on, in tab order. */
-function firstEnabledPage(tabs: EnabledTabs, order: TabKey[], candidates: string[]): string {
-  return [...candidates]
-    .sort((a, b) => tabRank(a, order) - tabRank(b, order))
-    .find((page) => pageEnabled(page, tabs)) ?? "dashboard";
-}
 
 function scanProductName(result: ScanResult) {
   const product = result.product ?? {};
@@ -478,7 +388,6 @@ export default function App() {
   ));
   const [cocktailFocus, setCocktailFocus] = useState<"mixologist" | null>(null);
   const [admin, setAdmin] = useState(tokenExists());
-  const [mobileNav, setMobileNav] = useState(false);
   const [moreSheet, setMoreSheet] = useState(false);
   const [navHint, setNavHint] = useState(() => !localStorage.getItem("smokey-nav-hint-dismissed"));
   const compactNav = useMediaQuery("(max-width: 1050px)");
@@ -503,27 +412,9 @@ export default function App() {
   const enabledTabs = house.enabledTabs;
   const tabOrder = parseTabOrder(house.settings.tab_order);
   /** Guest landing page, respecting the keeper's tab order and visibility switches. */
-  const guestLanding = firstEnabledPage(enabledTabs, tabOrder, [
-    "dashboard", "taps", "brewery", "cocktails", "spirits", "wines", "packaged_beer",
-    "patrons", "staff", "gallery", "events", "tipjar", "merch", "next"
-  ]);
+  const guestLanding = firstEnabledPage(enabledTabs, tabOrder, GUEST_LANDING_CANDIDATES);
   const guestLandingRef = useRef(guestLanding);
   guestLandingRef.current = guestLanding;
-
-  const lock = useCallback(() => {
-    clearToken();
-    setAdmin(false);
-    setScanDraft(undefined);
-    setScanMiss(null);
-    setShelfSessionMode("idle");
-    setShelfSessionSummary(null);
-    setShelfViewItem(null);
-    setUnlock(false);
-    setUnread(0);
-    setMobileNav(false);
-    setMoreSheet(false);
-    setPage((current) => GUEST_HIDDEN_PAGES.has(current) ? guestLandingRef.current : current);
-  }, []);
 
   /** Hands the iPad back to a guest: drops the token and returns to the guest landing page. */
   const handToGuest = useCallback(() => {
@@ -536,7 +427,6 @@ export default function App() {
     setShelfViewItem(null);
     setUnlock(false);
     setUnread(0);
-    setMobileNav(false);
     setMoreSheet(false);
     setPage(guestLandingRef.current);
   }, []);
@@ -547,29 +437,22 @@ export default function App() {
 
   useEffect(() => { applyTheme(theme); localStorage.setItem("smokey-theme", theme); }, [theme]);
   useEffect(() => {
-    document.body.classList.toggle("nav-open", mobileNav || moreSheet);
+    document.body.classList.toggle("nav-open", moreSheet);
     return () => document.body.classList.remove("nav-open");
-  }, [mobileNav, moreSheet]);
+  }, [moreSheet]);
+  // Phone portrait → bottom nav + More sheet. Landscape tablet/desktop → persistent rail.
+  const phoneShell = compactNav && portraitNav;
   useEffect(() => {
-    if (!compactNav) {
-      setMobileNav(false);
-      setMoreSheet(false);
-      return;
-    }
-    if (portraitNav) setMobileNav(false);
-    else setMoreSheet(false);
-  }, [compactNav, portraitNav]);
+    if (!phoneShell) setMoreSheet(false);
+  }, [phoneShell]);
   useEffect(() => {
-    if (!moreSheet && !mobileNav) return;
+    if (!moreSheet) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMoreSheet(false);
-        setMobileNav(false);
-      }
+      if (event.key === "Escape") setMoreSheet(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [moreSheet, mobileNav]);
+  }, [moreSheet]);
   useEffect(() => {
     api<Record<string, unknown>>("/house").then((values) => {
       setHouse({
@@ -638,7 +521,6 @@ export default function App() {
       if (next !== "cocktails") setCocktailFocus(null);
       setPage(next);
     }
-    setMobileNav(false);
     setMoreSheet(false);
     if (navHint) dismissNavHint();
   };
@@ -721,11 +603,7 @@ export default function App() {
   }
   const collectionNav = [
     { id:"dashboard",label:"Overview",icon:LayoutDashboard },
-    ...modules.filter((m) => {
-      if (!admin && GUEST_HIDDEN_PAGES.has(m.id)) return false;
-      if (!admin && m.id === "brews") return false;
-      return true;
-    }).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
+    ...modules.filter((m) => includeModuleInCollectionNav(m.id, admin)).map((m) => ({ id:m.id,label:m.label,icon:m.icon })),
     { id:"brewery",label:"Brewery Lab",icon:FlaskConical },
     { id:"cocktails",label:"What Can I Make?",icon:Wine },
     { id:"patrons",label:"Regulars",icon:Users },
@@ -738,17 +616,19 @@ export default function App() {
   ]
     .filter((item) => pageEnabled(item.id, enabledTabs, admin))
     .sort((a, b) => tabRank(a.id, tabOrder) - tabRank(b.id, tabOrder));
-  const keeperNav = [
+  const keeperNav = sortKeeperOperations([
+    { id:"brews",label:"Homebrew Log",icon:FlaskConical },
     { id:"messages",label:"Inbox",icon:Mail,badge:unread },
     { id:"scan",label:"Scan bottles",icon:ScanBarcode },
     { id:"import",label:"Import Review",icon:Upload },
     { id:"restock",label:"Restock",icon:ShoppingBag },
     { id:"settings",label:"Settings",icon:Settings }
-  ];
+  ]);
   const facebookGroupUrl = house.settings.facebook_group_url?.trim() ?? "";
-  const quickNav = mobileQuickNav(collectionNav, admin, keeperNav);
-  const moreCollection = notInQuickNav(collectionNav, quickNav);
-  const moreKeeper = admin ? notInQuickNav(keeperNav, quickNav) : [];
+  const primaryNav = selectPrimaryNav(collectionNav, admin, keeperNav);
+  const moreCollection = notInPrimaryNav(collectionNav, primaryNav);
+  const moreKeeper = admin ? notInPrimaryNav(keeperNav, primaryNav) : [];
+  const showMoreNav = shouldShowMoreNav(moreCollection, moreKeeper);
   const moreTabActive = moreSheet || moreCollection.some((item) => item.id === page) || moreKeeper.some((item) => item.id === page);
   const allNav = [...collectionNav, ...(admin ? keeperNav : [])];
   const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Barrel";
@@ -757,22 +637,15 @@ export default function App() {
     setNavHint(false);
   }
   function closeOverlays() {
-    setMobileNav(false);
     setMoreSheet(false);
   }
   function toggleMore() {
     if (navHint) dismissNavHint();
-    if (!compactNav) return;
-    if (portraitNav) {
-      setMobileNav(false);
-      setMoreSheet((open) => !open);
-      return;
-    }
-    setMoreSheet(false);
-    setMobileNav((open) => !open);
+    if (!phoneShell) return;
+    setMoreSheet((open) => !open);
   }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
-    return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)}>
+    return <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
       <item.icon size={19}/>{item.label}
       {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
       <ChevronRight size={15}/>
@@ -781,15 +654,14 @@ export default function App() {
 
   return (
     <HouseContext.Provider value={house}>
-    <div className="app-shell" data-page={page} data-mode={admin ? "keeper" : "guest"}>
-      <aside id="nav-drawer" className={`sidebar ${mobileNav ? "open" : ""}`}>
-        <button className="mobile-close icon-button" onClick={closeOverlays}><X/></button>
+    <div className="app-shell" data-page={page} data-mode={admin ? "keeper" : "guest"} data-shell={phoneShell ? "phone" : "rail"}>
+      <aside id="nav-drawer" className="sidebar" aria-label={admin ? "House and Keeper navigation" : "Guest navigation"}>
         <div className="brand"><div className="brand-mark"><Wine/></div><div><strong>The Smokey Barrel Bar &amp; Brewing</strong><span>PRIVATE CELLAR</span></div></div>
         <nav>
-          <span className="nav-label">COLLECTION</span>
+          <span className="nav-label">{admin ? "Guest destinations" : "Collection"}</span>
           {collectionNav.map(navButton)}
           {admin && <>
-            <span className="nav-label">KEEPER</span>
+            <span className="nav-label">Keeper Operations</span>
             {keeperNav.map(navButton)}
           </>}
           {facebookGroupUrl && <a className="nav-external" href={facebookGroupUrl} target="_blank" rel="noreferrer">
@@ -797,23 +669,18 @@ export default function App() {
           </a>}
         </nav>
         <div className="sidebar-footer">
-          <button onClick={() => admin ? lock() : setUnlock(true)}>{admin ? <LockOpen/> : <Lock/>}<span><strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong><small>{admin ? "Tap to lock" : "Tap for Keeper Mode"}</small></span></button>
+          <button type="button" onClick={() => admin ? handToGuest() : setUnlock(true)}>
+            {admin ? <LockOpen/> : <Lock/>}
+            <span>
+              <strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong>
+              <small>{admin ? "Lock / Hand to Guest" : "Tap for Keeper Mode"}</small>
+            </span>
+          </button>
         </div>
       </aside>
-      <main className="has-mobile-nav">
+      <main className={phoneShell ? "has-mobile-nav" : undefined}>
         <header className="topbar">
           <div className="topbar-start">
-            <button
-              type="button"
-              className={mobileNav ? "more-topbar open" : "more-topbar"}
-              onClick={toggleMore}
-              aria-label={mobileNav ? "Close more menu" : "Open more menu"}
-              aria-expanded={mobileNav}
-              aria-controls="nav-drawer"
-            >
-              {mobileNav ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
-              <span>More</span>
-            </button>
             <span className="topbar-title">{pageTitle}</span>
           </div>
           <div className="top-actions">
@@ -829,11 +696,9 @@ export default function App() {
           </div>
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
-        {navHint && <div className="nav-hint-banner" role="status">
+        {navHint && phoneShell && <div className="nav-hint-banner" role="status">
           <Menu size={16}/>
-          <span>{portraitNav
-            ? <>The rest of the house lives in <strong>More</strong> — tap the tab below.</>
-            : <>The rest of the house lives in <strong>More</strong> — tap the control in the top bar.</>}</span>
+          <span>The rest of the house lives in <strong>More</strong> — tap the tab below.</span>
           <button type="button" className="nav-hint-dismiss" onClick={dismissNavHint} aria-label="Dismiss navigation hint"><X size={16}/></button>
         </div>}
         <div className="page">
@@ -921,15 +786,15 @@ export default function App() {
           }))}/>}
         </div>
         {!admin && <GuestFooter locationText={house.settings.bar_location_text ?? ""} onContact={() => setContactOpen(true)}/>}
-        <nav className="mobile-bottom-nav" aria-label="Quick navigation">
-          {quickNav.map((item) => (
+        {phoneShell && <nav className="mobile-bottom-nav" aria-label="Primary navigation">
+          {primaryNav.map((item) => (
             <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
               <item.icon size={20}/>
-              <span>{MOBILE_SHORT_LABELS[item.id] ?? item.label}</span>
+              <span>{mobileShortLabel(item.id, item.label)}</span>
               {item.badge ? <span className="mobile-nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
             </button>
           ))}
-          <button
+          {showMoreNav && <button
             type="button"
             className={moreTabActive ? "active" : ""}
             onClick={toggleMore}
@@ -939,10 +804,10 @@ export default function App() {
           >
             {moreSheet ? <ChevronUp size={20}/> : <Menu size={20}/>}
             <span>More</span>
-          </button>
-        </nav>
+          </button>}
+        </nav>}
       </main>
-      {mobileNav && <button className="nav-backdrop" onClick={closeOverlays} aria-label="Close navigation"/>}
+      {phoneShell && <>
       <button
         className={moreSheet ? "more-sheet-overlay open" : "more-sheet-overlay"}
         onClick={closeOverlays}
@@ -964,16 +829,16 @@ export default function App() {
           {moreCollection.length > 0 && <>
             <span className="nav-label">Collection</span>
             {moreCollection.map((item) => (
-              <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
+              <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
                 <item.icon size={19}/>{item.label}
                 <ChevronRight size={15}/>
               </button>
             ))}
           </>}
           {moreKeeper.length > 0 && <>
-            <span className="nav-label">Keeper</span>
+            <span className="nav-label">Keeper Operations</span>
             {moreKeeper.map((item) => (
-              <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)}>
+              <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
                 <item.icon size={19}/>{item.label}
                 {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
                 <ChevronRight size={15}/>
@@ -987,15 +852,16 @@ export default function App() {
         <button
           type="button"
           className="more-sheet-lock"
-          onClick={() => { closeOverlays(); admin ? lock() : setUnlock(true); }}
+          onClick={() => { closeOverlays(); admin ? handToGuest() : setUnlock(true); }}
         >
           {admin ? <LockOpen size={19}/> : <Lock size={19}/>}
           <span>
             <strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong>
-            <small>{admin ? "Tap to lock" : "Tap for Keeper Mode"}</small>
+            <small>{admin ? "Lock / Hand to Guest" : "Tap for Keeper Mode"}</small>
           </span>
         </button>
       </div>
+      </>}
       {unlock && <Unlock onClose={() => { setUnlock(false); if (scanDraft) finishScanReview("cancelled"); }} onSuccess={() => { setAdmin(true); setUnlock(false); }}/>}
       {contactOpen && <ContactModal keeperName={house.keeperName} close={() => setContactOpen(false)}/>}
     </div>
