@@ -1092,7 +1092,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <div className="favorite-row">
         {snap.cocktails.favorites.map((drink) => (
           <button type="button" className="favorite-card" key={drink.id} onClick={() => go("cocktails")}>
-            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt=""/> : <Star/>}</div>
+            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt={drink.name}/> : <Star/>}</div>
             <div>
               <span className="eyebrow">{drink.readiness === "ready" ? "READY TO POUR" : drink.readiness === "almost" ? "ONE ITEM AWAY" : "BUILD THE SHELF"}</span>
               <strong>{drink.name}</strong>
@@ -1107,7 +1107,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <div className="favorite-row">
         {snap.cocktails.offMenu.map((drink) => (
           <button type="button" className="favorite-card" key={drink.id} onClick={() => go("cocktails")}>
-            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt=""/> : <Wine/>}</div>
+            <div className="card-icon">{drink.image_url ? <img src={drink.image_url} alt={drink.name}/> : <Wine/>}</div>
             <div>
               <span className="eyebrow">OFF THE MENU</span>
               <strong>{drink.name}</strong>
