@@ -801,6 +801,27 @@ export function tapsForBatch(taps: Array<Record<string, unknown>>, batchName: un
     .sort((a, b) => a - b);
 }
 
+/**
+ * Same deterministic tap↔brew linkage Brewery Lab uses (`tapsForBatch`).
+ * Exact trimmed case-insensitive `brewery_batch` ↔ `batch_name` match only.
+ */
+export function tapMatchesBrewBatch(
+  tap: Record<string, unknown> | null | undefined,
+  batchName: unknown
+): boolean {
+  if (!tap || isTapEmpty(tap)) return false;
+  return tapsForBatch([tap], batchName).length > 0;
+}
+
+/** True when any brew batch links to this tap under Brewery Lab semantics. */
+export function tapLinksToAnyBrewBatch(
+  tap: Record<string, unknown> | null | undefined,
+  brews: Array<Record<string, unknown>>
+): boolean {
+  if (!tap || isTapEmpty(tap) || !brews.length) return false;
+  return brews.some((brew) => tapMatchesBrewBatch(tap, brew.batch_name));
+}
+
 export function onTapLabel(tapNumbers: number[]): string {
   if (!tapNumbers.length) return "";
   if (tapNumbers.length === 1) return `On tap ${tapNumbers[0]}`;

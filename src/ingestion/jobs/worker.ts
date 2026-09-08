@@ -12,9 +12,14 @@ import {
 import { runMetadataJob } from "./metadata-job.js";
 import { runTastingNotesJob } from "./tasting-notes-job.js";
 import { runImageJob } from "./image-job.js";
+import {
+  isCommercialTapEnrichmentJob,
+  runCommercialTapEnrichmentJob
+} from "./commercial-tap-enrichment.js";
 import type { MetadataEnrichmentDeps } from "../enrichment/index.js";
 import type { TastingNotesEnrichmentDeps } from "../enrichment/execute-tasting-notes.js";
 import type { ImageJobDeps } from "./image-job.js";
+import type { CommercialTapEnrichmentDeps } from "../../commercial_tap_enrichment.js";
 
 export type EnrichmentLogger = {
   info: (obj: Record<string, unknown>, msg: string) => void;
@@ -33,6 +38,7 @@ export type EnrichmentWorkerOptions = {
   metadataDeps?: MetadataEnrichmentDeps;
   tastingNotesDeps?: TastingNotesEnrichmentDeps;
   imageDeps?: ImageJobDeps;
+  commercialTapDeps?: CommercialTapEnrichmentDeps;
   logger?: EnrichmentLogger;
   onCycle?: () => void;
 };
@@ -92,6 +98,21 @@ function scheduleNext(delayMs: number) {
 
 async function processClaimedJob(job: NonNullable<ReturnType<typeof claimNextPendingJob>>) {
   const log = workerOptions.logger ?? defaultLogger;
+  if (isCommercialTapEnrichmentJob(job)) {
+    const result = await runCommercialTapEnrichmentJob(job, workerOptions.commercialTapDeps);
+    log.info({
+      jobId: job.id,
+      jobType: job.job_type,
+      entityType: job.entity_type,
+      entityId: job.entity_id,
+      status: result.status,
+      match: result.match,
+      reason: result.reason,
+      updatedFields: result.updatedFields,
+      imageKind: result.imageKind
+    }, "enrichment job completed");
+    return;
+  }
   if (job.job_type === "metadata") {
     const result = await runMetadataJob(job, workerOptions.metadataDeps);
     markJobCompleted(job.id, result.resultPayload);

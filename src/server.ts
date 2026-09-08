@@ -47,6 +47,8 @@ import {
   rerunItemEnrichmentJob,
   verifyEnrichmentField,
   resolveEnrichmentConflict,
+  queueCommercialTapEnrichment,
+  buildCommercialTapEnrichmentView,
   startEnrichmentWorker,
   type EnrichmentBackfillJobType
 } from "./ingestion/jobs/index.js";
@@ -754,6 +756,50 @@ app.post<{
     return reply.code(result.statusCode).send({ error: result.error });
   }
   return result;
+});
+
+/**
+ * Keeper-only: queue commercial tap beer identity/image enrichment.
+ * Reuses official packaged-beer discovery under exact/strong identity.
+ * Homebrew taps are rejected. Does not run enrichment in-request.
+ */
+app.post<{ Params: { id: string } }>("/api/inventory/taps/:id/enrich-beer", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Queue commercial tap beer identity and imagery enrichment"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  const result = queueCommercialTapEnrichment(id);
+  if (!result.ok) {
+    return reply.code(result.statusCode).send({ error: result.error });
+  }
+  return {
+    tapId: id,
+    queued: true,
+    created: result.created,
+    jobId: result.job.id,
+    status: result.job.status
+  };
+});
+
+/**
+ * Keeper-only: commercial tap enrichment status / last result.
+ * Guests must not see job diagnostics.
+ */
+app.get<{ Params: { id: string } }>("/api/inventory/taps/:id/enrich-beer", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Commercial tap beer enrichment status"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isFinite(id) || id <= 0) return reply.code(400).send({ error: "Invalid id" });
+  const view = buildCommercialTapEnrichmentView(id);
+  if (!view) return reply.code(404).send({ error: "Tap not found" });
+  return view;
 });
 
 app.get<{ Params: { table: string; id: string } }>("/api/inventory/:table/:id/reviews", async (request, reply) => {
