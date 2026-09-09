@@ -6,10 +6,12 @@
   --accent-ink:#fff;
   /* Warm near-black the SB brand medallion always sits on, in either theme. */
   --medallion:#14110d;
-  --font-sans:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --font-sans:"Outfit",system-ui,sans-serif;
   --font-serif:"Playfair Display",serif;
   /* Readable blackletter for brand moments + major headers only (never body). */
   --font-display:"Manufacturing Consent","Playfair Display",serif;
+  /* Reserved for genuinely code-like / identifier / numeric values, never body. */
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   --ease-out:cubic-bezier(.22,1,.36,1);--ease-spring:cubic-bezier(.32,.72,0,1);
   --shadow-warm:0 18px 48px color-mix(in srgb,var(--bg) 55%,#3a2414);
   color-scheme:dark;
@@ -167,7 +169,7 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 @media(max-width:360px){.hero{grid-template-columns:1fr;grid-template-areas:"copy" "orbit" "lede";justify-items:start}.hero-orbit{width:124px;height:124px;margin:10px 0 0}.hero-orbit span{font-size:26px}.hero-wordmark{font-size:32px}}
 .settings-card .eyebrow{margin:0}
 .build-info{display:flex;flex-direction:column;gap:4px}
-.build-info-number{font:600 22px "JetBrains Mono",ui-monospace,monospace;letter-spacing:.5px}
+.build-info-number{font:600 22px var(--font-mono);letter-spacing:.5px}
 .build-info span{color:var(--muted);font-size:13px}
 .enrichment-maintenance .enrichment-refresh{margin-bottom:12px}
 .enrichment-services-health .enrichment-refresh{margin-top:14px}
@@ -670,7 +672,7 @@ a.subscriber-contact{color:var(--accent);text-decoration:underline;text-underlin
 .lightbox-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:46px;height:46px}
 .lightbox-nav.prev{left:14px}
 .lightbox-nav.next{right:14px}
-.bulk-import-input{width:100%;min-height:150px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;resize:vertical}
+.bulk-import-input{width:100%;min-height:150px;font:13px var(--font-mono);line-height:1.5;resize:vertical}
 .bulk-import-actions{display:flex;flex-wrap:wrap;gap:8px}
 .bulk-import-banner{margin:0;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--text);border-radius:11px;padding:11px 14px;font-size:13px}
 .bulk-import-result{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);background:var(--surface-2);border-radius:11px;padding:12px 14px;font-size:13px;max-height:220px;overflow:auto}
@@ -937,7 +939,7 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .gallery-social{display:flex;flex-direction:column;gap:12px;width:100%;border-top:1px solid var(--line);padding-top:12px;margin-top:2px}
 .gallery-social-votes{display:flex;align-items:center;gap:10px}
 .gallery-social .vote-button{width:auto;min-width:62px;height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px}
-.gallery-social-count{font:600 15px "JetBrains Mono",ui-monospace,monospace}
+.gallery-social-count{font:600 15px var(--font-mono)}
 .gallery-social-comment-count{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:13px}
 .gallery-social-comments{max-height:min(30vh,220px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .gallery-social-muted{color:var(--muted);font-size:13px;margin:4px 0}
