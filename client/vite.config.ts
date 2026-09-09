@@ -30,7 +30,9 @@ export default defineConfig({
           }
         },
         icons: [
-          { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }
+          { src: "/brand/sb-icon.png", sizes: "256x256", type: "image/png", purpose: "any" },
+          { src: "/brand/sb-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/brand/sb-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
         ]
       }
     })

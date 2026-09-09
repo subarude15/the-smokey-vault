@@ -28,6 +28,7 @@ import { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";
 import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
+import { SbMark } from "./SbMark";
 import {
   guestSpiritAvailabilityLabel,
   guestTapAvailabilityLabel,
@@ -661,7 +662,7 @@ export default function App() {
     <HouseContext.Provider value={house}>
     <div className="app-shell" data-page={page} data-mode={admin ? "keeper" : "guest"} data-shell={phoneShell ? "phone" : "rail"}>
       <aside id="nav-drawer" className="sidebar" aria-label={admin ? "House and Keeper navigation" : "Guest navigation"}>
-        <div className="brand"><div className="brand-mark"><Wine/></div><div><strong>The Smokey Barrel Bar &amp; Brewing</strong><span>PRIVATE CELLAR</span></div></div>
+        <div className="brand"><SbMark className="brand-mark"/><div><strong>The Smokey Barrel Bar &amp; Brewing</strong><span>PRIVATE CELLAR</span></div></div>
         <nav>
           <span className="nav-label">{admin ? "Guest destinations" : "Collection"}</span>
           {collectionNav.map(navButton)}
@@ -686,6 +687,7 @@ export default function App() {
       <main className={phoneShell ? "has-mobile-nav" : undefined}>
         <header className="topbar">
           <div className="topbar-start">
+            {phoneShell && <SbMark className="topbar-brand"/>}
             <span className="topbar-title">{pageTitle}</span>
           </div>
           <div className="top-actions">
@@ -916,12 +918,12 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
       <div className="hero-copy">
+        <SbMark className="hero-brand"/>
         <span className="eyebrow">{greeting.eyebrow}</span>
         <p className="hero-wordmark" role="heading" aria-level={1}>The Smokey Barrel</p>
         <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
       </div>
       <div className="hero-orbit" aria-label={`${orbitValue} bottles on the shelf`}>
-        <Wine/>
         <span>{orbitValue}<small>{orbitLabel}</small></span>
       </div>
       <p className="hero-lede">{snap ? overviewHeroCopy(snap, !admin) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
