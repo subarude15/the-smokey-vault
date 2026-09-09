@@ -5,13 +5,16 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
-- **PR145** — Cocktail recipe completeness, cocktail photo backfill, and Keeper build identifier. Built-in cocktails now render deterministic, practical preparation steps (`resolveCocktailInstructions` / `buildCocktailSteps` in `client/src/cocktail-instructions.ts`) derived from their method/glassware/garnish instead of a bare technique label; the short method stays as metadata, and AI/custom recipes with real prose/numbered instructions are used as-is. `backfillMissingCocktailImages` (in `src/cocktail_image.ts`) fills missing built-in cocktail photos in bounded batches at boot via the existing safe discovery, never overwriting Keeper/custom images. A lightweight build identifier (`src/build-info.ts`, `GET /api/admin/build`) appears in Keeper Settings.
+- **PR146** — Gallery comments + up/down voting. Guests comment and cast one up/down vote from the Gallery lightbox via a compact social section (`client/src/GallerySocial.tsx`, rendered inside the `GalleryPage` lightbox). Server logic lives in `src/gallery-social.ts` (tables `gallery_comments` + `gallery_votes`, media-scoped indexes, `UNIQUE(media_id, voter_key)`); routes are `GET /api/gallery/:id/social`, `POST /api/gallery/:id/comments`, `DELETE /api/gallery/:id/comments/:commentId` (Keeper), `POST /api/gallery/:id/vote`. The anonymous voter key is derived server-side (`deriveGalleryVoterKey`, HMAC of the client's existing `smokey-voter` device token + IP/UA with the session secret) and never returned. Comments/votes are cleaned up transactionally inside `deleteGalleryMedia`; album move/rename leaves them untouched.
+
+Previously completed:
+- **PR145** — Cocktail recipe completeness, cocktail photo backfill, and Keeper build identifier. Built-in cocktails render deterministic preparation steps (`resolveCocktailInstructions` / `buildCocktailSteps` in `client/src/cocktail-instructions.ts`); `backfillMissingCocktailImages` (`src/cocktail_image.ts`) fills missing built-in cocktail photos at boot; a lightweight build identifier (`src/build-info.ts`, `GET /api/admin/build`) appears in Keeper Settings.
 
 Currently working on:
 - None.
 
 Next planned:
-- **PR146 — Gallery comments + up/down voting** (`ROADMAP.md` Track C).
+- **PR147 — Visual system / Smokey Barrel branding polish** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
@@ -20,6 +23,7 @@ Next planned:
 - Event photo framing is event-only metadata (`image_focal_x` / `image_focal_y` / `image_zoom`) applied with CSS — never bake crop into the uploaded file via `ImageField`.
 - Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
 - Gallery video tiles/covers use persisted lightweight posters; original videos load only in the viewer/download path; poster cleanup follows Gallery media ownership/reference semantics.
+- Gallery social records (comments/votes) attach to the stable `gallery_media.id`, never to `album_id`, filenames, or poster paths, so album move/rename and file-dedup never disturb interaction; cleanup runs transactionally with `deleteGalleryMedia`. The anonymous voter key is derived server-side (HMAC of the reused client `smokey-voter` device token + request context, keyed with the session secret), stored only server-side, and never returned to Guests. One active vote per `(media_id, voter_key)`; same-direction re-vote toggles off. Comments are plain text only (React-escaped), length-capped server-side; Keeper-only removal via `requireAdmin`.
 - Gallery upload limits are centralized in `speakeasy-shared` and applied per media type: photos are capped at 150 MB for all roles, and only videos use the larger Keeper ceiling. The per-type ceiling is enforced server-side on the sniffed media type (not client `File.size`/Content-Length/filename). Large Keeper videos stream to `galleryDir/tmp` and finalize via one shared temp-file persistence path (atomic rename, no full-file Buffer); small uploads and the streamed path share that core so they cannot drift.
 - Built-in cocktail instructions are generated deterministically at render time from the seed's method/glassware/garnish (no DB migration; existing prod rows benefit immediately). Generation only fires when `method` is a bare technique label or empty; rich prose/numbered instructions (AI/custom) are preserved and never overwritten. The short method label stays visible as metadata (recipe header + resolver's `methodLabel`).
 - Cocktail photos use one shared discovery path: the Keeper "Find photo" action and the bounded boot backfill both call `findCocktailImage` (fill-missing only; localizes to `/api/media/...`; custom cocktails skipped). The boot backfill advances a persisted cursor (`cocktailImageBackfillCursor`) and wraps around, so persistent no-results near the start cannot starve later cocktails. No parallel cocktail image system.
