@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
-  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
+  Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, onKeeperAuthRejected, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
 import {
@@ -698,7 +698,6 @@ export default function App() {
               <Mail/>
               {unread > 0 && <span className="topbar-badge">{unread > 99 ? "99+" : unread}</span>}
             </button>}
-            {!admin && <button className="icon-button" onClick={() => setUnlock(true)} aria-label="Enter Keeper PIN"><Key size={18}/></button>}
             <button className="icon-button" onClick={() => setTheme(cycleTheme(theme))} aria-label="Change theme">{theme === "light" ? <Sun/> : <Moon/>}</button>
           </div>
         </header>
