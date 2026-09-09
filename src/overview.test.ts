@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildOverview, overviewGreeting, overviewHeroCopy } from "./overview.js";
+import { buildOverview, overviewGreeting, overviewHeroCopy, overviewHeroLede } from "./overview.js";
 
 test("overviewGreeting follows the clock", () => {
   assert.equal(overviewGreeting(new Date(2026, 7, 21, 8, 0, 0)).eyebrow, "GOOD MORNING");
@@ -15,6 +15,14 @@ test("patron greeting invites guests under the house wordmark", () => {
   assert.equal(guest.eyebrow, "GOOD EVENING · PATRON LOUNGE");
   assert.equal(guest.line, "Pull up a stool.");
   assert.equal(guest.emphasize, "Tonight's yours.");
+});
+
+test("overviewHeroLede is count-free welcome prose for each mode", () => {
+  assert.match(overviewHeroLede(false), /Stock the shelf/);
+  assert.match(overviewHeroLede(true), /Browse the collection/);
+  // Never contains live counts — the stat grid owns those.
+  assert.doesNotMatch(overviewHeroLede(true), /\d/);
+  assert.doesNotMatch(overviewHeroLede(false), /\d/);
 });
 
 test("empty vault snapshot is zeros and a stock-the-shelf line", () => {
