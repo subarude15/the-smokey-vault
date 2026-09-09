@@ -5,27 +5,23 @@ Last updated: 2026-09-09
 ## Current position
 
 Most recently completed:
-- **PR154** — Cocktail image discovery reliability. Extracted a pure identity model (`src/cocktail-image-identity.ts`): exact normalized name (strongest) → base-spirit alias confirmed by the drink's own ingredients (e.g. Basil Smash ↔ Gin Basil Smash when the recipe has gin) → reject everything else. Any meaningful modifier token (Strawberry/Smoked/…) or an unconfirmed/different base spirit rejects the candidate; a candidate whose ingredients add a flavor variant absent from the target is also rejected. `src/cocktail_image.ts` now runs a bounded 3-query plan (exact → alias → ingredient-assisted, deduped), classifies JSON-LD/heading/title identity with ingredient evidence, and returns staged Keeper diagnostics (`search_miss` / `identity_rejected` / `no_page_image` / `localize_failed` / `search_failed`) surfaced via `cocktailImageDiscoveryMessage`. All PR129 safety (fill-missing ownership, rejected-host denylist, mandatory localization, no thumbnail hotlinking) and the PR145 backfill are preserved; regression fixtures cover the Basil Smash accept and Strawberry/Raspberry/Whiskey rejects.
+- **PR155** — Cocktail image discovery observability + production reliability. After PR154, Keeper Find Photo still failed for common drinks (confirmed: French 75) even when Settings showed SearXNG connected. Root cause: the SERP pre-filter treated descriptive titles ("Classic French 75 Cocktail Recipe", "… - Serious Eats") as derivatives and dropped them before the page identity gate. PR155 softens that pre-filter (page gate remains strict), improves signature-ingredient query planning (gin/champagne/lemon over juice/syrup), distinguishes recipe-page host rejection from image-asset CDN rejection, collects bounded Keeper-only stage diagnostics on Find Photo failures, and adds French 75 regression coverage. Connectivity probe ≠ end-to-end discovery success. Ollama is unrelated. PR156 (Bottle Library flavor data audit) remains separate.
 
 Previously completed:
-- **PR153** — Remaining shell and chrome polish. Desktop/tablet rail shell now gives `main` the sole page-scroll path (`height: 100dvh` shell, `overflow-y: auto` on `main`; sidebar nav may still scroll when destinations exceed the viewport). Phone More sheet gained an explicit Close control (44px target, accessible name) alongside backdrop / Escape / destination dismissal with focus restore. Theme toggle uses `themeToggleLabel()` so assistive tech hears “Switch to Light theme” / “Switch to Dark theme”. Mobile horizontal overflow / stray shell scrollbar chrome did not reproduce on current `main` at ~390px, so no speculative scrollbar CSS was added. No navigation IA, Guest/Keeper privacy, backend/API/schema, or Light/Dark theme-semantic changes.
-
-Previously completed:
-- **PR152** — Bottle Library flavor discovery and filter cleanup. Client-only Flavor vocabulary/search helpers (`spirit-flavors.ts`, `spirit-search.ts`) and simplified Family · Flavor · Availability filters.
-
-Previously completed:
+- **PR154** — Cocktail image discovery reliability (exact/alias identity, bounded multi-query, staged no-result reasons).
+- **PR153** — Remaining shell and chrome polish.
+- **PR152** — Bottle Library flavor discovery and filter cleanup.
 - **PR151** — Bottle Library media and loading-state polish.
-- **PR150** — Overview hierarchy and responsive stat redesign.
-- **PR149** — Guest navigation, terminology, and Smokey Barrel naming (`NAV_LABELS` / `destinationTitle` in `shell-nav.ts`).
-- **PR148** — Live-use Guest/Keeper UX audit + focused cleanup.
 
 Currently working on:
-- Idle after PR153.
+- Idle after PR155.
 
 Next planned:
-- No numbered item queued. The roadmap returns to evidence-driven Brewery Lab / live-use follow-up (`ROADMAP.md` Track C); open a new PR number only when a concrete issue is identified.
+- **PR156** — Bottle Library flavor data audit + facet reliability (not started).
 
 ## Recent architectural decisions
+
+- Cocktail image discovery (PR155): Settings SearXNG health remains a connectivity/JSON probe only. Find Photo failures now carry bounded Keeper-only diagnostics (query/result/candidate/identity/image/localize counters + furthest stage). SERP pre-filter drops only clear flavored/numbered derivatives; descriptive titles reach the strict page gate. Signature search ingredients prefer identity spirits/citrus/sparkling over juice/syrup. Image asset host rejection is separate from recipe page host rejection so publisher CDNs are not falsely blocked.
 
 - Cocktail image identity (PR154) lives in the pure `src/cocktail-image-identity.ts`: exact name → base-spirit alias confirmed by the drink's own ingredients → reject. Any meaningful name modifier or unconfirmed/different base spirit rejects; extend the bounded vocab (base spirits, whiskey-family, modifier ingredients) rather than loosening the gate. `src/cocktail_image.ts` keeps all PR129 safety rules and the PR145 backfill; discovery returns staged diagnostics (never a single generic no-result).
 - Branding is a single tokenized visual system (PR147): the SB monogram medallion (`SbMark`) is the one brand mark; brand/heading type uses `--font-display` (Manufacturing Consent, weight 400) reserved for brand moments and major headers only (never body/labels/metadata); `--font-sans` (Outfit) is the proportional body/UI font; `--font-mono` (JetBrains Mono) is reserved for identifier/code-like values only. Light + Dark share the same warm whiskey-cellar palette via `theme.ts` tokens. Do not reintroduce removed theme modes, add fake-metal/heavy-texture treatments, use blackletter for dense/body text, or make JetBrains Mono the default UI font.

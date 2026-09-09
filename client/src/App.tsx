@@ -94,7 +94,7 @@ import { TipJarPage } from "./TipJarPage";
 import { CocktailCard } from "./CocktailCard";
 import { CocktailRecipeInstructions } from "./CocktailRecipeInstructions";
 import { cocktailMethodSummary } from "./cocktail-instructions";
-import { canFindCocktailPhoto, cocktailImageDiscoveryMessage } from "./cocktail-image-ui";
+import { canFindCocktailPhoto, cocktailImageDiscoveryDiagnosticLines, cocktailImageDiscoveryMessage, type CocktailImageDiscoveryDiagnosticsView } from "./cocktail-image-ui";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
 import { InventoryCleanupPreview } from "./InventoryCleanupPreview";
@@ -3058,6 +3058,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
   const [imageUrl, setImageUrl] = useState(String(drink.image_url ?? ""));
   const [findingPhoto, setFindingPhoto] = useState(false);
   const [photoNotice, setPhotoNotice] = useState("");
+  const [photoDiagnostics, setPhotoDiagnostics] = useState<CocktailImageDiscoveryDiagnosticsView | null>(null);
   const lines = cocktailLines(drink);
   const groups = substituteGroups(lines);
   const custom = drink.collection === "Custom Cocktails";
@@ -3093,30 +3094,36 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
       setError(err instanceof Error ? err.message : "Could not update favorite");
     }
   }
-  async function findPhoto() {
+    async function findPhoto() {
     if (!showFindPhoto || findingPhoto) return;
     setFindingPhoto(true);
     setPhotoNotice("");
+    setPhotoDiagnostics(null);
     setError("");
     try {
       const result = await api<{
         status: "updated" | "no_result" | "already_has_image";
         image_url?: string;
         reason?: string;
+        diagnostics?: CocktailImageDiscoveryDiagnosticsView;
       }>(`/cocktails/${drink.id}/find-image`, { method: "POST", body: "{}" });
       if (result.status === "updated" && result.image_url) {
         setImageUrl(result.image_url);
         setPhotoNotice(cocktailImageDiscoveryMessage("updated"));
+        setPhotoDiagnostics(null);
         onChanged();
       } else if (result.status === "already_has_image") {
         if (result.image_url) setImageUrl(result.image_url);
         setPhotoNotice(cocktailImageDiscoveryMessage("already_has_image"));
+        setPhotoDiagnostics(null);
         onChanged();
       } else {
         setPhotoNotice(cocktailImageDiscoveryMessage("no_result", result.reason));
+        setPhotoDiagnostics(admin ? (result.diagnostics ?? null) : null);
       }
     } catch (err) {
       setPhotoNotice(cocktailImageDiscoveryMessage("error"));
+      setPhotoDiagnostics(null);
       setError(err instanceof Error ? err.message : "Could not search for a photo");
     } finally {
       setFindingPhoto(false);
@@ -3165,6 +3172,16 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
         {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
         {drink.missing.length > 0 && <p className="recipe-warning">Missing from the shelf: {drink.missing.join(", ")}</p>}
         {photoNotice ? <p className="field-hint" aria-live="polite">{photoNotice}</p> : null}
+        {admin && photoDiagnostics && cocktailImageDiscoveryDiagnosticLines(photoDiagnostics).length > 0 ? (
+          <details className="field-hint cocktail-photo-diagnostics">
+            <summary>Photo search details</summary>
+            <ul>
+              {cocktailImageDiscoveryDiagnosticLines(photoDiagnostics).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
           {showFindPhoto && (

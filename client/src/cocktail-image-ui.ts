@@ -50,3 +50,65 @@ export function cocktailImageDiscoveryMessage(
     }
   }
 }
+
+/** Bounded Keeper-only diagnostic snapshot from Find Photo (PR155). */
+export type CocktailImageDiscoveryDiagnosticsView = {
+  cocktail_name?: string;
+  queries_tried?: number;
+  query_labels?: string[];
+  raw_results?: number;
+  candidates_after_dedupe?: number;
+  candidates_after_host_filter?: number;
+  pages_fetched?: number;
+  identity_matches?: number;
+  identity_rejects?: number;
+  pages_with_image?: number;
+  image_host_rejects?: number;
+  localize_attempts?: number;
+  localize_failures?: number;
+  stage?: string;
+  note?: string;
+};
+
+/**
+ * Build Keeper-only "Photo search details" lines from bounded diagnostics.
+ * Returns an empty list when diagnostics are absent — Guests never receive them.
+ */
+export function cocktailImageDiscoveryDiagnosticLines(
+  diagnostics?: CocktailImageDiscoveryDiagnosticsView | null
+): string[] {
+  if (!diagnostics) return [];
+  const lines: string[] = [];
+  const n = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+  const queries = n(diagnostics.queries_tried);
+  if (queries != null) lines.push(`Queries tried: ${queries}`);
+  const raw = n(diagnostics.raw_results);
+  if (raw != null) lines.push(`Search results returned: ${raw}`);
+  const candidates = n(diagnostics.candidates_after_dedupe) ?? n(diagnostics.candidates_after_host_filter);
+  if (candidates != null) lines.push(`Candidate pages checked: ${candidates}`);
+  const matches = n(diagnostics.identity_matches);
+  if (matches != null) lines.push(`Identity matches: ${matches}`);
+  const withImage = n(diagnostics.pages_with_image);
+  if (withImage != null) lines.push(`Pages with usable image: ${withImage}`);
+  const localizeFails = n(diagnostics.localize_failures);
+  if (localizeFails != null && localizeFails > 0) {
+    lines.push(`Localization failures: ${localizeFails}`);
+  }
+  if (diagnostics.note && String(diagnostics.note).trim()) {
+    lines.push(String(diagnostics.note).trim());
+  }
+  if (diagnostics.stage) {
+    const labels: Record<string, string> = {
+      search_miss: "Photo could not be found — no usable recipe pages",
+      search_failed: "Photo search is unavailable",
+      identity_rejected: "Pages were found, but none matched this cocktail",
+      no_page_image: "A matching recipe was found, but no usable photo was exposed",
+      localize_failed: "Photo could not be saved locally",
+      updated: "Photo saved",
+      already_has_image: "Recipe already has a photo"
+    };
+    const stage = String(diagnostics.stage);
+    lines.push(`Result: ${labels[stage] ?? stage.replace(/_/g, " ")}`);
+  }
+  return lines.slice(0, 12);
+}

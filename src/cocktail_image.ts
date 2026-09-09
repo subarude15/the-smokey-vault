@@ -19,6 +19,7 @@ import {
   buildCocktailImageQueryPlan,
   classifyCocktailIdentity,
   cocktailIdentityAccepted,
+  isDerivativeCocktailSearchTitle,
   normalizeCocktailName,
   softTitleCocktailIdentity
 } from "./cocktail-image-identity.js";
@@ -43,10 +44,29 @@ export type CocktailImageNoResultReason =
   | "no_page_image"
   | "localize_failed";
 
+/** Bounded Keeper-only counters for one Find Photo attempt (PR155). */
+export type CocktailImageDiscoveryDiagnostics = {
+  cocktail_name: string;
+  queries_tried: number;
+  query_labels: string[];
+  raw_results: number;
+  candidates_after_dedupe: number;
+  candidates_after_host_filter: number;
+  pages_fetched: number;
+  identity_matches: number;
+  identity_rejects: number;
+  pages_with_image: number;
+  image_host_rejects: number;
+  localize_attempts: number;
+  localize_failures: number;
+  stage: CocktailImageNoResultReason | "updated" | "already_has_image";
+  note?: string;
+};
+
 export type CocktailImageDiscoveryResult =
-  | { status: "updated"; image_url: string; source_url?: string }
-  | { status: "no_result"; reason?: CocktailImageNoResultReason }
-  | { status: "already_has_image"; image_url: string };
+  | { status: "updated"; image_url: string; source_url?: string; diagnostics?: CocktailImageDiscoveryDiagnostics }
+  | { status: "no_result"; reason?: CocktailImageNoResultReason; diagnostics?: CocktailImageDiscoveryDiagnostics }
+  | { status: "already_has_image"; image_url: string; diagnostics?: CocktailImageDiscoveryDiagnostics };
 
 export type CocktailImageRow = {
   id: number;
@@ -183,9 +203,20 @@ function imageFrom(value: unknown, base: string): string {
       return value;
     }
   }
-  if (Array.isArray(value)) return imageFrom(value[0], base);
-  if (typeof value === "object" && value && "url" in value) {
-    return imageFrom((value as { url: unknown }).url, base);
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = imageFrom(entry, base);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof value === "object" && value) {
+    const record = value as { url?: unknown; contentUrl?: unknown; contentURL?: unknown };
+    return (
+      imageFrom(record.url, base)
+      || imageFrom(record.contentUrl, base)
+      || imageFrom(record.contentURL, base)
+    );
   }
   return "";
 }
@@ -207,6 +238,27 @@ export function isRejectedCocktailImageHost(urlOrHost: string): boolean {
   if (!host) return true;
   return hostMatches(host, REJECTED_HOST_FRAGMENTS);
 }
+
+/** Stock/social image CDNs — applied to image asset URLs, not recipe page hosts. */
+const REJECTED_IMAGE_ASSET_FRAGMENTS = [
+  "pinterest.", "pinimg.", "shutterstock.", "gettyimages.", "istockphoto.",
+  "unsplash.", "pexels.", "adobe.com", "stock.adobe", "dreamstime.", "alamy.",
+  "depositphotos.", "facebook.com", "fbcdn.", "instagram.com", "cdninstagram.",
+  "twitter.com", "x.com", "t.co", "tiktok.com", "youtube.com", "youtu.be",
+  "reddit.com", "redd.it", "tumblr.com", "flickr.com"
+] as const;
+
+/**
+ * Whether an *image asset* URL is from a rejected stock/social host.
+ * Distinct from recipe-page host rejection: a trustworthy recipe page may serve
+ * its photo from a publisher CDN on another hostname.
+ */
+export function isRejectedCocktailImageAssetHost(urlOrHost: string): boolean {
+  const host = parseHost(urlOrHost) ?? urlOrHost.replace(/^www\./i, "").toLowerCase();
+  if (!host) return true;
+  return hostMatches(host, REJECTED_IMAGE_ASSET_FRAGMENTS);
+}
+
 
 export function isPreferredCocktailRecipeHost(urlOrHost: string): boolean {
   const host = parseHost(urlOrHost) ?? urlOrHost.replace(/^www\./i, "").toLowerCase();
@@ -418,12 +470,13 @@ export function filterCocktailImageSearchHits(
         candidate: row.hit.title,
         targetIngredients
       });
-      // Exact/alias titles are always eligible (the page gate still verifies).
+            // Exact/alias titles are always eligible (the page gate still verifies).
       if (cocktailIdentityAccepted(identity)) return true;
-      // Drop titles that are clearly a derivative/variant OF this drink.
-      const titleId = softTitleCocktailIdentity(row.hit.title);
-      if (titleId.includes(target) && titleId !== target) return false;
-      // Unrelated-but-not-derivative titles (and preferred hosts) reach the page gate.
+      // PR155: only drop clear flavored/numbered derivatives. Descriptive SERP
+      // titles ("Classic French 75 Cocktail Recipe") must reach the page gate.
+      if (isDerivativeCocktailSearchTitle(row.hit.title, cocktailName, targetIngredients)) {
+        return false;
+      }
       return true;
     })
     .sort((a, b) => b.score - a.score);
@@ -434,7 +487,7 @@ type CocktailPageAttempt =
   | { stage: "ok"; imageUrl: string; sourceUrl: string }
   | { stage: "skip" } // rejected host or fetch failure
   | { stage: "identity" } // fetched, but not the requested cocktail
-  | { stage: "no_image" }; // identified, but no usable Recipe/OG image
+  | { stage: "no_image"; imageHostRejected?: boolean }; // identified, but no usable Recipe/OG image
 
 async function tryImageFromPage(
   pageUrl: string,
@@ -456,7 +509,11 @@ async function tryImageFromPage(
   if (isRejectedCocktailImageHost(finalUrl)) return { stage: "skip" };
   if (!pageIdentifiesCocktail(html, cocktailName, targetIngredients)) return { stage: "identity" };
   const imageUrl = extractCocktailRecipeImage(html, finalUrl, cocktailName, targetIngredients);
-  if (!imageUrl || isRejectedCocktailImageHost(imageUrl)) return { stage: "no_image" };
+  if (!imageUrl) return { stage: "no_image" };
+  // Recipe page host ≠ image CDN host. Reject only stock/social asset hosts here.
+  if (isRejectedCocktailImageAssetHost(imageUrl)) {
+    return { stage: "no_image", imageHostRejected: true };
+  }
   return { stage: "ok", imageUrl, sourceUrl: finalUrl };
 }
 
@@ -469,37 +526,81 @@ async function localizeAccepted(
   return acceptLocalizedCocktailImage(localized, remoteUrl);
 }
 
+function emptyDiscoveryDiagnostics(
+  cocktailName: string,
+  stage: CocktailImageDiscoveryDiagnostics["stage"]
+): CocktailImageDiscoveryDiagnostics {
+  return {
+    cocktail_name: cocktailName,
+    queries_tried: 0,
+    query_labels: [],
+    raw_results: 0,
+    candidates_after_dedupe: 0,
+    candidates_after_host_filter: 0,
+    pages_fetched: 0,
+    identity_matches: 0,
+    identity_rejects: 0,
+    pages_with_image: 0,
+    image_host_rejects: 0,
+    localize_attempts: 0,
+    localize_failures: 0,
+    stage
+  };
+}
+
+function clampQueryLabel(query: string): string {
+  const q = query.trim();
+  return q.length > 80 ? `${q.slice(0, 77)}...` : q;
+}
+
 /**
  * Discover and localize a cocktail image without overwriting an existing one.
+ * Collects bounded Keeper-only stage diagnostics for Find Photo failures (PR155).
  */
 export async function discoverCocktailImage(
   row: CocktailImageRow,
   deps: CocktailImageDiscoveryDeps = {}
 ): Promise<CocktailImageDiscoveryResult> {
+  const name = text(row.name);
+  const diagnostics = emptyDiscoveryDiagnostics(name, "missing_name");
+
   if (cocktailHasImage(row)) {
-    return { status: "already_has_image", image_url: text(row.image_url) };
+    diagnostics.stage = "already_has_image";
+    return { status: "already_has_image", image_url: text(row.image_url), diagnostics };
   }
 
-  const name = text(row.name);
-  if (!name) return { status: "no_result", reason: "missing_name" };
+  if (!name) {
+    return { status: "no_result", reason: "missing_name", diagnostics };
+  }
 
   const targetIngredients = parseList(row.ingredients);
-  const maxCandidates = deps.maxCandidates ?? 6;
+  const maxCandidates = deps.maxCandidates ?? 8;
 
-  // Furthest stage reached, for a specific Keeper-facing diagnostic.
   let sawIdentityReject = false;
   let sawNoImage = false;
   let sawLocalizeFail = false;
 
   async function attemptPage(pageUrl: string): Promise<CocktailImageDiscoveryResult | null> {
     const attempt = await tryImageFromPage(pageUrl, name, targetIngredients, deps);
+    if (attempt.stage === "skip") return null;
+    diagnostics.pages_fetched += 1;
     if (attempt.stage === "ok") {
+      diagnostics.identity_matches += 1;
+      diagnostics.pages_with_image += 1;
+      diagnostics.localize_attempts += 1;
       const local = await localizeAccepted(attempt.imageUrl, deps);
-      if (local) return { status: "updated", image_url: local, source_url: attempt.sourceUrl };
+      if (local) {
+        diagnostics.stage = "updated";
+        return { status: "updated", image_url: local, source_url: attempt.sourceUrl, diagnostics };
+      }
+      diagnostics.localize_failures += 1;
       sawLocalizeFail = true;
     } else if (attempt.stage === "identity") {
+      diagnostics.identity_rejects += 1;
       sawIdentityReject = true;
     } else if (attempt.stage === "no_image") {
+      diagnostics.identity_matches += 1;
+      if (attempt.imageHostRejected) diagnostics.image_host_rejects += 1;
       sawNoImage = true;
     }
     return null;
@@ -516,29 +617,51 @@ export async function discoverCocktailImage(
   const search = deps.searchWebHits ?? searchWebHits;
   const baseQuery = buildCocktailImageSearchQuery(name, row.notes);
   const queries = buildCocktailImageQueryPlan(name, targetIngredients, baseQuery);
+  diagnostics.queries_tried = queries.length;
+  diagnostics.query_labels = queries.map(clampQueryLabel);
+
   const seen = new Set<string>();
   if (sourceUrl) seen.add(sourceUrl);
-  const candidates: string[] = [];
+  const pooled: WebSearchHit[] = [];
   let anyHits = false;
+  let anySearchOk = false;
+  let anySearchError = false;
+
+  // Collect across the full plan first so early rejected/duplicate hits cannot
+  // consume the entire candidate budget before later useful queries run.
   for (const query of queries) {
-    let hits: WebSearchHit[];
+    let raw: WebSearchHit[];
     try {
-      hits = filterCocktailImageSearchHits(await search(query, 10), name, targetIngredients);
+      raw = await search(query, 12);
+      anySearchOk = true;
     } catch {
-      return { status: "no_result", reason: "search_failed" };
+      anySearchError = true;
+      continue;
     }
+    diagnostics.raw_results += raw.length;
+    const hits = filterCocktailImageSearchHits(raw, name, targetIngredients);
     if (hits.length) anyHits = true;
     for (const hit of hits) {
       if (!hit.url || seen.has(hit.url)) continue;
       seen.add(hit.url);
-      candidates.push(hit.url);
+      pooled.push(hit);
     }
-    if (candidates.length >= maxCandidates) break;
   }
-  const limited = candidates.slice(0, maxCandidates);
 
-  for (const pageUrl of limited) {
-    const found = await attemptPage(pageUrl);
+  diagnostics.candidates_after_host_filter = pooled.length;
+  const preferred = pooled.filter((hit) => isPreferredCocktailRecipeHost(hit.url));
+  const other = pooled.filter((hit) => !isPreferredCocktailRecipeHost(hit.url));
+  const limited = [...preferred, ...other].slice(0, maxCandidates);
+  diagnostics.candidates_after_dedupe = limited.length;
+
+  if (!anySearchOk && anySearchError) {
+    diagnostics.stage = "search_failed";
+    diagnostics.note = "Search provider could not be reached for this discovery attempt.";
+    return { status: "no_result", reason: "search_failed", diagnostics };
+  }
+
+  for (const hit of limited) {
+    const found = await attemptPage(hit.url);
     if (found) return found;
   }
 
@@ -546,10 +669,16 @@ export async function discoverCocktailImage(
     ? "localize_failed"
     : sawNoImage
       ? "no_page_image"
-      : sawIdentityReject || anyHits
+      : sawIdentityReject
         ? "identity_rejected"
-        : "search_miss";
-  return { status: "no_result", reason };
+        : anyHits
+          ? "identity_rejected"
+          : "search_miss";
+  diagnostics.stage = reason;
+  if (reason === "search_miss" && anySearchOk) {
+    diagnostics.note = "SearXNG is reachable, but this search returned no usable recipe pages.";
+  }
+  return { status: "no_result", reason, diagnostics };
 }
 
 export function loadCocktailImageRow(id: number): CocktailImageRow | null {
@@ -580,9 +709,23 @@ export async function findCocktailImage(
   ).run(result.image_url, cocktailId);
 
   const after = loadCocktailImageRow(cocktailId);
-  if (!after) return { status: "no_result", reason: "update_failed" };
+  if (!after) {
+    return {
+      status: "no_result",
+      reason: "update_failed",
+      diagnostics: result.diagnostics
+        ? { ...result.diagnostics, stage: "update_failed" }
+        : undefined
+    };
+  }
   if (text(after.image_url) !== result.image_url) {
-    return { status: "already_has_image", image_url: text(after.image_url) };
+    return {
+      status: "already_has_image",
+      image_url: text(after.image_url),
+      diagnostics: result.diagnostics
+        ? { ...result.diagnostics, stage: "already_has_image" }
+        : undefined
+    };
   }
   return result;
 }
