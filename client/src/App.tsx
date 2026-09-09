@@ -1,3 +1,4 @@
+import { CocktailPhoto } from "./CocktailPhoto";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
@@ -3156,7 +3157,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
           </div>
           <button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button>
         </header>
-        {imageUrl ? <img className="recipe-hero" src={imageUrl} alt={drink.name}/> : null}
+        <CocktailPhoto key={drink.id} id={drink.id} name={String(drink.name ?? "Cocktail")} imageUrl={imageUrl} admin={admin} onSaved={url => { setImageUrl(url); setPhotoNotice("Photo saved."); setPhotoDiagnostics(null); onChanged(); }}/>
         <div className="recipe-modal-body">
           <div>
             <span className="eyebrow">INGREDIENTS</span>

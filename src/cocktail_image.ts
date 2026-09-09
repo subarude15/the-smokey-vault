@@ -84,6 +84,8 @@ export type CocktailImageDiscoveryDeps = {
   localizeImage?: (url: string | null | undefined, deps?: LocalizeImageDeps) => Promise<string | null>;
   localizeImageDeps?: LocalizeImageDeps;
   maxCandidates?: number;
+  /** Preview collector: true continues the existing bounded page scan. */
+  onCandidate?: (candidate: { image_url: string; source_url: string }) => boolean;
 };
 
 /** Hosts that must never supply cocktail recipe imagery. */
@@ -585,6 +587,7 @@ export async function discoverCocktailImage(
       diagnostics.localize_attempts += 1;
       const local = await localizeAccepted(attempt.imageUrl, deps);
       if (local) {
+        if (deps.onCandidate?.({ image_url: local, source_url: attempt.sourceUrl })) return null;
         diagnostics.stage = "updated";
         return { status: "updated", image_url: local, source_url: attempt.sourceUrl, diagnostics };
       }
@@ -792,4 +795,19 @@ export async function backfillMissingCocktailImages(opts?: {
     }
   }
   return { attempted, updated };
+}
+
+/** Preview uses the same identity/localization gates, without writing the cocktail. */
+export async function previewCocktailImages(row: CocktailImageRow, deps: CocktailImageDiscoveryDeps = {}) {
+  const candidates: { image_url: string; source_url: string }[] = [];
+  const result = await discoverCocktailImage({ ...row, image_url: "" }, {
+    ...deps,
+    onCandidate(candidate) {
+      if (candidate.image_url !== text(row.image_url) && !candidates.some(c => c.image_url === candidate.image_url)) {
+        candidates.push(candidate);
+      }
+      return candidates.length < 3;
+    }
+  });
+  return { candidates, diagnostics: result.diagnostics };
 }
