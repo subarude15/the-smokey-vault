@@ -35,6 +35,7 @@ const cssSrc = readFileSync(join(root, "client/src/styles.css"), "utf8");
 const shellSrc = readFileSync(join(root, "client/src/shell-nav.ts"), "utf8");
 const apiSrc = readFileSync(join(root, "client/src/api.ts"), "utf8");
 const bottleNavSrc = readFileSync(join(root, "client/src/bottle-detail-nav.ts"), "utf8");
+const tipJarSrc = readFileSync(join(root, "client/src/TipJarPage.tsx"), "utf8");
 
 function tabs(overrides: Partial<EnabledTabs> = {}): EnabledTabs {
   return { ...DEFAULT_ENABLED_TABS, ...overrides };
@@ -170,6 +171,13 @@ test("App wires shell helpers, handToGuest, and PR133 auth rejection", () => {
   assert.match(apiSrc, /keeperAuthRejectedPending/);
 });
 
+test("PR148 keeps Keeper entry in navigation, not the Guest topbar", () => {
+  assert.doesNotMatch(appSrc, /!admin\s*&&\s*<button[^>]+aria-label="Enter Keeper PIN"/);
+  assert.match(appSrc, /admin \? handToGuest\(\) : setUnlock\(true\)/);
+  assert.match(appSrc, /Tap for Keeper Mode/);
+  assert.match(appSrc, /aria-label="Change theme"/);
+});
+
 test("phone bottom-nav and safe-area CSS; rail for landscape/desktop", () => {
   assert.match(appSrc, /className=\"mobile-bottom-nav\"/);
   assert.match(cssSrc, /safe-area-inset-bottom/);
@@ -190,6 +198,14 @@ test("phone bottom-nav and safe-area CSS; rail for landscape/desktop", () => {
   assert.match(cssSrc, /main\.has-mobile-nav\{[^}]*padding-bottom:\s*var\(--mobile-bottom-nav-clearance\)/);
   assert.doesNotMatch(cssSrc, /\.has-mobile-nav \.page\{[^}]*padding-bottom:\s*calc\(88px/);
   assert.doesNotMatch(cssSrc, /\.has-mobile-nav \.guest-footer\{[^}]*margin-bottom/);
+  assert.match(cssSrc, /@media\(hover:none\)\{\.card-actions\{opacity:1\}\}/);
+  assert.match(cssSrc, /\.toast\{bottom:calc\(var\(--mobile-bottom-nav-clearance\) \+ 12px\)\}/);
+});
+
+test("PR148 uses Guest and Keeper terminology in user-facing copy", () => {
+  assert.doesNotMatch(appSrc, /Unlock Admin Mode|Admin unlock required|Patron Mode uses/);
+  assert.doesNotMatch(tipJarSrc, /Admin → Settings/);
+  assert.match(tipJarSrc, /Keeper Mode → Settings/);
 });
 
 test("More hint only renders when More overflow exists", () => {

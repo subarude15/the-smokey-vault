@@ -58,7 +58,7 @@ export function TipJarPage({ settings, keeperName }: { settings: HouseSettings; 
         {houseHandles.map((handle) => (
           <QrTipCard key={handle.id} label={handle.label} hint={handle.hint} href={handle.href} note="Tap the card or scan the code"/>
         ))}
-      </div> : <p className="field-hint">{keeperName} has not published tip handles yet. Add them in Admin → Settings.</p>}
+      </div> : <p className="field-hint">{keeperName} has not published tip handles yet. Add them in Keeper Mode → Settings.</p>}
     </section>
   </>;
 }
