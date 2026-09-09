@@ -112,6 +112,16 @@ export function overviewGreeting(date = new Date(), guest = false): { eyebrow: s
   return { eyebrow, line: "The house is", emphasize: "still pouring." };
 }
 
+/**
+ * Non-count welcome prose for the Overview hero. The live counts live only in the
+ * at-a-glance stat grid (PR150), so the hero lede stays count-free and stable.
+ */
+export function overviewHeroLede(guest = false): string {
+  return guest
+    ? "Browse the collection, see what is pouring, and find your next perfect drink."
+    : "Stock the shelf, put a beer on, and the house menu fills in.";
+}
+
 export function overviewHeroCopy(snapshot: OverviewSnapshot, guest = false): string {
   const parts: string[] = [];
   if (snapshot.taps.pouring) parts.push(`${snapshot.taps.pouring} handle${snapshot.taps.pouring === 1 ? "" : "s"} pouring`);
@@ -125,11 +135,7 @@ export function overviewHeroCopy(snapshot: OverviewSnapshot, guest = false): str
   if (snapshot.wines.bottles) parts.push(`${snapshot.wines.bottles} in the cellar`);
   if (snapshot.packaged.units) parts.push(`${snapshot.packaged.units} in the cold room`);
   if (snapshot.brews.active) parts.push(`${snapshot.brews.active} in the lab`);
-  if (!parts.length) {
-    return guest
-      ? "Browse the collection, see what is pouring, and find your next perfect drink."
-      : "Stock the shelf, put a beer on, and the house menu fills in.";
-  }
+  if (!parts.length) return overviewHeroLede(guest);
   return parts.join(" · ");
 }
 
