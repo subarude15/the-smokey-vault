@@ -117,6 +117,14 @@ import {
   saveGalleryUploadFromStream,
   backfillMissingGalleryPosters
 } from "./gallery.js";
+import {
+  addGalleryComment,
+  castGalleryVote,
+  deleteGalleryComment,
+  deriveGalleryVoterKey,
+  getGallerySocial,
+  GallerySocialError
+} from "./gallery-social.js";
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
 import {
   adjustPatronVisits, castDailyVote, createEvent, createEventSubscriber, createMerch, createMessage, createPatron,
@@ -2044,6 +2052,73 @@ app.put<{ Params: { id: string }; Body: { album_id?: number | string } }>("/api/
     return moveGalleryMedia(Number(request.params.id), albumId);
   } catch (error) {
     return galleryFail(reply, error, "Could not move that item");
+  }
+});
+
+/* --------------------------- Gallery social (PR146) -------------------------- */
+
+/**
+ * Server-derived anonymous voter key. The client sends its per-device token
+ * (the existing `smokey-voter` id); the stored/compared key is an HMAC of that
+ * token plus limited request context and is never returned to the client.
+ */
+function galleryVoterKey(request: FastifyRequest, deviceToken?: string): string {
+  const userAgent = request.headers["user-agent"];
+  return deriveGalleryVoterKey(secret, {
+    deviceToken,
+    ip: request.ip,
+    userAgent: typeof userAgent === "string" ? userAgent : ""
+  });
+}
+
+function gallerySocialFail(reply: FastifyReply, error: unknown, fallback: string) {
+  if (error instanceof GallerySocialError) return reply.code(error.status).send({ error: error.message });
+  app.log.error(error);
+  return reply.code(500).send({ error: fallback });
+}
+
+app.get<{ Params: { id: string }; Querystring: { voter?: string } }>("/api/gallery/:id/social", {
+  schema: { tags: ["Gallery"], summary: "Comments and vote tally for a gallery item" }
+}, async (request, reply) => {
+  const mediaId = Number(request.params.id);
+  if (!Number.isInteger(mediaId) || mediaId < 1) return reply.code(404).send({ error: "Unknown media" });
+  const voterKey = request.query.voter ? galleryVoterKey(request, request.query.voter) : undefined;
+  return getGallerySocial(mediaId, voterKey);
+});
+
+app.post<{ Params: { id: string }; Body: { body?: string; author?: string; voter?: string } }>("/api/gallery/:id/comments", {
+  schema: { tags: ["Gallery"], summary: "Leave a comment on a gallery item" }
+}, async (request, reply) => {
+  try {
+    const voterKey = galleryVoterKey(request, request.body?.voter);
+    const comment = addGalleryComment(Number(request.params.id), {
+      body: request.body?.body ?? "",
+      author: request.body?.author,
+      voterKey
+    });
+    return reply.code(201).send(comment);
+  } catch (error) {
+    return gallerySocialFail(reply, error, "Could not post that comment");
+  }
+});
+
+app.delete<{ Params: { id: string; commentId: string } }>("/api/gallery/:id/comments/:commentId", {
+  schema: { tags: ["Gallery"], summary: "Remove a gallery comment (Keeper)" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const removed = deleteGalleryComment(Number(request.params.id), Number(request.params.commentId));
+  if (!removed) return reply.code(404).send({ error: "That comment is already gone" });
+  return reply.code(204).send();
+});
+
+app.post<{ Params: { id: string }; Body: { value?: number; voter?: string } }>("/api/gallery/:id/vote", {
+  schema: { tags: ["Gallery"], summary: "Up or down vote a gallery item" }
+}, async (request, reply) => {
+  try {
+    const voterKey = galleryVoterKey(request, request.body?.voter);
+    return castGalleryVote(Number(request.params.id), voterKey, Number(request.body?.value));
+  } catch (error) {
+    return gallerySocialFail(reply, error, "Could not save that vote");
   }
 });
 

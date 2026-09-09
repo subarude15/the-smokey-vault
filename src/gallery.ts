@@ -5,6 +5,7 @@ import { dirname, extname, join } from "node:path";
 import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { db, dbPath } from "./db.js";
+import { deleteGallerySocialForMedia } from "./gallery-social.js";
 import {
   ensureGalleryVideoPoster,
   galleryPosterFilename,
@@ -625,10 +626,17 @@ export function deleteGalleryMedia(id: number) {
     | { filename: string; media_type: string }
     | undefined;
   if (!row) throw new GalleryError("That item is already gone", 404);
-  db.prepare("DELETE FROM gallery_media WHERE id=?").run(id);
 
-  const stillUsed = db.prepare("SELECT COUNT(*) AS c FROM gallery_media WHERE filename=?").get(row.filename) as { c: number };
-  if (stillUsed.c === 0) {
+  // Comments and votes belong to this media item, so they are removed in the
+  // same transaction as the row. File cleanup stays outside the transaction
+  // because it is best-effort and must not roll back a committed DB delete.
+  const stillUsedCount = db.transaction(() => {
+    deleteGallerySocialForMedia(id);
+    db.prepare("DELETE FROM gallery_media WHERE id=?").run(id);
+    return (db.prepare("SELECT COUNT(*) AS c FROM gallery_media WHERE filename=?").get(row.filename) as { c: number }).c;
+  })();
+
+  if (stillUsedCount === 0) {
     const target = join(galleryDir, row.filename);
     try {
       if (existsSync(target)) unlinkSync(target);
