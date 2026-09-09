@@ -3113,7 +3113,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
         setPhotoNotice(cocktailImageDiscoveryMessage("already_has_image"));
         onChanged();
       } else {
-        setPhotoNotice(cocktailImageDiscoveryMessage("no_result"));
+        setPhotoNotice(cocktailImageDiscoveryMessage("no_result", result.reason));
       }
     } catch (err) {
       setPhotoNotice(cocktailImageDiscoveryMessage("error"));
