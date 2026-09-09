@@ -5,6 +5,9 @@ Last updated: 2026-09-08
 ## Current position
 
 Most recently completed:
+- **PR147** — Visual system / Smokey Barrel branding polish. The circular blackletter **SB monogram** (hop/scroll filigree) is the primary brand mark, rendered by `client/src/SbMark.tsx` on a warm near-black medallion (artwork is keyed to transparency so the white/gold reads in both themes) and wired into the shell brand, phone topbar, landing hero, favicon, and PWA icons (`client/public/brand/*`). Typography is tokenized (`--font-display` = `Grenze Gotisch` blackletter for brand moments/major headers only; `--font-serif` = Playfair for content titles; `--font-sans` = Outfit for body/controls). Palette stays token-driven in `client/src/theme.ts`: Dark unchanged (warm charcoal + copper/amber); Light warmed to bone/smoke with a deeper amber `--accent-2` for small-label contrast. Light + Dark only; no IA/routing changes.
+
+Previously completed:
 - **PR146** — Gallery comments + up/down voting. Guests comment and cast one up/down vote from the Gallery lightbox via a compact social section (`client/src/GallerySocial.tsx`, rendered inside the `GalleryPage` lightbox). Server logic lives in `src/gallery-social.ts` (tables `gallery_comments` + `gallery_votes`, media-scoped indexes, `UNIQUE(media_id, voter_key)`); routes are `GET /api/gallery/:id/social`, `POST /api/gallery/:id/comments`, `DELETE /api/gallery/:id/comments/:commentId` (Keeper), `POST /api/gallery/:id/vote`. The anonymous voter key is derived server-side (`deriveGalleryVoterKey`, HMAC of the client's existing `smokey-voter` device token + IP/UA with the session secret) and never returned. Comments/votes are cleaned up transactionally inside `deleteGalleryMedia`; album move/rename leaves them untouched.
 
 Previously completed:
@@ -14,9 +17,11 @@ Currently working on:
 - None.
 
 Next planned:
-- **PR147 — Visual system / Smokey Barrel branding polish** (`ROADMAP.md` Track C).
+- **PR148 — Live-use Guest/Keeper UX audit + focused cleanup** (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
+
+- Branding is a single tokenized visual system (PR147): the SB monogram medallion (`SbMark`) is the one brand mark; brand/heading type uses `--font-display` (Grenze Gotisch) reserved for brand moments and major headers only (never body/labels/metadata); Light + Dark share the same warm whiskey-cellar palette via `theme.ts` tokens. Do not reintroduce removed theme modes, add fake-metal/heavy-texture treatments, or use blackletter for dense/body text.
 
 - Guest inventory/enrichment responses stay server-allowlisted (`guest-inventory-response`); coarse availability only.
 - Shared `ImageField` / `images` media path is the default for Keeper uploads; do not add parallel upload systems per feature.
@@ -41,7 +46,7 @@ Next planned:
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
 - Keeper large uploads write temp files under `galleryDir/tmp` so finalization is a same-filesystem atomic rename; keep temp storage on the Gallery/data filesystem to avoid cross-device rename failure.
-- Draft **#121** branding docs remain deferred until PR147.
+- Draft **#121** branding docs are superseded by PR147's shipped visual system; keep Light/Dark only and the SB monogram identity.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
 
 ## Handoff
