@@ -8,16 +8,17 @@ export type ThemeName = "light" | "dark";
 export const THEME_NAMES = ["light", "dark"] as const satisfies readonly ThemeName[];
 
 export const themePresets: Record<ThemeName, Record<string, string>> = {
-  /* Light: cool stone + smoked copper — avoids cream/terracotta AI cluster */
+  /* Light: warm bone + smoked copper — same whiskey-cellar brand, lit up.
+     accent-2 is a deeper amber than Dark so small gold text keeps contrast. */
   light: {
-    "--bg": "#e9e7e2",
-    "--surface": "#f6f5f2",
-    "--surface-2": "#dedad3",
-    "--text": "#1c1b19",
-    "--muted": "#6a6660",
-    "--line": "#c9c4bb",
-    "--accent": "#8f5a38",
-    "--accent-2": "#b8894a"
+    "--bg": "#e9e3d7",
+    "--surface": "#f7f2ea",
+    "--surface-2": "#e1d9c9",
+    "--text": "#201c16",
+    "--muted": "#6b6353",
+    "--line": "#cdc3b0",
+    "--accent": "#9a5a30",
+    "--accent-2": "#7a5015"
   },
   dark: {
     "--bg": "#0e0d0b",
