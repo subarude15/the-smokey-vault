@@ -172,7 +172,7 @@ test("Q. Keeper can still save generated recipes to Custom Cocktails", () => {
 test("R. guests do not gain recipe-save permission", () => {
   const panel = mixologistPanelSlice();
   assert.match(panel, /if\s*\(\s*!admin\s*\)/);
-  assert.match(panel, /Unlock Admin Mode to save this recipe to Custom Cocktails/);
+  assert.match(panel, /Unlock Keeper Mode to save this recipe to Custom Cocktails/);
 });
 
 test("S. redundant Recommend from the shelf AI action is removed", () => {

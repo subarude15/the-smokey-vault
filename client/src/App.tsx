@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
-  Key, Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
+  Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
 } from "lucide-react";
 import { api, ApiError, clearToken, downloadExport, Item, onKeeperAuthRejected, setToken, tokenExists, UNREACHABLE_STATUS } from "./api";
 import {
@@ -698,7 +698,6 @@ export default function App() {
               <Mail/>
               {unread > 0 && <span className="topbar-badge">{unread > 99 ? "99+" : unread}</span>}
             </button>}
-            {!admin && <button className="icon-button" onClick={() => setUnlock(true)} aria-label="Enter Keeper PIN"><Key size={18}/></button>}
             <button className="icon-button" onClick={() => setTheme(cycleTheme(theme))} aria-label="Change theme">{theme === "light" ? <Sun/> : <Moon/>}</button>
           </div>
         </header>
@@ -3231,7 +3230,7 @@ function MixologistPanel({ admin, sectionRef, promptRef }: {
       setLoading(false);
     }
   }
-  async function save(){if(!recipe)return;if(!admin){setError("Unlock Admin Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
+  async function save(){if(!recipe)return;if(!admin){setError("Unlock Keeper Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
   const loadingCopy = mixologistLoadingStep(waitMs);
   return (
     <section className="mixologist-panel" ref={sectionRef} id="ask-the-mixologist" aria-labelledby="mixologist-heading">
@@ -3251,7 +3250,7 @@ function MixologistPanel({ admin, sectionRef, promptRef }: {
       </div>
       {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
       {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
-      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Admin unlock required to save.</small>}</div></article>}
+      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Keeper unlock required to save.</small>}</div></article>}
     </div>
     </section>
   );
@@ -3413,7 +3412,7 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setThem
       <section className="settings-card">
         <span className="eyebrow">DISPLAY</span>
         <h3>Appearance</h3>
-        <p>Choose Light or Dark. The same screens and guest availability gauges work in both. Patron Mode uses the same toggle in the top bar.</p>
+        <p>Choose Light or Dark. The same screens and guest availability gauges work in both. Guest Mode uses the same toggle in the top bar.</p>
         <div className="theme-grid">{THEME_NAMES.map((t)=>(
           <button type="button" key={t} className={theme===t?"active":""} onClick={()=>setTheme(t)}>
             <span className={`theme-swatch ${t}`}/>{themeLabel(t)}

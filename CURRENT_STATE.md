@@ -1,10 +1,13 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 ## Current position
 
 Most recently completed:
+- **PR148** — Live-use Guest/Keeper UX audit + focused cleanup. Removed the duplicate Guest topbar Keeper PIN shortcut while retaining Keeper access in the rail/More sheet; touch-only devices now reveal generic Keeper card actions without hover; phone toasts clear the fixed bottom nav; stale Admin/Patron Mode copy now uses Guest/Keeper terminology. No API, authentication, privacy, routing, schema, or visual-system changes.
+
+Previously completed:
 - **PR147** — Visual system / Smokey Barrel branding polish. The circular blackletter **SB monogram** (hop/scroll filigree) is the primary brand mark, rendered by `client/src/SbMark.tsx` on a warm near-black medallion (artwork is keyed to transparency so the white/gold reads in both themes) and wired into the shell brand, phone topbar, landing hero, favicon, and PWA icons (`client/public/brand/*`). Typography is tokenized (`--font-display` = `Manufacturing Consent` blackletter for brand moments/major headers only, pinned to weight 400 with `font-synthesis:none`; `--font-serif` = Playfair for content titles; `--font-sans` = Outfit for all body/nav/controls/forms/metadata; `--font-mono` = JetBrains Mono only for identifier/code-like values such as the build id, gallery vote counters, and the bulk-import textarea). Palette stays token-driven in `client/src/theme.ts`: Dark unchanged (warm charcoal + copper/amber); Light warmed to bone/smoke with a deeper amber `--accent-2` for small-label contrast. Light + Dark only; no IA/routing changes.
 
 Previously completed:
@@ -17,7 +20,7 @@ Currently working on:
 - None.
 
 Next planned:
-- **PR148 — Live-use Guest/Keeper UX audit + focused cleanup** (`ROADMAP.md` Track C).
+- Brewery Lab follow-up only if live use proves a specific usability gap (`ROADMAP.md` Track C).
 
 ## Recent architectural decisions
 
