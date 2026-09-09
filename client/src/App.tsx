@@ -899,8 +899,6 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       .catch(() => setRestock(undefined));
   }
   useEffect(() => { load(); }, [admin]);
-  const orbitValue = snap?.spirits.on_shelf ?? 0;
-  const orbitLabel = "BOTTLES";
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
@@ -910,8 +908,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         <p className="hero-wordmark" role="heading" aria-level={1}>The Smokey Barrel</p>
         <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
       </div>
-      <div className="hero-orbit" aria-label={`${orbitValue} bottles on the shelf`}>
-        <span>{orbitValue}<small>{orbitLabel}</small></span>
+      {/* Decorative brand motif only — live counts live solely in the stat grid (PR150). */}
+      <div className="hero-orbit" aria-hidden="true">
+        <Wine/>
       </div>
       <p className="hero-lede">{overviewHeroLede(!admin)}</p>
     </div>

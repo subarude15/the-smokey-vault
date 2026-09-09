@@ -95,6 +95,17 @@ test("PR150 removes the duplicate six-count hero sentence", () => {
   assert.match(appSrc, /className="hero-lede">\{overviewHeroLede\(!admin\)\}/);
 });
 
+test("PR150 hero orbit is decorative — no duplicated live count or invented zero", () => {
+  // The old live-count orbit (snap?.spirits.on_shelf ?? 0 rendered as BOTTLES) is gone.
+  assert.doesNotMatch(appSrc, /orbitValue/);
+  assert.doesNotMatch(appSrc, /snap\?\.spirits\.on_shelf \?\? 0/);
+  assert.doesNotMatch(appSrc, /bottles on the shelf/);
+  // No Overview live count is read in App.tsx outside the stat component/helper.
+  assert.doesNotMatch(appSrc, /spirits\.on_shelf/);
+  // The orbit remains as a purely decorative, accessibility-hidden brand motif.
+  assert.match(appSrc, /<div className="hero-orbit" aria-hidden="true">/);
+});
+
 test("PR150 stat grid is a snapshot-driven component with loading/error safety", () => {
   assert.match(appSrc, /<OverviewStats snapshot=\{snap\} admin=\{admin\} loading=\{!snap && !error\} onNavigate=\{go\}\/>/);
   // The component skeletons while loading and renders nothing (not zeroes) on error.
