@@ -31,6 +31,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
 - **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. **PR144** adds a streamed, Guest-vs-Keeper-limited large-video upload path. **PR145** completes built-in cocktail instructions, backfills cocktail photos, and adds a Keeper build identifier. **PR146** adds Gallery comments + up/down voting from the lightbox with server-side anonymous voter keys and Keeper moderation. **PR147** consolidates the Smokey Barrel visual identity (SB monogram brand mark, blackletter display type for brand moments, warmed Light theme) across Guest and Keeper surfaces. **PR148** completes the live-use Guest/Keeper UX audit with a bounded shell, touch-action, toast-clearance, and terminology cleanup.
+- The next sequenced product-polish work is PR149–PR153: guest terminology/brand clarity, Overview hierarchy, Bottle Library media/loading polish, flavor-led discovery, then evidence-only shell cleanup.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -91,7 +92,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use. PR136–PR145 are complete; the remaining product sequence continues with Gallery social polish (PR146), branding / visual-system consolidation (PR147), then a focused live-use cross-surface UX audit.
+These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR148 are complete. Start the new sequence at PR149; if another GitHub PR consumes a number first, shift the unstarted entries forward rather than reusing a number.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -146,7 +147,27 @@ These are explicitly desired near-term product improvements based on real househ
    - Audited phone portrait/landscape, tablet portrait/landscape, and desktop Guest/Keeper surfaces without finding a P0 regression or Guest privacy leak.
    - Removed the duplicate Guest topbar Keeper shortcut while preserving rail/More unlock, made hover-hidden Keeper card actions visible on touch devices, and kept phone toasts above the fixed bottom nav.
    - Standardized stale Admin/Patron Mode copy to Guest/Keeper terminology. Deferred broad touch-target changes, IA work, media redesign, and backend/schema work without live evidence.
-14. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+14. **PR149 — Guest navigation, terminology, and Smokey Barrel naming**
+   - **Goal:** Make every Guest destination predictable without forcing short navigation labels to duplicate longer page titles.
+   - **Scope:** Establish one tested label map for the phone bar, More sheet, rail, page title, and Overview links. Prefer concise navigation labels such as Home, On Tap, Drinks, Gallery, and Spirits while keeping clear destination headings such as What Can I Make? and The Bottle Library. Clarify the cocktail “Missing 1” state in-place. Replace remaining Guest-visible “Smokey Vault” product copy with “Smokey Barrel”; keep repository, package, database, infrastructure, and other internal identifiers unchanged.
+   - **Acceptance:** Each enabled Guest destination has an obvious and consistent navigation-to-heading relationship at phone and rail widths; hidden tabs remain hidden everywhere; Guest copy uses Smokey Barrel consistently; Guest/Keeper authorization and state-based routing do not change; focused navigation/copy tests and the production build pass.
+15. **PR150 — Overview hierarchy and responsive stat redesign**
+   - **Goal:** Make the landing page scannable instead of presenting six live counts as a sentence.
+   - **Scope:** Remove or shorten the redundant `overviewHeroCopy` count sentence and make the existing six Overview metrics the sole at-a-glance count treatment. Give numbers first visual priority, use plain Guest-facing labels, and tune the existing stat grid for 2×3 phone and balanced tablet/desktop layouts. Preserve the current `/overview` response and destination links.
+   - **Acceptance:** No breakpoint presents all six counts as prose; all six metrics remain accurate and tappable; loading and error states do not show invented zeroes; the layout has no clipping or horizontal overflow at 390px, tablet portrait/landscape, and desktop; Overview tests and the production build pass.
+16. **PR151 — Bottle Library media and loading-state polish**
+   - **Goal:** Make every bottle tile feel intentional and prevent an empty shelf from flashing while data is still loading.
+   - **Scope:** Reuse one product-media frame for spirit cards, with consistent aspect ratio and image fitting plus one branded missing-image placeholder. Model loading, loaded-empty, loaded-populated, and error as distinct UI states; render a lightweight skeleton while the initial spirit request is pending. Do not source new bottle images or add another upload/media pipeline.
+   - **Acceptance:** Real images and placeholders occupy the same stable frame without layout shift; missing/broken media falls back cleanly; “Nothing on the shelf” appears only after a successful empty response; errors retain Retry; phone/tablet/desktop screenshots show no card jump or distorted bottle art; focused state/media tests and the production build pass.
+17. **PR152 — Bottle Library flavor discovery and filter cleanup**
+   - **Goal:** Let a Guest ask for “a rum with vanilla” without opening bottles one by one.
+   - **Scope:** Add a small deterministic flavor vocabulary/normalizer that forms Guest-facing Flavor facets from the existing structured `flavors` plus clearly recognized terms in `tasting_notes`. Do not copy arbitrary words or prose into `tags`, overwrite source fields, invoke AI at search time, or require a migration. Preserve Keeper-authored `tags` as separate metadata and keep them searchable. Make multi-word search match useful bottle fields and derived flavors (for example `vanilla rum`); simplify the Bottle Library controls so Search, Family, Flavor, and Availability are primary and less-used controls are secondary, with a compact phone treatment and no visible horizontal scrollbar chrome.
+   - **Acceptance:** A spirit with Vanilla in `flavors` or an unambiguous vanilla tasting note appears under Flavor → Vanilla and matches `vanilla rum`; unrelated prose does not create facets; matching is case-insensitive, deduplicated, and deterministic; manual tags survive edits unchanged and remain searchable but are not silently reclassified as flavors; clear/reset restores the full shelf; Guest responses expose no new Keeper-only inventory fields; focused flavor/search/filter tests and the production build pass.
+18. **PR153 — Remaining shell and chrome polish**
+   - **Goal:** Remove the small interaction defects that still make the responsive shell feel unfinished.
+   - **Scope:** Reproduce each reported issue on current `main` before editing, then fix only what remains: competing desktop scroll containers, an explicit close control for the phone More sheet, accessible dynamic naming for the theme toggle, stray mobile scrollbar chrome, and any directly adjacent spacing/touch-target failure found at the agreed smoke widths. Reuse the PR134/PR148 shell and Light/Dark theme paths.
+   - **Acceptance:** Desktop has one intentional page scroll path; the More sheet closes by its close button, backdrop, Escape, and destination selection without trapping focus; the theme control exposes its action to assistive technology; phone controls do not show unwanted scrollbar chrome; Guest and Keeper navigation remain reachable at 390px, tablet portrait/landscape, and desktop; shell tests and the production build pass. If a reported defect no longer reproduces, record it in the PR and make no speculative replacement change.
+19. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -162,6 +183,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path.
 - `client/src/api.ts` — shared client fetch helper, Keeper bearer storage, and central authenticated-401 → session-rejected signal.
 - `client/src/App.tsx` — responsive shell (phone bottom nav / rail), bottle-detail route, Keeper actions, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).
+- `src/overview.ts` / `src/overview.test.ts` — Overview snapshot and hero-copy behavior; PR150 should keep the response contract and remove redundant presentation, not add a second count source.
+- `client/src/catalog.ts` / `client/src/BottlePublicContent.tsx` — existing inventory field definitions and public bottle presentation; PR151–PR152 must preserve `flavors`, `tasting_notes`, and Keeper-authored `tags` as distinct source fields.
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
 - `client/src/EventsPage.tsx` — guest Events UI, signup form, and Keeper Invite List wiring.
 - `client/src/EventEditor.tsx` / `EventImageAdjuster.tsx` / `EventImageMedia.tsx` / `src/event-image-framing.ts` — PR140 event photo framing (draft Adjust photo; CSS focal/zoom; non-destructive).
@@ -236,3 +259,4 @@ Use fresh records for pipeline testing. Review cleanup candidates first, then re
 - No fuzzy acceptance of official product pages.
 - No large enrichment-system redesign for UI polish.
 - No new visual theme/branding expansion while the supported appearance is intentionally Light + Dark only.
+
