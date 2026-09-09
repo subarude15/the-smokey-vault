@@ -51,6 +51,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
     "display_image_url",
     "tasting_notes",
     "flavors",
+    "display_flavors",
     "tags",
     "base_ingredient",
     "blocked_from_ordering",

@@ -95,6 +95,8 @@ export {
   type ProductImageRecord
 } from "./product-images.js";
 
+export { attachInventoryDisplayFlavors } from "./display-flavors.js";
+
 export {
   maybeEnqueueMetadataEnrichment,
   maybeEnqueueTastingNotesEnrichment,
