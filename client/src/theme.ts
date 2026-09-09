@@ -55,6 +55,16 @@ export function themeLabel(theme: string): string {
   return resolveTheme(theme) === "light" ? "Light" : "Dark";
 }
 
+/**
+ * Accessible name for the compact theme control — describes the action it
+ * will perform (switch to the opposite theme), not the current theme.
+ */
+export function themeToggleLabel(current: string): string {
+  return resolveTheme(current) === "light"
+    ? "Switch to Dark theme"
+    : "Switch to Light theme";
+}
+
 export function applyTheme(theme: string, tokens?: Record<string, string>) {
   const name = resolveTheme(theme);
   const values = { ...themePresets[name], ...tokens };

@@ -9,6 +9,7 @@ import {
   resolveTheme,
   storedTheme,
   themeLabel,
+  themeToggleLabel,
   themePresets
 } from "../client/src/theme.ts";
 
@@ -59,4 +60,17 @@ test("themeLabel only surfaces Light or Dark", () => {
   assert.equal(themeLabel("dark"), "Dark");
   assert.equal(themeLabel("punk"), "Dark");
   assert.equal(themeLabel("angels"), "Dark");
+});
+
+test("themeToggleLabel names the action, not the current theme", () => {
+  assert.equal(themeToggleLabel("dark"), "Switch to Light theme");
+  assert.equal(themeToggleLabel("light"), "Switch to Dark theme");
+  // Obsolete values resolve as Dark, so the control offers Light.
+  assert.equal(themeToggleLabel("punk"), "Switch to Light theme");
+  assert.equal(themeToggleLabel("angels"), "Switch to Light theme");
+});
+
+test("themeToggleLabel stays aligned with cycleTheme", () => {
+  assert.equal(themeToggleLabel("dark"), `Switch to ${themeLabel(cycleTheme("dark"))} theme`);
+  assert.equal(themeToggleLabel("light"), `Switch to ${themeLabel(cycleTheme("light"))} theme`);
 });
