@@ -86,7 +86,7 @@ export function GallerySocial({ mediaId, admin }: { mediaId: number; admin: bool
     try {
       const comment = await api<GalleryComment>(`/gallery/${mediaId}/comments`, {
         method: "POST",
-        body: JSON.stringify({ voter, author, body })
+        body: JSON.stringify({ author, body })
       });
       if (author.trim()) localStorage.setItem(NAME_KEY, author.trim());
       setBody("");

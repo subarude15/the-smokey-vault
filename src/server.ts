@@ -2086,15 +2086,13 @@ app.get<{ Params: { id: string }; Querystring: { voter?: string } }>("/api/galle
   return getGallerySocial(mediaId, voterKey);
 });
 
-app.post<{ Params: { id: string }; Body: { body?: string; author?: string; voter?: string } }>("/api/gallery/:id/comments", {
+app.post<{ Params: { id: string }; Body: { body?: string; author?: string } }>("/api/gallery/:id/comments", {
   schema: { tags: ["Gallery"], summary: "Leave a comment on a gallery item" }
 }, async (request, reply) => {
   try {
-    const voterKey = galleryVoterKey(request, request.body?.voter);
     const comment = addGalleryComment(Number(request.params.id), {
       body: request.body?.body ?? "",
-      author: request.body?.author,
-      voterKey
+      author: request.body?.author
     });
     return reply.code(201).send(comment);
   } catch (error) {

@@ -100,7 +100,7 @@ test("HTML/script-like content is stored and returned as plain text (never trans
 
 test("Guests cannot delete comments; Keeper can", async () => {
   const id = insertMedia();
-  const comment = addGalleryComment(id, { body: "delete me", voterKey: "k" });
+  const comment = addGalleryComment(id, { body: "delete me" });
 
   const guest = await app.inject({ method: "DELETE", url: `/api/gallery/${id}/comments/${comment.id}` });
   assert.equal(guest.statusCode, 401, guest.body);
@@ -114,8 +114,8 @@ test("Guests cannot delete comments; Keeper can", async () => {
 test("Comment deletion is scoped to its media item and does not touch others", async () => {
   const a = insertMedia();
   const b = insertMedia();
-  const onA = addGalleryComment(a, { body: "on A", voterKey: "k" });
-  const onB = addGalleryComment(b, { body: "on B", voterKey: "k" });
+  const onA = addGalleryComment(a, { body: "on A" });
+  const onB = addGalleryComment(b, { body: "on B" });
 
   // A comment only appears under its own media.
   assert.equal(listGalleryComments(a).map((c) => c.id).includes(onB.id), false);
@@ -134,8 +134,8 @@ test("Comment deletion is scoped to its media item and does not touch others", a
 
 test("Deleting media cleans up its comments", async () => {
   const id = insertMedia();
-  addGalleryComment(id, { body: "one", voterKey: "k" });
-  addGalleryComment(id, { body: "two", voterKey: "k" });
+  addGalleryComment(id, { body: "one" });
+  addGalleryComment(id, { body: "two" });
   assert.equal(listGalleryComments(id).length, 2);
   deleteGalleryMedia(id);
   assert.equal(
@@ -187,6 +187,35 @@ test("Switching up -> down updates totals without creating a second vote", async
   );
 });
 
+test("A device keeps one vote across IP and User-Agent changes", async () => {
+  const id = insertMedia();
+  const first = await app.inject({
+    method: "POST",
+    url: `/api/gallery/${id}/vote`,
+    headers: { "user-agent": "Chrome/1" },
+    remoteAddress: "10.0.0.5",
+    payload: { value: 1, voter: "stable-device" }
+  });
+  assert.equal(first.statusCode, 200, first.body);
+  assert.equal((first.json() as { up: number }).up, 1);
+
+  // Same device token, but the LAN IP and browser UA have changed. Re-voting the
+  // same direction must toggle the SAME vote off, not create a second voter.
+  const second = await app.inject({
+    method: "POST",
+    url: `/api/gallery/${id}/vote`,
+    headers: { "user-agent": "Safari/2" },
+    remoteAddress: "192.168.1.99",
+    payload: { value: 1, voter: "stable-device" }
+  });
+  assert.equal(second.statusCode, 200, second.body);
+  assert.equal((second.json() as { up: number }).up, 0, "same device must remain one voter across IP/UA changes");
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) AS c FROM gallery_votes WHERE media_id=?").get(id) as { c: number }).c,
+    0
+  );
+});
+
 test("Separate anonymous voters vote independently", async () => {
   const id = insertMedia();
   await vote(id, 1, "voter-a");
@@ -231,7 +260,7 @@ test("Invalid vote values are rejected", async () => {
 test("Album move does NOT remove comments or votes (social belongs to media)", async () => {
   ensureDefaultGalleryAlbum();
   const id = insertMedia();
-  addGalleryComment(id, { body: "keep me across albums", voterKey: "k" });
+  addGalleryComment(id, { body: "keep me across albums" });
   await vote(id, 1, "voter-a");
   const other = createGalleryAlbum({ name: `PR146 Move Album ${Date.now()}` });
 
@@ -243,15 +272,24 @@ test("Album move does NOT remove comments or votes (social belongs to media)", a
 
 /* -------------------------------- Privacy --------------------------------- */
 
-test("Guest social response exposes only feature data, never voter keys", async () => {
+test("Guest social response exposes only feature data, never voter keys or request context", async () => {
   const id = insertMedia();
-  addGalleryComment(id, { body: "hello", author: "Sam", voterKey: "secret-internal-key" });
-  await vote(id, 1, "voter-a");
+  addGalleryComment(id, { body: "hello", author: "Sam" });
+  // Cast via HTTP so the response reflects a server-derived voter key.
+  await vote(id, 1, "device-secret-token");
 
-  const res = await app.inject({ method: "GET", url: `/api/gallery/${id}/social?voter=voter-a` });
+  const res = await app.inject({
+    method: "GET",
+    url: `/api/gallery/${id}/social?voter=device-secret-token`,
+    headers: { "user-agent": "SecretAgent/9.9" },
+    remoteAddress: "203.0.113.9"
+  });
   assert.equal(res.statusCode, 200, res.body);
+  // No stored/derived identity or request context leaks into the payload.
   assert.equal(res.body.includes("voter_key"), false);
-  assert.equal(res.body.includes("secret-internal-key"), false);
+  assert.equal(res.body.includes("device-secret-token"), false);
+  assert.equal(res.body.includes("203.0.113.9"), false);
+  assert.equal(res.body.includes("SecretAgent"), false);
 
   const social = res.json() as { votes: Record<string, unknown>; comments: Array<Record<string, unknown>> };
   assert.deepEqual(Object.keys(social.votes).sort(), ["down", "mine", "net", "total", "up"]);
@@ -261,7 +299,7 @@ test("Guest social response exposes only feature data, never voter keys", async 
 
 test("Keeper-only comment deletion route stays protected", async () => {
   const id = insertMedia();
-  const comment = addGalleryComment(id, { body: "guard", voterKey: "k" });
+  const comment = addGalleryComment(id, { body: "guard" });
   const denied = await app.inject({ method: "DELETE", url: `/api/gallery/${id}/comments/${comment.id}` });
   assert.equal(denied.statusCode, 401);
   assert.equal((denied.json() as { error: string }).error, "Admin session required");
@@ -278,6 +316,34 @@ test("deriveGalleryVoterKey is deterministic, opaque, and device-scoped", () => 
   // Opaque HMAC: never the raw device token, fixed hex length.
   assert.equal(a1.includes("dev-1"), false);
   assert.match(a1, /^[0-9a-f]{64}$/);
+});
+
+test("A device token is stable across IP and User-Agent changes", () => {
+  const base = deriveGalleryVoterKey(sessionSecret, { deviceToken: "dev-1", ip: "10.0.0.5", userAgent: "Chrome" });
+  const newIp = deriveGalleryVoterKey(sessionSecret, { deviceToken: "dev-1", ip: "192.168.1.42", userAgent: "Chrome" });
+  const newUa = deriveGalleryVoterKey(sessionSecret, { deviceToken: "dev-1", ip: "10.0.0.5", userAgent: "Safari" });
+  const noContext = deriveGalleryVoterKey(sessionSecret, { deviceToken: "dev-1" });
+  assert.equal(base, newIp, "same device token + different IP => same key");
+  assert.equal(base, newUa, "same device token + different User-Agent => same key");
+  assert.equal(base, noContext, "device token alone determines the key");
+});
+
+test("No device token falls back deterministically to opaque IP + User-Agent", () => {
+  const f1 = deriveGalleryVoterKey(sessionSecret, { ip: "10.0.0.5", userAgent: "Chrome" });
+  const f2 = deriveGalleryVoterKey(sessionSecret, { deviceToken: "  ", ip: "10.0.0.5", userAgent: "Chrome" });
+  assert.equal(f1, f2, "empty/whitespace device token falls back to request context");
+  assert.match(f1, /^[0-9a-f]{64}$/);
+  // Opaque: raw context never appears in the key.
+  assert.equal(f1.includes("10.0.0.5"), false);
+  assert.equal(f1.includes("Chrome"), false);
+
+  // Fallback changes when the fallback context changes.
+  assert.notEqual(f1, deriveGalleryVoterKey(sessionSecret, { ip: "10.0.0.6", userAgent: "Chrome" }), "different IP => different fallback key");
+  assert.notEqual(f1, deriveGalleryVoterKey(sessionSecret, { ip: "10.0.0.5", userAgent: "Safari" }), "different UA => different fallback key");
+
+  // A device-token key and a fallback key never collide (namespaced material).
+  const deviceKey = deriveGalleryVoterKey(sessionSecret, { deviceToken: "10.0.0.5\nChrome" });
+  assert.notEqual(deviceKey, f1, "device and fallback namespaces do not collide");
 });
 
 test("getGallerySocial returns empty, safe shape for media with no interaction", () => {
