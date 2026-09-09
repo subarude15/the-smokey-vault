@@ -31,7 +31,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
 - **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. **PR144** adds a streamed, Guest-vs-Keeper-limited large-video upload path. **PR145** completes built-in cocktail instructions, backfills cocktail photos, and adds a Keeper build identifier. **PR146** adds Gallery comments + up/down voting from the lightbox with server-side anonymous voter keys and Keeper moderation. **PR147** consolidates the Smokey Barrel visual identity (SB monogram brand mark, blackletter display type for brand moments, warmed Light theme) across Guest and Keeper surfaces. **PR148** completes the live-use Guest/Keeper UX audit with a bounded shell, touch-action, toast-clearance, and terminology cleanup.
-- The next sequenced product-polish work is PR149–PR153: guest terminology/brand clarity, Overview hierarchy, Bottle Library media/loading polish, flavor-led discovery, then evidence-only shell cleanup.
+- The next sequenced product-polish work is PR149–PR154: guest terminology/brand clarity, Overview hierarchy, Bottle Library media/loading polish, flavor-led discovery, evidence-only shell cleanup, then cocktail image-discovery reliability.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
 - Verified production cases:
   - Dirt wolf: official style, ABV, notes, and image found.
@@ -167,7 +167,11 @@ These are explicitly desired near-term product improvements based on real househ
    - **Goal:** Remove the small interaction defects that still make the responsive shell feel unfinished.
    - **Scope:** Reproduce each reported issue on current `main` before editing, then fix only what remains: competing desktop scroll containers, an explicit close control for the phone More sheet, accessible dynamic naming for the theme toggle, stray mobile scrollbar chrome, and any directly adjacent spacing/touch-target failure found at the agreed smoke widths. Reuse the PR134/PR148 shell and Light/Dark theme paths.
    - **Acceptance:** Desktop has one intentional page scroll path; the More sheet closes by its close button, backdrop, Escape, and destination selection without trapping focus; the theme control exposes its action to assistive technology; phone controls do not show unwanted scrollbar chrome; Guest and Keeper navigation remain reachable at 390px, tablet portrait/landscape, and desktop; shell tests and the production build pass. If a reported defect no longer reproduces, record it in the PR and make no speculative replacement change.
-19. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+19. **PR154 — Cocktail image discovery reliability**
+   - **Goal:** Make Keeper “Find photo” succeed for common cocktails without falling back to untrustworthy image scraping.
+   - **Scope:** Preserve PR129’s fill-missing, rejected-host, localization, and no-hotlink safety rules, but make identity verification less brittle. Add alias-aware / canonical-name matching (for example Basil Smash ↔ Gin Basil Smash), bounded multi-query search, and ingredient-assisted confirmation for strong near-matches while still rejecting obvious variants such as Strawberry Basil Smash. Keep exact-name matches highest priority. Add Keeper diagnostics that distinguish search miss, identity rejection, missing structured/OG image, and localization failure instead of only “No trustworthy photo found.”
+   - **Acceptance:** Basil Smash is a regression fixture and can accept a trustworthy Gin Basil Smash recipe image when title/ingredients support identity; obvious flavored/modified variants remain rejected; existing images are never overwritten; rejected hosts remain rejected; accepted images are localized before persistence; Keeper no-result diagnostics identify the stage/reason; focused cocktail-image discovery tests and the production build pass.
+20. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -209,7 +213,7 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, event subscribers, and authorization boundaries.
 - `src/cocktails.ts` — cocktail matching/recipe behavior; cocktail rows already support `image_url`.
 - `client/src/cocktail-instructions.ts` — cocktail method parsing plus PR145 deterministic step generation (`resolveCocktailInstructions` / `buildCocktailSteps`) for built-in recipes; rendered by `CocktailRecipeInstructions`.
-- `src/cocktail_image.ts` — safe fill-missing cocktail image discovery (`findCocktailImage`) and the PR145 bounded boot `backfillMissingCocktailImages`.
+- `src/cocktail_image.ts` — safe fill-missing cocktail image discovery (`findCocktailImage`) and the PR145 bounded boot `backfillMissingCocktailImages`; PR154 should preserve its safety boundaries while improving alias/near-match verification and Keeper no-result diagnostics.
 - `src/build-info.ts` — Keeper build identifier (`getBuildInfo`) derived from build-arg/env metadata (`BUILD_DATE`/`BUILD_PR`/`GIT_SHA`, stamped by `docker-publish.yml`) with a local/dev fallback; surfaced by `GET /api/admin/build` and the Keeper Settings "Build" card.
 - `src/official_brewery_beer_discovery.ts` — official beer discovery and identity gates.
 - `src/ingestion/jobs/` — enrichment queue, outcomes, ownership, repair, and cleanup.
@@ -259,4 +263,3 @@ Use fresh records for pipeline testing. Review cleanup candidates first, then re
 - No fuzzy acceptance of official product pages.
 - No large enrichment-system redesign for UI polish.
 - No new visual theme/branding expansion while the supported appearance is intentionally Light + Dark only.
-
