@@ -17,7 +17,7 @@ Previously completed:
 - **PR145** — Cocktail recipe completeness, cocktail photo backfill, and Keeper build identifier. Built-in cocktails render deterministic preparation steps (`resolveCocktailInstructions` / `buildCocktailSteps` in `client/src/cocktail-instructions.ts`); `backfillMissingCocktailImages` (`src/cocktail_image.ts`) fills missing built-in cocktail photos at boot; a lightweight build identifier (`src/build-info.ts`, `GET /api/admin/build`) appears in Keeper Settings.
 
 Currently working on:
-- None.
+- **PR149** — Guest navigation, terminology, and Smokey Barrel naming (branch `cursor/pr149-guest-nav-terminology-00d3`, not yet merged). `client/src/shell-nav.ts` now owns one authoritative concise nav-label map (`NAV_LABELS`/`navLabel`) used by the phone bottom bar, desktop/tablet rail, More sheet, and topbar title, plus a paired `DESTINATION_TITLES`/`destinationTitle` map for fuller landing headings (e.g. Drinks → “What can I make?”, Spirits → “The Bottle Library”), kept in agreement with the inventory module titles by a shell-nav test. The cocktail “Missing one” tab stays compact but gains an accessible helper/subtitle (`MISSING_ONE_HINT` in `client/src/cocktail-card.ts`, “One ingredient away from making.”) with no change to readiness/filter/count semantics. The one Guest-visible “Smokey Vault” brand string (Brewery Lab editor note) is now “Smokey Barrel”; internal identifiers (repo, package, DB, env, User-Agents, API/Swagger title, source comments, docker/GHCR) stay “Smokey Vault”. No IA, routing, authorization, or tab enable/disable/order changes.
 
 Next planned:
 - Brewery Lab follow-up only if live use proves a specific usability gap (`ROADMAP.md` Track C).
