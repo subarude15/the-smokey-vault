@@ -5,21 +5,26 @@ Last updated: 2026-09-09
 ## Current position
 
 Most recently completed:
-- **PR155** — Cocktail image discovery observability + production reliability. After PR154, Keeper Find Photo still failed for common drinks (confirmed: French 75) even when Settings showed SearXNG connected. Root cause: the SERP pre-filter treated descriptive titles ("Classic French 75 Cocktail Recipe", "… - Serious Eats") as derivatives and dropped them before the page identity gate. PR155 softens that pre-filter (page gate remains strict), improves signature-ingredient query planning (gin/champagne/lemon over juice/syrup), distinguishes recipe-page host rejection from image-asset CDN rejection, collects bounded Keeper-only stage diagnostics on Find Photo failures, and adds French 75 regression coverage. Connectivity probe ≠ end-to-end discovery success. Ollama is unrelated. PR156 (Bottle Library flavor data audit) remains separate.
+- **PR156** — Bottle Library flavor data audit + facet reliability. Production Flavor dropdowns were empty because PR152 derived facets only from inventory `flavors`/`tasting_notes`, while accepted enrichment tasting lives in `product_content` and was never attached for presentation. PR156 adds response-only `display_flavors` (Keeper flavors + tasting_notes + official/house enrichment tasting, controlled vocabulary), Family-scoped Flavor options (optional Availability constraint), stale Flavor reset, Guest allowlist update, and representative fixtures/tests. Does not invent family-based flavor profiles or overwrite Keeper-owned fields.
 
 Previously completed:
+- **PR155** — Cocktail image discovery observability + production reliability (French 75 SERP pre-filter false negatives; Keeper diagnostics; SearXNG health remains connectivity-only).
 - **PR154** — Cocktail image discovery reliability (exact/alias identity, bounded multi-query, staged no-result reasons).
 - **PR153** — Remaining shell and chrome polish.
 - **PR152** — Bottle Library flavor discovery and filter cleanup.
 - **PR151** — Bottle Library media and loading-state polish.
 
 Currently working on:
-- Idle after PR155.
+- Idle after PR156.
 
 Next planned:
-- **PR156** — Bottle Library flavor data audit + facet reliability (not started).
+- No concrete PR157 on the roadmap; wait for the next assigned product brief.
 
 ## Recent architectural decisions
+
+- Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation. Priority is Keeper structured `flavors` → Keeper `tasting_notes` → accepted enrichment official/house tasting text. Tags stay searchable free-text only and never become Flavor facets. Flavor dropdown options are computed after Family (and optionally Availability), without applying the current Flavor selection; invalid Flavor selections reset to All.
+
+- Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation. Priority is Keeper structured `flavors` → Keeper `tasting_notes` → accepted enrichment official/house tasting text. Tags stay searchable free-text only and never become Flavor facets. Flavor dropdown options are computed after Family (and optionally Availability), without applying the current Flavor selection; invalid Flavor selections reset to All.
 
 - Cocktail image discovery (PR155): Settings SearXNG health remains a connectivity/JSON probe only. Find Photo failures now carry bounded Keeper-only diagnostics (query/result/candidate/identity/image/localize counters + furthest stage). SERP pre-filter drops only clear flavored/numbered derivatives; descriptive titles reach the strict page gate. Signature search ingredients prefer identity spirits/citrus/sparkling over juice/syrup. Image asset host rejection is separate from recipe page host rejection so publisher CDNs are not falsely blocked.
 

@@ -1,24 +1,20 @@
 # Current task
 
-**PR155 — Cocktail image discovery observability + production reliability** (complete on this branch).
+**PR156 — Bottle Library flavor data audit + facet reliability** (complete on this branch).
 
 ## Production finding
 
-SearXNG Settings health can report connected while Keeper Find Photo still fails for common drinks (French 75). Connectivity ≠ end-to-end discovery.
-
-## Failure stage (French 75)
-
-SERP pre-filter treated descriptive titles as derivatives (`title includes name && title !== name`), discarding valid recipe pages before the page identity gate.
+Bottle Library Flavor facets looked empty in production (with or without Family = Whiskey). Not Guest redaction: enrichment tasting lived in `product_content` and never reached PR152’s inventory-only derivation. Flavor options were also global, so Family did not constrain them.
 
 ## Delivered
 
-- Softened SERP pre-filter; strict page identity retained
-- Signature-ingredient query planning
-- Recipe page host vs image asset host rejection
-- Bounded Keeper-only Find Photo diagnostics
-- French 75 regression + diagnostics/safety tests
-- Docs: next is PR156 (Bottle Library flavor) — not started
+- Case B source of truth: derived `display_flavors` = Keeper `flavors` + `tasting_notes` + accepted enrichment official/house tasting text (controlled vocabulary only)
+- Response-only attachment (`attachInventoryDisplayFlavors`); no writes into Keeper-owned inventory columns
+- Guest allowlist updated for `display_flavors`; provenance/diagnostics stay stripped
+- Family (+ optional Availability) constrains Flavor options; selected Flavor is not applied while building its own options
+- Stale Flavor resets when Family/Availability makes it invalid
+- Shared `src/spirit-flavors.ts` (client re-export); PR156 fixtures/search/facet/privacy tests
 
 ## Idle next
 
-PR156 — Bottle Library flavor data audit + facet reliability
+No concrete PR157 is defined on the roadmap; stay idle unless a new product brief is assigned.

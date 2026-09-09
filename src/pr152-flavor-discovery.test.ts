@@ -138,7 +138,7 @@ test("flavor/search helpers are pure — no AI or network calls", () => {
 
 test("Bottle Library wires derived-flavor search, flavor + availability filters", () => {
   assert.match(appSrc, /matchesBottleSearch\(bottleSearchHaystack\(item, derived\), search\)/);
-  assert.match(appSrc, /deriveSpiritFlavors\(item\)/);
+  assert.match(appSrc, /resolveSpiritDisplayFlavors\(item\)/);
   assert.match(appSrc, /spiritIsAvailable\(item\)/);
   // Flavor filter checks the derived canonical facets, not raw structured flavors.
   assert.match(appSrc, /flavor !== "All" && !derived\.some/);

@@ -34,7 +34,11 @@ import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import { SbMark } from "./SbMark";
 import { MISSING_ONE_HINT } from "./cocktail-card";
 import { OverviewStats } from "./OverviewStats";
-import { CANONICAL_FLAVOR_LABELS, deriveSpiritFlavors } from "./spirit-flavors";
+import {
+  coerceSpiritFlavorSelection,
+  resolveSpiritDisplayFlavors,
+  spiritFlavorFacetOptions
+} from "./spirit-flavors";
 import { bottleSearchHaystack, matchesBottleSearch, spiritIsAvailable } from "./spirit-search";
 import {
   guestSpiritAvailabilityLabel,
@@ -1733,15 +1737,27 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const isBottleLibrary = module.id === "spirits";
   const derivedFlavorsById = useMemo(() => {
     const map = new Map<number, string[]>();
-    if (isBottleLibrary) for (const item of items) map.set(Number(item.id), deriveSpiritFlavors(item));
+    if (isBottleLibrary) for (const item of items) map.set(Number(item.id), resolveSpiritDisplayFlavors(item));
     return map;
   }, [items, isBottleLibrary]);
+  // Flavor options are constrained by Family (and Availability) but not by the
+  // currently selected Flavor — avoids empty/irrelevant facet choices.
   const spiritFlavorOptions = useMemo(() => {
     if (!isBottleLibrary) return [];
-    const present = new Set<string>();
-    for (const list of derivedFlavorsById.values()) for (const label of list) present.add(label);
-    return CANONICAL_FLAVOR_LABELS.filter((label) => present.has(label));
-  }, [derivedFlavorsById, isBottleLibrary]);
+    return spiritFlavorFacetOptions({
+      items,
+      flavorsById: derivedFlavorsById,
+      family: kind,
+      familyKey: module.kindKey,
+      availability: avail,
+      isAvailable: spiritIsAvailable
+    });
+  }, [items, derivedFlavorsById, isBottleLibrary, kind, avail, module.kindKey]);
+  useEffect(() => {
+    if (!isBottleLibrary) return;
+    const next = coerceSpiritFlavorSelection(flavor, spiritFlavorOptions);
+    if (next !== flavor) setFlavor(next);
+  }, [isBottleLibrary, flavor, spiritFlavorOptions]);
   const makers = ["All", ...uniqueValues(items, module.makerKey)];
   const kinds = ["All", ...(module.id === "wines" ? uniqueWineKinds(items) : uniqueValues(items, module.kindKey))];
   const tags = ["All", ...uniqueItemLists(items, "tags")];

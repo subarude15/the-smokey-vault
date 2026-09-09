@@ -31,6 +31,7 @@ import {
   identifyByLocalLabelImage
 } from "./ingestion/bottle-orchestrator.js";
 import {
+  attachInventoryDisplayFlavors,
   attachInventoryDisplayImageUrl,
   buildBottleEnrichmentView,
   enrichmentJobCounts,
@@ -372,7 +373,7 @@ function withInventoryDisplayFields(
   table: string,
   row: Record<string, unknown>
 ): Record<string, unknown> {
-  return attachInventoryDisplayImageUrl(table, row);
+  return attachInventoryDisplayFlavors(table, attachInventoryDisplayImageUrl(table, row));
 }
 
 app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, reply) => {
