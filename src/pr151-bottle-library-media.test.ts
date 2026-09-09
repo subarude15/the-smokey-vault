@@ -23,6 +23,17 @@ test("spiritCardImageUrl prefers display_image_url then image_url", () => {
   assert.equal(spiritCardImageUrl({ display_image_url: "  ", image_url: null }), "");
 });
 
+test("spiritCardImageUrl falls back when display_image_url is blank", () => {
+  assert.equal(
+    spiritCardImageUrl({ display_image_url: "", image_url: "/bottle.webp" }),
+    "/bottle.webp"
+  );
+  assert.equal(
+    spiritCardImageUrl({ display_image_url: "   ", image_url: "/bottle.webp" }),
+    "/bottle.webp"
+  );
+});
+
 test("image URL present → SpiritCardMedia renders an img with bottle alt text", () => {
   assert.match(mediaSrc, /const showImage = Boolean\(src\) && !broken;/);
   assert.match(mediaSrc, /alt=\{spiritMediaAlt\(item\)\}/);

@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { SbMark } from "./SbMark";
 
-/** Prefer the server-derived display URL, then the stored Keeper image_url. */
+/** Prefer the first non-blank URL: trimmed display_image_url, then trimmed image_url. */
 export function spiritCardImageUrl(item: {
   display_image_url?: unknown;
   image_url?: unknown;
 }): string {
-  return String(item.display_image_url ?? item.image_url ?? "").trim();
+  const display = String(item.display_image_url ?? "").trim();
+  if (display) return display;
+  return String(item.image_url ?? "").trim();
 }
 
 function spiritMediaAlt(item: { name?: unknown; brand?: unknown }): string {
