@@ -289,7 +289,8 @@ export function pageIdentifiesCocktail(
   const target = normalizeCocktailName(cocktailName);
   if (!target) return false;
 
-  for (const recipe of parseJsonLdRecipes(html, "https://example.invalid/")) {
+  const recipes = parseJsonLdRecipes(html, "https://example.invalid/");
+  for (const recipe of recipes) {
     const result = classifyCocktailIdentity({
       target: cocktailName,
       candidate: recipe.name,
@@ -299,15 +300,30 @@ export function pageIdentifiesCocktail(
     if (cocktailIdentityAccepted(result)) return true;
   }
 
+  // Heading/title matches must still respect the page's recipe ingredients so an
+  // exact-named page whose Recipe adds a flavor modifier (e.g. strawberry) is
+  // rejected rather than accepted on the clean heading alone.
+  const pageIngredients = recipes.flatMap((recipe) => recipe.ingredients);
+
   for (const heading of pageHeadingTexts(html)) {
-    if (cocktailIdentityAccepted(classifyCocktailIdentity({ target: cocktailName, candidate: heading, targetIngredients }))) {
+    if (cocktailIdentityAccepted(classifyCocktailIdentity({
+      target: cocktailName,
+      candidate: heading,
+      targetIngredients,
+      candidateIngredients: pageIngredients
+    }))) {
       return true;
     }
   }
 
   const ogTitle = metaContent(html, "og:title");
   const title = ogTitle || stripTags(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] ?? "");
-  if (title && cocktailIdentityAccepted(classifyCocktailIdentity({ target: cocktailName, candidate: title, targetIngredients }))) {
+  if (title && cocktailIdentityAccepted(classifyCocktailIdentity({
+    target: cocktailName,
+    candidate: title,
+    targetIngredients,
+    candidateIngredients: pageIngredients
+  }))) {
     return true;
   }
 

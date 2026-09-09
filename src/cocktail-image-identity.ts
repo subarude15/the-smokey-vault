@@ -159,24 +159,35 @@ export function classifyCocktailIdentity(input: {
   const targetNorm = normalizeCocktailName(input.target);
   const candidateNorm = softTitleCocktailIdentity(input.candidate);
   if (!targetNorm || !candidateNorm) return { tier: "reject", reason: "empty_name" };
-  if (targetNorm === candidateNorm) return { tier: "exact" };
 
-  const targetSet = new Set(tokens(targetNorm));
-  const candidateSet = new Set(tokens(candidateNorm));
-  const diff = [
-    ...[...candidateSet].filter((t) => !targetSet.has(t)),
-    ...[...targetSet].filter((t) => !candidateSet.has(t))
-  ];
-  if (diff.length === 0) return { tier: "exact" };
+  // 1. Determine the name-based tier (exact, valid base-spirit alias, or reject).
+  let nameTier: "exact" | "alias" | null = null;
+  if (targetNorm === candidateNorm) {
+    nameTier = "exact";
+  } else {
+    const targetSet = new Set(tokens(targetNorm));
+    const candidateSet = new Set(tokens(candidateNorm));
+    const diff = [
+      ...[...candidateSet].filter((t) => !targetSet.has(t)),
+      ...[...targetSet].filter((t) => !candidateSet.has(t))
+    ];
+    if (diff.length === 0) {
+      nameTier = "exact";
+    } else {
+      // Every differing token must be a base spirit the requested drink truly uses.
+      const confirmedBase = baseSpiritsInIngredients(input.targetIngredients);
+      const allDiffAreConfirmedBaseSpirits = diff.every(
+        (token) => BASE_SPIRITS.has(token) && confirmedBase.has(token)
+      );
+      if (allDiffAreConfirmedBaseSpirits) nameTier = "alias";
+    }
+  }
+  if (!nameTier) return { tier: "reject", reason: "name_modifier" };
 
-  // Every differing token must be a base spirit the requested drink truly uses.
-  const confirmedBase = baseSpiritsInIngredients(input.targetIngredients);
-  const allDiffAreConfirmedBaseSpirits = diff.every(
-    (token) => BASE_SPIRITS.has(token) && confirmedBase.has(token)
-  );
-  if (!allDiffAreConfirmedBaseSpirits) return { tier: "reject", reason: "name_modifier" };
-
-  // The candidate's own ingredients must not introduce a flavor variant.
+  // 2. Ingredient-variant guard — applies to BOTH exact and alias identities.
+  // A clean/matching name still rejects when the candidate's ingredients add a
+  // known flavor modifier the target lacks (e.g. an exact "Basil Smash" page
+  // whose recipe includes strawberry).
   if (input.candidateIngredients) {
     const targetMods = modifierIngredients(input.targetIngredients);
     for (const mod of modifierIngredients(input.candidateIngredients)) {
@@ -184,7 +195,7 @@ export function classifyCocktailIdentity(input: {
     }
   }
 
-  return { tier: "alias" };
+  return { tier: nameTier };
 }
 
 export function cocktailIdentityAccepted(result: CocktailIdentityResult): boolean {

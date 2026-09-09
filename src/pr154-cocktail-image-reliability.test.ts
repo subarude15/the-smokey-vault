@@ -91,15 +91,33 @@ test("flavored/base variants of Basil Smash are rejected", () => {
   }
 });
 
-test("clean name but variant ingredients (strawberry) is rejected", () => {
-  const result = classifyCocktailIdentity({
+test("variant ingredients reject even when the name is EXACT (not just alias)", () => {
+  // Exact name, but the candidate recipe secretly adds strawberry → reject.
+  const exact = classifyCocktailIdentity({
+    target: "Basil Smash",
+    candidate: "Basil Smash",
+    targetIngredients: BASIL_SMASH_INGREDIENTS,
+    candidateIngredients: ["2 oz gin", "1 oz lemon juice", "0.75 oz simple syrup", "8 basil leaves", "4 strawberries"]
+  });
+  assert.deepEqual(exact, { tier: "reject", reason: "ingredient_variant" });
+
+  // The alias path is guarded the same way.
+  const alias = classifyCocktailIdentity({
     target: "Basil Smash",
     candidate: "Gin Basil Smash",
     targetIngredients: BASIL_SMASH_INGREDIENTS,
     candidateIngredients: ["2 oz gin", "1 oz lemon juice", "6 strawberries", "8 basil leaves"]
   });
-  assert.equal(result.tier, "reject");
-  assert.equal(result.reason, "ingredient_variant");
+  assert.deepEqual(alias, { tier: "reject", reason: "ingredient_variant" });
+
+  // A clean exact page with normal ingredients still passes.
+  const clean = classifyCocktailIdentity({
+    target: "Basil Smash",
+    candidate: "Basil Smash",
+    targetIngredients: BASIL_SMASH_INGREDIENTS,
+    candidateIngredients: ["2 oz gin", "1 oz lemon juice", "0.75 oz simple syrup", "8 basil leaves"]
+  });
+  assert.equal(clean.tier, "exact");
 });
 
 test("Smoked Old Fashioned still rejected; base-spirit prefixes confirmed by ingredients", () => {
@@ -147,6 +165,35 @@ test("Gin Basil Smash page identifies for Basil Smash; strawberry variant does n
 
   const exact = recipePage({ name: "Basil Smash", image: "https://cdn.example/bs.jpg", ingredients: BASIL_SMASH_INGREDIENTS });
   assert.equal(pageIdentifiesCocktail(exact, "Basil Smash", BASIL_SMASH_INGREDIENTS), true);
+
+  // Exact name but strawberry in the recipe ingredients must NOT identify.
+  const exactButStrawberry = recipePage({
+    name: "Basil Smash",
+    image: "https://cdn.example/exact-strawberry.jpg",
+    ingredients: ["2 oz gin", "1 oz lemon juice", "0.75 oz simple syrup", "8 basil leaves", "4 strawberries"]
+  });
+  assert.equal(pageIdentifiesCocktail(exactButStrawberry, "Basil Smash", BASIL_SMASH_INGREDIENTS), false);
+});
+
+test("REGRESSION: an exact-named Basil Smash page with strawberry never localizes", async () => {
+  let localizeCalled = false;
+  const result = await discoverCocktailImage(basilRow(), {
+    searchWebHits: async () => [
+      { title: "Basil Smash Recipe | Liquor.com", content: "smash", url: "https://liquor.com/recipes/basil-smash/" }
+    ],
+    fetchHtml: async (url) => ({
+      html: recipePage({
+        name: "Basil Smash",
+        image: "https://cdn.example/exact-strawberry.jpg",
+        ingredients: ["2 oz gin", "1 oz lemon juice", "0.75 oz simple syrup", "8 basil leaves", "4 strawberries"]
+      }),
+      finalUrl: url
+    }),
+    localizeImage: async () => { localizeCalled = true; return "/api/media/images/should-not-save.jpg"; }
+  });
+  assert.equal(result.status, "no_result");
+  if (result.status === "no_result") assert.equal(result.reason, "identity_rejected");
+  assert.equal(localizeCalled, false, "an exact-named strawberry variant must not localize");
 });
 
 /* --------------------------- Bounded query plan --------------------------- */
