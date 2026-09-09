@@ -974,3 +974,6 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .hero-wordmark,.page-title h1,.section-heading h2,.feature-card h2,.empty h3,.modal-header h2{font-weight:400;font-synthesis:none}
 /* The brand medallion reads as an intentional dark coaster in Light mode too. */
 [data-theme="light"] .sb-medallion{border-color:color-mix(in srgb,var(--accent) 55%,#0000);box-shadow:0 2px 10px color-mix(in srgb,#000 22%,transparent)}
+
+/* PR152 — Bottle Library primary filters (Family · Flavor · Availability) share width evenly. */
+.bottle-filter-row select{flex:1;min-width:150px}
