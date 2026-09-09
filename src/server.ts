@@ -89,7 +89,10 @@ import {
   acceptLocalizedCocktailImage,
   backfillMissingCocktailImages,
   enrichImportedRecipeImage,
-  findCocktailImage
+  findCocktailImage,
+  loadCocktailImageRow,
+  previewCocktailImages,
+  resolveCocktailImageSelection
 } from "./cocktail_image.js";
 import { getBuildInfo } from "./build-info.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
@@ -1481,6 +1484,47 @@ app.post<{ Params: { id: string } }>("/api/cocktails/:id/find-image", {
   } catch {
     return reply.code(502).send({ error: "Could not search for a photo" });
   }
+});
+
+// Previewing never replaces the saved photo; only explicit Keeper selection does.
+app.post<{ Params: { id: string } }>("/api/cocktails/:id/image-options", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const row = loadCocktailImageRow(Number(request.params.id));
+  if (!row) return reply.code(404).send({ error: "Recipe not found" });
+  try { return await previewCocktailImages(row); }
+  catch { return reply.code(502).send({ error: "Could not search for photos" }); }
+});
+
+app.put<{ Params: { id: string }; Body: { image_url?: unknown; expected_image_url?: unknown } }>("/api/cocktails/:id/image", async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const row = loadCocktailImageRow(Number(request.params.id));
+  if (!row) return reply.code(404).send({ error: "Recipe not found" });
+  const { image_url: requestedImage, expected_image_url: expected } = request.body ?? {};
+  if (typeof requestedImage !== "string" || typeof expected !== "string") {
+    return reply.code(400).send({ error: "Choose an uploaded or discovered photo" });
+  }
+  let image = requestedImage.trim();
+  if (image) {
+    if (/^https?:\/\//i.test(image)) {
+      // ImageField intentionally exposes a URL workflow. Localize through the
+      // same SSRF/content/size guarded media path before persisting it.
+      try {
+        image = await resolveCocktailImageSelection(image);
+      } catch {
+        image = "";
+      }
+      if (!image) return reply.code(400).send({ error: "Could not download that photo" });
+    }
+    // Persist only existing shared-media files; empty explicitly removes one.
+    if (!/^\/api\/media\/images\/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp|gif|avif|heic)$/.test(image)
+        || !existsSync(join(imagesDir, basename(image)))) {
+      return reply.code(400).send({ error: "Choose an uploaded or discovered photo" });
+    }
+  }
+  const changed = db.prepare("UPDATE cocktails SET image_url=? WHERE id=? AND COALESCE(image_url, '')=?")
+    .run(image, row.id, expected);
+  if (!changed.changes) return reply.code(409).send({ error: "The photo changed. Reopen the recipe before replacing it." });
+  return { image_url: image };
 });
 
 app.put<{ Params: { id: string }; Body: { bartender_fav?: boolean | number } }>("/api/cocktails/:id", async (request, reply) => {

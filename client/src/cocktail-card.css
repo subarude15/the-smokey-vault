@@ -24,7 +24,7 @@
 .cocktail-card-keeper .secondary.active{border-color:var(--accent-2);color:var(--accent-2)}
 
 /* Detail media: constrained, cover-cropped, not giant on phone. */
-.recipe-modal .recipe-hero{width:100%;max-width:100%;height:auto;max-height:min(220px,40vw);aspect-ratio:16/9;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);margin:0 0 16px}
+.recipe-modal .recipe-hero{width:100%;max-width:100%;height:auto;max-height:min(220px,40vw);aspect-ratio:auto;object-fit:contain;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);margin:0 0 16px}
 
 .recipe-instructions{display:flex;flex-direction:column;gap:8px;margin-top:4px}
 .recipe-instructions .eyebrow{margin:0}
