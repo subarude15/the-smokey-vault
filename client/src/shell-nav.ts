@@ -48,8 +48,14 @@ export const PAGE_TAB: Record<string, TabKey> = {
   next: "whatsnext"
 };
 
-/** Concise labels for the phone bottom bar. */
-export const MOBILE_SHORT_LABELS: Record<string, string> = {
+/**
+ * Authoritative concise navigation labels — the single source of truth for
+ * every shell surface (phone bottom bar, desktop/tablet rail, More sheet, and
+ * topbar title). A nav label answers "where am I going"; the fuller destination
+ * heading (see DESTINATION_TITLES / a page's own title) confirms "where I
+ * landed". Keeping one map here stops the phone bar and rail from drifting apart.
+ */
+export const NAV_LABELS: Record<string, string> = {
   dashboard: "Home",
   taps: "On Tap",
   cocktails: "Drinks",
@@ -70,6 +76,23 @@ export const MOBILE_SHORT_LABELS: Record<string, string> = {
   messages: "Inbox",
   restock: "Restock",
   settings: "Settings"
+};
+
+/**
+ * Fuller Guest destination/page titles for the destinations whose concise nav
+ * label intentionally differs from the heading a Guest sees after tapping.
+ * This is the tested pairing between a nav label and its landing page. For the
+ * inventory modules these must stay in agreement with each module's `title`
+ * (guarded by a shell-nav test). Destinations without an entry simply reuse
+ * their nav label as the heading (e.g. On Tap, Gallery, Events).
+ */
+export const DESTINATION_TITLES: Record<string, string> = {
+  dashboard: "The Smokey Barrel",
+  cocktails: "What can I make?",
+  spirits: "The Bottle Library",
+  wines: "The Wine Cellar",
+  packaged_beer: "Packaged Beer",
+  taps: "On Tap"
 };
 
 /** Preferred Guest primary destinations (visibility/order still authoritative). */
@@ -227,6 +250,12 @@ export function sortKeeperOperations<T extends { id: string }>(items: T[]): T[] 
   );
 }
 
-export function mobileShortLabel(id: string, fallback: string): string {
-  return MOBILE_SHORT_LABELS[id] ?? fallback;
+/** Concise navigation label for any shell surface (phone bar, rail, More, topbar). */
+export function navLabel(id: string, fallback: string): string {
+  return NAV_LABELS[id] ?? fallback;
+}
+
+/** Fuller destination/page heading; falls back to the nav label when none differs. */
+export function destinationTitle(id: string, fallback: string): string {
+  return DESTINATION_TITLES[id] ?? navLabel(id, fallback);
 }

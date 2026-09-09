@@ -129,7 +129,7 @@ export function BreweryLabDetail({
         <div className="page-title">
           <span className="eyebrow">KEEPER PRESENTATION</span>
           <h1>Edit guest-facing details</h1>
-          <p>These fields stay in The Smokey Vault. Brewfather sync will not overwrite them.</p>
+          <p>These fields stay in The Smokey Barrel. Brewfather sync will not overwrite them.</p>
         </div>
         {error ? <div className="ai-error load-error"><div><strong>Could not save</strong><span>{error}</span></div></div> : null}
         <div className="form-grid lab-edit-grid">

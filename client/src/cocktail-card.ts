@@ -1,3 +1,10 @@
+/**
+ * Short, accessible explanation of the compact "Missing one" cocktail tab
+ * (PR149). Kept as display-only copy — it never affects readiness/filter/count
+ * calculations.
+ */
+export const MISSING_ONE_HINT = "One ingredient away from making.";
+
 export type CocktailCardReadiness = "ready" | "almost" | "missing" | string;
 
 export type CocktailReadinessPresentation = {
