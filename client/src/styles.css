@@ -113,6 +113,7 @@ main{min-width:0}.topbar{height:72px;border-bottom:1px solid var(--line);display
 .inventory-card.empty-tap{opacity:.78}
 .inventory-card.empty-tap h3{color:var(--muted);font-style:italic}
 .cocktail-search{max-width:none;margin:0 0 18px}
+.cocktail-filter-hint{margin:-4px 0 14px;color:var(--muted);font-size:13px}
 .ingredient-preview{padding-left:18px;margin:10px 0 0;line-height:1.55;font-size:13px}
 .ingredient-preview .missing{color:#e4b86e}
 .ingredient-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}

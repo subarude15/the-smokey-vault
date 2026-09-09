@@ -10,7 +10,8 @@ import {
   includeModuleInCollectionNav,
   firstEnabledPage,
   landingFeedbackCtaEnabled,
-  mobileShortLabel,
+  navLabel,
+  destinationTitle,
   notInPrimaryNav,
   pageEnabled,
   selectPrimaryNav,
@@ -29,6 +30,7 @@ import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import { SbMark } from "./SbMark";
+import { MISSING_ONE_HINT } from "./cocktail-card";
 import {
   guestSpiritAvailabilityLabel,
   guestTapAvailabilityLabel,
@@ -637,7 +639,7 @@ export default function App() {
   const showMoreNav = shouldShowMoreNav(moreCollection, moreKeeper);
   const moreTabActive = moreSheet || moreCollection.some((item) => item.id === page) || moreKeeper.some((item) => item.id === page);
   const allNav = [...collectionNav, ...(admin ? keeperNav : [])];
-  const pageTitle = allNav.find((item) => item.id === page)?.label ?? "The Smokey Barrel";
+  const pageTitle = navLabel(page, allNav.find((item) => item.id === page)?.label ?? "The Smokey Barrel");
   function dismissNavHint() {
     localStorage.setItem("smokey-nav-hint-dismissed", "1");
     setNavHint(false);
@@ -652,7 +654,7 @@ export default function App() {
   }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
     return <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
-      <item.icon size={19}/>{item.label}
+      <item.icon size={19}/>{navLabel(item.id, item.label)}
       {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
       <ChevronRight size={15}/>
     </button>;
@@ -797,7 +799,7 @@ export default function App() {
           {primaryNav.map((item) => (
             <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
               <item.icon size={20}/>
-              <span>{mobileShortLabel(item.id, item.label)}</span>
+              <span>{navLabel(item.id, item.label)}</span>
               {item.badge ? <span className="mobile-nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
             </button>
           ))}
@@ -837,7 +839,7 @@ export default function App() {
             <span className="nav-label">Collection</span>
             {moreCollection.map((item) => (
               <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
-                <item.icon size={19}/>{item.label}
+                <item.icon size={19}/>{navLabel(item.id, item.label)}
                 <ChevronRight size={15}/>
               </button>
             ))}
@@ -846,7 +848,7 @@ export default function App() {
             <span className="nav-label">Keeper Operations</span>
             {moreKeeper.map((item) => (
               <button key={item.id} type="button" className={page === item.id ? "more-sheet-item active" : "more-sheet-item"} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
-                <item.icon size={19}/>{item.label}
+                <item.icon size={19}/>{navLabel(item.id, item.label)}
                 {item.badge ? <span className="nav-badge">{item.badge > 99 ? "99+" : item.badge}</span> : null}
                 <ChevronRight size={15}/>
               </button>
@@ -2871,7 +2873,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
   return <>
     <PageTitle
       eyebrow="THE RECIPE INDEX"
-      title="What can I make?"
+      title={destinationTitle("cocktails", "What can I make?")}
       subtitle={admin
         ? `${ready.length} ready to pour · ${almost.length} one bottle away. Paste a recipe link, star ${keeperName}’s favorites, or pick a drink to show at the bar.`
         : `${ready.length} off the menu · ${almost.length} one bottle away. Pick a drink, then walk it over to ${keeperName}.`}
@@ -2880,7 +2882,13 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
     <div className="cocktail-toolbar">
       <div className="segmented cocktail-filters">
         {([["ready", admin ? "Ready now" : "Off the menu"], ["almost", "Missing one"], ["all", "All recipes"]] as const).map(([id, label]) => (
-          <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>{label}</button>
+          <button
+            key={id}
+            className={filter === id ? "active" : ""}
+            onClick={() => setFilter(id)}
+            title={id === "almost" ? MISSING_ONE_HINT : undefined}
+            aria-label={id === "almost" ? `${label} — ${MISSING_ONE_HINT}` : undefined}
+          >{label}</button>
         ))}
       </div>
       <div className="toolbar-actions">
@@ -2889,6 +2897,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
         <button className="primary surprise-button" disabled={!ready.length} onClick={surprise}><Shuffle size={18}/> Surprise me</button>
       </div>
     </div>
+    {filter === "almost" && <p className="cocktail-filter-hint" aria-live="polite">{MISSING_ONE_HINT}</p>}
     <label className="search cocktail-search"><Search/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Negroni, mezcal, coupe…"/></label>
     {favorites.length > 0 && <section className="favorite-board">
       <div className="section-heading"><div><span className="eyebrow">BEHIND THE STICK</span><h2>Bartender favorites</h2></div></div>

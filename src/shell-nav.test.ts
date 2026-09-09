@@ -8,19 +8,23 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_ENABLED_TABS, type EnabledTabs, type TabKey } from "../client/src/catalog.ts";
 import {
+  DESTINATION_TITLES,
   GUEST_HIDDEN_PAGES,
   GUEST_LANDING_CANDIDATES,
   GUEST_PRIMARY_PREFERENCE,
   KEEPER_OPERATION_IDS,
   KEEPER_PAGES,
   KEEPER_PRIMARY_PREFERENCE,
+  NAV_LABELS,
   PRIMARY_NAV_CAPACITY,
+  destinationTitle,
   firstEnabledPage,
   guestDestinationsCovered,
   includeModuleInCollectionNav,
   isKeeperOnlyPage,
   LANDING_FEEDBACK_PAGE,
   landingFeedbackCtaEnabled,
+  navLabel,
   notInPrimaryNav,
   pageEnabled,
   selectPrimaryNav,
@@ -28,6 +32,7 @@ import {
   sortKeeperOperations,
   tabRank
 } from "../client/src/shell-nav.ts";
+import { MISSING_ONE_HINT } from "../client/src/cocktail-card.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const appSrc = readFileSync(join(root, "client/src/App.tsx"), "utf8");
@@ -36,6 +41,7 @@ const shellSrc = readFileSync(join(root, "client/src/shell-nav.ts"), "utf8");
 const apiSrc = readFileSync(join(root, "client/src/api.ts"), "utf8");
 const bottleNavSrc = readFileSync(join(root, "client/src/bottle-detail-nav.ts"), "utf8");
 const tipJarSrc = readFileSync(join(root, "client/src/TipJarPage.tsx"), "utf8");
+const breweryLabDetailSrc = readFileSync(join(root, "client/src/BreweryLabDetail.tsx"), "utf8");
 
 function tabs(overrides: Partial<EnabledTabs> = {}): EnabledTabs {
   return { ...DEFAULT_ENABLED_TABS, ...overrides };
@@ -239,4 +245,78 @@ test("single page content tree — no mobile/desktop page fork", () => {
   assert.equal((appSrc.match(/\{page === \"cocktails\" && <Cocktails/g) ?? []).length, 1);
   assert.doesNotMatch(appSrc, /phoneShell\s*\?\s*<Dashboard/);
   assert.doesNotMatch(appSrc, /compactNav\s*\?\s*<Cocktails/);
+});
+
+/* ---------------------- PR149 — nav labels & terminology ------------------- */
+
+test("PR149 nav labels resolve deterministically to the intended shorthands", () => {
+  assert.equal(navLabel("dashboard", "x"), "Home");
+  assert.equal(navLabel("taps", "x"), "On Tap");
+  assert.equal(navLabel("cocktails", "x"), "Drinks");
+  assert.equal(navLabel("gallery", "x"), "Gallery");
+  assert.equal(navLabel("spirits", "x"), "Spirits");
+  assert.equal(navLabel("wines", "x"), "Wine");
+  assert.equal(navLabel("packaged_beer", "x"), "Beer");
+  // Unknown ids fall back to the provided label, never throw.
+  assert.equal(navLabel("not-a-page", "Fallback"), "Fallback");
+});
+
+test("PR149 destination titles pair concise nav labels with fuller headings", () => {
+  // Where a distinction improves clarity, the heading differs from the nav label.
+  assert.equal(destinationTitle("cocktails", "x"), "What can I make?");
+  assert.notEqual(destinationTitle("cocktails", "x"), navLabel("cocktails", "x"));
+  assert.equal(destinationTitle("spirits", "x"), "The Bottle Library");
+  assert.notEqual(destinationTitle("spirits", "x"), navLabel("spirits", "x"));
+  // Destinations whose label already reads as the heading reuse the nav label.
+  assert.equal(destinationTitle("gallery", "Gallery"), "Gallery");
+  assert.equal(destinationTitle("taps", "x"), "On Tap");
+  assert.equal(destinationTitle("taps", "x"), navLabel("taps", "x"));
+  // Unknown ids fall back to the provided fallback.
+  assert.equal(destinationTitle("not-a-page", "Fallback"), "Fallback");
+});
+
+test("PR149 destination titles agree with the inventory module page titles", () => {
+  // The label map is the single source of truth: module `title` strings in App
+  // must not drift from DESTINATION_TITLES.
+  for (const [id, title] of [
+    ["spirits", "The Bottle Library"],
+    ["wines", "The Wine Cellar"],
+    ["packaged_beer", "Packaged Beer"],
+    ["taps", "On Tap"]
+  ] as const) {
+    assert.equal(DESTINATION_TITLES[id], title);
+    assert.match(appSrc, new RegExp(`id: ?"${id}"[^]*?title: ?"${title}"`));
+  }
+});
+
+test("PR149 all shell surfaces render the shared nav label (no drift)", () => {
+  // Rail, More sheet, phone bottom bar, and topbar title all resolve via navLabel.
+  assert.match(appSrc, /<item\.icon size=\{19\}\/>\{navLabel\(item\.id, item\.label\)\}/); // rail + More
+  assert.match(appSrc, /<span>\{navLabel\(item\.id, item\.label\)\}<\/span>/); // phone bottom bar
+  assert.match(appSrc, /const pageTitle = navLabel\(page,/); // topbar title
+  // The old phone-only helper name is fully retired.
+  assert.doesNotMatch(appSrc, /mobileShortLabel/);
+  assert.doesNotMatch(shellSrc, /mobileShortLabel|MOBILE_SHORT_LABELS/);
+});
+
+test("PR149 Cocktails heading uses the destination-title source of truth", () => {
+  assert.match(appSrc, /title=\{destinationTitle\("cocktails", "What can I make\?"\)\}/);
+});
+
+test("PR149 clarifies Missing one without changing filter/count semantics", () => {
+  assert.equal(MISSING_ONE_HINT, "One ingredient away from making.");
+  // The three cocktail filter ids and their order are unchanged.
+  assert.match(
+    appSrc,
+    /\[\["ready", admin \? "Ready now" : "Off the menu"\], \["almost", "Missing one"\], \["all", "All recipes"\]\]/
+  );
+  // The hint is surfaced accessibly (tab aria-label/title) and as a visible helper.
+  assert.match(appSrc, /aria-label=\{id === "almost" \? `\$\{label\} — \$\{MISSING_ONE_HINT\}`/);
+  assert.match(appSrc, /filter === "almost" && <p className="cocktail-filter-hint"/);
+});
+
+test("PR149 Guest-facing Smokey Vault copy becomes Smokey Barrel", () => {
+  // The one Guest-visible brand string in the Brewery Lab editor is rebranded.
+  assert.doesNotMatch(breweryLabDetailSrc, /Smokey Vault/);
+  assert.match(breweryLabDetailSrc, /These fields stay in The Smokey Barrel\./);
 });
