@@ -56,3 +56,68 @@
   .domain-card-media{width:68px}
   .domain-card-meta{font-size:11px}
 }
+
+/* PR151 — Bottle Library media frame + loading skeleton */
+.spirit-card-media{
+  position:relative;
+  flex:none;
+  min-height:0;
+  background:linear-gradient(160deg,color-mix(in srgb,var(--accent) 10%,var(--surface-2)),var(--surface-2) 55%,color-mix(in srgb,var(--bg) 18%,var(--surface-2)));
+}
+.spirit-card-media.has-image{background:var(--surface-2)}
+.spirit-card-media-placeholder{
+  display:grid;
+  place-items:center;
+  width:100%;
+  height:100%;
+  position:relative;
+  color:var(--muted);
+}
+.spirit-card-media-silhouette{
+  width:42%;
+  height:auto;
+  max-height:62%;
+  grid-area:1/1;
+}
+.spirit-card-media-mark{
+  grid-area:1/1;
+  align-self:end;
+  justify-self:center;
+  margin-bottom:10%;
+  opacity:.92;
+  box-shadow:0 4px 12px color-mix(in srgb,var(--bg) 55%,transparent);
+}
+.spirit-card.is-skeleton,
+.domain-card.is-skeleton{
+  pointer-events:none;
+  box-shadow:none;
+}
+.spirit-card.is-skeleton:hover,
+.domain-card.is-skeleton:hover{
+  border-color:var(--line);
+  box-shadow:none;
+  transform:none;
+}
+.spirit-skel-copy{gap:10px;padding-top:4px}
+.spirit-skel-line{
+  display:block;
+  height:11px;
+  border-radius:6px;
+  background:color-mix(in srgb,var(--muted) 20%,transparent);
+  animation:spirit-skel-pulse 1.4s var(--ease-out,ease-out) infinite;
+}
+.spirit-skel-line.short{width:42%}
+.spirit-skel-line.mid{width:68%}
+.spirit-skel-line:not(.short):not(.mid){width:88%;height:16px}
+@keyframes spirit-skel-pulse{0%,100%{opacity:.45}50%{opacity:.85}}
+.inventory-loading{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:160px;
+  color:var(--muted);
+  font-size:14px;
+}
+@media(prefers-reduced-motion:reduce){
+  .spirit-skel-line{animation:none}
+}

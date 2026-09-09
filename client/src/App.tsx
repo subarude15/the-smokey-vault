@@ -25,6 +25,8 @@ import { GuestReviews } from "./GuestReviews";
 import { EnrichmentPanel, ENRICHMENT_MODULES } from "./EnrichmentPanel";
 import { CommercialTapEnrichmentPanel } from "./CommercialTapEnrichmentPanel";
 import { SpiritInventoryCard, TapInventoryCard } from "./TapSpiritInventoryCard";
+import { SpiritShelfSkeleton } from "./SpiritShelfSkeleton";
+import { inventoryViewState } from "./inventory-view-state";
 import { BottlePublicContent, TastingProfileView } from "./BottlePublicContent";
 import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
@@ -1557,6 +1559,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const [viewing,setViewing] = useState<Item>();
   const [finderOpen,setFinderOpen] = useState(false);
   const [loadError,setLoadError] = useState("");
+  const [loading,setLoading] = useState(true);
   const [taps,setTaps] = useState<Item[]>([]);
   const [syncing,setSyncing] = useState(false);
   const openedScanKey = useRef<number | undefined>(undefined);
@@ -1566,8 +1569,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   viewingRef.current = viewing;
   const load = useCallback(() => {
     setLoadError("");
-    return api<Item[]>(`/inventory/${module.id}`).then(setItems).catch((err) => {
+    setLoading(true);
+    return api<Item[]>(`/inventory/${module.id}`).then((rows) => {
+      setItems(rows);
+      setLoading(false);
+    }).catch((err) => {
       setLoadError(err instanceof Error ? err.message : "Could not load this section.");
+      setLoading(false);
     });
   }, [module.id]);
   const syncFromBrewfather = useCallback(async (force = false) => {
@@ -1726,6 +1734,15 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const emptyText = brewfatherReady
     ? "Sync batches from Brewfather, or add one by hand."
     : admin ? `Add your first ${module.singular.toLowerCase()} to begin.` : "Nothing on the shelf in this section yet.";
+  const emptyTitle = module.id === "spirits"
+    ? "Nothing on the shelf yet"
+    : `No ${module.label.toLowerCase()} yet`;
+  const viewState = inventoryViewState({
+    loading,
+    error: loadError,
+    itemCount: items.length,
+    filteredCount: filtered.length
+  });
 
   if (viewing) {
     return <BottleDetail
@@ -1751,16 +1768,19 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         {module.id !== "taps" && <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>}
       </div>}
     </div>
-    {items.length > 0 && <div className="filter-row">
+    {items.length > 0 && !loading && <div className="filter-row">
       <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value}>{value === "All" ? "All makers" : value}</option>)}</select>
       <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value}>{value === "All" ? (module.id === "spirits" ? "All families" : module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
       <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
       <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
       {activeFilters && <button type="button" className="secondary" onClick={() => { setSearch(""); setMaker("All"); setKind("All"); setTag("All"); setFlavor("All"); }}>Clear</button>}
     </div>}
-    {loadError ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
-    !items.length ? <Empty icon={module.icon} title={`No ${module.label.toLowerCase()} yet`} text={emptyText} actions={emptyActions}/> :
-    !filtered.length ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
+    {viewState === "error" ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
+    viewState === "loading" ? (module.id === "spirits"
+      ? <SpiritShelfSkeleton/>
+      : <div className="inventory-loading" aria-busy="true" aria-label={`Loading ${module.label}`}><span>Loading {module.label.toLowerCase()}…</span></div>) :
+    viewState === "empty" ? <Empty icon={module.icon} title={emptyTitle} text={emptyText} actions={emptyActions}/> :
+    viewState === "filtered-empty" ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
       <div className="inventory-grid">{listed.map((item) => {
         const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
