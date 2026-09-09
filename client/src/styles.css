@@ -922,3 +922,25 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .cleanup-findings h4{margin:0 0 8px;font:600 17px "Playfair Display",serif;color:var(--text)}
 .cleanup-findings ul{margin:0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.55}
 .cleanup-findings code{margin-left:4px;color:var(--text)}
+
+/* Gallery social (PR146): compact lightbox votes + comments */
+.gallery-lightbox .lightbox-stage{overflow-y:auto}
+.gallery-social{display:flex;flex-direction:column;gap:12px;width:100%;border-top:1px solid var(--line);padding-top:12px;margin-top:2px}
+.gallery-social-votes{display:flex;align-items:center;gap:10px}
+.gallery-social .vote-button{width:auto;min-width:62px;height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px}
+.gallery-social-count{font:600 15px "JetBrains Mono",ui-monospace,monospace}
+.gallery-social-comment-count{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:13px}
+.gallery-social-comments{max-height:min(30vh,220px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+.gallery-social-muted{color:var(--muted);font-size:13px;margin:4px 0}
+.gallery-social-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.gallery-social-item{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.gallery-social-item-text{min-width:0}
+.gallery-social-item-text strong{font-size:14px;margin-right:8px}
+.gallery-social-item-text small{color:var(--muted);font-size:11px}
+.gallery-social-item-text p{margin:3px 0 0;font-size:14px;line-height:1.4;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap}
+.gallery-social-form{display:flex;flex-direction:column;gap:8px}
+.gallery-social-author{width:100%}
+.gallery-social-send{display:flex;gap:8px;align-items:flex-end}
+.gallery-social-send textarea{flex:1;min-height:44px;resize:vertical;line-height:1.4}
+.gallery-social-submit{flex:none;min-width:48px;height:44px;display:inline-flex;align-items:center;justify-content:center}
+.gallery-social .error{margin:0}

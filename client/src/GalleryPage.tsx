@@ -32,6 +32,7 @@ import {
   defaultAlbumId,
   sortAlbumsForDisplay
 } from "./gallery-albums";
+import { GallerySocial } from "./GallerySocial";
 import {
   canRemoveGalleryUpload,
   formatGalleryBatchPartialMessage,
@@ -448,6 +449,7 @@ export function GalleryPage({ admin, keeperName }: { admin: boolean; keeperName:
                 </>
               ) : null}
             </div>
+            <GallerySocial mediaId={active.id} admin={admin}/>
           </figcaption>
         </figure>
       </div>
