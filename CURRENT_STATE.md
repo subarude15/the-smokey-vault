@@ -5,25 +5,22 @@ Last updated: 2026-09-09
 ## Current position
 
 Most recently completed:
-- **PR149** — Guest navigation, terminology, and Smokey Barrel naming. `client/src/shell-nav.ts` owns one authoritative concise nav-label map (`NAV_LABELS`/`navLabel`) used by the phone bottom bar, desktop/tablet rail, More sheet, and topbar title, plus a paired `DESTINATION_TITLES`/`destinationTitle` for fuller landing headings (Drinks → “What can I make?”, Spirits → “The Bottle Library”). The cocktail “Missing one” tab gained an accessible helper (`MISSING_ONE_HINT`, `client/src/cocktail-card.ts`) with no filter/count change, and the one Guest-visible “Smokey Vault” string became “Smokey Barrel”.
+- **PR153** — Remaining shell and chrome polish. Desktop/tablet rail shell now gives `main` the sole page-scroll path (`height: 100dvh` shell, `overflow-y: auto` on `main`; sidebar nav may still scroll when destinations exceed the viewport). Phone More sheet gained an explicit Close control (44px target, accessible name) alongside backdrop / Escape / destination dismissal with focus restore. Theme toggle uses `themeToggleLabel()` so assistive tech hears “Switch to Light theme” / “Switch to Dark theme”. Mobile horizontal overflow / stray shell scrollbar chrome did not reproduce on current `main` at ~390px, so no speculative scrollbar CSS was added. No navigation IA, Guest/Keeper privacy, backend/API/schema, or Light/Dark theme-semantic changes.
 
 Previously completed:
-- **PR148** — Live-use Guest/Keeper UX audit + focused cleanup. Removed the duplicate Guest topbar Keeper PIN shortcut while retaining Keeper access in the rail/More sheet; touch-only devices now reveal generic Keeper card actions without hover; phone toasts clear the fixed bottom nav; stale Admin/Patron Mode copy now uses Guest/Keeper terminology. No API, authentication, privacy, routing, schema, or visual-system changes.
+- **PR152** — Bottle Library flavor discovery and filter cleanup. Client-only Flavor vocabulary/search helpers (`spirit-flavors.ts`, `spirit-search.ts`) and simplified Family · Flavor · Availability filters.
 
 Previously completed:
-- **PR147** — Visual system / Smokey Barrel branding polish. The circular blackletter **SB monogram** (hop/scroll filigree) is the primary brand mark, rendered by `client/src/SbMark.tsx` on a warm near-black medallion (artwork is keyed to transparency so the white/gold reads in both themes) and wired into the shell brand, phone topbar, landing hero, favicon, and PWA icons (`client/public/brand/*`). Typography is tokenized (`--font-display` = `Manufacturing Consent` blackletter for brand moments/major headers only, pinned to weight 400 with `font-synthesis:none`; `--font-serif` = Playfair for content titles; `--font-sans` = Outfit for all body/nav/controls/forms/metadata; `--font-mono` = JetBrains Mono only for identifier/code-like values such as the build id, gallery vote counters, and the bulk-import textarea). Palette stays token-driven in `client/src/theme.ts`: Dark unchanged (warm charcoal + copper/amber); Light warmed to bone/smoke with a deeper amber `--accent-2` for small-label contrast. Light + Dark only; no IA/routing changes.
-
-Previously completed:
-- **PR146** — Gallery comments + up/down voting. Guests comment and cast one up/down vote from the Gallery lightbox via a compact social section (`client/src/GallerySocial.tsx`, rendered inside the `GalleryPage` lightbox). Server logic lives in `src/gallery-social.ts` (tables `gallery_comments` + `gallery_votes`, media-scoped indexes, `UNIQUE(media_id, voter_key)`); routes are `GET /api/gallery/:id/social`, `POST /api/gallery/:id/comments`, `DELETE /api/gallery/:id/comments/:commentId` (Keeper), `POST /api/gallery/:id/vote`. The anonymous voter key is derived server-side (`deriveGalleryVoterKey`, HMAC keyed with the session secret): the durable `smokey-voter` device token is the primary identity and, when present, the key is derived from that token alone (so a device stays one voter across IP/User-Agent changes), with an opaque IP + User-Agent key used only as a fallback when no device token is supplied. The key is never returned. Comments/votes are cleaned up transactionally inside `deleteGalleryMedia`; album move/rename leaves them untouched.
-
-Previously completed:
-- **PR145** — Cocktail recipe completeness, cocktail photo backfill, and Keeper build identifier. Built-in cocktails render deterministic preparation steps (`resolveCocktailInstructions` / `buildCocktailSteps` in `client/src/cocktail-instructions.ts`); `backfillMissingCocktailImages` (`src/cocktail_image.ts`) fills missing built-in cocktail photos at boot; a lightweight build identifier (`src/build-info.ts`, `GET /api/admin/build`) appears in Keeper Settings.
+- **PR151** — Bottle Library media and loading-state polish.
+- **PR150** — Overview hierarchy and responsive stat redesign.
+- **PR149** — Guest navigation, terminology, and Smokey Barrel naming (`NAV_LABELS` / `destinationTitle` in `shell-nav.ts`).
+- **PR148** — Live-use Guest/Keeper UX audit + focused cleanup.
 
 Currently working on:
-- **PR152** — Bottle Library flavor discovery and filter cleanup (branch `cursor/pr152-flavor-discovery-00d3`, not yet merged). New client-only pure helpers: `client/src/spirit-flavors.ts` derives a finite, controlled canonical Flavor vocabulary from the existing structured `flavors` + recognized `tasting_notes` terms (case-insensitive, word/phrase-aware, no junk facets, no mutation), and `client/src/spirit-search.ts` provides flavor-aware multi-word search (every token must match name/brand/family/subtype/base/notes/tasting/structured+derived flavors+flavor aliases/tags) plus Guest-safe `spiritIsAvailable`. The Bottle Library filter row is simplified to primary Family · Flavor · Availability (canonical flavors, availability from Guest-safe out-of-stock); the guest-facing Tags dropdown is dropped (tags stay free-text searchable), Clear resets every axis, and filtered-empty copy is distinct from a genuinely empty shelf. Entirely client-side — the Guest spirits response already includes `flavors`/`tasting_notes`/`tags`; no schema, API, privacy, or `tags`/`flavors` source mutations. No PR153 shell work.
+- Idle after PR153.
 
 Next planned:
-- Brewery Lab follow-up only if live use proves a specific usability gap (`ROADMAP.md` Track C).
+- **PR154 — Cocktail image discovery reliability** (alias-aware matching, bounded multi-query, Keeper stage diagnostics; preserve PR129 safety rules).
 
 ## Recent architectural decisions
 
@@ -43,8 +40,9 @@ Next planned:
 - Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
 - Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
 - Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
-- Appearance support is Light + Dark only (PR127).
+- Appearance support is Light + Dark only (PR127). Theme toggle accessible naming is action-oriented via `themeToggleLabel` (PR153).
 - App routing remains state-based in `App.tsx` (no React Router for primary navigation).
+- Rail shell scroll ownership (PR153): viewport-locked `.app-shell` on desktop/tablet landscape; `main` is the page scroller; phone portrait keeps document scroll.
 - GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR141 chore → feedback CTA visibility is PR142).
 - `.env` is optional for boot (`SESSION_SECRET` auto-generates into the vault DB); `KEEPER_GALLERY_MAX_VIDEO_MB` tunes the Keeper video ceiling without an image rebuild.
 
@@ -54,6 +52,7 @@ Next planned:
 - Keeper large uploads write temp files under `galleryDir/tmp` so finalization is a same-filesystem atomic rename; keep temp storage on the Gallery/data filesystem to avoid cross-device rename failure.
 - Draft **#121** branding docs are superseded by PR147's shipped visual system; keep Light/Dark only and the SB monogram identity.
 - Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
+- Deferred from PR153: global touch-target expansion; cocktail image discovery (PR154).
 
 ## Handoff
 

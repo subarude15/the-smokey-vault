@@ -92,7 +92,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR148 are complete. Start the new sequence at PR149; if another GitHub PR consumes a number first, shift the unstarted entries forward rather than reusing a number.
+These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR153 are complete. Start the next product sequence at PR154; if another GitHub PR consumes a number first, shift the unstarted entries forward rather than reusing a number.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.

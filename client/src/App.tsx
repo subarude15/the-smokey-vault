@@ -49,6 +49,7 @@ import {
   cycleTheme,
   storedTheme,
   themeLabel,
+  themeToggleLabel,
   type ThemeName
 } from "./theme";
 import {
@@ -422,6 +423,8 @@ export default function App() {
   const [contactOpen, setContactOpen] = useState(false);
   const scanReviewResolver = useRef<((outcome: ScanReviewOutcome) => void) | undefined>(undefined);
   const previousPageRef = useRef(page);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreCloseRef = useRef<HTMLButtonElement>(null);
   const enabledTabs = house.enabledTabs;
   const tabOrder = parseTabOrder(house.settings.tab_order);
   /** Guest landing page, respecting the keeper's tab order and visibility switches. */
@@ -461,9 +464,11 @@ export default function App() {
   useEffect(() => {
     if (!moreSheet) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMoreSheet(false);
+      if (event.key === "Escape") closeMoreSheet();
     };
     window.addEventListener("keydown", onKey);
+    // Move focus into the sheet so Escape/keyboard users are not stranded outside.
+    window.requestAnimationFrame(() => moreCloseRef.current?.focus());
     return () => window.removeEventListener("keydown", onKey);
   }, [moreSheet]);
   useEffect(() => {
@@ -534,8 +539,19 @@ export default function App() {
       if (next !== "cocktails") setCocktailFocus(null);
       setPage(next);
     }
+    const leavingMore = moreSheet;
     setMoreSheet(false);
     if (navHint) dismissNavHint();
+    // Destination selection dismisses More — park focus in main so it is not left on an inert sheet control.
+    if (leavingMore) {
+      window.requestAnimationFrame(() => {
+        const main = document.querySelector("main");
+        if (main instanceof HTMLElement) {
+          if (!main.hasAttribute("tabindex")) main.tabIndex = -1;
+          main.focus({ preventScroll: true });
+        }
+      });
+    }
   };
 
   // Leaving Events must drop ?event= so a later refresh does not reopen the old deep link.
@@ -649,13 +665,23 @@ export default function App() {
     localStorage.setItem("smokey-nav-hint-dismissed", "1");
     setNavHint(false);
   }
-  function closeOverlays() {
+  function closeMoreSheet() {
     setMoreSheet(false);
+    window.requestAnimationFrame(() => moreButtonRef.current?.focus());
+  }
+  function closeOverlays() {
+    closeMoreSheet();
   }
   function toggleMore() {
     if (navHint) dismissNavHint();
     if (!phoneShell) return;
-    setMoreSheet((open) => !open);
+    setMoreSheet((open) => {
+      if (open) {
+        window.requestAnimationFrame(() => moreButtonRef.current?.focus());
+        return false;
+      }
+      return true;
+    });
   }
   function navButton(item: { id: string; label: string; icon: typeof Bottle; badge?: number }) {
     return <button key={item.id} type="button" className={page === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={page === item.id ? "page" : undefined}>
@@ -705,7 +731,13 @@ export default function App() {
               <Mail/>
               {unread > 0 && <span className="topbar-badge">{unread > 99 ? "99+" : unread}</span>}
             </button>}
-            <button className="icon-button" onClick={() => setTheme(cycleTheme(theme))} aria-label="Change theme">{theme === "light" ? <Sun/> : <Moon/>}</button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setTheme(cycleTheme(theme))}
+              aria-label={themeToggleLabel(theme)}
+              title={themeToggleLabel(theme)}
+            >{theme === "light" ? <Sun aria-hidden="true"/> : <Moon aria-hidden="true"/>}</button>
           </div>
         </header>
         {admin && backupDue && <button className="backup-banner" onClick={() => navigate("settings")}><Database size={17}/><span>Your last portable backup is over 30 days old.</span><strong>Back up now</strong></button>}
@@ -809,6 +841,7 @@ export default function App() {
             </button>
           ))}
           {showMoreNav && <button
+            ref={moreButtonRef}
             type="button"
             className={moreTabActive ? "active" : ""}
             onClick={toggleMore}
@@ -816,13 +849,14 @@ export default function App() {
             aria-expanded={moreSheet}
             aria-controls="more-sheet"
           >
-            {moreSheet ? <ChevronUp size={20}/> : <Menu size={20}/>}
+            {moreSheet ? <ChevronUp size={20} aria-hidden="true"/> : <Menu size={20} aria-hidden="true"/>}
             <span>More</span>
           </button>}
         </nav>}
       </main>
       {phoneShell && <>
       <button
+        type="button"
         className={moreSheet ? "more-sheet-overlay open" : "more-sheet-overlay"}
         onClick={closeOverlays}
         aria-label="Close more menu"
@@ -837,8 +871,21 @@ export default function App() {
         aria-label="More sections"
         {...(moreSheet ? {} : { inert: true })}
       >
-        <div className="more-sheet-handle" aria-hidden="true"/>
-        <p className="more-sheet-kicker">More from the house</p>
+        <div className="more-sheet-chrome">
+          <div className="more-sheet-handle" aria-hidden="true"/>
+          <div className="more-sheet-heading">
+            <p className="more-sheet-kicker">More from the house</p>
+            <button
+              ref={moreCloseRef}
+              type="button"
+              className="icon-button more-sheet-close"
+              onClick={closeOverlays}
+              aria-label="Close more menu"
+            >
+              <X size={18} aria-hidden="true"/>
+            </button>
+          </div>
+        </div>
         <div className="more-sheet-body">
           {moreCollection.length > 0 && <>
             <span className="nav-label">Collection</span>

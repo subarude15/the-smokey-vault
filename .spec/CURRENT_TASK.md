@@ -2,13 +2,13 @@
 
 **Status: idle**
 
-PR148 complete — Live-use Guest/Keeper UX audit + focused cleanup.
+PR153 complete — Remaining shell and chrome polish.
 
-Ponytail audit found no P0 regressions. Bounded implementation list:
+Bounded implementation:
 
-1. Removed the duplicate Guest topbar Keeper PIN shortcut; the More/rail entry and unlock flow remain.
-2. Generic Keeper card actions stay visible on touch devices that cannot hover.
-3. Phone toasts clear the fixed bottom navigation.
-4. Stale Guest-facing “Admin” / “Patron Mode” wording now uses Guest/Keeper terminology.
+1. Desktop/tablet rail: `main` is the sole page scroller; sidebar nav may scroll only when needed.
+2. Phone More sheet: explicit Close control + backdrop / Escape / destination dismissal with focus restore.
+3. Theme toggle: action-oriented `themeToggleLabel` (“Switch to Light/Dark theme”).
+4. Mobile horizontal overflow / stray shell scrollbar chrome: not reproduced on current `main` — no speculative change.
 
-Deferred: global touch-target expansion, Brewery Lab follow-up, IA changes, media redesign, and backend/schema work without a reproducible live-use failure.
+Next planned code work: **PR154 — Cocktail image discovery reliability**.

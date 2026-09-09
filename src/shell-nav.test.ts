@@ -181,7 +181,8 @@ test("PR148 keeps Keeper entry in navigation, not the Guest topbar", () => {
   assert.doesNotMatch(appSrc, /!admin\s*&&\s*<button[^>]+aria-label="Enter Keeper PIN"/);
   assert.match(appSrc, /admin \? handToGuest\(\) : setUnlock\(true\)/);
   assert.match(appSrc, /Tap for Keeper Mode/);
-  assert.match(appSrc, /aria-label="Change theme"/);
+  assert.match(appSrc, /themeToggleLabel\(theme\)/);
+  assert.doesNotMatch(appSrc, /aria-label="Change theme"/);
 });
 
 test("phone bottom-nav and safe-area CSS; rail for landscape/desktop", () => {
