@@ -23,7 +23,7 @@ Next planned:
 ## Recent architectural decisions
 
 - Cocktail photo choice: native dialog for full-photo viewing and Keeper editing; shared ImageField for uploads. `/image-options` reuses bounded discovery with a preview collector (no cocktail writes, up to three unique localized alternatives). `/image` requires Keeper auth, an existing local image and the expected prior URL to prevent stale overwrites. No schema changes or automatic replacement. Preview files use existing content-addressed image storage; canceled preview files are retained, as with shared uploads.
-- Validation for photo choice: 39 focused tests and production build passed. Standalone client typecheck errors also exist on baseline. No live SearXNG/NAS/mobile verification from this workspace.
+- Validation for photo choice: 40 focused tests and production build passed. Pasted URLs localize through shared guarded media, and empty selection explicitly removes a photo. Standalone client typecheck errors also exist on baseline. No live SearXNG/NAS/mobile verification from this workspace.
 
 - Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation. Priority is Keeper structured `flavors` → Keeper `tasting_notes` → accepted enrichment official/house tasting text. Tags stay searchable free-text only and never become Flavor facets. Flavor dropdown options are computed after Family (and optionally Availability), without applying the current Flavor selection; invalid Flavor selections reset to All.
 

@@ -88,6 +88,16 @@ export type CocktailImageDiscoveryDeps = {
   onCandidate?: (candidate: { image_url: string; source_url: string }) => boolean;
 };
 
+/** Resolve a Keeper image choice through shared localization; empty removes it. */
+export async function resolveCocktailImageSelection(
+  requested: string,
+  localize: (url: string) => Promise<string | null> = (url) => localizeImage(url)
+): Promise<string> {
+  const image = requested.trim();
+  if (!image || !/^https?:\/\//i.test(image)) return image;
+  return acceptLocalizedCocktailImage(await localize(image), image);
+}
+
 /** Hosts that must never supply cocktail recipe imagery. */
 const REJECTED_HOST_FRAGMENTS = [
   "pinterest.",

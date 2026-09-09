@@ -82,7 +82,7 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 Production French 75 photo was cropped around an ornate stem. Detail images now contain the full photo and open an accessible native dialog. Keepers preview up to three localized discovery alternatives or use shared ImageField uploads/URLs, then explicitly save with a concurrent-edit guard. Existing fill-missing discovery and backfill remain unchanged.
 
-Validation: 39 focused tests passed; production build passed. Standalone client typecheck has pre-existing baseline errors. Live NAS/mobile verification remains pending deployment.
+Validation: 40 focused tests passed; production build passed. URL selections localize through shared guarded media and removal is committable. Standalone client typecheck has pre-existing baseline errors. Live NAS/mobile verification remains pending deployment.
 
 Follow-up: SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work. Operator enabled the working Google engine after live default engines returned CAPTCHA/rate-limit failures.
 

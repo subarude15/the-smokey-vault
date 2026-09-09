@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
-const { previewCocktailImages } = await import("./cocktail_image.js");
+const { previewCocktailImages, resolveCocktailImageSelection } = await import("./cocktail_image.js");
 const { app, createTestAdminToken } = await import("./server.js");
 const { db } = await import("./db.js");
 const { saveImageBuffer } = await import("./images.js");
@@ -25,6 +25,17 @@ test("preview preserves saved photo, deduplicates, caps choices and reuses bound
   assert.equal(row.image_url, "/api/media/images/current.jpg");
 });
 
+test("pasted URL selections localize through shared media and empty removes", async () => {
+  let requested = "";
+  const local = await resolveCocktailImageSelection(" https://publisher.example/photo.jpg ", async url => {
+    requested = url;
+    return "/api/media/images/localized.jpg";
+  });
+  assert.equal(requested, "https://publisher.example/photo.jpg");
+  assert.equal(local, "/api/media/images/localized.jpg");
+  assert.equal(await resolveCocktailImageSelection("", async () => { throw new Error("unused"); }), "");
+});
+
 test("photo mutation is Keeper-only, validates media and protects concurrent edits", async () => {
   const name = "photo-choice-route-test";
   db.prepare("DELETE FROM cocktails WHERE name=?").run(name);
@@ -35,12 +46,15 @@ test("photo mutation is Keeper-only, validates media and protects concurrent edi
       assert.equal((await app.inject({ method, url: `/api/cocktails/${id}/${suffix}`, payload: {} })).statusCode, 401);
     }
     const url = `/api/cocktails/${id}/image`;
-    for (const image_url of ["https://example.com/x.jpg", "/api/media/images/../secret.jpg", "/api/media/images/missing-file.jpg"]) {
+    for (const image_url of ["/api/media/images/../secret.jpg", "/api/media/images/missing-file.jpg"]) {
       assert.equal((await app.inject({ method: "PUT", url, headers, payload: { image_url, expected_image_url: "/api/media/images/original.jpg" } })).statusCode, 400);
     }
+    const remove = await app.inject({ method: "PUT", url, headers, payload: { image_url: "", expected_image_url: "/api/media/images/original.jpg" } });
+    assert.equal(remove.statusCode, 200);
+    assert.equal((db.prepare("SELECT image_url FROM cocktails WHERE id=?").get(id) as any).image_url, "");
     const image = saveImageBuffer(Buffer.from("photo-choice-test"), "image/png");
     assert.equal((await app.inject({ method: "PUT", url, headers, payload: { image_url: image, expected_image_url: "stale" } })).statusCode, 409);
-    assert.equal((await app.inject({ method: "PUT", url, headers, payload: { image_url: image, expected_image_url: "/api/media/images/original.jpg" } })).statusCode, 200);
+    assert.equal((await app.inject({ method: "PUT", url, headers, payload: { image_url: image, expected_image_url: "" } })).statusCode, 200);
     assert.equal((db.prepare("SELECT image_url FROM cocktails WHERE id=?").get(id) as any).image_url, image);
   } finally { db.prepare("DELETE FROM cocktails WHERE id=?").run(id); }
 });

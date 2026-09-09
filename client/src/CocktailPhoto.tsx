@@ -61,7 +61,7 @@ export function CocktailPhoto({ id, name, imageUrl, admin, onSaved }: {
           </button>)}</div>
           <ImageField value={draft} onChange={setDraft}/>
           {draft && <img className="cocktail-photo-preview" src={draft} alt="Selected photo preview"/>}
-          <button type="button" className="primary" disabled={!draft || draft === imageUrl || !draft.startsWith("/api/media/images/")} onClick={() => void save()}>Save photo</button>
+          <button type="button" className="primary" disabled={draft === imageUrl} onClick={() => void save()}>Save photo</button>
         </fieldset>
         {notice && <p role="status">{notice}</p>}
         {error && <p role="alert" className="error">{error}</p>}

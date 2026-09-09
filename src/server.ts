@@ -91,7 +91,8 @@ import {
   enrichImportedRecipeImage,
   findCocktailImage,
   loadCocktailImageRow,
-  previewCocktailImages
+  previewCocktailImages,
+  resolveCocktailImageSelection
 } from "./cocktail_image.js";
 import { getBuildInfo } from "./build-info.js";
 import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
@@ -1498,11 +1499,27 @@ app.put<{ Params: { id: string }; Body: { image_url?: unknown; expected_image_ur
   if (requireAdmin(request, reply)) return;
   const row = loadCocktailImageRow(Number(request.params.id));
   if (!row) return reply.code(404).send({ error: "Recipe not found" });
-  const { image_url: image, expected_image_url: expected } = request.body ?? {};
-  // Accept only already-localized, existing image files from shared media storage.
-  if (typeof image !== "string" || !/^\/api\/media\/images\/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp|gif|avif|heic)$/.test(image)
-      || !existsSync(join(imagesDir, basename(image))) || typeof expected !== "string") {
+  const { image_url: requestedImage, expected_image_url: expected } = request.body ?? {};
+  if (typeof requestedImage !== "string" || typeof expected !== "string") {
     return reply.code(400).send({ error: "Choose an uploaded or discovered photo" });
+  }
+  let image = requestedImage.trim();
+  if (image) {
+    if (/^https?:\/\//i.test(image)) {
+      // ImageField intentionally exposes a URL workflow. Localize through the
+      // same SSRF/content/size guarded media path before persisting it.
+      try {
+        image = await resolveCocktailImageSelection(image);
+      } catch {
+        image = "";
+      }
+      if (!image) return reply.code(400).send({ error: "Could not download that photo" });
+    }
+    // Persist only existing shared-media files; empty explicitly removes one.
+    if (!/^\/api\/media\/images\/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp|gif|avif|heic)$/.test(image)
+        || !existsSync(join(imagesDir, basename(image)))) {
+      return reply.code(400).send({ error: "Choose an uploaded or discovered photo" });
+    }
   }
   const changed = db.prepare("UPDATE cocktails SET image_url=? WHERE id=? AND COALESCE(image_url, '')=?")
     .run(image, row.id, expected);
