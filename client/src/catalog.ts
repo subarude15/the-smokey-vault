@@ -84,7 +84,7 @@ export {
   stripTastingBoilerplate
 } from "../../src/tasting-profile";
 export type { TastingProfile } from "../../src/tasting-profile";
-export { overviewGreeting, overviewHeroCopy } from "../../src/overview";
+export { overviewGreeting, overviewHeroCopy, overviewHeroLede } from "../../src/overview";
 export type { OverviewSnapshot, OverviewPour } from "../../src/overview";
 export {
   type RestockKind,

@@ -31,6 +31,7 @@ import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import { SbMark } from "./SbMark";
 import { MISSING_ONE_HINT } from "./cocktail-card";
+import { OverviewStats } from "./OverviewStats";
 import {
   guestSpiritAvailabilityLabel,
   guestTapAvailabilityLabel,
@@ -59,7 +60,7 @@ import {
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   spiritFamilyFromLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, recipeIngredientMatchesBottle, shelfBottleFromItem, shelfKindForModule,
-  overviewGreeting, overviewHeroCopy, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
+  overviewGreeting, overviewHeroLede, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
   type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME,
@@ -898,23 +899,6 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       .catch(() => setRestock(undefined));
   }
   useEffect(() => { load(); }, [admin]);
-  const orbitValue = snap?.spirits.on_shelf ?? 0;
-  const orbitLabel = "BOTTLES";
-  const stats = snap ? (admin ? [
-    { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: snap.spirits.low ? `${snap.spirits.low} running low` : "Spirits & mixers" },
-    { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: `${snap.taps.empty} open handle${snap.taps.empty === 1 ? "" : "s"}` },
-    { id: "brewery", icon: FlaskConical, value: snap.brews.active, label: "IN THE LAB", hint: snap.brews.archived ? `${snap.brews.archived} archived` : "Active batches" },
-    { id: "packaged_beer", icon: Beer, value: snap.packaged.units, label: "COLD ROOM", hint: snap.packaged.out ? `${snap.packaged.out} out of stock` : "Cans & bottles" },
-    { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: `${snap.wines.labels} on the rack` },
-    { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "READY TO POUR", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Matched to the shelf" }
-  ] : [
-    { id: "taps", icon: Beer, value: snap.taps.pouring, label: "POURING", hint: "What’s on tap tonight" },
-    { id: "cocktails", icon: Wine, value: snap.cocktails.ready, label: "OFF THE MENU", hint: snap.cocktails.almost ? `${snap.cocktails.almost} one bottle away` : "Drinks the shelf can make" },
-    { id: "spirits", icon: Bottle, value: snap.spirits.on_shelf, label: "ON THE SHELF", hint: "Spirits & mixers" },
-    { id: "wines", icon: Grape, value: snap.wines.bottles, label: "WINE CELLAR", hint: "On the rack" },
-    { id: "brewery", icon: FlaskConical, value: snap.brews.active, label: "BREWING", hint: "What’s in the pipeline" },
-    { id: "packaged_beer", icon: Beer, value: snap.packaged.units, label: "COLD ROOM", hint: "Cans & bottles on hand" }
-  ]) : [];
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
@@ -924,10 +908,11 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         <p className="hero-wordmark" role="heading" aria-level={1}>The Smokey Barrel</p>
         <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
       </div>
-      <div className="hero-orbit" aria-label={`${orbitValue} bottles on the shelf`}>
-        <span>{orbitValue}<small>{orbitLabel}</small></span>
+      {/* Decorative brand motif only — live counts live solely in the stat grid (PR150). */}
+      <div className="hero-orbit" aria-hidden="true">
+        <Wine/>
       </div>
-      <p className="hero-lede">{snap ? overviewHeroCopy(snap, !admin) : "Browse the collection, see what is pouring, and find your next perfect drink."}</p>
+      <p className="hero-lede">{overviewHeroLede(!admin)}</p>
     </div>
     {!admin && pageEnabled("cocktails", enabledTabs) && <div className="tonight-cta">
       <button type="button" className="primary" onClick={() => go("cocktails")}><Search size={18}/> Find a drink</button>
@@ -939,17 +924,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         <div><span className="eyebrow">AT A GLANCE</span><h2>Inside The Smokey Barrel</h2></div>
         {!admin && <span className="guest-badge"><Lock size={13}/> PATRON MODE</span>}
       </div>
-      <div className={`stat-grid${!admin ? " guest-stats" : ""}`}>
-        {stats.map((stat) => (
-          <button className="stat-card" key={stat.id} onClick={() => go(stat.id)}>
-            <stat.icon/>
-            <span>{stat.value}</span>
-            <small>{stat.label}</small>
-            <b className="stat-hint">{stat.hint}</b>
-            <ChevronRight/>
-          </button>
-        ))}
-      </div>
+      <OverviewStats snapshot={snap} admin={admin} loading={!snap && !error} onNavigate={go}/>
     </section>
     {snap && <section className="overview-board">
       <div className="section-heading"><div><span className="eyebrow">ON TAP</span><h2>What's pouring</h2></div><button type="button" className="secondary" onClick={() => go("taps")}>All handles</button></div>
