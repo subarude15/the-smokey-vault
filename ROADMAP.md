@@ -92,7 +92,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR153 are complete. Start the next product sequence at PR154; if another GitHub PR consumes a number first, shift the unstarted entries forward rather than reusing a number.
+These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR154 are complete. The roadmap now returns to evidence-driven Brewery Lab / live-use follow-up; start a new numbered entry only when a concrete next item exists.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -167,7 +167,7 @@ These are explicitly desired near-term product improvements based on real househ
    - **Goal:** Remove the small interaction defects that still make the responsive shell feel unfinished.
    - **Scope:** Reproduce each reported issue on current `main` before editing, then fix only what remains: competing desktop scroll containers, an explicit close control for the phone More sheet, accessible dynamic naming for the theme toggle, stray mobile scrollbar chrome, and any directly adjacent spacing/touch-target failure found at the agreed smoke widths. Reuse the PR134/PR148 shell and Light/Dark theme paths.
    - **Acceptance:** Desktop has one intentional page scroll path; the More sheet closes by its close button, backdrop, Escape, and destination selection without trapping focus; the theme control exposes its action to assistive technology; phone controls do not show unwanted scrollbar chrome; Guest and Keeper navigation remain reachable at 390px, tablet portrait/landscape, and desktop; shell tests and the production build pass. If a reported defect no longer reproduces, record it in the PR and make no speculative replacement change.
-19. **PR154 — Cocktail image discovery reliability**
+19. **PR154 — Cocktail image discovery reliability** (done)
    - **Goal:** Make Keeper “Find photo” succeed for common cocktails without falling back to untrustworthy image scraping.
    - **Scope:** Preserve PR129’s fill-missing, rejected-host, localization, and no-hotlink safety rules, but make identity verification less brittle. Add alias-aware / canonical-name matching (for example Basil Smash ↔ Gin Basil Smash), bounded multi-query search, and ingredient-assisted confirmation for strong near-matches while still rejecting obvious variants such as Strawberry Basil Smash. Keep exact-name matches highest priority. Add Keeper diagnostics that distinguish search miss, identity rejection, missing structured/OG image, and localization failure instead of only “No trustworthy photo found.”
    - **Acceptance:** Basil Smash is a regression fixture and can accept a trustworthy Gin Basil Smash recipe image when title/ingredients support identity; obvious flavored/modified variants remain rejected; existing images are never overwritten; rejected hosts remain rejected; accepted images are localized before persistence; Keeper no-result diagnostics identify the stage/reason; focused cocktail-image discovery tests and the production build pass.

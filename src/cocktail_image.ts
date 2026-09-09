@@ -6,6 +6,7 @@
  * for an exact-named cocktail recipe page and extract Recipe JSON-LD / OG image.
  * Always localize through existing image safety helpers before saving.
  */
+import { parseList } from "./catalog.js";
 import { db, getSetting, setSetting } from "./db.js";
 import { isLocalImagePath, localizeImage, type LocalizeImageDeps } from "./images.js";
 import { searchWebHits, type WebSearchHit } from "./ingestion/web-search.js";
@@ -14,10 +15,37 @@ import {
   metaContent,
   type ImportedRecipe
 } from "./recipe_import.js";
+import {
+  buildCocktailImageQueryPlan,
+  classifyCocktailIdentity,
+  cocktailIdentityAccepted,
+  normalizeCocktailName,
+  softTitleCocktailIdentity
+} from "./cocktail-image-identity.js";
+
+// Identity helpers now live in the pure identity module; re-export for callers
+// and existing tests that import them from here.
+export {
+  cocktailNamesMatchExact,
+  normalizeCocktailName,
+  softTitleCocktailIdentity
+} from "./cocktail-image-identity.js";
+export type { CocktailIdentityTier } from "./cocktail-image-identity.js";
+
+/** Bounded, user-readable reasons a discovery attempt produced no image. */
+export type CocktailImageNoResultReason =
+  | "missing_name"
+  | "not_found"
+  | "update_failed"
+  | "search_failed"
+  | "search_miss"
+  | "identity_rejected"
+  | "no_page_image"
+  | "localize_failed";
 
 export type CocktailImageDiscoveryResult =
   | { status: "updated"; image_url: string; source_url?: string }
-  | { status: "no_result"; reason?: string }
+  | { status: "no_result"; reason?: CocktailImageNoResultReason }
   | { status: "already_has_image"; image_url: string };
 
 export type CocktailImageRow = {
@@ -174,53 +202,6 @@ function hostMatches(host: string, fragments: readonly string[]): boolean {
   return fragments.some((frag) => host.includes(frag));
 }
 
-/** Punctuation/case-normalized cocktail identity token string. */
-export function normalizeCocktailName(name: string): string {
-  return text(name)
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/[''`]/g, "")
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-/**
- * Exact identity only (after normalize). Derivative names like
- * "Smoked Old Fashioned" do not match "Old Fashioned".
- */
-export function cocktailNamesMatchExact(candidate: string, target: string): boolean {
-  const a = normalizeCocktailName(candidate);
-  const b = normalizeCocktailName(target);
-  return Boolean(a) && a === b;
-}
-
-/**
- * Soften a page title into a candidate drink identity by stripping site branding
- * and generic recipe boilerplate — not drink modifiers.
- *
- * Site separators `|`, `·`, and `•` may drop publisher branding
- * (e.g. "Old Fashioned Cocktail Recipe | Liquor.com").
- * Do NOT strip after `-` / `–` / `—`: those often carry drink modifiers
- * ("Old Fashioned – Smoked Version") and must stay part of identity.
- */
-export function softTitleCocktailIdentity(title: string): string {
-  const main = (text(title).split(/\s*[|·•]\s*/)[0] ?? text(title)).trim();
-  let n = normalizeCocktailName(main);
-  n = n.replace(/^(the|a|an)\s+/, "");
-  for (let i = 0; i < 3; i++) {
-    const next = n
-      .replace(/^(how to make|make|best|homemade)\s+/, "")
-      .replace(/\s+(recipe|cocktail|drink|cocktails)$/, "")
-      .trim();
-    if (next === n) break;
-    n = next;
-  }
-  return n;
-}
-
 export function isRejectedCocktailImageHost(urlOrHost: string): boolean {
   const host = parseHost(urlOrHost) ?? urlOrHost.replace(/^www\./i, "").toLowerCase();
   if (!host) return true;
@@ -247,7 +228,13 @@ export function acceptLocalizedCocktailImage(
   return "";
 }
 
-type JsonLdRecipe = { name: string; image_url: string };
+type JsonLdRecipe = { name: string; image_url: string; ingredients: string[] };
+
+function ingredientStrings(value: unknown): string[] {
+  return asList(value)
+    .map((entry) => stripTags(String(entry ?? "")))
+    .filter(Boolean);
+}
 
 function parseJsonLdRecipes(html: string, pageUrl: string): JsonLdRecipe[] {
   const recipes: JsonLdRecipe[] = [];
@@ -265,7 +252,8 @@ function parseJsonLdRecipes(html: string, pageUrl: string): JsonLdRecipe[] {
         if (!name) continue;
         recipes.push({
           name,
-          image_url: imageFrom(record.image, pageUrl)
+          image_url: imageFrom(record.image, pageUrl),
+          ingredients: ingredientStrings(record.recipeIngredient ?? record.ingredients)
         });
       }
     } catch {
@@ -288,24 +276,56 @@ function pageHeadingTexts(html: string): string[] {
 
 /**
  * Whether a page strongly identifies the intended cocktail.
- * Accepts exact JSON-LD Recipe name, exact heading, or softened title identity.
+ * Accepts exact identity, or a base-spirit alias confirmed by the requested
+ * drink's own ingredients (PR154). JSON-LD Recipe names are checked with their
+ * own ingredients so flavored variants (e.g. Strawberry Basil Smash) are
+ * rejected; headings/titles fall back to name-only identity.
  */
-export function pageIdentifiesCocktail(html: string, cocktailName: string): boolean {
+export function pageIdentifiesCocktail(
+  html: string,
+  cocktailName: string,
+  targetIngredients: readonly string[] = []
+): boolean {
   const target = normalizeCocktailName(cocktailName);
   if (!target) return false;
 
-  for (const recipe of parseJsonLdRecipes(html, "https://example.invalid/")) {
-    if (cocktailNamesMatchExact(recipe.name, cocktailName)) return true;
+  const recipes = parseJsonLdRecipes(html, "https://example.invalid/");
+  for (const recipe of recipes) {
+    const result = classifyCocktailIdentity({
+      target: cocktailName,
+      candidate: recipe.name,
+      targetIngredients,
+      candidateIngredients: recipe.ingredients
+    });
+    if (cocktailIdentityAccepted(result)) return true;
   }
 
+  // Heading/title matches must still respect the page's recipe ingredients so an
+  // exact-named page whose Recipe adds a flavor modifier (e.g. strawberry) is
+  // rejected rather than accepted on the clean heading alone.
+  const pageIngredients = recipes.flatMap((recipe) => recipe.ingredients);
+
   for (const heading of pageHeadingTexts(html)) {
-    if (cocktailNamesMatchExact(heading, cocktailName)) return true;
-    if (softTitleCocktailIdentity(heading) === target) return true;
+    if (cocktailIdentityAccepted(classifyCocktailIdentity({
+      target: cocktailName,
+      candidate: heading,
+      targetIngredients,
+      candidateIngredients: pageIngredients
+    }))) {
+      return true;
+    }
   }
 
   const ogTitle = metaContent(html, "og:title");
   const title = ogTitle || stripTags(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] ?? "");
-  if (title && softTitleCocktailIdentity(title) === target) return true;
+  if (title && cocktailIdentityAccepted(classifyCocktailIdentity({
+    target: cocktailName,
+    candidate: title,
+    targetIngredients,
+    candidateIngredients: pageIngredients
+  }))) {
+    return true;
+  }
 
   return false;
 }
@@ -315,10 +335,20 @@ export function pageIdentifiesCocktail(html: string, cocktailName: string): bool
  * Order: Recipe JSON-LD image → og:image → twitter:image.
  * Does not scrape arbitrary <img> tags.
  */
-export function extractCocktailRecipeImage(html: string, pageUrl: string, cocktailName?: string): string {
+export function extractCocktailRecipeImage(
+  html: string,
+  pageUrl: string,
+  cocktailName?: string,
+  targetIngredients: readonly string[] = []
+): string {
   const recipes = parseJsonLdRecipes(html, pageUrl);
   const matched = cocktailName
-    ? recipes.find((recipe) => cocktailNamesMatchExact(recipe.name, cocktailName))
+    ? recipes.find((recipe) => cocktailIdentityAccepted(classifyCocktailIdentity({
+        target: cocktailName,
+        candidate: recipe.name,
+        targetIngredients,
+        candidateIngredients: recipe.ingredients
+      })))
     : recipes[0];
   if (matched?.image_url) {
     try {
@@ -372,29 +402,47 @@ function rankSearchHit(hit: WebSearchHit): number {
   return score;
 }
 
-export function filterCocktailImageSearchHits(hits: WebSearchHit[], cocktailName: string): WebSearchHit[] {
+export function filterCocktailImageSearchHits(
+  hits: WebSearchHit[],
+  cocktailName: string,
+  targetIngredients: readonly string[] = []
+): WebSearchHit[] {
   const target = normalizeCocktailName(cocktailName);
   const scored = hits
     .map((hit) => ({ hit, score: rankSearchHit(hit) }))
     .filter((row) => row.score > 0)
     .filter((row) => {
+      if (!row.hit.url) return false;
+      const identity = classifyCocktailIdentity({
+        target: cocktailName,
+        candidate: row.hit.title,
+        targetIngredients
+      });
+      // Exact/alias titles are always eligible (the page gate still verifies).
+      if (cocktailIdentityAccepted(identity)) return true;
+      // Drop titles that are clearly a derivative/variant OF this drink.
       const titleId = softTitleCocktailIdentity(row.hit.title);
-      if (titleId === target) return true;
-      if (isPreferredCocktailRecipeHost(row.hit.url)) return true;
-      // Reject obvious derivative titles early.
       if (titleId.includes(target) && titleId !== target) return false;
-      return Boolean(row.hit.url);
+      // Unrelated-but-not-derivative titles (and preferred hosts) reach the page gate.
+      return true;
     })
     .sort((a, b) => b.score - a.score);
   return scored.map((row) => row.hit);
 }
 
+type CocktailPageAttempt =
+  | { stage: "ok"; imageUrl: string; sourceUrl: string }
+  | { stage: "skip" } // rejected host or fetch failure
+  | { stage: "identity" } // fetched, but not the requested cocktail
+  | { stage: "no_image" }; // identified, but no usable Recipe/OG image
+
 async function tryImageFromPage(
   pageUrl: string,
   cocktailName: string,
+  targetIngredients: readonly string[],
   deps: CocktailImageDiscoveryDeps
-): Promise<{ imageUrl: string; sourceUrl: string } | null> {
-  if (!pageUrl || isRejectedCocktailImageHost(pageUrl)) return null;
+): Promise<CocktailPageAttempt> {
+  if (!pageUrl || isRejectedCocktailImageHost(pageUrl)) return { stage: "skip" };
   const fetchHtml = deps.fetchHtml ?? fetchPublicHtml;
   let html: string;
   let finalUrl: string;
@@ -403,13 +451,13 @@ async function tryImageFromPage(
     html = page.html;
     finalUrl = page.finalUrl || pageUrl;
   } catch {
-    return null;
+    return { stage: "skip" };
   }
-  if (isRejectedCocktailImageHost(finalUrl)) return null;
-  if (!pageIdentifiesCocktail(html, cocktailName)) return null;
-  const imageUrl = extractCocktailRecipeImage(html, finalUrl, cocktailName);
-  if (!imageUrl || isRejectedCocktailImageHost(imageUrl)) return null;
-  return { imageUrl, sourceUrl: finalUrl };
+  if (isRejectedCocktailImageHost(finalUrl)) return { stage: "skip" };
+  if (!pageIdentifiesCocktail(html, cocktailName, targetIngredients)) return { stage: "identity" };
+  const imageUrl = extractCocktailRecipeImage(html, finalUrl, cocktailName, targetIngredients);
+  if (!imageUrl || isRejectedCocktailImageHost(imageUrl)) return { stage: "no_image" };
+  return { stage: "ok", imageUrl, sourceUrl: finalUrl };
 }
 
 async function localizeAccepted(
@@ -435,51 +483,73 @@ export async function discoverCocktailImage(
   const name = text(row.name);
   if (!name) return { status: "no_result", reason: "missing_name" };
 
+  const targetIngredients = parseList(row.ingredients);
   const maxCandidates = deps.maxCandidates ?? 6;
+
+  // Furthest stage reached, for a specific Keeper-facing diagnostic.
+  let sawIdentityReject = false;
+  let sawNoImage = false;
+  let sawLocalizeFail = false;
+
+  async function attemptPage(pageUrl: string): Promise<CocktailImageDiscoveryResult | null> {
+    const attempt = await tryImageFromPage(pageUrl, name, targetIngredients, deps);
+    if (attempt.stage === "ok") {
+      const local = await localizeAccepted(attempt.imageUrl, deps);
+      if (local) return { status: "updated", image_url: local, source_url: attempt.sourceUrl };
+      sawLocalizeFail = true;
+    } else if (attempt.stage === "identity") {
+      sawIdentityReject = true;
+    } else if (attempt.stage === "no_image") {
+      sawNoImage = true;
+    }
+    return null;
+  }
 
   // Imported source page is strongest identity evidence — try it before any web search.
   const sourceUrl = text(row.source_url);
   if (sourceUrl && !isRejectedCocktailImageHost(sourceUrl)) {
-    const fromSource = await tryImageFromPage(sourceUrl, name, deps);
-    if (fromSource) {
-      const local = await localizeAccepted(fromSource.imageUrl, deps);
-      if (local) {
-        return {
-          status: "updated",
-          image_url: local,
-          source_url: fromSource.sourceUrl
-        };
-      }
-    }
+    const fromSource = await attemptPage(sourceUrl);
+    if (fromSource) return fromSource;
   }
 
-  const candidates: string[] = [];
+  // Bounded, deterministic query plan: exact → base-spirit alias → ingredient-assisted.
   const search = deps.searchWebHits ?? searchWebHits;
-  try {
-    const query = buildCocktailImageSearchQuery(name, row.notes);
-    const hits = filterCocktailImageSearchHits(await search(query, 10), name);
-    for (const hit of hits) {
-      if (hit.url === sourceUrl) continue;
-      candidates.push(hit.url);
-      if (candidates.length >= maxCandidates) break;
+  const baseQuery = buildCocktailImageSearchQuery(name, row.notes);
+  const queries = buildCocktailImageQueryPlan(name, targetIngredients, baseQuery);
+  const seen = new Set<string>();
+  if (sourceUrl) seen.add(sourceUrl);
+  const candidates: string[] = [];
+  let anyHits = false;
+  for (const query of queries) {
+    let hits: WebSearchHit[];
+    try {
+      hits = filterCocktailImageSearchHits(await search(query, 10), name, targetIngredients);
+    } catch {
+      return { status: "no_result", reason: "search_failed" };
     }
-  } catch {
-    return { status: "no_result", reason: "search_failed" };
+    if (hits.length) anyHits = true;
+    for (const hit of hits) {
+      if (!hit.url || seen.has(hit.url)) continue;
+      seen.add(hit.url);
+      candidates.push(hit.url);
+    }
+    if (candidates.length >= maxCandidates) break;
+  }
+  const limited = candidates.slice(0, maxCandidates);
+
+  for (const pageUrl of limited) {
+    const found = await attemptPage(pageUrl);
+    if (found) return found;
   }
 
-  for (const pageUrl of candidates) {
-    const found = await tryImageFromPage(pageUrl, name, deps);
-    if (!found) continue;
-    const local = await localizeAccepted(found.imageUrl, deps);
-    if (!local) continue;
-    return {
-      status: "updated",
-      image_url: local,
-      source_url: found.sourceUrl
-    };
-  }
-
-  return { status: "no_result", reason: "no_trustworthy_source" };
+  const reason: CocktailImageNoResultReason = sawLocalizeFail
+    ? "localize_failed"
+    : sawNoImage
+      ? "no_page_image"
+      : sawIdentityReject || anyHits
+        ? "identity_rejected"
+        : "search_miss";
+  return { status: "no_result", reason };
 }
 
 export function loadCocktailImageRow(id: number): CocktailImageRow | null {
