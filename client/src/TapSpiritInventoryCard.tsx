@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import { Beer, BottleWine, FlaskConical, Settings, WineOff } from "lucide-react";
+import { Beer, FlaskConical, Settings, WineOff } from "lucide-react";
 import { api, type Item } from "./api";
 import {
   BLOCKED_RIBBON_LABEL,
@@ -24,6 +24,7 @@ import {
   spiritGaugePct,
   tapGaugeForDisplay
 } from "./guestAvailability";
+import { SpiritCardMedia } from "./SpiritCardMedia";
 import "./tap-spirit-card.css";
 
 type CardProps = {
@@ -64,11 +65,11 @@ function isHomebrew(item: Item): boolean {
   return /^homebrew$/i.test(text(item.source_type));
 }
 
-function CardMedia({ item, kind }: { item: Item; kind: "tap" | "spirit" }) {
+function TapCardMedia({ item }: { item: Item }) {
   const src = imageUrl(item);
-  const label = kind === "tap" ? tapTitle(item) : text(item.name) || "Bottle";
+  const label = tapTitle(item);
   return <div className={`domain-card-media ${src ? "has-image" : ""}`} aria-hidden={!src}>
-    {src ? <img src={src} alt={label}/> : kind === "tap" ? <Beer/> : <BottleWine/>}
+    {src ? <img src={src} alt={label}/> : <Beer/>}
   </div>;
 }
 
@@ -143,7 +144,7 @@ export function TapInventoryCard({
       onKeyDown={(event) => openOnKeyboard(event, onOpenDetail)}
       aria-label={empty ? `Tap ${item.tap_number}, empty` : `Tap ${item.tap_number}, ${tapTitle(item)}`}
     >
-      <CardMedia item={item} kind="tap"/>
+      <TapCardMedia item={item}/>
       <div className="domain-card-copy">
         <div className="domain-card-kicker">
           <span className="tap-number">Tap {item.tap_number}</span>
@@ -241,7 +242,7 @@ export function SpiritInventoryCard({ item, admin, onOpenDetail, onEdit, onUpdat
       onKeyDown={(event) => openOnKeyboard(event, onOpenDetail)}
       aria-label={`Open ${text(item.name) || "bottle"} details`}
     >
-      <CardMedia item={item} kind="spirit"/>
+      <SpiritCardMedia item={item}/>
       <div className="domain-card-copy">
         <div className="domain-card-kicker">
           <span>{text(item.brand) || family || "Bottle Library"}</span>
