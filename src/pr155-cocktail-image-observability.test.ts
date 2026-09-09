@@ -206,9 +206,75 @@ test("structured image extraction covers string, array, ImageObject, @graph, OG"
   );
 });
 
-test("image asset host policy rejects stock CDNs but allows publisher CDNs", () => {
-  assert.equal(isRejectedCocktailImageAssetHost("https://i.pinimg.com/x.jpg"), true);
+test("image asset host policy allows publisher CDNs and rejects stock/retailer/content hosts", () => {
   assert.equal(isRejectedCocktailImageAssetHost("https://cdn.seriouseats.com/french75.jpg"), false);
+  for (const url of [
+    "https://i.pinimg.com/x.jpg",
+    "https://www.shutterstock.com/image.jpg",
+    "https://www.amazon.com/images/I/french75.jpg",
+    "https://www.walmart.com/images/french75.jpg",
+    "https://www.ebay.com/images/french75.jpg",
+    "https://www.etsy.com/images/french75.jpg",
+    "https://www.target.com/images/french75.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/french75.jpg",
+    "https://en.wikipedia.org/wiki/Special:FilePath/French_75.jpg",
+    "https://mybar.blogspot.com/french75.jpg",
+    "https://mybar.wordpress.com/french75.jpg",
+    "https://medium.com/@author/french75.jpg",
+    "https://author.substack.com/french75.jpg",
+    "https://www.quora.com/images/french75.jpg"
+  ]) {
+    assert.equal(isRejectedCocktailImageAssetHost(url), true, url);
+  }
+});
+
+test("accepted recipe page with prohibited image asset yields no_page_image and never localizes", async () => {
+  const prohibitedImages = [
+    "https://www.amazon.com/images/I/french75.jpg",
+    "https://www.walmart.com/images/french75.jpg",
+    "https://i.pinimg.com/originals/french75.jpg",
+    "https://www.shutterstock.com/image-photo/french-75.jpg"
+  ];
+
+  for (const image of prohibitedImages) {
+    let localizeCalls = 0;
+    const html = recipePage({
+      name: "French 75",
+      image,
+      ingredients: FRENCH_75_INGREDIENTS,
+      title: "French 75 Cocktail Recipe | Serious Eats"
+    });
+    const result = await discoverCocktailImage(
+      {
+        id: 11,
+        name: "French 75",
+        ingredients: FRENCH_75_INGREDIENTS.join("\n"),
+        image_url: null,
+        source_url: null
+      },
+      {
+        searchWebHits: async () => [
+          {
+            title: "French 75 Cocktail Recipe",
+            url: "https://www.seriouseats.com/french-75",
+            content: "cocktail recipe"
+          }
+        ],
+        fetchHtml: async (url) => ({ html, finalUrl: url }),
+        localizeImage: async () => {
+          localizeCalls += 1;
+          return "/api/media/images/cocktails/french-75.jpg";
+        }
+      }
+    );
+    assert.equal(result.status, "no_result", image);
+    if (result.status === "no_result") {
+      assert.equal(result.reason, "no_page_image", image);
+      assert.ok((result.diagnostics?.image_host_rejects ?? 0) >= 1, image);
+      assert.equal(result.diagnostics?.localize_attempts ?? 0, 0, image);
+    }
+    assert.equal(localizeCalls, 0, `localize must not run for ${image}`);
+  }
 });
 
 test("French 75 positive path: search → page → image → localize", async () => {

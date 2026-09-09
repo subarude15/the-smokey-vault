@@ -239,24 +239,17 @@ export function isRejectedCocktailImageHost(urlOrHost: string): boolean {
   return hostMatches(host, REJECTED_HOST_FRAGMENTS);
 }
 
-/** Stock/social image CDNs — applied to image asset URLs, not recipe page hosts. */
-const REJECTED_IMAGE_ASSET_FRAGMENTS = [
-  "pinterest.", "pinimg.", "shutterstock.", "gettyimages.", "istockphoto.",
-  "unsplash.", "pexels.", "adobe.com", "stock.adobe", "dreamstime.", "alamy.",
-  "depositphotos.", "facebook.com", "fbcdn.", "instagram.com", "cdninstagram.",
-  "twitter.com", "x.com", "t.co", "tiktok.com", "youtube.com", "youtu.be",
-  "reddit.com", "redd.it", "tumblr.com", "flickr.com"
-] as const;
-
 /**
- * Whether an *image asset* URL is from a rejected stock/social host.
- * Distinct from recipe-page host rejection: a trustworthy recipe page may serve
- * its photo from a publisher CDN on another hostname.
+ * Whether an *image asset* URL is from a prohibited host class.
+ *
+ * Uses the same denylist as recipe-page rejection (stock, social, retailer,
+ * wiki, and generic user-content hosts). Distinct from page-host checks only
+ * in *when* it is applied: a trustworthy recipe page may still serve its photo
+ * from a separate publisher CDN hostname that is not on this denylist.
+ * Do not require image hostname === recipe hostname.
  */
 export function isRejectedCocktailImageAssetHost(urlOrHost: string): boolean {
-  const host = parseHost(urlOrHost) ?? urlOrHost.replace(/^www\./i, "").toLowerCase();
-  if (!host) return true;
-  return hostMatches(host, REJECTED_IMAGE_ASSET_FRAGMENTS);
+  return isRejectedCocktailImageHost(urlOrHost);
 }
 
 
@@ -510,7 +503,9 @@ async function tryImageFromPage(
   if (!pageIdentifiesCocktail(html, cocktailName, targetIngredients)) return { stage: "identity" };
   const imageUrl = extractCocktailRecipeImage(html, finalUrl, cocktailName, targetIngredients);
   if (!imageUrl) return { stage: "no_image" };
-  // Recipe page host ≠ image CDN host. Reject only stock/social asset hosts here.
+  // Recipe page host ≠ image CDN host. Apply the full prohibited-host denylist to
+  // the asset URL (retailer/social/stock/wiki/user-content), but do not require
+  // the image hostname to match the recipe page hostname.
   if (isRejectedCocktailImageAssetHost(imageUrl)) {
     return { stage: "no_image", imageHostRejected: true };
   }
