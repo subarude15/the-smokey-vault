@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
   Library, Link, LoaderCircle, Lock, LockOpen, Mail, Menu, Moon, Plus, Power, RefreshCw, Save, ScanBarcode, Search, Settings, Share2, Shirt, ShoppingBag, Shuffle, Sparkles, Star, Sun, ThumbsUp, Trash2, Upload, Users, Wine, X, ClipboardPaste
@@ -34,6 +34,8 @@ import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import { SbMark } from "./SbMark";
 import { MISSING_ONE_HINT } from "./cocktail-card";
 import { OverviewStats } from "./OverviewStats";
+import { CANONICAL_FLAVOR_LABELS, deriveSpiritFlavors } from "./spirit-flavors";
+import { bottleSearchHaystack, matchesBottleSearch, spiritIsAvailable } from "./spirit-search";
 import {
   guestSpiritAvailabilityLabel,
   guestTapAvailabilityLabel,
@@ -1677,11 +1679,39 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const [kind,setKind] = useState("All");
   const [tag,setTag] = useState("All");
   const [flavor,setFlavor] = useState("All");
+  const [avail,setAvail] = useState("All");
+  // PR152: the Bottle Library (spirits) derives canonical Guest-facing flavor
+  // facets and uses flavor-aware, multi-word search + availability. Other
+  // modules keep the existing simple filter behavior.
+  const isBottleLibrary = module.id === "spirits";
+  const derivedFlavorsById = useMemo(() => {
+    const map = new Map<number, string[]>();
+    if (isBottleLibrary) for (const item of items) map.set(Number(item.id), deriveSpiritFlavors(item));
+    return map;
+  }, [items, isBottleLibrary]);
+  const spiritFlavorOptions = useMemo(() => {
+    if (!isBottleLibrary) return [];
+    const present = new Set<string>();
+    for (const list of derivedFlavorsById.values()) for (const label of list) present.add(label);
+    return CANONICAL_FLAVOR_LABELS.filter((label) => present.has(label));
+  }, [derivedFlavorsById, isBottleLibrary]);
   const makers = ["All", ...uniqueValues(items, module.makerKey)];
   const kinds = ["All", ...(module.id === "wines" ? uniqueWineKinds(items) : uniqueValues(items, module.kindKey))];
   const tags = ["All", ...uniqueItemLists(items, "tags")];
-  const flavors = ["All", ...uniqueItemLists(items, "flavors")];
+  const flavors = isBottleLibrary ? ["All", ...spiritFlavorOptions] : ["All", ...uniqueItemLists(items, "flavors")];
   const filtered = items.filter((item) => {
+    if (isBottleLibrary) {
+      const derived = derivedFlavorsById.get(Number(item.id)) ?? [];
+      if (search.trim() && !matchesBottleSearch(bottleSearchHaystack(item, derived), search)) return false;
+      if (kind !== "All" && String(item[module.kindKey] ?? "") !== kind) return false;
+      if (flavor !== "All" && !derived.some((value) => value.toLowerCase() === flavor.toLowerCase())) return false;
+      if (avail !== "All") {
+        const available = spiritIsAvailable(item);
+        if (avail === "available" && !available) return false;
+        if (avail === "out" && available) return false;
+      }
+      return true;
+    }
     const haystack = JSON.stringify(item).toLowerCase();
     if (search && !haystack.includes(search.toLowerCase())) return false;
     if (maker !== "All" && String(item[module.makerKey] ?? "") !== maker) return false;
@@ -1695,7 +1725,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
     if (flavor !== "All" && !parseList(item.flavors).some((value) => value.toLowerCase() === flavor.toLowerCase())) return false;
     return true;
   });
-  const activeFilters = maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
+  const activeFilters = isBottleLibrary
+    ? kind !== "All" || flavor !== "All" || avail !== "All" || Boolean(search.trim())
+    : maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
+  function clearFilters() {
+    setSearch(""); setMaker("All"); setKind("All"); setTag("All"); setFlavor("All"); setAvail("All");
+  }
   async function remove(id:number) {
     if (!confirm("Remove this item from the vault? Its enrichment history and unused lookup cache will also be cleared.")) return;
     try {
@@ -1737,6 +1772,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const emptyTitle = module.id === "spirits"
     ? "Nothing on the shelf yet"
     : `No ${module.label.toLowerCase()} yet`;
+  const activeBottleFacets = isBottleLibrary
+    ? [kind !== "All" ? kind : null, flavor !== "All" ? flavor : null].filter(Boolean).join(" · ")
+    : "";
+  const filteredEmptyText = isBottleLibrary
+    ? `No bottles match ${activeBottleFacets ? activeBottleFacets : "those filters"}. Try clearing a filter to see the full shelf.`
+    : `Nothing in ${module.label.toLowerCase()} matches those filters.`;
   const viewState = inventoryViewState({
     loading,
     error: loadError,
@@ -1768,19 +1809,28 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         {module.id !== "taps" && <button className="primary" onClick={() => setEditing(null)}><Plus/> Add {module.singular}</button>}
       </div>}
     </div>
-    {items.length > 0 && !loading && <div className="filter-row">
+    {items.length > 0 && !loading && (isBottleLibrary ? <div className="filter-row bottle-filter-row">
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by family">{kinds.map((value)=><option key={value}>{value === "All" ? "All families" : value}</option>)}</select>
+      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      <select value={avail} onChange={(e)=>setAvail(e.target.value)} aria-label="Filter by availability">
+        <option value="All">Any availability</option>
+        <option value="available">On the shelf</option>
+        <option value="out">Out of stock</option>
+      </select>
+      {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
+    </div> : <div className="filter-row">
       <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value}>{value === "All" ? "All makers" : value}</option>)}</select>
-      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value}>{value === "All" ? (module.id === "spirits" ? "All families" : module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value}>{value === "All" ? (module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
       <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
       <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
-      {activeFilters && <button type="button" className="secondary" onClick={() => { setSearch(""); setMaker("All"); setKind("All"); setTag("All"); setFlavor("All"); }}>Clear</button>}
-    </div>}
+      {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
+    </div>)}
     {viewState === "error" ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
     viewState === "loading" ? (module.id === "spirits"
       ? <SpiritShelfSkeleton/>
       : <div className="inventory-loading" aria-busy="true" aria-label={`Loading ${module.label}`}><span>Loading {module.label.toLowerCase()}…</span></div>) :
     viewState === "empty" ? <Empty icon={module.icon} title={emptyTitle} text={emptyText} actions={emptyActions}/> :
-    viewState === "filtered-empty" ? <Empty icon={module.icon} title="No matches" text={`Nothing in ${module.label.toLowerCase()} matches those filters.`}/> :
+    viewState === "filtered-empty" ? <Empty icon={module.icon} title="No matches" text={filteredEmptyText}/> :
       <div className="inventory-grid">{listed.map((item) => {
         const brewTaps = module.id === "brews" ? tapsForBatch(taps, item.batch_name) : [];
         const brewAbvText = module.id === "brews" ? brewAbvDisplay(item) : "";
