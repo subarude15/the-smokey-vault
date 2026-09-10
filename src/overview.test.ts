@@ -10,9 +10,10 @@ test("overviewGreeting follows the clock", () => {
   assert.equal(overviewGreeting(new Date(2026, 7, 21, 2, 0, 0)).eyebrow, "AFTER HOURS");
 });
 
-test("patron greeting invites guests under the house wordmark", () => {
+test("guest greeting invites guests under the house wordmark (plain eyebrow)", () => {
   const guest = overviewGreeting(new Date(2026, 7, 21, 19, 0, 0), true);
-  assert.equal(guest.eyebrow, "GOOD EVENING · PATRON LOUNGE");
+  assert.equal(guest.eyebrow, "GOOD EVENING");
+  assert.doesNotMatch(guest.eyebrow, /PATRON|LOUNGE/);
   assert.equal(guest.line, "Pull up a stool.");
   assert.equal(guest.emphasize, "Tonight's yours.");
 });

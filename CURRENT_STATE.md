@@ -1,10 +1,13 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## Current position
 
 Most recently completed:
+- **PR159** — Homepage Brand Hero & Filigree Refinement. The Dashboard hero now shows the real **Smokey Barrel** wordmark as genuine traced vector `<path>` art (`client/src/SmokeyBarrelWordmark.tsx`): copper distressed `THE` (`--accent`) over blackletter `Smokey`/`Barrel` (`currentColor` = `--text`), legible in both themes, kept as an accessible level-1 heading (SVG `role="img"` + `aria-label`); no `<text>`, no font substitute, no embedded raster. A restrained, decorative hop-vine filigree (`client/src/HopFiligree.tsx`, also traced vector) flows down the upper-right of the hero and fades before the CTAs — `aria-hidden`, `pointer-events:none`, tinted via `--line` (charcoal/gunmetal Dark, muted neutral Light) with a copper touch, clipped so it never overflows; verified 320–430px. Removed the duplicate SB medallion (`hero-brand`) and the wine-glass orbit ornament (`hero-orbit`/`orbit-glow`); the single SB medallion still anchors the shell brand + phone topbar. Purged "Patron/Lounge" from the homepage: guest greeting eyebrow is the plain time-of-day line (`overviewGreeting`), the `PATRON MODE` badge is gone, and the guest unlock affordance reads **Keeper Mode** / **Tap to unlock**. Frontend presentation + copy only (plus the pure greeting helper/tests); no DB/API/serializer/auth/schema/route changes and no `PatronsPage` rename.
+
+Previously completed:
 - **PR154** — Cocktail image discovery reliability. Extracted a pure identity model (`src/cocktail-image-identity.ts`): exact normalized name (strongest) → base-spirit alias confirmed by the drink's own ingredients (e.g. Basil Smash ↔ Gin Basil Smash when the recipe has gin) → reject everything else. Any meaningful modifier token (Strawberry/Smoked/…) or an unconfirmed/different base spirit rejects the candidate; a candidate whose ingredients add a flavor variant absent from the target is also rejected. `src/cocktail_image.ts` now runs a bounded 3-query plan (exact → alias → ingredient-assisted, deduped), classifies JSON-LD/heading/title identity with ingredient evidence, and returns staged Keeper diagnostics (`search_miss` / `identity_rejected` / `no_page_image` / `localize_failed` / `search_failed`) surfaced via `cocktailImageDiscoveryMessage`. All PR129 safety (fill-missing ownership, rejected-host denylist, mandatory localization, no thumbnail hotlinking) and the PR145 backfill are preserved; regression fixtures cover the Basil Smash accept and Strawberry/Raspberry/Whiskey rejects.
 
 Previously completed:
@@ -20,7 +23,7 @@ Previously completed:
 - **PR148** — Live-use Guest/Keeper UX audit + focused cleanup.
 
 Currently working on:
-- Idle after PR153.
+- Idle after PR159.
 
 Next planned:
 - No numbered item queued. The roadmap returns to evidence-driven Brewery Lab / live-use follow-up (`ROADMAP.md` Track C); open a new PR number only when a concrete issue is identified.
@@ -29,6 +32,7 @@ Next planned:
 
 - Cocktail image identity (PR154) lives in the pure `src/cocktail-image-identity.ts`: exact name → base-spirit alias confirmed by the drink's own ingredients → reject. Any meaningful name modifier or unconfirmed/different base spirit rejects; extend the bounded vocab (base spirits, whiskey-family, modifier ingredients) rather than loosening the gate. `src/cocktail_image.ts` keeps all PR129 safety rules and the PR145 backfill; discovery returns staged diagnostics (never a single generic no-result).
 - Branding is a single tokenized visual system (PR147): the SB monogram medallion (`SbMark`) is the one brand mark; brand/heading type uses `--font-display` (Manufacturing Consent, weight 400) reserved for brand moments and major headers only (never body/labels/metadata); `--font-sans` (Outfit) is the proportional body/UI font; `--font-mono` (JetBrains Mono) is reserved for identifier/code-like values only. Light + Dark share the same warm whiskey-cellar palette via `theme.ts` tokens. Do not reintroduce removed theme modes, add fake-metal/heavy-texture treatments, use blackletter for dense/body text, or make JetBrains Mono the default UI font.
+- Homepage hero brand art (PR159): the Dashboard hero's visible "Smokey Barrel" name is genuine traced vector art in `client/src/SmokeyBarrelWordmark.tsx` (two theme-aware fills — copper `THE` via `--accent`, `Smokey`/`Barrel` via `currentColor` → `--text`) wrapped in an accessible level-1 heading; the hop-vine `client/src/HopFiligree.tsx` is decorative (`aria-hidden`, `pointer-events:none`, `--line`-tinted, hero-clipped). Both are hand-embedded `<path>` geometry — never re-create the wordmark with a font/`<text>`/embedded raster, and keep the single `SbMark` medallion (no second hero medallion or orbit ornament). The homepage carries no "Patron/Lounge" language; the guest greeting eyebrow is the plain time-of-day line and the guest unlock affordance is "Keeper Mode / Tap to unlock".
 
 - Guest inventory/enrichment responses stay server-allowlisted (`guest-inventory-response`); coarse availability only.
 - Shared `ImageField` / `images` media path is the default for Keeper uploads; do not add parallel upload systems per feature.

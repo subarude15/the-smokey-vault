@@ -32,6 +32,8 @@ import { useFormDraft } from "./useFormDraft";
 import { useTransientNotice } from "./useTransientNotice";
 import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import { SbMark } from "./SbMark";
+import { SmokeyBarrelWordmark } from "./SmokeyBarrelWordmark";
+import { HopFiligree } from "./HopFiligree";
 import { MISSING_ONE_HINT } from "./cocktail-card";
 import { OverviewStats } from "./OverviewStats";
 import { CANONICAL_FLAVOR_LABELS, deriveSpiritFlavors } from "./spirit-flavors";
@@ -711,8 +713,8 @@ export default function App() {
           <button type="button" onClick={() => admin ? handToGuest() : setUnlock(true)}>
             {admin ? <LockOpen/> : <Lock/>}
             <span>
-              <strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong>
-              <small>{admin ? "Lock / Hand to Guest" : "Tap for Keeper Mode"}</small>
+              <strong>Keeper Mode</strong>
+              <small>{admin ? "Lock / Hand to Guest" : "Tap to unlock"}</small>
             </span>
           </button>
         </div>
@@ -917,8 +919,8 @@ export default function App() {
         >
           {admin ? <LockOpen size={19}/> : <Lock size={19}/>}
           <span>
-            <strong>{admin ? "Keeper Mode" : "Welcome, Patron"}</strong>
-            <small>{admin ? "Lock / Hand to Guest" : "Tap for Keeper Mode"}</small>
+            <strong>Keeper Mode</strong>
+            <small>{admin ? "Lock / Hand to Guest" : "Tap to unlock"}</small>
           </span>
         </button>
       </div>
@@ -954,15 +956,15 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
     <div className="hero">
       <div className="hero-copy">
-        <SbMark className="hero-brand"/>
         <span className="eyebrow">{greeting.eyebrow}</span>
-        <p className="hero-wordmark" role="heading" aria-level={1}>The Smokey Barrel</p>
+        <span className="hero-wordmark" role="heading" aria-level={1}>
+          <SmokeyBarrelWordmark/>
+        </span>
         <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
       </div>
-      {/* Decorative brand motif only — live counts live solely in the stat grid (PR150). */}
-      <div className="hero-orbit" aria-hidden="true">
-        <Wine/>
-      </div>
+      {/* Decorative hop-vine filigree only — non-interactive, aria-hidden, and it
+          fades out before the CTAs (PR159). */}
+      <HopFiligree className="hero-filigree"/>
       <p className="hero-lede">{overviewHeroLede(!admin)}</p>
     </div>
     {!admin && pageEnabled("cocktails", enabledTabs) && <div className="tonight-cta">
@@ -973,7 +975,6 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
     <section>
       <div className="section-heading">
         <div><span className="eyebrow">AT A GLANCE</span><h2>Inside The Smokey Barrel</h2></div>
-        {!admin && <span className="guest-badge"><Lock size={13}/> PATRON MODE</span>}
       </div>
       <OverviewStats snapshot={snap} admin={admin} loading={!snap && !error} onNavigate={go}/>
     </section>

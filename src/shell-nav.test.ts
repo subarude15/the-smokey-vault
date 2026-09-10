@@ -180,7 +180,7 @@ test("App wires shell helpers, handToGuest, and PR133 auth rejection", () => {
 test("PR148 keeps Keeper entry in navigation, not the Guest topbar", () => {
   assert.doesNotMatch(appSrc, /!admin\s*&&\s*<button[^>]+aria-label="Enter Keeper PIN"/);
   assert.match(appSrc, /admin \? handToGuest\(\) : setUnlock\(true\)/);
-  assert.match(appSrc, /Tap for Keeper Mode/);
+  assert.match(appSrc, /Tap to unlock/);
   assert.match(appSrc, /themeToggleLabel\(theme\)/);
   assert.doesNotMatch(appSrc, /aria-label="Change theme"/);
 });
