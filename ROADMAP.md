@@ -31,7 +31,7 @@ Guest Mode must present the collection safely. Keeper Mode owns mutations and op
 - PR #135 gives Taps and Spirits purpose-built collection cards with Guest-safe availability hierarchy and layered inline Keeper actions, while preserving BottleDetail and existing mutation semantics.
 - PR #136–#138 are merged (cocktail card/Keeper workspace refinements, cocktail mobile media + structured steps, keg image reliability + Keeper upload rendering / enrich-beer Bad Request fix).
 - **PR139** established durable repository AI agent context (`AGENTS.md`, `CURRENT_STATE.md`) and aligned roadmap numbering with GitHub PR numbers. **PR140** added non-destructive event image framing. **PR141** was a Cloud Agent environment chore that consumed the GitHub number. **PR142** ties the Overview “Give us your 2 cents” CTA to the same `whatsnext` Guest tab rule as nav. **PR143** adds durable Gallery video posters so grids/covers stay lightweight. **PR144** adds a streamed, Guest-vs-Keeper-limited large-video upload path. **PR145** completes built-in cocktail instructions, backfills cocktail photos, and adds a Keeper build identifier. **PR146** adds Gallery comments + up/down voting from the lightbox with server-side anonymous voter keys and Keeper moderation. **PR147** consolidates the Smokey Barrel visual identity (SB monogram brand mark, blackletter display type for brand moments, warmed Light theme) across Guest and Keeper surfaces. **PR148** completes the live-use Guest/Keeper UX audit with a bounded shell, touch-action, toast-clearance, and terminology cleanup.
-- PR149–PR155 product-polish items are complete. **PR156** fixes Bottle Library Flavor facets by attaching derived `display_flavors` from inventory + accepted enrichment tasting (no Keeper field overwrite) and Family-scoping Flavor options with stale-selection reset. Next review: cocktail photo framing, full-photo viewing, and explicit Keeper photo selection (implemented on `codex/cocktail-photo-choice`).
+- PR149–PR155 product-polish items are complete. **PR156** fixes Bottle Library Flavor facets by attaching derived `display_flavors` from inventory + accepted enrichment tasting (no Keeper field overwrite) and Family-scoping Flavor options with stale-selection reset. **PR157** ships cocktail photo framing (full contained photo + native enlarge) and explicit Keeper photo selection. **PR158** fixes inventory filter `<option>` sentinel reliability so “All …” labels submit `"All"` rather than display text.
 
 Historical note — the sequenced product-polish work was PR149–PR154: guest terminology/brand clarity, Overview hierarchy, Bottle Library media/loading polish, flavor-led discovery, evidence-only shell cleanup, then cocktail image-discovery reliability.
 - Draft PR #53 was reviewed and closed unmerged as superseded: its Keeper enrichment-action product intent remains useful, but its parallel `enrichment_field_overrides` architecture is obsolete against current ownership, entity allowlists, queue controls, and deletion cleanup.
@@ -78,15 +78,11 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
-### Cocktail photo framing and Keeper selection — ready for review
+### Idle — evidence-driven follow-up
 
-Production French 75 photo was cropped around an ornate stem. Detail images now contain the full photo and open an accessible native dialog. Keepers preview up to three localized discovery alternatives or use shared ImageField uploads/URLs, then explicitly save with a concurrent-edit guard. Existing fill-missing discovery and backfill remain unchanged.
+PR157 (cocktail photo framing / Keeper photo selection) and PR158 (inventory filter sentinel reliability) are complete. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
 
-Validation: 40 focused tests passed; production build passed. URL selections localize through shared guarded media and removal is committable. Standalone client typecheck has pre-existing baseline errors. Live NAS/mobile verification remains pending deployment.
-
-Follow-up: SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work. Operator enabled the working Google engine after live default engines returned CAPTCHA/rate-limit failures.
-
-Stability-first, but prioritize concrete product usability problems observed in the live bar. Prefer small, testable PRs. Do not open speculative discovery features.
+Stability-first, but prioritize concrete product usability problems observed in the live bar. Prefer small, testable PRs. Do not open speculative discovery features. Start a new numbered Track C entry only when a concrete next item exists.
 
 ### Track A — Evidence-only discovery
 
