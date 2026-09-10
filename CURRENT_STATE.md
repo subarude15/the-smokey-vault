@@ -1,31 +1,29 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## Current position
 
 Most recently completed:
-- **PR156** — Bottle Library flavor data audit + facet reliability. Production Flavor dropdowns were empty because PR152 derived facets only from inventory `flavors`/`tasting_notes`, while accepted enrichment tasting lives in `product_content` and was never attached for presentation. PR156 adds response-only `display_flavors` (Keeper flavors + tasting_notes + official/house enrichment tasting, controlled vocabulary), Family-scoped Flavor options (optional Availability constraint), stale Flavor reset, Guest allowlist update, and representative fixtures/tests. Does not invent family-based flavor profiles or overwrite Keeper-owned fields.
+- **PR158** — Inventory filter sentinel reliability. Mapped inventory `<option>` elements now set explicit `value={value}` so “All families” / “All flavors” / etc. keep the internal `"All"` sentinel instead of submitting label text. Covers Bottle Library Family/Flavor and general Maker/Type/Tag/Flavor filters; focused regression tests in `src/pr158-inventory-filter-sentinel.test.ts`.
 
 Previously completed:
-- **PR155** — Cocktail image discovery observability + production reliability (French 75 SERP pre-filter false negatives; Keeper diagnostics; SearXNG health remains connectivity-only).
-- **PR154** — Cocktail image discovery reliability (exact/alias identity, bounded multi-query, staged no-result reasons).
-- **PR153** — Remaining shell and chrome polish.
-- **PR152** — Bottle Library flavor discovery and filter cleanup.
-- **PR151** — Bottle Library media and loading-state polish.
+- **PR157** — Cocktail photo framing and explicit Keeper photo selection (full contained photo + native enlarge dialog; preview up to three alternatives or ImageField; explicit save with concurrent-edit guard).
+- **PR156** — Bottle Library flavor data audit + facet reliability (`display_flavors`, Family-scoped Flavor options, stale Flavor reset).
+- **PR155** — Cocktail image discovery observability + production reliability.
+- **PR154** — Cocktail image discovery reliability.
 
 Currently working on:
-- Cocktail photo framing and explicit Keeper selection implemented on `codex/cocktail-photo-choice`; ready for review.
+- Idle — no assigned product task.
 
 Next planned:
-- Review/deploy photo choice work, then verify French 75 on mobile. Search-provider health/backoff remains follow-up.
+- Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up. Otherwise evidence-driven Brewery Lab / live-use follow-up.
 
 ## Recent architectural decisions
 
-- Cocktail photo choice: native dialog for full-photo viewing and Keeper editing; shared ImageField for uploads. `/image-options` reuses bounded discovery with a preview collector (no cocktail writes, up to three unique localized alternatives). `/image` requires Keeper auth, an existing local image and the expected prior URL to prevent stale overwrites. No schema changes or automatic replacement. Preview files use existing content-addressed image storage; canceled preview files are retained, as with shared uploads.
-- Validation for photo choice: 40 focused tests and production build passed. Pasted URLs localize through shared guarded media, and empty selection explicitly removes a photo. Standalone client typecheck errors also exist on baseline. No live SearXNG/NAS/mobile verification from this workspace.
+- Inventory filter options (PR158): Display labels (“All families”, “All flavors”, …) must never become submitted values. Mapped `<option>` elements use `value={value}` with `"All"` as the sole clear/reset sentinel. Do not introduce alternate sentinel strings.
 
-- Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation. Priority is Keeper structured `flavors` → Keeper `tasting_notes` → accepted enrichment official/house tasting text. Tags stay searchable free-text only and never become Flavor facets. Flavor dropdown options are computed after Family (and optionally Availability), without applying the current Flavor selection; invalid Flavor selections reset to All.
+- Cocktail photo choice (PR157): native dialog for full-photo viewing and Keeper editing; shared ImageField for uploads. `/image-options` reuses bounded discovery with a preview collector (no cocktail writes, up to three unique localized alternatives). `/image` requires Keeper auth, an existing local image and the expected prior URL to prevent stale overwrites. No schema changes or automatic replacement. Preview files use existing content-addressed image storage; canceled preview files are retained, as with shared uploads.
 
 - Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation. Priority is Keeper structured `flavors` → Keeper `tasting_notes` → accepted enrichment official/house tasting text. Tags stay searchable free-text only and never become Flavor facets. Flavor dropdown options are computed after Family (and optionally Availability), without applying the current Flavor selection; invalid Flavor selections reset to All.
 

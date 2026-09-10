@@ -1874,8 +1874,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       </div>}
     </div>
     {items.length > 0 && !loading && (isBottleLibrary ? <div className="filter-row bottle-filter-row">
-      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by family">{kinds.map((value)=><option key={value}>{value === "All" ? "All families" : value}</option>)}</select>
-      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by family">{kinds.map((value)=><option key={value} value={value}>{value === "All" ? "All families" : value}</option>)}</select>
+      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value} value={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
       <select value={avail} onChange={(e)=>setAvail(e.target.value)} aria-label="Filter by availability">
         <option value="All">Any availability</option>
         <option value="available">On the shelf</option>
@@ -1883,10 +1883,10 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       </select>
       {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
     </div> : <div className="filter-row">
-      <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value}>{value === "All" ? "All makers" : value}</option>)}</select>
-      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value}>{value === "All" ? (module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
-      <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
-      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value} value={value}>{value === "All" ? "All makers" : value}</option>)}</select>
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value} value={value}>{value === "All" ? (module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
+      <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value} value={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
+      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value} value={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
       {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
     </div>)}
     {viewState === "error" ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
