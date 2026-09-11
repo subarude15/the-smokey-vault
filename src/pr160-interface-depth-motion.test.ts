@@ -2,9 +2,9 @@
  * PR160 — Interface Depth & Motion System.
  *
  * Source-reading regression coverage for the shared elevation/motion language:
- * tokens exist, hover lift is pointer-gated, press feedback is present,
- * prefers-reduced-motion disables motion, hero layers stay separate vectors,
- * and guest privacy / backend surfaces are untouched.
+ * stronger resting Depth-2 elevation, unmistakable hover lift, Depth 0–4 planes,
+ * pointer-gated hover, press feedback, prefers-reduced-motion (motion only),
+ * hero layers stay separate vectors, guest privacy / backend untouched.
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -34,7 +34,7 @@ test("PR160 depth-motion stylesheet is loaded after base and hero CSS", () => {
   assert.ok(stylesAt >= 0 && heroAt > stylesAt && depthAt > heroAt);
 });
 
-test("PR160 exposes shared motion and elevation tokens", () => {
+test("PR160 exposes shared motion, surface, and elevation tokens through Depth 4", () => {
   for (const token of [
     "--motion-fast",
     "--motion-standard",
@@ -49,6 +49,8 @@ test("PR160 exposes shared motion and elevation tokens", () => {
     "--elevation-1",
     "--elevation-2",
     "--elevation-3",
+    "--elevation-4",
+    "--edge-highlight",
     "--lift-card",
     "--press-scale",
     "--press-card",
@@ -58,26 +60,73 @@ test("PR160 exposes shared motion and elevation tokens", () => {
   }
 });
 
-test("PR160 card lift is gated to hover-capable fine pointers", () => {
-  assert.match(depthCss, /@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)/);
-  assert.match(depthCss, /transform:\s*var\(--lift-card\)/);
-  assert.match(depthCss, /translateY\(-4px\)\s*scale\(1\.006\)/);
+test("PR160 resting Depth-2 elevation uses real dark contrast plus edge lighting", () => {
+  assert.match(depthCss, /--elevation-2:[\s\S]*?#000/);
+  assert.match(depthCss, /--elevation-2:[\s\S]*?var\(--edge-card\)|--elevation-2:[\s\S]*?var\(--edge-highlight\)/);
+  assert.match(depthCss, /--edge-highlight:\s*inset/);
+  assert.match(depthCss, /--edge-shadow:\s*inset/);
+  // Warm bounce-light stays atmospheric (single-digit / low alpha), not a glow border.
+  assert.match(depthCss, /--elevation-2:[\s\S]*?var\(--accent\)/);
+  assert.doesNotMatch(depthCss, /box-shadow:[^;]*0\s+0\s+\d{2,}px\s+[^;]*accent[^;]*\.\d{2,}/);
 });
 
-test("PR160 touch/press feedback uses restrained scale", () => {
-  assert.match(depthCss, /--press-scale:\s*scale\(\.98\)/);
-  assert.match(depthCss, /--press-card:\s*scale\(\.985\)/);
+test("PR160 card lift is gated to hover-capable fine pointers and is visually clear", () => {
+  assert.match(depthCss, /@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)/);
+  assert.match(depthCss, /transform:\s*var\(--lift-card\)/);
+  assert.match(depthCss, /--lift-card:\s*translateY\(-8px\)\s*scale\(1\.012\)/);
+  assert.match(depthCss, /--lift-card-strong:\s*translateY\(-9px\)\s*scale\(1\.015\)/);
+  assert.match(depthCss, /box-shadow:\s*var\(--elevation-3\)/);
+});
+
+test("PR160 guest-facing card surfaces receive Depth-2 elevation", () => {
+  for (const selector of [
+    ".domain-card",
+    ".cocktail-card",
+    ".stat-card",
+    ".feature-card",
+    ".event-card",
+    ".merch-card",
+    ".gallery-album-card",
+    ".lab-card",
+    ".lab-card-button",
+    ".inventory-card",
+    ".inventory-card-button",
+    ".overview-tap",
+    ".overview-brew",
+    ".overview-low"
+  ]) {
+    assert.match(depthCss, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(depthCss, /box-shadow:\s*var\(--elevation-2\)/);
+  assert.match(tapCardCss, /box-shadow:\s*var\(--elevation-2/);
+  assert.match(cocktailCardCss, /box-shadow:\s*var\(--elevation-2/);
+});
+
+test("PR160 overlays use Depth-4 elevation distinct from hovered cards", () => {
+  assert.match(depthCss, /\.modal[\s\S]*?box-shadow:\s*var\(--elevation-4\)/);
+  assert.match(depthCss, /\.more-sheet\.open[\s\S]*?box-shadow:\s*var\(--elevation-4\)/);
+  assert.match(depthCss, /\.lightbox-stage[\s\S]*?box-shadow:\s*var\(--elevation-4\)/);
+});
+
+test("PR160 touch/press feedback uses restrained inward scale", () => {
+  assert.match(depthCss, /--press-scale:\s*scale\(\.975\)/);
+  assert.match(depthCss, /--press-card:\s*scale\(\.978\)/);
   assert.match(depthCss, /\.primary:active/);
   assert.match(depthCss, /\.domain-card:active/);
   assert.match(depthCss, /\.mobile-bottom-nav button:active/);
 });
 
-test("PR160 prefers-reduced-motion disables non-essential motion", () => {
+test("PR160 prefers-reduced-motion disables movement but keeps static elevation tokens", () => {
   assert.match(depthCss, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   assert.match(depthCss, /--lift-card:\s*none/);
   assert.match(depthCss, /--press-scale:\s*none/);
   assert.match(depthCss, /animation:\s*none\s*!important/);
   assert.match(depthCss, /transform:\s*none\s*!important/);
+  // Static depth remains defined — reduced motion must not zero elevation tokens.
+  assert.doesNotMatch(
+    depthCss,
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)\{[^}]*--elevation-2:\s*none/
+  );
 });
 
 test("PR160 hero keeps separate layered vector planes", () => {
@@ -95,34 +144,8 @@ test("PR160 hero keeps separate layered vector planes", () => {
   assert.match(filigreeSrc, /<path\b/);
 });
 
-test("PR160 shared cards consume elevation tokens rather than one-off shadows", () => {
-  assert.match(tapCardCss, /box-shadow:\s*var\(--elevation-2/);
-  assert.match(cocktailCardCss, /box-shadow:\s*var\(--elevation-2/);
-  assert.match(depthCss, /\.domain-card,\s*\.cocktail-card/);
-  assert.match(depthCss, /box-shadow:\s*var\(--elevation-2\)/);
-});
-
 test("PR160 does not introduce a routing library or backend/schema edits", () => {
   assert.doesNotMatch(appSrc, /react-router|createBrowserRouter|BrowserRouter/);
-  const backendTouched = [
-    "src/server.ts",
-    "src/db.ts",
-    "src/schema.ts",
-    "src/migrations",
-    "src/guest-inventory-response.ts",
-    "src/guestAvailability.ts",
-    "client/src/guestAvailability.ts"
-  ].filter((rel) => {
-    try {
-      // Presence is fine; this PR must not modify these paths.
-      return false;
-    } catch {
-      return false;
-    }
-  });
-  assert.deepEqual(backendTouched, []);
-
-  // Guard: guest allowlist / availability helpers remain in the tree unchanged by this PR's file set.
   const guestFiles = [
     "src/guest-inventory-response.ts",
     "client/src/guestAvailability.ts"
@@ -135,7 +158,6 @@ test("PR160 does not introduce a routing library or backend/schema edits", () =>
 test("PR160 does not revive the removed top-key Keeper unlock or flashy motion", () => {
   assert.doesNotMatch(appSrc, /top-key|keeper-key-icon|KeyRound.*topbar|topbar.*KeyRound/);
   assert.doesNotMatch(depthCss, /rotateX|rotateY|perspective\(|@keyframes\s+\w*float|@keyframes\s+\w*pulse|@keyframes\s+\w*breathe/);
-  assert.doesNotMatch(depthCss, /box-shadow:[^;]*0\s+0\s+\d+px\s+[^;]*accent[^;]*\.\d{2,}[^;]*inset/);
 });
 
 test("PR160 scope stays frontend presentation files", () => {

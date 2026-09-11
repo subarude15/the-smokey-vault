@@ -1,6 +1,8 @@
 # Current task
 
-PR160 — Interface Depth & Motion System is ready for review. Shared elevation + motion tokens live in `client/src/depth-motion.css` (loaded after `styles.css` and `home-hero.css`). Cards, panels, nav/controls, and the homepage hero use the system; hover is fine-pointer-only; touch gets press scale; `prefers-reduced-motion` is honored. Frontend presentation only — no backend/schema/API changes, Guest privacy preserved, More-panel Keeper unlock unchanged.
+PR160 — Interface Depth & Motion System is ready for review (refined for stronger visible depth). Shared elevation + motion tokens live in `client/src/depth-motion.css` (loaded after `styles.css` and `home-hero.css`).
+
+Depth 0–4 surface planes; resting Depth-2 cards float with contact + ambient shadow, edge highlight, and restrained warm bounce-light; fine-pointer hover lifts ~8–9px into Depth 3; Depth-4 overlays (modal/More/lightbox); touch press scale without sticky hover; `prefers-reduced-motion` suppresses movement but keeps static elevation. Frontend presentation only — no backend/schema/API changes, Guest privacy preserved, More-panel Keeper unlock unchanged, PR159 brand hero preserved.
 
 Most recently completed before this: **PR159** homepage brand hero & filigree refinement; **PR158** inventory filter sentinel reliability; **PR157** cocktail photo framing / Keeper photo selection.
 

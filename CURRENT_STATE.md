@@ -14,14 +14,14 @@ Previously completed:
 - **PR155** — Cocktail image discovery observability + production reliability.
 
 Currently working on:
-- **PR160 ready for review** — Interface Depth & Motion System. Shared frontend elevation/motion tokens and behaviors in `client/src/depth-motion.css` (card lift, touch press, panel/card/modal depth, hero layering + reveal, reduced-motion). Presentation only; Guest redaction and More-panel Keeper unlock unchanged.
+- **PR160 ready for review** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`: visible resting card float, ~8–9px hover lift, edge lighting, warm bounce-light, Depth-4 overlays, touch press, hero layering + reveal; reduced-motion keeps static elevation. Presentation only; Guest redaction and More-panel Keeper unlock unchanged.
 
 Next planned:
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up. Otherwise evidence-driven Brewery Lab / live-use follow-up.
 
 ## Recent architectural decisions
 
-- Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--elevation-*`, `--lift-card`, `--press-*`) applied site-wide. Hover motion is pointer-gated; touch uses press scale; `prefers-reduced-motion` disables non-essential transforms/animations. Scroll parallax intentionally omitted. Do not add a second competing token system or a JS animation library for this.
+- Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--surface-*`, `--elevation-1..4`, `--edge-*`, `--lift-card`, `--press-*`) applied site-wide. Resting Depth-2 must be obvious without hover. Hover motion is fine-pointer-gated (~8–9px); touch uses press scale with sticky-hover cancelled; reduced-motion disables movement but must not flatten static elevation. Scroll parallax intentionally omitted. Do not add a second competing token system or a JS animation library for this.
 
 - Inventory filter options (PR158): Display labels (“All families”, “All flavors”, …) must never become submitted values. Mapped `<option>` elements use `value={value}` with `"All"` as the sole clear/reset sentinel.
 

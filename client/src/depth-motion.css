@@ -2,14 +2,14 @@
  * PR160 — Interface Depth & Motion System
  *
  * Shared elevation + motion language for The Smokey Barrel.
- * Quiet whiskey-cellar depth: layered surfaces, restrained lift, tactile press.
- * No persistent animation, no 3D tilt, no glowing gold borders.
+ * Whiskey-cellar surface hierarchy: recessed page → quiet panels → floating cards
+ * → lifted hover → true overlays. Premium and tactile — not gaudy.
  */
 
 :root{
   /* Motion durations */
   --motion-fast:160ms;
-  --motion-standard:200ms;
+  --motion-standard:230ms;
   --motion-slow:280ms;
   --motion-reveal:720ms;
 
@@ -17,32 +17,54 @@
   --ease-standard:var(--ease-out);
   --ease-emphasized:var(--ease-spring);
 
-  /* Surface roles (Depth 0–3) */
+  /* Surface roles (Depth 0–4 tonal planes) */
   --surface-base:var(--bg);
-  --surface-panel:color-mix(in srgb,var(--surface) 92%,transparent);
-  --surface-raised:var(--surface);
-  --surface-floating:color-mix(in srgb,var(--surface) 88%,var(--surface-2));
+  --surface-panel:color-mix(in srgb,var(--surface) 82%,var(--bg));
+  --surface-raised:color-mix(in srgb,var(--surface) 88%,var(--surface-2));
+  --surface-floating:color-mix(in srgb,var(--surface-2) 70%,var(--surface));
 
-  /* Elevation shadows — felt, not heavy */
+  /* Edge lighting — physical panel lip, not a bevel graphic */
+  --edge-highlight:inset 0 1px 0 color-mix(in srgb,#fff 10%,transparent);
+  --edge-shadow:inset 0 -1px 0 color-mix(in srgb,#000 14%,transparent);
+  --edge-card:var(--edge-highlight), var(--edge-shadow);
+  --border-raised:color-mix(in srgb,var(--line) 78%,var(--surface-2));
+  --border-lifted:color-mix(in srgb,var(--accent) 34%,var(--line));
+
+  /* Elevation shadows — real dark contrast + restrained warm bounce-light */
   --elevation-1:
-    0 1px 2px color-mix(in srgb,#000 14%,transparent),
-    0 8px 22px color-mix(in srgb,var(--bg) 42%,transparent);
-  --elevation-2:
-    0 2px 4px color-mix(in srgb,#000 16%,transparent),
-    0 12px 28px color-mix(in srgb,var(--bg) 48%,transparent),
-    inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);
-  --elevation-3:
-    0 8px 18px color-mix(in srgb,#000 20%,transparent),
-    0 22px 48px color-mix(in srgb,var(--bg) 55%,transparent),
-    0 0 28px color-mix(in srgb,var(--accent-2) 3%,transparent),
-    inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent);
+    0 1px 1px color-mix(in srgb,#000 18%,transparent),
+    0 4px 12px color-mix(in srgb,#000 12%,transparent),
+    var(--edge-highlight);
 
-  /* Hover / press lift */
-  --lift-card:translateY(-4px) scale(1.006);
-  --lift-card-strong:translateY(-5px) scale(1.008);
-  --press-scale:scale(.98);
-  --press-card:scale(.985);
-  --nav-active-lift:translateY(-1.5px);
+  --elevation-2:
+    0 1px 2px color-mix(in srgb,#000 28%,transparent),
+    0 6px 10px color-mix(in srgb,#000 16%,transparent),
+    0 16px 32px color-mix(in srgb,#000 22%,transparent),
+    0 20px 40px color-mix(in srgb,var(--accent) 4%,transparent),
+    var(--edge-card);
+
+  --elevation-3:
+    0 2px 4px color-mix(in srgb,#000 30%,transparent),
+    0 12px 18px color-mix(in srgb,#000 20%,transparent),
+    0 28px 48px color-mix(in srgb,#000 30%,transparent),
+    0 18px 36px color-mix(in srgb,var(--accent-2) 7%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#000 18%,transparent);
+
+  --elevation-4:
+    0 4px 8px color-mix(in srgb,#000 34%,transparent),
+    0 18px 28px color-mix(in srgb,#000 26%,transparent),
+    0 40px 72px color-mix(in srgb,#000 42%,transparent),
+    0 24px 48px color-mix(in srgb,var(--accent-2) 8%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#000 20%,transparent);
+
+  /* Hover / press lift — unmistakable rise, still premium */
+  --lift-card:translateY(-8px) scale(1.012);
+  --lift-card-strong:translateY(-9px) scale(1.015);
+  --press-scale:scale(.975);
+  --press-card:scale(.978) translateY(1px);
+  --nav-active-lift:translateY(-2px);
 
   /* Shared interactive transition bundle */
   --motion-interactive:
@@ -52,6 +74,62 @@
     background-color var(--motion-fast) var(--ease-standard),
     opacity var(--motion-fast) var(--ease-standard),
     color var(--motion-fast) var(--ease-standard);
+}
+
+/* Light theme: softer blacks, clearer raised plane vs warm bone page */
+[data-theme="light"]{
+  --surface-panel:color-mix(in srgb,var(--surface) 94%,#fff);
+  --surface-raised:color-mix(in srgb,var(--surface) 92%,#fff);
+  --surface-floating:#fffdf8;
+  --edge-highlight:inset 0 1px 0 color-mix(in srgb,#fff 72%,transparent);
+  --edge-shadow:inset 0 -1px 0 color-mix(in srgb,#000 8%,transparent);
+  --border-raised:color-mix(in srgb,var(--line) 70%,var(--accent) 8%);
+
+  --elevation-1:
+    0 1px 2px color-mix(in srgb,#3a2a18 10%,transparent),
+    0 4px 14px color-mix(in srgb,#3a2a18 8%,transparent),
+    var(--edge-highlight);
+
+  --elevation-2:
+    0 1px 2px color-mix(in srgb,#3a2a18 14%,transparent),
+    0 8px 14px color-mix(in srgb,#3a2a18 10%,transparent),
+    0 18px 36px color-mix(in srgb,#3a2a18 14%,transparent),
+    0 16px 28px color-mix(in srgb,var(--accent) 6%,transparent),
+    var(--edge-card);
+
+  --elevation-3:
+    0 3px 6px color-mix(in srgb,#3a2a18 16%,transparent),
+    0 14px 22px color-mix(in srgb,#3a2a18 12%,transparent),
+    0 30px 52px color-mix(in srgb,#3a2a18 18%,transparent),
+    0 18px 34px color-mix(in srgb,var(--accent) 9%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#3a2a18 10%,transparent);
+
+  --elevation-4:
+    0 6px 12px color-mix(in srgb,#3a2a18 18%,transparent),
+    0 22px 36px color-mix(in srgb,#3a2a18 16%,transparent),
+    0 44px 80px color-mix(in srgb,#3a2a18 22%,transparent),
+    0 20px 40px color-mix(in srgb,var(--accent) 10%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#3a2a18 12%,transparent);
+}
+
+/* Dark theme: push page deeper so raised cards read clearly */
+[data-theme="dark"]{
+  --surface-panel:color-mix(in srgb,var(--surface) 88%,#000);
+  --surface-raised:color-mix(in srgb,var(--surface) 70%,var(--surface-2));
+  --surface-floating:color-mix(in srgb,var(--surface-2) 78%,var(--surface));
+  --edge-highlight:inset 0 1px 0 color-mix(in srgb,#fff 9%,transparent);
+  --edge-shadow:inset 0 -1px 0 color-mix(in srgb,#000 28%,transparent);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Depth 0 — recessed page plane                                                */
+/* -------------------------------------------------------------------------- */
+
+body,
+.app-shell{
+  background:var(--surface-base);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -68,18 +146,13 @@
 .mixologist,
 .legacy-beer-audit,
 .cleanup-findings{
+  background-color:var(--surface-panel);
+  border-color:color-mix(in srgb,var(--line) 88%,transparent);
   box-shadow:var(--elevation-1);
 }
 
-.settings-card,
-.enrichment-panel,
-.wanted-card,
-.mixologist{
-  background:var(--surface-panel);
-}
-
 /* -------------------------------------------------------------------------- */
-/* Depth 2 — shared card elevation                                              */
+/* Depth 2 — shared content cards (resting float)                               */
 /* -------------------------------------------------------------------------- */
 
 .domain-card,
@@ -90,6 +163,7 @@
 .merch-card,
 .gallery-album-card,
 .lab-card,
+.lab-card-button,
 .ticket-card,
 .favorite-card,
 .restock-row,
@@ -97,19 +171,15 @@
 .overview-brew,
 .overview-low,
 .recipe-card,
-.inventory-card{
+.inventory-card,
+.inventory-card-button{
+  background-color:var(--surface-raised);
+  border-color:var(--border-raised);
   box-shadow:var(--elevation-2);
   transition:var(--motion-interactive);
 }
 
-/* Depth 3 — floating / active chrome */
-.modal,
-.more-sheet.open,
-.lightbox-stage,
-.keeper-card-controls{
-  box-shadow:var(--elevation-3);
-}
-
+/* Depth 3 — selected / active chrome (below true overlays) */
 .sidebar nav button.active,
 .mobile-bottom-nav button.active,
 .chip.active,
@@ -117,8 +187,22 @@
 .season-filters button.active,
 .cocktail-filters button.active{
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent),
-    0 0 20px color-mix(in srgb,var(--accent-2) 2.5%,transparent);
+    var(--edge-highlight),
+    0 4px 14px color-mix(in srgb,#000 18%,transparent),
+    0 0 18px color-mix(in srgb,var(--accent-2) 5%,transparent);
+}
+
+.keeper-card-controls{
+  background-color:var(--surface-floating);
+  box-shadow:var(--elevation-3);
+}
+
+/* Depth 4 — true overlays */
+.modal,
+.more-sheet.open,
+.lightbox-stage{
+  background-color:var(--surface-floating);
+  box-shadow:var(--elevation-4);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -133,6 +217,7 @@
   .event-card:hover,
   .merch-card:hover,
   .gallery-album-card:hover,
+  .lab-card:hover,
   .lab-card-button:hover,
   .ticket-card:hover,
   .favorite-card:hover,
@@ -141,15 +226,17 @@
   .overview-brew:hover,
   .overview-low:hover,
   .recipe-card:hover,
+  .inventory-card:hover,
   .inventory-card-button:hover{
     transform:var(--lift-card);
-    border-color:color-mix(in srgb,var(--accent) 42%,var(--line));
+    border-color:var(--border-lifted);
     box-shadow:var(--elevation-3);
   }
 
   .feature-card-lead:hover,
   .stat-card:hover{
     transform:var(--lift-card-strong);
+    box-shadow:var(--elevation-3);
   }
 
   .domain-card.is-skeleton:hover,
@@ -157,7 +244,7 @@
   .stat-card.is-skeleton:hover{
     transform:none;
     box-shadow:var(--elevation-2);
-    border-color:var(--line);
+    border-color:var(--border-raised);
   }
 }
 
@@ -190,6 +277,7 @@
 .event-card:active,
 .merch-card:active,
 .gallery-album-card:active,
+.lab-card:active,
 .lab-card-button:active,
 .recipe-card:active,
 .favorite-card:active,
@@ -197,8 +285,10 @@
 .overview-tap:active,
 .overview-brew:active,
 .overview-low:active,
+.inventory-card:active,
 .inventory-card-button:active{
   transform:var(--press-card);
+  box-shadow:var(--elevation-1);
 }
 
 .mobile-bottom-nav button.active,
@@ -221,7 +311,7 @@
 }
 
 @keyframes depth-card-enter{
-  from{opacity:0;transform:translateY(8px)}
+  from{opacity:0;transform:translateY(10px)}
   to{opacity:1;transform:translateY(0)}
 }
 
@@ -246,8 +336,8 @@
   /* Layered enter replaces the single flat rise-in so wordmark/filigree read as separate planes. */
   animation:none;
   --hero-ambient:
-    radial-gradient(560px 320px at 78% 8%, color-mix(in srgb,var(--accent-2) 7%,transparent), transparent 68%),
-    radial-gradient(420px 260px at 12% 0%, color-mix(in srgb,var(--accent) 6%,transparent), transparent 62%);
+    radial-gradient(560px 320px at 78% 8%, color-mix(in srgb,var(--accent-2) 8%,transparent), transparent 68%),
+    radial-gradient(420px 260px at 12% 0%, color-mix(in srgb,var(--accent) 7%,transparent), transparent 62%);
 }
 
 .hero::before{
@@ -257,7 +347,7 @@
   z-index:0;
   pointer-events:none;
   background:var(--hero-ambient);
-  opacity:.9;
+  opacity:.95;
 }
 
 .hero .hero-copy,
@@ -295,9 +385,6 @@
   to{opacity:1;transform:translateY(0) scale(1)}
 }
 
-/* Scroll parallax intentionally omitted: dual transform animations fought the
-   hero reveal, and a JS scroll listener would be heavier than this PR warrants. */
-
 /* -------------------------------------------------------------------------- */
 /* Cancel legacy sticky-hover transforms on touch-first pointers                */
 /* -------------------------------------------------------------------------- */
@@ -313,17 +400,20 @@
   .event-card:hover,
   .merch-card:hover,
   .gallery-album-card:hover,
+  .lab-card:hover,
+  .lab-card-button:hover,
   .recipe-card:hover,
   .favorite-card:hover,
   .restock-row:hover,
   .inventory-card:hover,
   .inventory-card-button:hover{
     transform:none;
+    box-shadow:var(--elevation-2);
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/* Reduced motion                                                               */
+/* Reduced motion — keep static elevation; suppress movement only               */
 /* -------------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion:reduce){
@@ -362,6 +452,7 @@
   .merch-card,
   .gallery-album-card,
   .lab-card,
+  .lab-card-button,
   .ticket-card,
   .favorite-card,
   .restock-row,
@@ -382,8 +473,7 @@
   .sidebar nav button,
   .mobile-bottom-nav button,
   .more-sheet-item,
-  .homebrew-link,
-  .lab-card-button{
+  .homebrew-link{
     transition:border-color 1ms linear, background-color 1ms linear, color 1ms linear !important;
     transform:none !important;
   }
