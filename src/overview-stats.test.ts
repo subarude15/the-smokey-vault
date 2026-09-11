@@ -95,15 +95,17 @@ test("PR150 removes the duplicate six-count hero sentence", () => {
   assert.match(appSrc, /className="hero-lede">\{overviewHeroLede\(!admin\)\}/);
 });
 
-test("PR150 hero orbit is decorative — no duplicated live count or invented zero", () => {
+test("hero brand motif is decorative — no duplicated live count or invented zero", () => {
   // The old live-count orbit (snap?.spirits.on_shelf ?? 0 rendered as BOTTLES) is gone.
   assert.doesNotMatch(appSrc, /orbitValue/);
   assert.doesNotMatch(appSrc, /snap\?\.spirits\.on_shelf \?\? 0/);
   assert.doesNotMatch(appSrc, /bottles on the shelf/);
   // No Overview live count is read in App.tsx outside the stat component/helper.
   assert.doesNotMatch(appSrc, /spirits\.on_shelf/);
-  // The orbit remains as a purely decorative, accessibility-hidden brand motif.
-  assert.match(appSrc, /<div className="hero-orbit" aria-hidden="true">/);
+  // PR159: the orbit ornament is retired; the hop-vine filigree is the decorative,
+  // accessibility-hidden brand motif (HopFiligree renders aria-hidden).
+  assert.doesNotMatch(appSrc, /hero-orbit/);
+  assert.match(appSrc, /<HopFiligree className="hero-filigree"\s*\/>/);
 });
 
 test("PR150 stat grid is a snapshot-driven component with loading/error safety", () => {

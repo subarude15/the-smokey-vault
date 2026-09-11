@@ -1,6 +1,6 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 ## Current position
 
@@ -14,7 +14,7 @@ Previously completed:
 - **PR154** — Cocktail image discovery reliability.
 
 Currently working on:
-- Idle — no assigned product task.
+- **PR159 ready for review** — Homepage hero repaired on current `main`: original stacked wordmark, continuous charcoal hop-vine corner, one SB medallion, and no Patron/Lounge homepage copy. Standalone theme-ready SVGs are in `client/public/brand/`. Full regression suite: 1,578 passed / 7 skipped; production build passes. The managed visual-preview connection was unavailable, so final phone/desktop inspection remains a reviewer check.
 
 Next planned:
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up. Otherwise evidence-driven Brewery Lab / live-use follow-up.

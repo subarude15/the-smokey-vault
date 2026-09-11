@@ -98,7 +98,7 @@ export function overviewGreeting(date = new Date(), guest = false): { eyebrow: s
         ? "GOOD EVENING"
         : "AFTER HOURS";
   if (guest) {
-    return { eyebrow: `${eyebrow} · PATRON LOUNGE`, line: "Pull up a stool.", emphasize: "Tonight's yours." };
+    return { eyebrow, line: "Pull up a stool.", emphasize: "Tonight's yours." };
   }
   if (hour >= 5 && hour < 12) {
     return { eyebrow, line: "The cellar is", emphasize: "waking up." };
