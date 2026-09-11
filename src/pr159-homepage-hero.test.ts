@@ -18,7 +18,7 @@ import { overviewGreeting } from "./overview.js";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 const appSrc = read("client/src/App.tsx");
-const cssSrc = read("client/src/styles.css");
+const cssSrc = read("client/src/styles.css") + read("client/src/home-hero.css");
 const wordmarkSrc = read("client/src/SmokeyBarrelWordmark.tsx");
 const filigreeSrc = read("client/src/HopFiligree.tsx");
 
@@ -79,8 +79,8 @@ test("copy no longer says Patron and unlock reads as Keeper Mode / Tap to unlock
   assert.match(appSrc, /<strong>Keeper Mode<\/strong>/);
 });
 
-test("wordmark and filigree are genuine vector paths, not text or raster", () => {
-  for (const src of [wordmarkSrc, filigreeSrc]) {
+test("wordmark remains genuine vector paths, not text or raster", () => {
+  for (const src of [wordmarkSrc]) {
     assert.doesNotMatch(src, /<text[\s>]/); // no SVG <text> glyphs
     assert.doesNotMatch(src, /data:image|base64/); // no embedded raster
     assert.match(src, /<path\b/); // real path geometry
@@ -89,6 +89,14 @@ test("wordmark and filigree are genuine vector paths, not text or raster", () =>
   // The wordmark keeps the two independently themed fills (copper THE + text body).
   assert.match(wordmarkSrc, /fill="currentColor"/);
   assert.match(wordmarkSrc, /var\(--accent\)/);
+});
+
+test("corner is a continuous responsive vector treatment", () => {
+  assert.match(filigreeSrc, /fillRule="evenodd"/);
+  assert.match(filigreeSrc, /preserveAspectRatio="xMaxYMin meet"/);
+  assert.doesNotMatch(filigreeSrc, /<image|\.png|\.jpe?g/);
+  assert.match(cssSrc, /\.hero \.hero-greeting em\{display:block\}/);
+  assert.match(cssSrc, /linear-gradient\(#000 65%,transparent 100%\)/);
 });
 
 test("filigree color and mobile bounds come from theme tokens / responsive CSS", () => {

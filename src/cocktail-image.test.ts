@@ -564,14 +564,16 @@ test("UI source: Keeper Find photo only when image missing; cards render image_u
   assert.match(appSrc, /\/cocktails\/\$\{drink\.id\}\/find-image/);
   assert.match(cardSrc, /imageUrl \? <img src=\{imageUrl\}/);
   assert.match(cardSrc, /alt=\{drink\.name\}/);
-  assert.match(appSrc, /recipe-hero/);
-  assert.match(appSrc, /alt=\{drink\.name\}/);
+  const photoSrc = readFileSync(join(root, "client/src/CocktailPhoto.tsx"), "utf8");
+  assert.match(appSrc, /<CocktailPhoto/);
+  assert.match(photoSrc, /recipe-hero/);
+  assert.match(photoSrc, /alt=\{name\}/);
   // Guest path: showFindPhoto gates on admin via canFindCocktailPhoto
   assert.match(appSrc, /showFindPhoto &&/);
   const cssSrc = readFileSync(join(root, "client/src/cocktail-card.css"), "utf8");
   assert.match(cssSrc, /\.cocktail-card-media img\{[^}]*object-fit:cover/);
   assert.match(cssSrc, /\.cocktail-card-media\{[^}]*height:104px/);
-  assert.match(cssSrc, /\.recipe-modal \.recipe-hero\{[^}]*object-fit:cover/);
+  assert.match(cssSrc, /\.recipe-modal \.recipe-hero\{[^}]*object-fit:contain/);
   assert.match(cssSrc, /\.recipe-modal \.recipe-hero\{[^}]*max-height/);
   // PR137 regression: ordered instruction markers must survive CSS reset / non-flex ol.
   assert.match(cssSrc, /\.recipe-instructions ol\{[^}]*list-style:\s*decimal/);

@@ -1,3 +1,4 @@
+import { CocktailPhoto } from "./CocktailPhoto";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, createContext, type ClipboardEvent, type FormEvent, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeft, Beer, BottleWine as Bottle, CalendarDays, Camera, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Copy, Database, ExternalLink, FlaskConical, GlassWater, Grape, HandCoins, LayoutDashboard,
@@ -36,7 +37,11 @@ import { SmokeyBarrelWordmark } from "./SmokeyBarrelWordmark";
 import { HopFiligree } from "./HopFiligree";
 import { MISSING_ONE_HINT } from "./cocktail-card";
 import { OverviewStats } from "./OverviewStats";
-import { CANONICAL_FLAVOR_LABELS, deriveSpiritFlavors } from "./spirit-flavors";
+import {
+  coerceSpiritFlavorSelection,
+  resolveSpiritDisplayFlavors,
+  spiritFlavorFacetOptions
+} from "./spirit-flavors";
 import { bottleSearchHaystack, matchesBottleSearch, spiritIsAvailable } from "./spirit-search";
 import {
   guestSpiritAvailabilityLabel,
@@ -96,7 +101,7 @@ import { TipJarPage } from "./TipJarPage";
 import { CocktailCard } from "./CocktailCard";
 import { CocktailRecipeInstructions } from "./CocktailRecipeInstructions";
 import { cocktailMethodSummary } from "./cocktail-instructions";
-import { canFindCocktailPhoto, cocktailImageDiscoveryMessage } from "./cocktail-image-ui";
+import { canFindCocktailPhoto, cocktailImageDiscoveryDiagnosticLines, cocktailImageDiscoveryMessage, type CocktailImageDiscoveryDiagnosticsView } from "./cocktail-image-ui";
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
 import { InventoryCleanupPreview } from "./InventoryCleanupPreview";
@@ -1734,15 +1739,27 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const isBottleLibrary = module.id === "spirits";
   const derivedFlavorsById = useMemo(() => {
     const map = new Map<number, string[]>();
-    if (isBottleLibrary) for (const item of items) map.set(Number(item.id), deriveSpiritFlavors(item));
+    if (isBottleLibrary) for (const item of items) map.set(Number(item.id), resolveSpiritDisplayFlavors(item));
     return map;
   }, [items, isBottleLibrary]);
+  // Flavor options are constrained by Family (and Availability) but not by the
+  // currently selected Flavor — avoids empty/irrelevant facet choices.
   const spiritFlavorOptions = useMemo(() => {
     if (!isBottleLibrary) return [];
-    const present = new Set<string>();
-    for (const list of derivedFlavorsById.values()) for (const label of list) present.add(label);
-    return CANONICAL_FLAVOR_LABELS.filter((label) => present.has(label));
-  }, [derivedFlavorsById, isBottleLibrary]);
+    return spiritFlavorFacetOptions({
+      items,
+      flavorsById: derivedFlavorsById,
+      family: kind,
+      familyKey: module.kindKey,
+      availability: avail,
+      isAvailable: spiritIsAvailable
+    });
+  }, [items, derivedFlavorsById, isBottleLibrary, kind, avail, module.kindKey]);
+  useEffect(() => {
+    if (!isBottleLibrary) return;
+    const next = coerceSpiritFlavorSelection(flavor, spiritFlavorOptions);
+    if (next !== flavor) setFlavor(next);
+  }, [isBottleLibrary, flavor, spiritFlavorOptions]);
   const makers = ["All", ...uniqueValues(items, module.makerKey)];
   const kinds = ["All", ...(module.id === "wines" ? uniqueWineKinds(items) : uniqueValues(items, module.kindKey))];
   const tags = ["All", ...uniqueItemLists(items, "tags")];
@@ -1858,8 +1875,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       </div>}
     </div>
     {items.length > 0 && !loading && (isBottleLibrary ? <div className="filter-row bottle-filter-row">
-      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by family">{kinds.map((value)=><option key={value}>{value === "All" ? "All families" : value}</option>)}</select>
-      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by family">{kinds.map((value)=><option key={value} value={value}>{value === "All" ? "All families" : value}</option>)}</select>
+      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value} value={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
       <select value={avail} onChange={(e)=>setAvail(e.target.value)} aria-label="Filter by availability">
         <option value="All">Any availability</option>
         <option value="available">On the shelf</option>
@@ -1867,10 +1884,10 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       </select>
       {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
     </div> : <div className="filter-row">
-      <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value}>{value === "All" ? "All makers" : value}</option>)}</select>
-      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value}>{value === "All" ? (module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
-      <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
-      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      <select value={maker} onChange={(e)=>setMaker(e.target.value)} aria-label="Filter by maker">{makers.map((value)=><option key={value} value={value}>{value === "All" ? "All makers" : value}</option>)}</select>
+      <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value} value={value}>{value === "All" ? (module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
+      <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value} value={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
+      <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value} value={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
       {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
     </div>)}
     {viewState === "error" ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
@@ -3059,6 +3076,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
   const [imageUrl, setImageUrl] = useState(String(drink.image_url ?? ""));
   const [findingPhoto, setFindingPhoto] = useState(false);
   const [photoNotice, setPhotoNotice] = useState("");
+  const [photoDiagnostics, setPhotoDiagnostics] = useState<CocktailImageDiscoveryDiagnosticsView | null>(null);
   const lines = cocktailLines(drink);
   const groups = substituteGroups(lines);
   const custom = drink.collection === "Custom Cocktails";
@@ -3094,30 +3112,36 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
       setError(err instanceof Error ? err.message : "Could not update favorite");
     }
   }
-  async function findPhoto() {
+    async function findPhoto() {
     if (!showFindPhoto || findingPhoto) return;
     setFindingPhoto(true);
     setPhotoNotice("");
+    setPhotoDiagnostics(null);
     setError("");
     try {
       const result = await api<{
         status: "updated" | "no_result" | "already_has_image";
         image_url?: string;
         reason?: string;
+        diagnostics?: CocktailImageDiscoveryDiagnosticsView;
       }>(`/cocktails/${drink.id}/find-image`, { method: "POST", body: "{}" });
       if (result.status === "updated" && result.image_url) {
         setImageUrl(result.image_url);
         setPhotoNotice(cocktailImageDiscoveryMessage("updated"));
+        setPhotoDiagnostics(null);
         onChanged();
       } else if (result.status === "already_has_image") {
         if (result.image_url) setImageUrl(result.image_url);
         setPhotoNotice(cocktailImageDiscoveryMessage("already_has_image"));
+        setPhotoDiagnostics(null);
         onChanged();
       } else {
         setPhotoNotice(cocktailImageDiscoveryMessage("no_result", result.reason));
+        setPhotoDiagnostics(admin ? (result.diagnostics ?? null) : null);
       }
     } catch (err) {
       setPhotoNotice(cocktailImageDiscoveryMessage("error"));
+      setPhotoDiagnostics(null);
       setError(err instanceof Error ? err.message : "Could not search for a photo");
     } finally {
       setFindingPhoto(false);
@@ -3134,7 +3158,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
           </div>
           <button className="icon-button" onClick={close} aria-label="Close recipe"><X/></button>
         </header>
-        {imageUrl ? <img className="recipe-hero" src={imageUrl} alt={drink.name}/> : null}
+        <CocktailPhoto key={drink.id} id={drink.id} name={String(drink.name ?? "Cocktail")} imageUrl={imageUrl} admin={admin} onSaved={url => { setImageUrl(url); setPhotoNotice("Photo saved."); setPhotoDiagnostics(null); onChanged(); }}/>
         <div className="recipe-modal-body">
           <div>
             <span className="eyebrow">INGREDIENTS</span>
@@ -3166,6 +3190,16 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
         {drink.notes ? <article className="bottle-notes"><span className="eyebrow">NOTES</span><p>{drink.notes}</p></article> : null}
         {drink.missing.length > 0 && <p className="recipe-warning">Missing from the shelf: {drink.missing.join(", ")}</p>}
         {photoNotice ? <p className="field-hint" aria-live="polite">{photoNotice}</p> : null}
+        {admin && photoDiagnostics && cocktailImageDiscoveryDiagnosticLines(photoDiagnostics).length > 0 ? (
+          <details className="field-hint cocktail-photo-diagnostics">
+            <summary>Photo search details</summary>
+            <ul>
+              {cocktailImageDiscoveryDiagnosticLines(photoDiagnostics).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
         {error ? <p className="error">{error}</p> : null}
         <footer className="modal-footer">
           {showFindPhoto && (
