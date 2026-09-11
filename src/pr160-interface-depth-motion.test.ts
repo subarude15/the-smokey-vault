@@ -144,6 +144,29 @@ test("PR160 hero keeps separate layered vector planes", () => {
   assert.match(filigreeSrc, /<path\b/);
 });
 
+test("PR160 homepage uses CSS sticky hero underlap with foreground scrim", () => {
+  // Layered planes: sticky back-plane hero + raised content, no JS scroll wiring.
+  assert.match(appSrc, /className="home-stack"/);
+  assert.match(appSrc, /className="home-opening"/);
+  assert.match(appSrc, /className="home-hero-pin"/);
+  assert.match(appSrc, /className="home-content"/);
+  assert.match(depthCss, /\.home-hero-pin\{[\s\S]*?position:\s*sticky/);
+  assert.match(depthCss, /\.home-opening\{[\s\S]*?min-height:/);
+  assert.match(depthCss, /\.home-content\{[\s\S]*?z-index:\s*2/);
+  assert.match(depthCss, /\.home-content\{[\s\S]*?background:\s*var\(--surface-base\)/);
+  assert.match(depthCss, /\.home-content::before\{/);
+  assert.match(depthCss, /linear-gradient\(/);
+  assert.match(depthCss, /\[data-theme="dark"\]\s*\.home-content::before/);
+  assert.match(depthCss, /\[data-theme="light"\]\s*\.home-content::before/);
+  // Sticky must not be poisoned by a transform on the homepage wrapper.
+  assert.match(depthCss, /\.page\s*>\s*\*:[^\n]*:not\(\.home-stack\)/);
+  assert.match(depthCss, /@keyframes\s+depth-home-stack-enter/);
+  assert.doesNotMatch(depthCss, /addEventListener\(\s*["']scroll["']/);
+  assert.doesNotMatch(depthCss, /animation-timeline:\s*scroll/);
+  // Short viewports fall back so sticky never traps scroll.
+  assert.match(depthCss, /@media\s*\(max-height:\s*520px\)[\s\S]*?\.home-hero-pin\{[\s\S]*?position:\s*relative/);
+});
+
 test("PR160 does not introduce a routing library or backend/schema edits", () => {
   assert.doesNotMatch(appSrc, /react-router|createBrowserRouter|BrowserRouter/);
   const guestFiles = [

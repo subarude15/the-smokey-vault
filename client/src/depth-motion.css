@@ -315,8 +315,19 @@ body,
   to{opacity:1;transform:translateY(0)}
 }
 
-.page > *:not(.scan-session-parked):not([hidden]){
+/* Exclude .home-stack: a lingering transform on that wrapper would break
+   sticky hero underlap (transformed ancestors become sticky containing blocks). */
+.page > *:not(.scan-session-parked):not([hidden]):not(.home-stack){
   animation:depth-page-enter var(--motion-standard) var(--ease-standard) both;
+}
+
+.page > .home-stack{
+  animation:depth-home-stack-enter var(--motion-standard) var(--ease-standard) both;
+}
+
+@keyframes depth-home-stack-enter{
+  from{opacity:0}
+  to{opacity:1}
 }
 
 .inventory-grid > *,
@@ -386,6 +397,148 @@ body,
 }
 
 /* -------------------------------------------------------------------------- */
+/* Homepage hero underlap — sticky back plane + foreground scrim (CSS-first)  */
+/* Depth 0 hero sticks inside a short opening runway; content (Depth 2+)      */
+/* pulls up over it. Soft leading scrim darkens the hero as cards approach.   */
+/* Hero leaves naturally when the opening region ends. No JS scroll listeners. */
+/* -------------------------------------------------------------------------- */
+
+.home-stack{
+  position:relative;
+  isolation:isolate;
+  overflow:visible;
+}
+
+/* Sticky runway: taller than the hero so pin can hold, then release. */
+.home-opening{
+  position:relative;
+  z-index:0;
+  overflow:visible;
+  min-height:min(68vh,560px);
+}
+
+.home-hero-pin{
+  position:sticky;
+  top:0;
+  z-index:0;
+  overflow:visible;
+}
+
+/* Hero keeps its own overflow clip for filigree; the pin must not clip. */
+.home-hero-pin .hero{
+  margin-bottom:0;
+}
+
+.home-content{
+  position:relative;
+  z-index:2;
+  overflow:visible;
+  background:var(--surface-base);
+  /* Pull onto the sticky runway so cards/shadows meet the hero plane */
+  margin-top:calc(-1 * min(42vh,340px));
+  padding-top:12px;
+}
+
+/* Leading scrim travels with the foreground plane and obscures the hero. */
+.home-content::before{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  top:-176px;
+  height:176px;
+  pointer-events:none;
+  z-index:0;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb,var(--surface-base) 28%,transparent) 34%,
+      color-mix(in srgb,var(--surface-base) 62%,transparent) 62%,
+      color-mix(in srgb,var(--surface-base) 88%,transparent) 84%,
+      var(--surface-base) 100%
+    );
+}
+
+.home-content > *{
+  position:relative;
+  z-index:1;
+}
+
+/* Dark: deepen into whiskey-cellar shadow, not a flat pure-black fade. */
+[data-theme="dark"] .home-content::before{
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb,var(--surface-base) 32%,transparent) 28%,
+      color-mix(in srgb,var(--surface-base) 55%,#000 18%) 52%,
+      color-mix(in srgb,var(--surface-base) 82%,#000 12%) 78%,
+      var(--surface-base) 100%
+    );
+}
+
+/* Light: warmer cream transition from existing surface tokens. */
+[data-theme="light"] .home-content::before{
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb,var(--surface-base) 22%,transparent) 30%,
+      color-mix(in srgb,var(--surface-base) 55%,var(--surface) 8%) 58%,
+      color-mix(in srgb,var(--surface-base) 86%,var(--surface) 4%) 82%,
+      var(--surface-base) 100%
+    );
+}
+
+/* Mobile-first: shorter sticky consumption, earlier card entry. */
+@media (max-width:700px){
+  .home-opening{
+    min-height:min(58vh,480px);
+  }
+  .home-content{
+    margin-top:calc(-1 * min(36vh,280px));
+    padding-top:8px;
+  }
+  .home-content::before{
+    top:-156px;
+    height:156px;
+  }
+}
+
+@media (max-width:430px){
+  .home-opening{
+    min-height:min(52vh,420px);
+  }
+  .home-hero-pin .hero{
+    padding-top:54px;
+    padding-bottom:18px;
+  }
+  .home-content{
+    margin-top:calc(-1 * min(32vh,240px));
+    padding-top:4px;
+  }
+  .home-content::before{
+    top:-144px;
+    height:144px;
+  }
+}
+
+/* Unusually short viewports: skip sticky so the opening never traps scroll. */
+@media (max-height:520px){
+  .home-opening{
+    min-height:0;
+  }
+  .home-hero-pin{
+    position:relative;
+    top:auto;
+  }
+  .home-content{
+    margin-top:-16px;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Cancel legacy sticky-hover transforms on touch-first pointers                */
 /* -------------------------------------------------------------------------- */
 
@@ -430,6 +583,7 @@ body,
   }
 
   .page > *:not(.scan-session-parked):not([hidden]),
+  .page > .home-stack,
   .inventory-grid > *,
   .cocktail-card-grid > *,
   .gallery-album-grid > *,
