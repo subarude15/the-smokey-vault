@@ -409,19 +409,31 @@ body,
   overflow:visible;
 }
 
-/* Sticky runway: taller than the hero so pin can hold, then release. */
+/*
+ * Sticky runway MUST be taller than the hero pin. A min-height alone fails when
+ * the hero is already ~viewport-tall (common on phones) — sticky never engages.
+ * padding-bottom creates an explicit hold region below the pin.
+ */
 .home-opening{
   position:relative;
   z-index:0;
   overflow:visible;
-  min-height:min(68vh,560px);
+  min-height:0;
+  padding-bottom:0;
 }
 
 .home-hero-pin{
   position:sticky;
-  top:0;
+  /* Sit under the sticky topbar (72px) so engagement does not jump under chrome */
+  top:72px;
   z-index:0;
   overflow:visible;
+}
+
+/* Explicit in-flow sticky runway (more reliable than parent padding-bottom). */
+.home-hero-runway{
+  height:min(36vh,300px);
+  pointer-events:none;
 }
 
 /* Hero keeps its own overflow clip for filigree; the pin must not clip. */
@@ -434,8 +446,8 @@ body,
   z-index:2;
   overflow:visible;
   background:var(--surface-base);
-  /* Pull onto the sticky runway so cards/shadows meet the hero plane */
-  margin-top:calc(-1 * min(42vh,340px));
+  /* Pull across the runway and into the hero so cards meet the back plane */
+  margin-top:calc(-1 * (min(36vh,300px) + 72px));
   padding-top:12px;
 }
 
@@ -491,13 +503,13 @@ body,
     );
 }
 
-/* Mobile-first: shorter sticky consumption, earlier card entry. */
+/* Mobile-first: shorter sticky hold, earlier card entry over the brand. */
 @media (max-width:700px){
-  .home-opening{
-    min-height:min(58vh,480px);
+  .home-hero-runway{
+    height:min(30vh,240px);
   }
   .home-content{
-    margin-top:calc(-1 * min(36vh,280px));
+    margin-top:calc(-1 * (min(30vh,240px) + 64px));
     padding-top:8px;
   }
   .home-content::before{
@@ -507,15 +519,15 @@ body,
 }
 
 @media (max-width:430px){
-  .home-opening{
-    min-height:min(52vh,420px);
+  .home-hero-runway{
+    height:min(28vh,210px);
   }
   .home-hero-pin .hero{
     padding-top:54px;
     padding-bottom:18px;
   }
   .home-content{
-    margin-top:calc(-1 * min(32vh,240px));
+    margin-top:calc(-1 * (min(28vh,210px) + 56px));
     padding-top:4px;
   }
   .home-content::before{
@@ -526,8 +538,8 @@ body,
 
 /* Unusually short viewports: skip sticky so the opening never traps scroll. */
 @media (max-height:520px){
-  .home-opening{
-    min-height:0;
+  .home-hero-runway{
+    height:0;
   }
   .home-hero-pin{
     position:relative;

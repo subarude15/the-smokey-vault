@@ -976,6 +976,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <p className="hero-lede">{overviewHeroLede(!admin)}</p>
     </div>
     </div>
+    {/* In-flow spacer: padding alone is not a reliable sticky runway in all engines. */}
+    <div className="home-hero-runway" aria-hidden="true"/>
     </div>
     <div className="home-content">
     {!admin && pageEnabled("cocktails", enabledTabs) && <div className="tonight-cta">

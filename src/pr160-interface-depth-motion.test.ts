@@ -151,7 +151,9 @@ test("PR160 homepage uses CSS sticky hero underlap with foreground scrim", () =>
   assert.match(appSrc, /className="home-hero-pin"/);
   assert.match(appSrc, /className="home-content"/);
   assert.match(depthCss, /\.home-hero-pin\{[\s\S]*?position:\s*sticky/);
-  assert.match(depthCss, /\.home-opening\{[\s\S]*?min-height:/);
+  assert.match(depthCss, /\.home-hero-runway\{[\s\S]*?height:/);
+  assert.match(depthCss, /\.home-hero-pin\{[\s\S]*?top:\s*72px/);
+  assert.match(appSrc, /className="home-hero-runway"/);
   assert.match(depthCss, /\.home-content\{[\s\S]*?z-index:\s*2/);
   assert.match(depthCss, /\.home-content\{[\s\S]*?background:\s*var\(--surface-base\)/);
   assert.match(depthCss, /\.home-content::before\{/);
