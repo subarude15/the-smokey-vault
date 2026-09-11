@@ -5,60 +5,40 @@ Last updated: 2026-09-11
 ## Current position
 
 Most recently completed:
-- **PR158** — Inventory filter sentinel reliability. Mapped inventory `<option>` elements now set explicit `value={value}` so “All families” / “All flavors” / etc. keep the internal `"All"` sentinel instead of submitting label text. Covers Bottle Library Family/Flavor and general Maker/Type/Tag/Flavor filters; focused regression tests in `src/pr158-inventory-filter-sentinel.test.ts`.
+- **PR159** — Homepage Brand Hero & Filigree Refinement (ready for review on its branch): stacked Smokey Barrel vector wordmark, continuous hop-vine filigree, single SB medallion, no Patron/Lounge homepage copy.
 
 Previously completed:
-- **PR157** — Cocktail photo framing and explicit Keeper photo selection (full contained photo + native enlarge dialog; preview up to three alternatives or ImageField; explicit save with concurrent-edit guard).
-- **PR156** — Bottle Library flavor data audit + facet reliability (`display_flavors`, Family-scoped Flavor options, stale Flavor reset).
+- **PR158** — Inventory filter sentinel reliability. Mapped inventory `<option>` elements now set explicit `value={value}` so “All families” / “All flavors” / etc. keep the internal `"All"` sentinel instead of submitting label text.
+- **PR157** — Cocktail photo framing and explicit Keeper photo selection.
+- **PR156** — Bottle Library flavor data audit + facet reliability.
 - **PR155** — Cocktail image discovery observability + production reliability.
-- **PR154** — Cocktail image discovery reliability.
 
 Currently working on:
-- **PR159 ready for review** — Homepage hero repaired on current `main`: original stacked wordmark, continuous charcoal hop-vine corner, one SB medallion, and no Patron/Lounge homepage copy. Standalone theme-ready SVGs are in `client/public/brand/`. Full regression suite: 1,578 passed / 7 skipped; production build passes. The managed visual-preview connection was unavailable, so final phone/desktop inspection remains a reviewer check.
+- **PR160 ready for review** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`: visible resting card float, ~8–9px hover lift, edge lighting, warm bounce-light, Depth-4 overlays, touch press, hero layering + reveal, and CSS sticky homepage hero underlap (content + scrim pass over the hero; no parallax). Reduced-motion keeps static elevation. Presentation only; Guest redaction and More-panel Keeper unlock unchanged.
 
 Next planned:
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up. Otherwise evidence-driven Brewery Lab / live-use follow-up.
 
 ## Recent architectural decisions
 
-- Inventory filter options (PR158): Display labels (“All families”, “All flavors”, …) must never become submitted values. Mapped `<option>` elements use `value={value}` with `"All"` as the sole clear/reset sentinel. Do not introduce alternate sentinel strings.
+- Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--surface-*`, `--elevation-1..4`, `--edge-*`, `--lift-card`, `--press-*`) applied site-wide. Resting Depth-2 must be obvious without hover. Hover motion is fine-pointer-gated (~8–9px); touch uses press scale with sticky-hover cancelled; reduced-motion disables movement but must not flatten static elevation. Homepage underlap is CSS sticky + scrim only (no scroll listeners / parallax). Do not add a second competing token system or a JS animation library for this.
 
-- Cocktail photo choice (PR157): native dialog for full-photo viewing and Keeper editing; shared ImageField for uploads. `/image-options` reuses bounded discovery with a preview collector (no cocktail writes, up to three unique localized alternatives). `/image` requires Keeper auth, an existing local image and the expected prior URL to prevent stale overwrites. No schema changes or automatic replacement. Preview files use existing content-addressed image storage; canceled preview files are retained, as with shared uploads.
+- Inventory filter options (PR158): Display labels (“All families”, “All flavors”, …) must never become submitted values. Mapped `<option>` elements use `value={value}` with `"All"` as the sole clear/reset sentinel.
 
-- Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation. Priority is Keeper structured `flavors` → Keeper `tasting_notes` → accepted enrichment official/house tasting text. Tags stay searchable free-text only and never become Flavor facets. Flavor dropdown options are computed after Family (and optionally Availability), without applying the current Flavor selection; invalid Flavor selections reset to All.
+- Cocktail photo choice (PR157): native dialog for full-photo viewing and Keeper editing; shared ImageField for uploads.
 
-- Cocktail image discovery (PR155): Settings SearXNG health remains a connectivity/JSON probe only. Find Photo failures now carry bounded Keeper-only diagnostics (query/result/candidate/identity/image/localize counters + furthest stage). SERP pre-filter drops only clear flavored/numbered derivatives; descriptive titles reach the strict page gate. Signature search ingredients prefer identity spirits/citrus/sparkling over juice/syrup. Image asset host rejection is separate from recipe page host rejection so publisher CDNs are not falsely blocked.
+- Bottle Library flavors (PR156): Facet/search source of truth is derived presentation `display_flavors`, not a DB mutation.
 
-- Cocktail image identity (PR154) lives in the pure `src/cocktail-image-identity.ts`: exact name → base-spirit alias confirmed by the drink's own ingredients → reject. Any meaningful name modifier or unconfirmed/different base spirit rejects; extend the bounded vocab (base spirits, whiskey-family, modifier ingredients) rather than loosening the gate. `src/cocktail_image.ts` keeps all PR129 safety rules and the PR145 backfill; discovery returns staged diagnostics (never a single generic no-result).
-- Branding is a single tokenized visual system (PR147): the SB monogram medallion (`SbMark`) is the one brand mark; brand/heading type uses `--font-display` (Manufacturing Consent, weight 400) reserved for brand moments and major headers only (never body/labels/metadata); `--font-sans` (Outfit) is the proportional body/UI font; `--font-mono` (JetBrains Mono) is reserved for identifier/code-like values only. Light + Dark share the same warm whiskey-cellar palette via `theme.ts` tokens. Do not reintroduce removed theme modes, add fake-metal/heavy-texture treatments, use blackletter for dense/body text, or make JetBrains Mono the default UI font.
+- Branding is a single tokenized visual system (PR147): the SB monogram medallion (`SbMark`) is the one brand mark; Light + Dark only; warm whiskey-cellar palette. Do not reintroduce removed theme modes or fake-metal treatments.
 
-- Guest inventory/enrichment responses stay server-allowlisted (`guest-inventory-response`); coarse availability only.
-- Shared `ImageField` / `images` media path is the default for Keeper uploads; do not add parallel upload systems per feature.
-- Event photo framing is event-only metadata (`image_focal_x` / `image_focal_y` / `image_zoom`) applied with CSS — never bake crop into the uploaded file via `ImageField`.
-- Guest landing CTAs that deep-link to tab-gated pages must reuse `pageEnabled` / `PAGE_TAB` (see `landingFeedbackCtaEnabled`) so Overview and nav cannot drift.
-- Gallery video tiles/covers use persisted lightweight posters; original videos load only in the viewer/download path; poster cleanup follows Gallery media ownership/reference semantics.
-- Gallery social records (comments/votes) attach to the stable `gallery_media.id`, never to `album_id`, filenames, or poster paths, so album move/rename and file-dedup never disturb interaction; cleanup runs transactionally with `deleteGalleryMedia`. The anonymous voter key is derived server-side (`deriveGalleryVoterKey`, HMAC keyed with the session secret): the durable client `smokey-voter` device token is the primary identity (key from token alone, so a device stays one voter across IP/UA changes), with an opaque IP+User-Agent fallback only when no token is supplied. Keys/raw context are never returned to Guests. One active vote per `(media_id, voter_key)`; same-direction re-vote toggles off. Comments store no voter/device identity (id, media_id, author, body, created_at only), are plain text (React-escaped), length-capped server-side; Keeper-only removal via `requireAdmin`.
-- Gallery upload limits are centralized in `speakeasy-shared` and applied per media type: photos are capped at 150 MB for all roles, and only videos use the larger Keeper ceiling. The per-type ceiling is enforced server-side on the sniffed media type (not client `File.size`/Content-Length/filename). Large Keeper videos stream to `galleryDir/tmp` and finalize via one shared temp-file persistence path (atomic rename, no full-file Buffer); small uploads and the streamed path share that core so they cannot drift.
-- Built-in cocktail instructions are generated deterministically at render time from the seed's method/glassware/garnish (no DB migration; existing prod rows benefit immediately). Generation only fires when `method` is a bare technique label or empty; rich prose/numbered instructions (AI/custom) are preserved and never overwritten. The short method label stays visible as metadata (recipe header + resolver's `methodLabel`).
-- Cocktail photos use one shared discovery path: the Keeper "Find photo" action and the bounded boot backfill both call `findCocktailImage` (fill-missing only; localizes to `/api/media/...`; custom cocktails skipped). The boot backfill advances a persisted cursor (`cocktailImageBackfillCursor`) and wraps around, so persistent no-results near the start cannot starve later cocktails. No parallel cocktail image system.
-- Built-in cocktail method-label detection uses an explicit technique allowlist (`isCocktailMethodLabel`), so only genuine short labels (Build/Shake/Stir/…) become generated steps; real short prose (e.g. "Shake with ice and strain into a coupe.") is preserved.
-- Build/version identifier is derived from build metadata injected at image build time (`BUILD_DATE`/`BUILD_PR`/`GIT_SHA`) — no committed milestone constant to bump per PR. `docker-publish.yml` stamps the date, parses the PR number from the merge commit, and passes `github.sha`; local/dev falls back deterministically to today's date with a `.dev` marker. Exposed Keeper-only via `GET /api/admin/build` (`src/build-info.ts`).
-- Absolute `/api/media/images/...` URLs collapse to relative paths only when the origin matches the app/request; foreign CDNs with that path stay remote.
-- Upload failure must not call `onChange` with a captured prior value (avoids racing a newer successful image).
-- Commercial tap enrichment reuses exact vault packaged-beer images; homebrew taps stay excluded; Keeper-owned images are not auto-overwritten.
-- Appearance support is Light + Dark only (PR127). Theme toggle accessible naming is action-oriented via `themeToggleLabel` (PR153).
+- Guest inventory/enrichment responses stay server-allowlisted; coarse availability only.
 - App routing remains state-based in `App.tsx` (no React Router for primary navigation).
-- Rail shell scroll ownership (PR153): viewport-locked `.app-shell` on desktop/tablet landscape; `main` is the page scroller; phone portrait keeps document scroll.
-- GitHub PR numbers are authoritative for roadmap numbering; when a docs/tooling PR consumes a number, later planned product PRs shift forward (PR141 chore → feedback CTA visibility is PR142).
-- `.env` is optional for boot (`SESSION_SECRET` auto-generates into the vault DB); `KEEPER_GALLERY_MAX_VIDEO_MB` tunes the Keeper video ceiling without an image rebuild.
 
 ## Known issues / follow-ups
 
-- Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap (see Track A).
-- Keeper large uploads write temp files under `galleryDir/tmp` so finalization is a same-filesystem atomic rename; keep temp storage on the Gallery/data filesystem to avoid cross-device rename failure.
-- Draft **#121** branding docs are superseded by PR147's shipped visual system; keep Light/Dark only and the SB monogram identity.
-- Ops hardening (Watchtower scope, ownership expansion) stays evidence-driven and must not displace the next product PR.
-- Deferred from PR153: global touch-target expansion; cocktail image discovery (PR154).
+- Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap.
+- Live NAS/mobile verify cocktail photo framing after deploy.
+- SearXNG health/backoff follow-up.
 
 ## Handoff
 

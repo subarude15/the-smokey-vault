@@ -959,6 +959,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   useEffect(() => { load(); }, [admin]);
   return <>
     {error && <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load Overview</strong><span>{error}</span></div></div>}
+    <div className="home-stack">
+    <div className="home-opening">
+    <div className="home-hero-pin">
     <div className="hero">
       <div className="hero-copy">
         <span className="eyebrow">{greeting.eyebrow}</span>
@@ -972,6 +975,11 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
       <HopFiligree className="hero-filigree"/>
       <p className="hero-lede">{overviewHeroLede(!admin)}</p>
     </div>
+    </div>
+    {/* In-flow spacer: padding alone is not a reliable sticky runway in all engines. */}
+    <div className="home-hero-runway" aria-hidden="true"/>
+    </div>
+    <div className="home-content">
     {!admin && pageEnabled("cocktails", enabledTabs) && <div className="tonight-cta">
       <button type="button" className="primary" onClick={() => go("cocktails")}><Search size={18}/> Find a drink</button>
       {aiConfigured && <button type="button" className="secondary" onClick={() => go("mixologist")}><Sparkles size={18}/> Ask the mixologist</button>}
@@ -1092,6 +1100,8 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         <button className="feature-card" onClick={() => go("next")}><div><span className="eyebrow">GUEST PICKS</span><h2>Give us your 2 cents</h2><p>Request liquor and wine, then vote the next keg and brew {keeperName} puts up.</p></div><ThumbsUp size={56}/></button>
       )}
     </section>
+    </div>
+    </div>
   </>;
 }
 

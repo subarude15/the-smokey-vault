@@ -429,13 +429,17 @@ body.nav-open{overflow:hidden}
   .topbar-title{display:block;max-width:min(48vw,280px)}
 }
 
-/* Phone portrait keeps document/page scroll (not the rail height-lock). */
+/* Phone portrait keeps document/page scroll (not the rail height-lock).
+   Do not set overflow-y on html/body/#root here: pairing overflow-x:clip with
+   overflow-y:auto makes browsers treat overflow-x as hidden and creates a
+   sticky-killing scrollport. Horizontal clip alone (base html/body rules) is enough. */
 @media(max-width:1050px) and (orientation:portrait){
   html, body, #root {
     height: auto;
     max-height: none;
-    overflow-x: clip;
-    overflow-y: auto;
+  }
+  body, #root {
+    overflow: visible;
   }
   .app-shell{
     height: auto;

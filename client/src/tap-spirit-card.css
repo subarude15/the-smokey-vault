@@ -1,6 +1,6 @@
 /* PR135 — Tap + Spirit collection cards. Uses the existing Smokey Vault visual tokens. */
-.domain-card{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden;box-shadow:0 10px 28px color-mix(in srgb,var(--bg) 78%,transparent);transition:border-color .18s var(--ease-out),transform .18s var(--ease-out),box-shadow .18s var(--ease-out)}
-.domain-card:hover{border-color:color-mix(in srgb,var(--accent) 46%,var(--line));box-shadow:0 16px 36px color-mix(in srgb,var(--bg) 66%,transparent)}
+.domain-card{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden;box-shadow:var(--elevation-2,0 10px 28px color-mix(in srgb,var(--bg) 78%,transparent));transition:border-color var(--motion-fast,.18s) var(--ease-out),transform var(--motion-standard,.18s) var(--ease-out),box-shadow var(--motion-standard,.18s) var(--ease-out)}
+.domain-card:hover{border-color:color-mix(in srgb,var(--accent) 46%,var(--line))}
 .domain-card-main{display:grid;grid-template-columns:92px minmax(0,1fr);gap:15px;min-width:0;padding:15px;text-align:left;cursor:pointer;outline:none}
 .domain-card-main:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
 .domain-card-media{width:92px;aspect-ratio:4/5;display:grid;place-items:center;align-self:start;border-radius:13px;background:var(--surface-2);color:var(--muted);overflow:hidden}

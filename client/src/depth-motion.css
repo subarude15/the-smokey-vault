@@ -1,0 +1,646 @@
+/**
+ * PR160 — Interface Depth & Motion System
+ *
+ * Shared elevation + motion language for The Smokey Barrel.
+ * Whiskey-cellar surface hierarchy: recessed page → quiet panels → floating cards
+ * → lifted hover → true overlays. Premium and tactile — not gaudy.
+ */
+
+:root{
+  /* Motion durations */
+  --motion-fast:160ms;
+  --motion-standard:230ms;
+  --motion-slow:280ms;
+  --motion-reveal:720ms;
+
+  /* Easing — reuse the existing brand curves */
+  --ease-standard:var(--ease-out);
+  --ease-emphasized:var(--ease-spring);
+
+  /* Surface roles (Depth 0–4 tonal planes) */
+  --surface-base:var(--bg);
+  --surface-panel:color-mix(in srgb,var(--surface) 82%,var(--bg));
+  --surface-raised:color-mix(in srgb,var(--surface) 88%,var(--surface-2));
+  --surface-floating:color-mix(in srgb,var(--surface-2) 70%,var(--surface));
+
+  /* Edge lighting — physical panel lip, not a bevel graphic */
+  --edge-highlight:inset 0 1px 0 color-mix(in srgb,#fff 10%,transparent);
+  --edge-shadow:inset 0 -1px 0 color-mix(in srgb,#000 14%,transparent);
+  --edge-card:var(--edge-highlight), var(--edge-shadow);
+  --border-raised:color-mix(in srgb,var(--line) 78%,var(--surface-2));
+  --border-lifted:color-mix(in srgb,var(--accent) 34%,var(--line));
+
+  /* Elevation shadows — real dark contrast + restrained warm bounce-light */
+  --elevation-1:
+    0 1px 1px color-mix(in srgb,#000 18%,transparent),
+    0 4px 12px color-mix(in srgb,#000 12%,transparent),
+    var(--edge-highlight);
+
+  --elevation-2:
+    0 1px 2px color-mix(in srgb,#000 28%,transparent),
+    0 6px 10px color-mix(in srgb,#000 16%,transparent),
+    0 16px 32px color-mix(in srgb,#000 22%,transparent),
+    0 20px 40px color-mix(in srgb,var(--accent) 4%,transparent),
+    var(--edge-card);
+
+  --elevation-3:
+    0 2px 4px color-mix(in srgb,#000 30%,transparent),
+    0 12px 18px color-mix(in srgb,#000 20%,transparent),
+    0 28px 48px color-mix(in srgb,#000 30%,transparent),
+    0 18px 36px color-mix(in srgb,var(--accent-2) 7%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#000 18%,transparent);
+
+  --elevation-4:
+    0 4px 8px color-mix(in srgb,#000 34%,transparent),
+    0 18px 28px color-mix(in srgb,#000 26%,transparent),
+    0 40px 72px color-mix(in srgb,#000 42%,transparent),
+    0 24px 48px color-mix(in srgb,var(--accent-2) 8%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#000 20%,transparent);
+
+  /* Hover / press lift — unmistakable rise, still premium */
+  --lift-card:translateY(-8px) scale(1.012);
+  --lift-card-strong:translateY(-9px) scale(1.015);
+  --press-scale:scale(.975);
+  --press-card:scale(.978) translateY(1px);
+  --nav-active-lift:translateY(-2px);
+
+  /* Shared interactive transition bundle */
+  --motion-interactive:
+    transform var(--motion-standard) var(--ease-emphasized),
+    box-shadow var(--motion-standard) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+/* Light theme: softer blacks, clearer raised plane vs warm bone page */
+[data-theme="light"]{
+  --surface-panel:color-mix(in srgb,var(--surface) 94%,#fff);
+  --surface-raised:color-mix(in srgb,var(--surface) 92%,#fff);
+  --surface-floating:#fffdf8;
+  --edge-highlight:inset 0 1px 0 color-mix(in srgb,#fff 72%,transparent);
+  --edge-shadow:inset 0 -1px 0 color-mix(in srgb,#000 8%,transparent);
+  --border-raised:color-mix(in srgb,var(--line) 70%,var(--accent) 8%);
+
+  --elevation-1:
+    0 1px 2px color-mix(in srgb,#3a2a18 10%,transparent),
+    0 4px 14px color-mix(in srgb,#3a2a18 8%,transparent),
+    var(--edge-highlight);
+
+  --elevation-2:
+    0 1px 2px color-mix(in srgb,#3a2a18 14%,transparent),
+    0 8px 14px color-mix(in srgb,#3a2a18 10%,transparent),
+    0 18px 36px color-mix(in srgb,#3a2a18 14%,transparent),
+    0 16px 28px color-mix(in srgb,var(--accent) 6%,transparent),
+    var(--edge-card);
+
+  --elevation-3:
+    0 3px 6px color-mix(in srgb,#3a2a18 16%,transparent),
+    0 14px 22px color-mix(in srgb,#3a2a18 12%,transparent),
+    0 30px 52px color-mix(in srgb,#3a2a18 18%,transparent),
+    0 18px 34px color-mix(in srgb,var(--accent) 9%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#3a2a18 10%,transparent);
+
+  --elevation-4:
+    0 6px 12px color-mix(in srgb,#3a2a18 18%,transparent),
+    0 22px 36px color-mix(in srgb,#3a2a18 16%,transparent),
+    0 44px 80px color-mix(in srgb,#3a2a18 22%,transparent),
+    0 20px 40px color-mix(in srgb,var(--accent) 10%,transparent),
+    var(--edge-highlight),
+    inset 0 -1px 0 color-mix(in srgb,#3a2a18 12%,transparent);
+}
+
+/* Dark theme: push page deeper so raised cards read clearly */
+[data-theme="dark"]{
+  --surface-panel:color-mix(in srgb,var(--surface) 88%,#000);
+  --surface-raised:color-mix(in srgb,var(--surface) 70%,var(--surface-2));
+  --surface-floating:color-mix(in srgb,var(--surface-2) 78%,var(--surface));
+  --edge-highlight:inset 0 1px 0 color-mix(in srgb,#fff 9%,transparent);
+  --edge-shadow:inset 0 -1px 0 color-mix(in srgb,#000 28%,transparent);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Depth 0 — recessed page plane                                                */
+/* -------------------------------------------------------------------------- */
+
+body,
+.app-shell{
+  background:var(--surface-base);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Depth 1 — panels / section surfaces                                          */
+/* -------------------------------------------------------------------------- */
+
+.filter-row,
+.toolbar,
+.cocktail-toolbar,
+.wanted-card,
+.settings-card,
+.enrichment-panel,
+.scan-session,
+.mixologist,
+.legacy-beer-audit,
+.cleanup-findings{
+  background-color:var(--surface-panel);
+  border-color:color-mix(in srgb,var(--line) 88%,transparent);
+  box-shadow:var(--elevation-1);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Depth 2 — shared content cards (resting float)                               */
+/* -------------------------------------------------------------------------- */
+
+.domain-card,
+.cocktail-card,
+.stat-card,
+.feature-card,
+.event-card,
+.merch-card,
+.gallery-album-card,
+.lab-card,
+.lab-card-button,
+.ticket-card,
+.favorite-card,
+.restock-row,
+.overview-tap,
+.overview-brew,
+.overview-low,
+.recipe-card,
+.inventory-card,
+.inventory-card-button{
+  background-color:var(--surface-raised);
+  border-color:var(--border-raised);
+  box-shadow:var(--elevation-2);
+  transition:var(--motion-interactive);
+}
+
+/* Depth 3 — selected / active chrome (below true overlays) */
+.sidebar nav button.active,
+.mobile-bottom-nav button.active,
+.chip.active,
+.segmented button.active,
+.season-filters button.active,
+.cocktail-filters button.active{
+  box-shadow:
+    var(--edge-highlight),
+    0 4px 14px color-mix(in srgb,#000 18%,transparent),
+    0 0 18px color-mix(in srgb,var(--accent-2) 5%,transparent);
+}
+
+.keeper-card-controls{
+  background-color:var(--surface-floating);
+  box-shadow:var(--elevation-3);
+}
+
+/* Depth 4 — true overlays */
+.modal,
+.more-sheet.open,
+.lightbox-stage{
+  background-color:var(--surface-floating);
+  box-shadow:var(--elevation-4);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Hover-capable lift (pointer fine only)                                       */
+/* -------------------------------------------------------------------------- */
+
+@media (hover:hover) and (pointer:fine){
+  .domain-card:hover,
+  .cocktail-card:hover,
+  .stat-card:hover,
+  .feature-card:hover,
+  .event-card:hover,
+  .merch-card:hover,
+  .gallery-album-card:hover,
+  .lab-card:hover,
+  .lab-card-button:hover,
+  .ticket-card:hover,
+  .favorite-card:hover,
+  .restock-row:hover,
+  .overview-tap:hover,
+  .overview-brew:hover,
+  .overview-low:hover,
+  .recipe-card:hover,
+  .inventory-card:hover,
+  .inventory-card-button:hover{
+    transform:var(--lift-card);
+    border-color:var(--border-lifted);
+    box-shadow:var(--elevation-3);
+  }
+
+  .feature-card-lead:hover,
+  .stat-card:hover{
+    transform:var(--lift-card-strong);
+    box-shadow:var(--elevation-3);
+  }
+
+  .domain-card.is-skeleton:hover,
+  .spirit-card.is-skeleton:hover,
+  .stat-card.is-skeleton:hover{
+    transform:none;
+    box-shadow:var(--elevation-2);
+    border-color:var(--border-raised);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Touch / pressed feedback                                                     */
+/* -------------------------------------------------------------------------- */
+
+.primary:active,
+.secondary:active,
+.scan-button:active,
+.icon-button:active,
+.chip:active,
+.segmented button:active,
+.season-filters button:active,
+.cocktail-filters button:active,
+.sidebar nav button:active,
+.mobile-bottom-nav button:active,
+.more-sheet-item:active,
+.nav-hint-dismiss:active,
+.homebrew-link:active,
+.keeper-card-controls .secondary:active,
+.kiosk-lock:active{
+  transform:var(--press-scale);
+}
+
+.domain-card:active,
+.cocktail-card:has(.cocktail-card-main:active),
+.stat-card:active,
+.feature-card:active,
+.event-card:active,
+.merch-card:active,
+.gallery-album-card:active,
+.lab-card:active,
+.lab-card-button:active,
+.recipe-card:active,
+.favorite-card:active,
+.restock-row:active,
+.overview-tap:active,
+.overview-brew:active,
+.overview-low:active,
+.inventory-card:active,
+.inventory-card-button:active{
+  transform:var(--press-card);
+  box-shadow:var(--elevation-1);
+}
+
+.mobile-bottom-nav button.active,
+.sidebar nav button.active{
+  transform:var(--nav-active-lift);
+}
+
+.mobile-bottom-nav button.active:active,
+.sidebar nav button.active:active{
+  transform:var(--press-scale);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page + grid enter (brief, non-blocking)                                      */
+/* -------------------------------------------------------------------------- */
+
+@keyframes depth-page-enter{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+@keyframes depth-card-enter{
+  from{opacity:0;transform:translateY(10px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* Exclude .home-stack: a lingering transform on that wrapper would break
+   sticky hero underlap (transformed ancestors become sticky containing blocks). */
+.page > *:not(.scan-session-parked):not([hidden]):not(.home-stack){
+  animation:depth-page-enter var(--motion-standard) var(--ease-standard) both;
+}
+
+.page > .home-stack{
+  animation:depth-home-stack-enter var(--motion-standard) var(--ease-standard) both;
+}
+
+@keyframes depth-home-stack-enter{
+  from{opacity:0}
+  to{opacity:1}
+}
+
+.inventory-grid > *,
+.cocktail-card-grid > *,
+.gallery-album-grid > *,
+.recipe-grid > *,
+.stat-grid > *,
+.feature-grid > *{
+  animation:depth-card-enter var(--motion-slow) var(--ease-standard) both;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Homepage hero layering + restrained reveal                                   */
+/* -------------------------------------------------------------------------- */
+
+.hero{
+  /* Layered enter replaces the single flat rise-in so wordmark/filigree read as separate planes. */
+  animation:none;
+  --hero-ambient:
+    radial-gradient(560px 320px at 78% 8%, color-mix(in srgb,var(--accent-2) 8%,transparent), transparent 68%),
+    radial-gradient(420px 260px at 12% 0%, color-mix(in srgb,var(--accent) 7%,transparent), transparent 62%);
+}
+
+.hero::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background:var(--hero-ambient);
+  opacity:.95;
+}
+
+.hero .hero-copy,
+.hero .hero-lede{
+  position:relative;
+  z-index:2;
+}
+
+.hero .hero-filigree{
+  z-index:1;
+}
+
+.hero .hero-wordmark,
+.hero .hero-filigree{
+  transform-origin:center top;
+  animation:depth-hero-reveal var(--motion-reveal) var(--ease-standard) both;
+}
+
+.hero .hero-filigree{
+  animation-delay:60ms;
+}
+
+.hero .hero-greeting{
+  animation:depth-hero-reveal calc(var(--motion-reveal) * .85) var(--ease-standard) both;
+  animation-delay:90ms;
+}
+
+.hero .hero-lede{
+  animation:depth-hero-reveal calc(var(--motion-reveal) * .8) var(--ease-standard) both;
+  animation-delay:120ms;
+}
+
+@keyframes depth-hero-reveal{
+  from{opacity:0;transform:translateY(7px) scale(.978)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+
+/* -------------------------------------------------------------------------- */
+/* Homepage hero underlap — sticky back plane + foreground scrim (CSS-first)  */
+/* Depth 0 hero sticks inside a short opening runway; content (Depth 2+)      */
+/* pulls up over it. Soft leading scrim darkens the hero as cards approach.   */
+/* Hero leaves naturally when the opening region ends. No JS scroll listeners. */
+/* -------------------------------------------------------------------------- */
+
+.home-stack{
+  position:relative;
+  isolation:isolate;
+  overflow:visible;
+}
+
+/*
+ * Sticky runway MUST be taller than the hero pin. A min-height alone fails when
+ * the hero is already ~viewport-tall (common on phones) — sticky never engages.
+ * padding-bottom creates an explicit hold region below the pin.
+ */
+.home-opening{
+  position:relative;
+  z-index:0;
+  overflow:visible;
+  min-height:0;
+  padding-bottom:0;
+}
+
+.home-hero-pin{
+  position:sticky;
+  /* Sit under the sticky topbar (72px) so engagement does not jump under chrome */
+  top:72px;
+  z-index:0;
+  overflow:visible;
+}
+
+/* Explicit in-flow sticky runway (more reliable than parent padding-bottom). */
+.home-hero-runway{
+  height:min(36vh,300px);
+  pointer-events:none;
+}
+
+/* Hero keeps its own overflow clip for filigree; the pin must not clip. */
+.home-hero-pin .hero{
+  margin-bottom:0;
+}
+
+.home-content{
+  position:relative;
+  z-index:2;
+  overflow:visible;
+  background:var(--surface-base);
+  /* Pull across the runway and into the hero so cards meet the back plane */
+  margin-top:calc(-1 * (min(36vh,300px) + 72px));
+  padding-top:12px;
+}
+
+/* Leading scrim travels with the foreground plane and obscures the hero. */
+.home-content::before{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  top:-176px;
+  height:176px;
+  pointer-events:none;
+  z-index:0;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb,var(--surface-base) 28%,transparent) 34%,
+      color-mix(in srgb,var(--surface-base) 62%,transparent) 62%,
+      color-mix(in srgb,var(--surface-base) 88%,transparent) 84%,
+      var(--surface-base) 100%
+    );
+}
+
+.home-content > *{
+  position:relative;
+  z-index:1;
+}
+
+/* Dark: deepen into whiskey-cellar shadow, not a flat pure-black fade. */
+[data-theme="dark"] .home-content::before{
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb,var(--surface-base) 32%,transparent) 28%,
+      color-mix(in srgb,var(--surface-base) 55%,#000 18%) 52%,
+      color-mix(in srgb,var(--surface-base) 82%,#000 12%) 78%,
+      var(--surface-base) 100%
+    );
+}
+
+/* Light: warmer cream transition from existing surface tokens. */
+[data-theme="light"] .home-content::before{
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb,var(--surface-base) 22%,transparent) 30%,
+      color-mix(in srgb,var(--surface-base) 55%,var(--surface) 8%) 58%,
+      color-mix(in srgb,var(--surface-base) 86%,var(--surface) 4%) 82%,
+      var(--surface-base) 100%
+    );
+}
+
+/* Mobile-first: shorter sticky hold, earlier card entry over the brand. */
+@media (max-width:700px){
+  .home-hero-runway{
+    height:min(30vh,240px);
+  }
+  .home-content{
+    margin-top:calc(-1 * (min(30vh,240px) + 64px));
+    padding-top:8px;
+  }
+  .home-content::before{
+    top:-156px;
+    height:156px;
+  }
+}
+
+@media (max-width:430px){
+  .home-hero-runway{
+    height:min(28vh,210px);
+  }
+  .home-hero-pin .hero{
+    padding-top:54px;
+    padding-bottom:18px;
+  }
+  .home-content{
+    margin-top:calc(-1 * (min(28vh,210px) + 56px));
+    padding-top:4px;
+  }
+  .home-content::before{
+    top:-144px;
+    height:144px;
+  }
+}
+
+/* Unusually short viewports: skip sticky so the opening never traps scroll. */
+@media (max-height:520px){
+  .home-hero-runway{
+    height:0;
+  }
+  .home-hero-pin{
+    position:relative;
+    top:auto;
+  }
+  .home-content{
+    margin-top:-16px;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cancel legacy sticky-hover transforms on touch-first pointers                */
+/* -------------------------------------------------------------------------- */
+
+@media (hover:none), (pointer:coarse){
+  .feature-card:hover,
+  .stat-card:hover,
+  .domain-card:hover,
+  .cocktail-card:hover,
+  .overview-tap:hover,
+  .overview-brew:hover,
+  .overview-low:hover,
+  .event-card:hover,
+  .merch-card:hover,
+  .gallery-album-card:hover,
+  .lab-card:hover,
+  .lab-card-button:hover,
+  .recipe-card:hover,
+  .favorite-card:hover,
+  .restock-row:hover,
+  .inventory-card:hover,
+  .inventory-card-button:hover{
+    transform:none;
+    box-shadow:var(--elevation-2);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reduced motion — keep static elevation; suppress movement only               */
+/* -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion:reduce){
+  :root{
+    --motion-fast:1ms;
+    --motion-standard:1ms;
+    --motion-slow:1ms;
+    --motion-reveal:1ms;
+    --lift-card:none;
+    --lift-card-strong:none;
+    --press-scale:none;
+    --press-card:none;
+    --nav-active-lift:none;
+  }
+
+  .page > *:not(.scan-session-parked):not([hidden]),
+  .page > .home-stack,
+  .inventory-grid > *,
+  .cocktail-card-grid > *,
+  .gallery-album-grid > *,
+  .recipe-grid > *,
+  .stat-grid > *,
+  .feature-grid > *,
+  .hero,
+  .hero .hero-wordmark,
+  .hero .hero-filigree,
+  .hero .hero-greeting,
+  .hero .hero-lede{
+    animation:none !important;
+  }
+
+  .domain-card,
+  .cocktail-card,
+  .stat-card,
+  .feature-card,
+  .event-card,
+  .merch-card,
+  .gallery-album-card,
+  .lab-card,
+  .lab-card-button,
+  .ticket-card,
+  .favorite-card,
+  .restock-row,
+  .overview-tap,
+  .overview-brew,
+  .overview-low,
+  .recipe-card,
+  .inventory-card,
+  .inventory-card-button,
+  .primary,
+  .secondary,
+  .scan-button,
+  .icon-button,
+  .chip,
+  .segmented button,
+  .season-filters button,
+  .cocktail-filters button,
+  .sidebar nav button,
+  .mobile-bottom-nav button,
+  .more-sheet-item,
+  .homebrew-link{
+    transition:border-color 1ms linear, background-color 1ms linear, color 1ms linear !important;
+    transform:none !important;
+  }
+}
