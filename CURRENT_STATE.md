@@ -21,6 +21,8 @@ Next planned:
 
 ## Recent architectural decisions
 
+- Dev/CI/Docker tooling (PR161): Node 24 bundles npm 11.19+, which gates dependency install scripts behind an `allowScripts` allowlist in `package.json` (`better-sqlite3`, `sharp`, `esbuild`). Without it `npm install` silently skips native install/postinstall steps. Keep those approvals; older npm ignores the field.
+
 - Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--surface-*`, `--elevation-1..4`, `--edge-*`, `--lift-card`, `--press-*`) applied site-wide. Resting Depth-2 must be obvious without hover. Hover motion is fine-pointer-gated (~8–9px); touch uses press scale with sticky-hover cancelled; reduced-motion disables movement but must not flatten static elevation. Homepage underlap is CSS sticky + scrim only (no scroll listeners / parallax). Do not add a second competing token system or a JS animation library for this.
 
 - Inventory filter options (PR158): Display labels (“All families”, “All flavors”, …) must never become submitted values. Mapped `<option>` elements use `value={value}` with `"All"` as the sole clear/reset sentinel.
