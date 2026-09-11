@@ -1,9 +1,7 @@
 # Current task
 
-PR159 homepage repair is ready for review. It is rebased onto current `main`, preserves PR155–158, and replaces the broken narrow ornament with a continuous responsive hop-vine corner. Full tests and production build pass; final phone/desktop reviewer inspection remains because the managed visual-preview connection was unavailable.
+PR160 — Interface Depth & Motion System is ready for review. Shared elevation + motion tokens live in `client/src/depth-motion.css` (loaded after `styles.css` and `home-hero.css`). Cards, panels, nav/controls, and the homepage hero use the system; hover is fine-pointer-only; touch gets press scale; `prefers-reduced-motion` is honored. Frontend presentation only — no backend/schema/API changes, Guest privacy preserved, More-panel Keeper unlock unchanged.
 
-Most recently completed: **PR158 — Inventory filter sentinel reliability** (mapped inventory filter options use explicit `value={value}` so “All …” labels keep the `"All"` sentinel; focused regression tests).
+Most recently completed before this: **PR159** homepage brand hero & filigree refinement; **PR158** inventory filter sentinel reliability; **PR157** cocktail photo framing / Keeper photo selection.
 
-Previously completed: **PR157** cocktail photo framing / Keeper photo selection.
-
-Next: live NAS/mobile verify photo framing after deploy; SearXNG health/backoff follow-up; otherwise evidence-driven live-use work.
+Next after PR160 lands: live NAS/mobile verify photo framing; SearXNG health/backoff follow-up; otherwise evidence-driven live-use work.

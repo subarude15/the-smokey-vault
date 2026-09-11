@@ -1,0 +1,390 @@
+/**
+ * PR160 — Interface Depth & Motion System
+ *
+ * Shared elevation + motion language for The Smokey Barrel.
+ * Quiet whiskey-cellar depth: layered surfaces, restrained lift, tactile press.
+ * No persistent animation, no 3D tilt, no glowing gold borders.
+ */
+
+:root{
+  /* Motion durations */
+  --motion-fast:160ms;
+  --motion-standard:200ms;
+  --motion-slow:280ms;
+  --motion-reveal:720ms;
+
+  /* Easing — reuse the existing brand curves */
+  --ease-standard:var(--ease-out);
+  --ease-emphasized:var(--ease-spring);
+
+  /* Surface roles (Depth 0–3) */
+  --surface-base:var(--bg);
+  --surface-panel:color-mix(in srgb,var(--surface) 92%,transparent);
+  --surface-raised:var(--surface);
+  --surface-floating:color-mix(in srgb,var(--surface) 88%,var(--surface-2));
+
+  /* Elevation shadows — felt, not heavy */
+  --elevation-1:
+    0 1px 2px color-mix(in srgb,#000 14%,transparent),
+    0 8px 22px color-mix(in srgb,var(--bg) 42%,transparent);
+  --elevation-2:
+    0 2px 4px color-mix(in srgb,#000 16%,transparent),
+    0 12px 28px color-mix(in srgb,var(--bg) 48%,transparent),
+    inset 0 1px 0 color-mix(in srgb,#fff 4%,transparent);
+  --elevation-3:
+    0 8px 18px color-mix(in srgb,#000 20%,transparent),
+    0 22px 48px color-mix(in srgb,var(--bg) 55%,transparent),
+    0 0 28px color-mix(in srgb,var(--accent-2) 3%,transparent),
+    inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent);
+
+  /* Hover / press lift */
+  --lift-card:translateY(-4px) scale(1.006);
+  --lift-card-strong:translateY(-5px) scale(1.008);
+  --press-scale:scale(.98);
+  --press-card:scale(.985);
+  --nav-active-lift:translateY(-1.5px);
+
+  /* Shared interactive transition bundle */
+  --motion-interactive:
+    transform var(--motion-standard) var(--ease-emphasized),
+    box-shadow var(--motion-standard) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Depth 1 — panels / section surfaces                                          */
+/* -------------------------------------------------------------------------- */
+
+.filter-row,
+.toolbar,
+.cocktail-toolbar,
+.wanted-card,
+.settings-card,
+.enrichment-panel,
+.scan-session,
+.mixologist,
+.legacy-beer-audit,
+.cleanup-findings{
+  box-shadow:var(--elevation-1);
+}
+
+.settings-card,
+.enrichment-panel,
+.wanted-card,
+.mixologist{
+  background:var(--surface-panel);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Depth 2 — shared card elevation                                              */
+/* -------------------------------------------------------------------------- */
+
+.domain-card,
+.cocktail-card,
+.stat-card,
+.feature-card,
+.event-card,
+.merch-card,
+.gallery-album-card,
+.lab-card,
+.ticket-card,
+.favorite-card,
+.restock-row,
+.overview-tap,
+.overview-brew,
+.overview-low,
+.recipe-card,
+.inventory-card{
+  box-shadow:var(--elevation-2);
+  transition:var(--motion-interactive);
+}
+
+/* Depth 3 — floating / active chrome */
+.modal,
+.more-sheet.open,
+.lightbox-stage,
+.keeper-card-controls{
+  box-shadow:var(--elevation-3);
+}
+
+.sidebar nav button.active,
+.mobile-bottom-nav button.active,
+.chip.active,
+.segmented button.active,
+.season-filters button.active,
+.cocktail-filters button.active{
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent),
+    0 0 20px color-mix(in srgb,var(--accent-2) 2.5%,transparent);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Hover-capable lift (pointer fine only)                                       */
+/* -------------------------------------------------------------------------- */
+
+@media (hover:hover) and (pointer:fine){
+  .domain-card:hover,
+  .cocktail-card:hover,
+  .stat-card:hover,
+  .feature-card:hover,
+  .event-card:hover,
+  .merch-card:hover,
+  .gallery-album-card:hover,
+  .lab-card-button:hover,
+  .ticket-card:hover,
+  .favorite-card:hover,
+  .restock-row:hover,
+  .overview-tap:hover,
+  .overview-brew:hover,
+  .overview-low:hover,
+  .recipe-card:hover,
+  .inventory-card-button:hover{
+    transform:var(--lift-card);
+    border-color:color-mix(in srgb,var(--accent) 42%,var(--line));
+    box-shadow:var(--elevation-3);
+  }
+
+  .feature-card-lead:hover,
+  .stat-card:hover{
+    transform:var(--lift-card-strong);
+  }
+
+  .domain-card.is-skeleton:hover,
+  .spirit-card.is-skeleton:hover,
+  .stat-card.is-skeleton:hover{
+    transform:none;
+    box-shadow:var(--elevation-2);
+    border-color:var(--line);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Touch / pressed feedback                                                     */
+/* -------------------------------------------------------------------------- */
+
+.primary:active,
+.secondary:active,
+.scan-button:active,
+.icon-button:active,
+.chip:active,
+.segmented button:active,
+.season-filters button:active,
+.cocktail-filters button:active,
+.sidebar nav button:active,
+.mobile-bottom-nav button:active,
+.more-sheet-item:active,
+.nav-hint-dismiss:active,
+.homebrew-link:active,
+.keeper-card-controls .secondary:active,
+.kiosk-lock:active{
+  transform:var(--press-scale);
+}
+
+.domain-card:active,
+.cocktail-card:has(.cocktail-card-main:active),
+.stat-card:active,
+.feature-card:active,
+.event-card:active,
+.merch-card:active,
+.gallery-album-card:active,
+.lab-card-button:active,
+.recipe-card:active,
+.favorite-card:active,
+.restock-row:active,
+.overview-tap:active,
+.overview-brew:active,
+.overview-low:active,
+.inventory-card-button:active{
+  transform:var(--press-card);
+}
+
+.mobile-bottom-nav button.active,
+.sidebar nav button.active{
+  transform:var(--nav-active-lift);
+}
+
+.mobile-bottom-nav button.active:active,
+.sidebar nav button.active:active{
+  transform:var(--press-scale);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page + grid enter (brief, non-blocking)                                      */
+/* -------------------------------------------------------------------------- */
+
+@keyframes depth-page-enter{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+@keyframes depth-card-enter{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+.page > *:not(.scan-session-parked):not([hidden]){
+  animation:depth-page-enter var(--motion-standard) var(--ease-standard) both;
+}
+
+.inventory-grid > *,
+.cocktail-card-grid > *,
+.gallery-album-grid > *,
+.recipe-grid > *,
+.stat-grid > *,
+.feature-grid > *{
+  animation:depth-card-enter var(--motion-slow) var(--ease-standard) both;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Homepage hero layering + restrained reveal                                   */
+/* -------------------------------------------------------------------------- */
+
+.hero{
+  /* Layered enter replaces the single flat rise-in so wordmark/filigree read as separate planes. */
+  animation:none;
+  --hero-ambient:
+    radial-gradient(560px 320px at 78% 8%, color-mix(in srgb,var(--accent-2) 7%,transparent), transparent 68%),
+    radial-gradient(420px 260px at 12% 0%, color-mix(in srgb,var(--accent) 6%,transparent), transparent 62%);
+}
+
+.hero::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background:var(--hero-ambient);
+  opacity:.9;
+}
+
+.hero .hero-copy,
+.hero .hero-lede{
+  position:relative;
+  z-index:2;
+}
+
+.hero .hero-filigree{
+  z-index:1;
+}
+
+.hero .hero-wordmark,
+.hero .hero-filigree{
+  transform-origin:center top;
+  animation:depth-hero-reveal var(--motion-reveal) var(--ease-standard) both;
+}
+
+.hero .hero-filigree{
+  animation-delay:60ms;
+}
+
+.hero .hero-greeting{
+  animation:depth-hero-reveal calc(var(--motion-reveal) * .85) var(--ease-standard) both;
+  animation-delay:90ms;
+}
+
+.hero .hero-lede{
+  animation:depth-hero-reveal calc(var(--motion-reveal) * .8) var(--ease-standard) both;
+  animation-delay:120ms;
+}
+
+@keyframes depth-hero-reveal{
+  from{opacity:0;transform:translateY(7px) scale(.978)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+
+/* Scroll parallax intentionally omitted: dual transform animations fought the
+   hero reveal, and a JS scroll listener would be heavier than this PR warrants. */
+
+/* -------------------------------------------------------------------------- */
+/* Cancel legacy sticky-hover transforms on touch-first pointers                */
+/* -------------------------------------------------------------------------- */
+
+@media (hover:none), (pointer:coarse){
+  .feature-card:hover,
+  .stat-card:hover,
+  .domain-card:hover,
+  .cocktail-card:hover,
+  .overview-tap:hover,
+  .overview-brew:hover,
+  .overview-low:hover,
+  .event-card:hover,
+  .merch-card:hover,
+  .gallery-album-card:hover,
+  .recipe-card:hover,
+  .favorite-card:hover,
+  .restock-row:hover,
+  .inventory-card:hover,
+  .inventory-card-button:hover{
+    transform:none;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reduced motion                                                               */
+/* -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion:reduce){
+  :root{
+    --motion-fast:1ms;
+    --motion-standard:1ms;
+    --motion-slow:1ms;
+    --motion-reveal:1ms;
+    --lift-card:none;
+    --lift-card-strong:none;
+    --press-scale:none;
+    --press-card:none;
+    --nav-active-lift:none;
+  }
+
+  .page > *:not(.scan-session-parked):not([hidden]),
+  .inventory-grid > *,
+  .cocktail-card-grid > *,
+  .gallery-album-grid > *,
+  .recipe-grid > *,
+  .stat-grid > *,
+  .feature-grid > *,
+  .hero,
+  .hero .hero-wordmark,
+  .hero .hero-filigree,
+  .hero .hero-greeting,
+  .hero .hero-lede{
+    animation:none !important;
+  }
+
+  .domain-card,
+  .cocktail-card,
+  .stat-card,
+  .feature-card,
+  .event-card,
+  .merch-card,
+  .gallery-album-card,
+  .lab-card,
+  .ticket-card,
+  .favorite-card,
+  .restock-row,
+  .overview-tap,
+  .overview-brew,
+  .overview-low,
+  .recipe-card,
+  .inventory-card,
+  .inventory-card-button,
+  .primary,
+  .secondary,
+  .scan-button,
+  .icon-button,
+  .chip,
+  .segmented button,
+  .season-filters button,
+  .cocktail-filters button,
+  .sidebar nav button,
+  .mobile-bottom-nav button,
+  .more-sheet-item,
+  .homebrew-link,
+  .lab-card-button{
+    transition:border-color 1ms linear, background-color 1ms linear, color 1ms linear !important;
+    transform:none !important;
+  }
+}

@@ -78,9 +78,13 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
+### In review — PR160 Interface Depth & Motion System
+
+Shared frontend elevation + motion language is implemented (`client/src/depth-motion.css`): Depth 0–3 surface/elevation tokens, hover lift gated to fine pointers (~4–5px + tiny scale), touch press scale, brief page/grid enters, layered homepage hero reveal, and `prefers-reduced-motion` kill-switch. No backend/schema/API changes; Guest redaction unchanged; Smokey Barrel brand art preserved as separate vectors.
+
 ### Idle — evidence-driven follow-up
 
-PR157 (cocktail photo framing / Keeper photo selection) and PR158 (inventory filter sentinel reliability) are complete. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
+PR157–PR159 product items are complete; PR160 is ready for review. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
 
 Stability-first, but prioritize concrete product usability problems observed in the live bar. Prefer small, testable PRs. Do not open speculative discovery features. Start a new numbered Track C entry only when a concrete next item exists.
 
@@ -181,7 +185,11 @@ These are explicitly desired near-term product improvements based on real househ
    - Replaced the Dashboard hero's Google-font wordmark with the real **Smokey Barrel** lockup as genuine scalable vector `<path>` artwork traced from the supplied hand-lettered source — copper distressed `THE` over blackletter `Smokey` / `Barrel` — as a new `client/src/SmokeyBarrelWordmark.tsx`. The mark is two independently themed fills (copper `THE` via `--accent`; `Smokey`/`Barrel` via `currentColor` = `--text`) so it reads in both Light and Dark, and stays an accessible level-1 heading (SVG `role="img"` + `aria-label`). No SVG `<text>`, no font substitution, no embedded raster.
    - Added a continuous decorative hop-vine filigree (`client/src/HopFiligree.tsx`, also genuine vector path art) flowing across the top-right and down the hero edge, fading before the CTAs. It is `aria-hidden`, non-interactive (`pointer-events:none`), token-tinted as charcoal/gunmetal on Dark and muted neutral on Light, and clipped so it never causes horizontal overflow. The vector exports render cleanly; responsive rules cover 320–430px phones and desktop, with final visual reviewer inspection still required because the managed preview connection was unavailable.
    - Removed the duplicate SB medallion (`hero-brand`) and the circular wine-glass orbit ornament (`hero-orbit`, `orbit-glow`) from the hero; the single SB medallion still anchors the shell brand and phone topbar. Purged "Patron / Lounge" language from the homepage: the guest greeting eyebrow is now the plain time-of-day line (`overviewGreeting`), the `PATRON MODE` Overview badge is gone, and the guest unlock affordance reads **Keeper Mode** / **Tap to unlock**. Frontend presentation + copy only (plus the pure greeting helper and its tests); no DB/API/serializer/auth/schema/route changes and no rename of `PatronsPage`.
-21. **Brewery Lab follow-up only if live use proves a specific usability gap.**
+21. **PR160 — Interface Depth & Motion System** (ready for review)
+   - **Goal:** Make the UI feel more dimensional and tactile without changing brand identity or adding flashy motion.
+   - **Scope:** Frontend-only shared depth/motion language in `client/src/depth-motion.css` (imported after `styles.css` + `home-hero.css`). Tokens for motion durations/easing, surface roles, elevation 1–3, card lift, and press scale. Apply consistently to panels, shared cards (domain/cocktail/stat/feature/event/merch/etc.), nav/chips/buttons, modal/More sheet/Keeper controls, brief page/grid enters, and layered homepage hero ambient + reveal. Hover lift only under `(hover:hover) and (pointer:fine)`; touch uses restrained press scale; cancel sticky-hover transforms on coarse pointers. Skip scroll parallax (transform conflicts with reveal; not worth a scroll listener). Honor `prefers-reduced-motion`. No routing library, no backend/schema/API/serializer changes, no Guest privacy regressions, no top-key Keeper unlock revival.
+   - **Acceptance:** Cards sit above surfaces without heavy shadows; hover-capable cards rise ~4–6px; touch controls depress slightly; navigation feels tactile; major surfaces share elevation language; homepage wordmark/filigree read as layered planes; filtering/navigation transitions stay short and non-blocking; warm accent ambient stays nearly imperceptible; no persistent/distracting motion; Light/Dark and mobile-first behavior preserved; focused PR160 tests, full suite, and production build pass.
+22. **Brewery Lab follow-up only if live use proves a specific usability gap.**
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
@@ -193,6 +201,7 @@ These are explicitly desired near-term product improvements based on real househ
 
 ## Relevant code
 
+- `client/src/depth-motion.css` — PR160 shared elevation + motion tokens and site-wide depth/lift/press/reveal behaviors (imported from `main.tsx` after `styles.css` and `home-hero.css`).
 - `client/src/shell-nav.ts` — pure shell navigation helpers (primary/More selection, Guest/Keeper partition, tab visibility/order); PR142 `landingFeedbackCtaEnabled` shares `pageEnabled("next")` with Guest nav.
 - `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path.
 - `client/src/api.ts` — shared client fetch helper, Keeper bearer storage, and central authenticated-401 → session-rejected signal.
