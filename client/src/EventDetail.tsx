@@ -1,17 +1,7 @@
 import { ArrowLeft, CalendarDays, Copy, Link2, Pencil, Share2 } from "lucide-react";
 import type { HouseEvent } from "./catalog";
+import { eventDateLabel } from "./event-date";
 import { EventImageMedia } from "./EventImageMedia";
-
-function eventDateLabel(raw: string) {
-  const stamp = Date.parse(raw);
-  if (!Number.isFinite(stamp)) return raw;
-  return new Date(stamp).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "long",
-    day: "numeric",
-    year: "numeric"
-  });
-}
 
 export function EventDetail({
   event,
