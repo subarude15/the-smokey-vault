@@ -11,23 +11,8 @@ import {
   parseEventIdFromSearch,
   syncEventDeepLinkUrl
 } from "./event-deep-link";
+import { eventDateLabel, isUpcomingEventDate } from "./event-date";
 import { buildEventSharePayload, shareOrCopyEventLink } from "./event-share";
-
-function eventDateLabel(raw: string) {
-  const stamp = Date.parse(raw);
-  if (!Number.isFinite(stamp)) return raw;
-  return new Date(stamp).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "long",
-    day: "numeric",
-    year: "numeric"
-  });
-}
-
-function isUpcoming(raw: string) {
-  const stamp = Date.parse(raw);
-  return !Number.isFinite(stamp) || stamp >= Date.now() - 86_400_000;
-}
 
 export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: string }) {
   const [events, setEvents] = useState<HouseEvent[]>([]);
@@ -297,8 +282,8 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
     }
   }
 
-  const upcoming = events.filter((event) => isUpcoming(event.event_date));
-  const past = events.filter((event) => !isUpcoming(event.event_date));
+  const upcoming = events.filter((event) => isUpcomingEventDate(event.event_date));
+  const past = events.filter((event) => !isUpcomingEventDate(event.event_date));
 
   function eventCard(event: HouseEvent) {
     return (

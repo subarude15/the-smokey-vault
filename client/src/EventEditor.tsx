@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Crop } from "lucide-react";
 import { ImageField } from "./ImageField";
 import { EventImageAdjuster } from "./EventImageAdjuster";
+import { eventDateInputValue } from "./event-date";
 import {
   DEFAULT_EVENT_IMAGE_FRAMING,
   normalizeEventImageFraming,
@@ -43,7 +44,7 @@ export function eventToEditorValues(event: {
   const framing = normalizeEventImageFraming(event);
   return {
     title: event.title ?? "",
-    event_date: (event.event_date ?? "").slice(0, 10),
+    event_date: eventDateInputValue(event.event_date ?? ""),
     description: event.description ?? "",
     image_url: event.image_url ?? "",
     image_focal_x: framing.image_focal_x,
