@@ -4,11 +4,12 @@
  */
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { db } from "./db.js";
+import { createAdminToken } from "./auth.js";
 import { sqliteUtc } from "./cocktail_expiry.js";
+import { db } from "./db.js";
 
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
-const { app, createTestAdminToken } = await import("./server.js");
+const { app, createTestAdminToken, sessionSecret } = await import("./server.js");
 
 type CocktailRow = {
   id: number;
@@ -89,11 +90,22 @@ test("Guest AI save expires about 24 hours later and hides the timestamp", async
   assert.equal(row.bartender_fav, 0);
   assert.equal(row.image_url, "");
   assert.equal(row.source_url, "");
+});
 
-  const forged = await saveGenerated("TmpGuest-forged", {}, "not-a-keeper-token");
-  assert.equal(forged.statusCode, 201);
-  assert.equal((forged.json() as { temporary: boolean }).temporary, true);
-  assert.ok(rowByName("TmpGuest-forged")?.expires_at);
+test("a forged or expired Keeper token cannot force a permanent save", async () => {
+  wipe();
+  const cases = [
+    ["TmpGuest-forged", createAdminToken("not-the-session-secret")],
+    ["TmpGuest-expired", createAdminToken(sessionSecret, Date.now() - 1_000)]
+  ] as const;
+  for (const [name, token] of cases) {
+    const forged = await saveGenerated(name, {}, token);
+    assert.equal(forged.statusCode, 201);
+    assert.equal((forged.json() as { temporary: boolean }).temporary, true);
+    const row = rowByName(name);
+    assert.ok(row?.expires_at);
+    assert.ok(hoursUntil(row.expires_at) > 23.5);
+  }
 });
 
 test("Guest-provided expiration, collection, and keeper fields are rejected", async () => {
