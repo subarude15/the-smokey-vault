@@ -27,3 +27,13 @@ export function missingIngredientSummary(missing: unknown, limit = 2): string {
   const remainder = items.length - shown.length;
   return `Missing: ${shown.join(", ")}${remainder > 0 ? ` +${remainder}` : ""}`;
 }
+
+/** Relative label for a Guest save. Permanent cocktails (`expires_at` empty) return null. */
+export function temporaryCocktailLabel(expiresAt: unknown, now = Date.now()): string | null {
+  if (typeof expiresAt !== "string" || !expiresAt.trim()) return null;
+  const iso = expiresAt.includes("T") ? expiresAt : `${expiresAt.replace(" ", "T")}Z`;
+  const expires = Date.parse(iso);
+  if (!Number.isFinite(expires) || expires <= now) return null;
+  const hours = Math.max(1, Math.round((expires - now) / 3_600_000));
+  return `TEMPORARY · EXPIRES IN ${hours}H`;
+}

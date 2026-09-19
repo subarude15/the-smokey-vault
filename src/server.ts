@@ -11,7 +11,8 @@ import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin 
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { applyBrewImageOwnershipOnWrite, prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
 import { canonicalGtin } from "./cola_client.js";
-import { parseGeneratedRecipe, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
+import { parseGeneratedRecipe, parseGeneratedRecipeSave, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
+import { guestCocktailExpiresAt, listActiveCocktails, purgeExpiredCocktails, sqliteUtc } from "./cocktail_expiry.js";
 import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottlePrompt, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
@@ -383,7 +384,9 @@ app.get<{ Params: { table: string } }>("/api/inventory/:table", async (request, 
   if (!publicTables.has(request.params.table)) return reply.code(404).send({ error: "Unknown module" });
   const table = request.params.table;
   const admin = isAdmin(request.headers.authorization);
-  const rows = db.prepare(`SELECT * FROM ${table} ORDER BY ${table === "taps" ? "tap_number ASC" : "id DESC"}`).all() as Array<Record<string, unknown>>;
+  const rows = (table === "cocktails"
+    ? listActiveCocktails("id")
+    : db.prepare(`SELECT * FROM ${table} ORDER BY ${table === "taps" ? "tap_number ASC" : "id DESC"}`).all()) as Array<Record<string, unknown>>;
   if (!VOTE_TABLES.has(table)) {
     return rows.map((row) =>
       serializeInventoryItemForCaller(table, withInventoryDisplayFields(table, row), { admin })
@@ -964,7 +967,7 @@ app.delete<{ Params: { id: string } }>("/api/next/:id", {
 
 app.get("/api/cocktails/match", async () => {
   const shelf = currentShelf();
-  const cocktails = db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>;
+  const cocktails = listActiveCocktails();
   return cocktails.map((cocktail) => {
     const matched = matchCocktail(cocktail, shelf);
     return { ...cocktail, ...matched };
@@ -978,7 +981,7 @@ app.get("/api/overview", { schema: { tags: ["System"], summary: "House snapshot 
   const packaged = db.prepare("SELECT * FROM packaged_beer").all() as Array<Record<string, unknown>>;
   const wines = db.prepare("SELECT * FROM wines").all() as Array<Record<string, unknown>>;
   const shelf = buildShelf(spirits, wines, packaged, taps);
-  const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
+  const cocktails = listActiveCocktails()
     .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
   const snap = buildOverview({
     spirits,
@@ -1007,7 +1010,7 @@ function restockPayload() {
   const wines = db.prepare("SELECT * FROM wines").all() as Array<Record<string, unknown>>;
   const taps = db.prepare("SELECT * FROM taps").all() as Array<Record<string, unknown>>;
   const shelf = buildShelf(spirits, wines, packaged, taps);
-  const cocktails = (db.prepare("SELECT * FROM cocktails ORDER BY name").all() as Array<Record<string, unknown>>)
+  const cocktails = listActiveCocktails()
     .map((cocktail) => ({ ...cocktail, ...matchCocktail(cocktail, shelf) }));
   const thresholds = restockThresholds();
   const items = buildRestockList({
@@ -1438,6 +1441,7 @@ app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, rep
   }
   const fav = recipe.bartender_fav ? 1 : 0;
   const name = recipe.name.trim();
+  purgeExpiredCocktails();
   const existing = db.prepare("SELECT image_url FROM cocktails WHERE name=?").get(name) as
     | { image_url?: string }
     | undefined;
@@ -1445,17 +1449,58 @@ app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, rep
   if (existing && String(existing.image_url ?? "").trim()) {
     imageUrl = String(existing.image_url).trim();
   }
-  db.prepare(`INSERT INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season,image_url,source_url,bartender_fav)
-    VALUES(?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  db.prepare(`INSERT INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season,image_url,source_url,bartender_fav,expires_at)
+    VALUES(?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT(name) DO UPDATE SET collection='Custom Cocktails',ingredients=excluded.ingredients,
     glassware=excluded.glassware,garnish=excluded.garnish,method=excluded.method,notes=excluded.notes,season=excluded.season,
     image_url=CASE WHEN length(trim(cocktails.image_url)) > 0 THEN cocktails.image_url ELSE excluded.image_url END,
-    source_url=excluded.source_url,bartender_fav=excluded.bartender_fav`)
+    source_url=excluded.source_url,bartender_fav=excluded.bartender_fav,expires_at=NULL`)
     .run(
       name, JSON.stringify(recipe.ingredients), recipe.glassware || "Rocks", recipe.garnish || "",
       recipe.method, recipe.notes || "", recipe.season || "All", imageUrl, recipe.source_url || "", fav
     );
   return reply.code(201).send(db.prepare("SELECT * FROM cocktails WHERE name=?").get(name));
+});
+
+app.post("/api/cocktails/generated", async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  if (authHeader && !isAdmin(authHeader)) {
+    return reply.code(401).send({ error: "Keeper session expired or invalid" });
+  }
+  const keeper = Boolean(authHeader);
+  let recipe: GeneratedRecipe;
+  try {
+    recipe = parseGeneratedRecipeSave(request.body);
+  } catch (error) {
+    if (error instanceof AiRecipeParseError) return reply.code(400).send({ error: error.message });
+    throw error;
+  }
+  const now = new Date();
+  purgeExpiredCocktails(sqliteUtc(now));
+  const expiresAt = keeper ? null : guestCocktailExpiresAt(now);
+  try {
+    const inserted = db.prepare(`INSERT INTO cocktails(
+      name, collection, ingredients, glassware, garnish, method, notes, season,
+      image_url, source_url, bartender_fav, expires_at
+    ) VALUES (?, 'Custom Cocktails', ?, ?, ?, ?, ?, ?, '', '', 0, ?)`).run(
+      recipe.name,
+      JSON.stringify(recipe.ingredients),
+      recipe.glassware,
+      recipe.garnish,
+      recipe.method,
+      recipe.notes,
+      recipe.season,
+      expiresAt
+    );
+    const row = db.prepare("SELECT * FROM cocktails WHERE id=?").get(inserted.lastInsertRowid) as Record<string, unknown>;
+    if (!keeper) delete row.expires_at;
+    return reply.code(201).send({ temporary: !keeper, cocktail: row });
+  } catch (error) {
+    if (error instanceof Error && /UNIQUE constraint failed: cocktails\.name/.test(error.message)) {
+      return reply.code(409).send({ error: "A cocktail with that name already exists." });
+    }
+    throw error;
+  }
 });
 
 app.post<{ Params: { id: string } }>("/api/cocktails/:id/find-image", {
@@ -1465,6 +1510,7 @@ app.post<{ Params: { id: string } }>("/api/cocktails/:id/find-image", {
   }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
+  purgeExpiredCocktails();
   const id = Number(request.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return reply.code(400).send({ error: "Invalid cocktail id" });
@@ -1489,6 +1535,7 @@ app.post<{ Params: { id: string } }>("/api/cocktails/:id/find-image", {
 // Previewing never replaces the saved photo; only explicit Keeper selection does.
 app.post<{ Params: { id: string } }>("/api/cocktails/:id/image-options", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
+  purgeExpiredCocktails();
   const row = loadCocktailImageRow(Number(request.params.id));
   if (!row) return reply.code(404).send({ error: "Recipe not found" });
   try { return await previewCocktailImages(row); }
@@ -1497,6 +1544,7 @@ app.post<{ Params: { id: string } }>("/api/cocktails/:id/image-options", async (
 
 app.put<{ Params: { id: string }; Body: { image_url?: unknown; expected_image_url?: unknown } }>("/api/cocktails/:id/image", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
+  purgeExpiredCocktails();
   const row = loadCocktailImageRow(Number(request.params.id));
   if (!row) return reply.code(404).send({ error: "Recipe not found" });
   const { image_url: requestedImage, expected_image_url: expected } = request.body ?? {};
@@ -1529,6 +1577,7 @@ app.put<{ Params: { id: string }; Body: { image_url?: unknown; expected_image_ur
 
 app.put<{ Params: { id: string }; Body: { bartender_fav?: boolean | number } }>("/api/cocktails/:id", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
+  purgeExpiredCocktails();
   const row = db.prepare("SELECT id FROM cocktails WHERE id=?").get(request.params.id);
   if (!row) return reply.code(404).send({ error: "Recipe not found" });
   if (request.body.bartender_fav === undefined) return reply.code(400).send({ error: "Nothing to update" });
@@ -1538,6 +1587,7 @@ app.put<{ Params: { id: string }; Body: { bartender_fav?: boolean | number } }>(
 
 app.delete<{ Params: { id: string } }>("/api/cocktails/:id", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
+  purgeExpiredCocktails();
   const row = db.prepare("SELECT id, collection FROM cocktails WHERE id=?").get(request.params.id) as { id: number; collection: string } | undefined;
   if (!row) return reply.code(404).send({ error: "Recipe not found" });
   if (row.collection !== "Custom Cocktails") return reply.code(403).send({ error: "Only custom recipes can be removed" });
@@ -2243,12 +2293,16 @@ app.put<{ Body: Record<string, string> }>("/api/settings", async (request, reply
 app.get<{ Querystring: { format?: string; table?: string } }>("/api/export", async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   setSetting("lastBackupDownload", new Date().toISOString());
+  purgeExpiredCocktails();
   if (request.query.format === "db") {
     db.pragma("wal_checkpoint(TRUNCATE)");
     return reply.header("content-disposition", 'attachment; filename="smokeyvault.db"').type("application/octet-stream").send(createReadStream(dbPath));
   }
   const exportTables = request.query.table && publicTables.has(request.query.table) ? [request.query.table] : [...publicTables];
-  const payload = Object.fromEntries(exportTables.map((table) => [table, db.prepare(`SELECT * FROM ${table}`).all()]));
+  const payload = Object.fromEntries(exportTables.map((table) => [
+    table,
+    table === "cocktails" ? listActiveCocktails() : db.prepare(`SELECT * FROM ${table}`).all()
+  ]));
   if (request.query.format === "csv" && request.query.table) {
     const rows = payload[request.query.table] as Record<string, unknown>[];
     const headers = rows[0] ? Object.keys(rows[0]) : tableFields[request.query.table] ?? [];

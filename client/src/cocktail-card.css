@@ -14,6 +14,8 @@
 .cocktail-readiness-almost{color:var(--accent-2);border-color:color-mix(in srgb,var(--accent-2) 48%,var(--line));background:color-mix(in srgb,var(--accent-2) 10%,var(--surface))}
 .cocktail-readiness-missing{color:#e9796d;border-color:color-mix(in srgb,#e9796d 46%,var(--line));background:color-mix(in srgb,#e9796d 9%,var(--surface))}
 .cocktail-favorite-tag{color:var(--accent-2)}
+.cocktail-temp-tag{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line)}
+.modal-header .cocktail-temp-tag{margin-top:8px}
 .cocktail-card h3{font:600 22px/1.15 "Playfair Display",serif;margin:2px 0 5px;letter-spacing:-.01em}
 .cocktail-card-style,.cocktail-card-missing,.cocktail-card-notes{margin:0;color:var(--muted);font-size:13px;line-height:1.4}
 .cocktail-card-missing{margin-top:5px;color:color-mix(in srgb,#e9796d 78%,var(--text))}

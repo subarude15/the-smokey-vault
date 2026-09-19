@@ -82,6 +82,16 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 Shared frontend elevation + motion language is implemented (`client/src/depth-motion.css`): Depth 0–4 surface/elevation tokens with clear resting card float (contact + ambient shadow, edge highlight, restrained warm bounce-light), fine-pointer hover lift (~8–9px + ~1.012–1.015 scale into Depth 3), Depth-4 overlays (modal/More/lightbox), touch press scale, brief page/grid enters, layered homepage hero reveal, CSS sticky homepage hero underlap (content scrolls over the hero with a soft leading scrim; no parallax / no scroll listeners), and `prefers-reduced-motion` (movement off, static elevation kept). No backend/schema/API changes; Guest redaction unchanged; Smokey Barrel brand art preserved as separate vectors.
 
+### Upcoming — Conversational AI Mixologist
+
+Phase 1 is safe temporary Guest saves for AI-generated cocktails. No Authorization header is a Guest save: the server sets `expires_at` to about 24 hours ahead and cocktail reads hide or delete expired rows. A valid Keeper token saves permanently (`expires_at` NULL). A supplied but invalid or expired Keeper token is 401 and inserts nothing. Guests cannot set expiration, collection, or other Keeper fields, and the existing Keeper cocktail create/update/delete routes stay behind `requireAdmin`.
+
+Still upcoming, and not part of phase 1:
+
+- Try another / Retry
+- Conversational refinement
+- AI chat history
+
 ### Idle — evidence-driven follow-up
 
 PR157–PR159 product items are complete; PR160 is ready for review. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
