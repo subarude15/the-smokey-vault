@@ -92,20 +92,20 @@ test("Guest AI save expires about 24 hours later and hides the timestamp", async
   assert.equal(row.source_url, "");
 });
 
-test("a forged or expired Keeper token cannot force a permanent save", async () => {
+test("a forged Keeper token is rejected and inserts nothing", async () => {
   wipe();
-  const cases = [
-    ["TmpGuest-forged", createAdminToken("not-the-session-secret")],
-    ["TmpGuest-expired", createAdminToken(sessionSecret, Date.now() - 1_000)]
-  ] as const;
-  for (const [name, token] of cases) {
-    const forged = await saveGenerated(name, {}, token);
-    assert.equal(forged.statusCode, 201);
-    assert.equal((forged.json() as { temporary: boolean }).temporary, true);
-    const row = rowByName(name);
-    assert.ok(row?.expires_at);
-    assert.ok(hoursUntil(row.expires_at) > 23.5);
-  }
+  const forged = await saveGenerated("TmpGuest-forged", {}, createAdminToken("not-the-session-secret"));
+  assert.equal(forged.statusCode, 401);
+  assert.equal((forged.json() as { error: string }).error, "Keeper session expired or invalid");
+  assert.equal(rowByName("TmpGuest-forged"), undefined);
+});
+
+test("an expired Keeper token is rejected and inserts nothing", async () => {
+  wipe();
+  const expired = await saveGenerated("TmpGuest-expired", {}, createAdminToken(sessionSecret, Date.now() - 1_000));
+  assert.equal(expired.statusCode, 401);
+  assert.equal((expired.json() as { error: string }).error, "Keeper session expired or invalid");
+  assert.equal(rowByName("TmpGuest-expired"), undefined);
 });
 
 test("Guest-provided expiration, collection, and keeper fields are rejected", async () => {

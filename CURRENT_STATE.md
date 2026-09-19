@@ -5,7 +5,7 @@ Last updated: 2026-09-19
 ## Current position
 
 Most recently in progress:
-- **Conversational AI Mixologist, phase 1** — 24-hour Guest saves for AI-generated cocktails. Keeper saves remain permanent. Retry and conversational refinement are still upcoming and are not in this phase.
+- **Conversational AI Mixologist, phase 1** — no Authorization header is a 24-hour Guest save; a valid Keeper token is permanent; a supplied invalid or expired Keeper token is 401 with no insert. Retry and conversational refinement are still upcoming and are not in this phase.
 
 Previously ready for review:
 - **PR160** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`.

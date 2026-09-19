@@ -84,7 +84,7 @@ Shared frontend elevation + motion language is implemented (`client/src/depth-mo
 
 ### Upcoming — Conversational AI Mixologist
 
-Phase 1 is safe temporary Guest saves for AI-generated cocktails. A Guest may save a generated recipe into Custom Cocktails; the server sets `expires_at` to about 24 hours ahead and cocktail reads hide or delete expired rows. Keeper AI saves stay permanent (`expires_at` NULL). Guests cannot set expiration, collection, or other Keeper fields, and the existing Keeper cocktail create/update/delete routes stay behind `requireAdmin`.
+Phase 1 is safe temporary Guest saves for AI-generated cocktails. No Authorization header is a Guest save: the server sets `expires_at` to about 24 hours ahead and cocktail reads hide or delete expired rows. A valid Keeper token saves permanently (`expires_at` NULL). A supplied but invalid or expired Keeper token is 401 and inserts nothing. Guests cannot set expiration, collection, or other Keeper fields, and the existing Keeper cocktail create/update/delete routes stay behind `requireAdmin`.
 
 Still upcoming, and not part of phase 1:
 

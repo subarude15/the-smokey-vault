@@ -1463,6 +1463,11 @@ app.post<{ Body: GeneratedRecipe }>("/api/cocktails/custom", async (request, rep
 });
 
 app.post("/api/cocktails/generated", async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  if (authHeader && !isAdmin(authHeader)) {
+    return reply.code(401).send({ error: "Keeper session expired or invalid" });
+  }
+  const keeper = Boolean(authHeader);
   let recipe: GeneratedRecipe;
   try {
     recipe = parseGeneratedRecipeSave(request.body);
@@ -1470,7 +1475,6 @@ app.post("/api/cocktails/generated", async (request, reply) => {
     if (error instanceof AiRecipeParseError) return reply.code(400).send({ error: error.message });
     throw error;
   }
-  const keeper = isAdmin(request.headers.authorization);
   const now = new Date();
   purgeExpiredCocktails(sqliteUtc(now));
   const expiresAt = keeper ? null : guestCocktailExpiresAt(now);

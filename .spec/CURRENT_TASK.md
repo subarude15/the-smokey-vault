@@ -5,7 +5,7 @@ Conversational AI Mixologist — phase 1 only: safe temporary Guest saves for AI
 ## In this phase
 
 - Additive nullable `cocktails.expires_at`. NULL means permanent.
-- Keeper AI saves stay permanent. Guest AI saves expire about 24 hours after the server writes them.
+- No Authorization header is a Guest save that expires about 24 hours after the server writes it. A valid Keeper token saves permanently. A supplied but invalid or expired Keeper token is 401 and inserts nothing.
 - Narrow `POST /api/cocktails/generated` route. Guests cannot set `id`, `collection`, `expires_at`, `bartender_fav`, `image_url`, `source_url`, or update an existing cocktail.
 - Existing Keeper cocktail CRUD stays behind `requireAdmin`.
 - Cocktail list/read paths exclude expired rows. Opportunistic cleanup deletes expired Guest rows only.
