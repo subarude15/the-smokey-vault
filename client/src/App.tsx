@@ -36,6 +36,7 @@ import { SbMark } from "./SbMark";
 import { SmokeyBarrelWordmark } from "./SmokeyBarrelWordmark";
 import { HopFiligree } from "./HopFiligree";
 import { MISSING_ONE_HINT, temporaryCocktailLabel } from "./cocktail-card";
+import { emptyMixologistView, mixologistGenerateBody, mixologistRetryBody, reduceMixologist, type MixologistRecipe } from "./mixologist-retry";
 import { OverviewStats } from "./OverviewStats";
 import {
   coerceSpiritFlavorSelection,
@@ -3345,12 +3346,13 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
   promptRef?: RefObject<HTMLTextAreaElement | null>;
   onSaved?: () => void;
 }) {
-  const [prompt,setPrompt] = useState("");
-  const [recipe,setRecipe] = useState<GeneratedRecipe>();
-  const [loading,setLoading] = useState(false);
-  const [error,setError] = useState("");
-  const [saved,setSaved] = useState<"" | "keeper" | "guest">("");
-  const [waitMs,setWaitMs] = useState(0);
+  const [view, setView] = useState(emptyMixologistView);
+  const [waitMs, setWaitMs] = useState(0);
+  const busy = useRef(false);
+  const recipe = view.recipe;
+  const loading = view.loading;
+  const error = view.error;
+  const saved = view.saved;
 
   useEffect(() => {
     if (!loading) {
@@ -3363,8 +3365,10 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
     return () => window.clearInterval(tick);
   }, [loading]);
 
-  async function ask(request=prompt){
-    setLoading(true);setRecipe(undefined);setError("");setSaved("");
+  async function run(request: string, previous?: MixologistRecipe) {
+    if (busy.current) return;
+    busy.current = true;
+    setView((current) => reduceMixologist(current, previous ? { type: "retry-start" } : { type: "generate-start" }));
     let timedOut = false;
     const abort = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -3372,17 +3376,22 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
       abort.abort();
     }, AI_MIXOLOGIST_TIMEOUT_MS);
     try {
-      const data = await api<{recipe:GeneratedRecipe}>("/ai/mixologist",{method:"POST",body:JSON.stringify({prompt:request}),signal:abort.signal});
-      setRecipe(data.recipe);
-    } catch(e) {
-      setError(mixologistFailureMessage(e, timedOut));
+      const data = await api<{recipe:GeneratedRecipe}>("/ai/mixologist", {
+        method:"POST",
+        body: JSON.stringify(previous ? mixologistRetryBody(request, previous) : mixologistGenerateBody(request)),
+        signal: abort.signal
+      });
+      setView((current) => reduceMixologist(current, { type: "success", recipe: data.recipe, prompt: request }));
+    } catch (e) {
+      setView((current) => reduceMixologist(current, { type: "failure", error: mixologistFailureMessage(e, timedOut) }));
     } finally {
       clearTimeout(timeout);
-      setLoading(false);
+      busy.current = false;
+      setView((current) => reduceMixologist(current, { type: "idle" }));
     }
   }
   async function save() {
-    if (!recipe || saved) return;
+    if (!recipe || saved || loading) return;
     try {
       const data = await api<{ temporary?: boolean }>("/cocktails/generated", {
         method: "POST",
@@ -3396,11 +3405,13 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
           notes: recipe.notes
         })
       });
-      setSaved(data.temporary ? "guest" : "keeper");
-      setError("");
+      setView((current) => reduceMixologist(current, { type: "saved", saved: data.temporary ? "guest" : "keeper" }));
       onSaved?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save the recipe.");
+      setView((current) => reduceMixologist(current, {
+        type: "failure",
+        error: e instanceof Error ? e.message : "Could not save the recipe."
+      }));
     }
   }
   const saveLabel = saved === "guest" ? "Saved for 24 hours" : saved === "keeper" ? "Saved to cocktails" : "Save cocktail";
@@ -3416,14 +3427,14 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
       </div>
     <div className="mixologist" aria-busy={loading}>
       <Sparkles size={44}/>
-      <div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button type="button" key={p} disabled={loading} onClick={()=>setPrompt(p)}>{p}</button>)}</div>
-      <textarea ref={promptRef} id="mixologist-prompt" aria-label="Describe what you are in the mood for" value={prompt} onChange={(e)=>setPrompt(e.target.value)} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…" disabled={loading}/>
+      <div className="prompt-chips">{["Smoky and contemplative","Bright summer highball","Use my amaro","A low-ABV nightcap","Something with what I already have"].map((p)=><button type="button" key={p} disabled={loading} onClick={() => setView((current) => reduceMixologist(current, { type: "edit", text: p }))}>{p}</button>)}</div>
+      <textarea ref={promptRef} id="mixologist-prompt" aria-label="Describe what you are in the mood for" value={view.textarea} onChange={(e) => setView((current) => reduceMixologist(current, { type: "edit", text: e.target.value }))} placeholder="Tonight I want something spirit-forward, smoky, and not too sweet…" disabled={loading}/>
       <div className="mixologist-actions">
-        <button className="primary" disabled={loading||!prompt} aria-busy={loading} onClick={()=>ask()}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button>
+        <button className="primary" disabled={loading||!view.textarea} aria-busy={loading} onClick={() => void run(view.textarea)}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button>
       </div>
-      {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
+      {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{view.retrying ? "Trying another drink…" : loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
       {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
-      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={() => void save()} disabled={saved !== ""}><Save/> {saveLabel}</button></div></article>}
+      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={() => void save()} disabled={loading || saved !== ""}><Save/> {saveLabel}</button><button type="button" className="secondary" onClick={() => void run(view.askedPrompt, recipe)} disabled={loading}>Try another</button></div></article>}
     </div>
     </section>
   );

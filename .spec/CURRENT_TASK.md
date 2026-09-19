@@ -1,19 +1,17 @@
 # Current task
 
-Conversational AI Mixologist — phase 1 only: safe temporary Guest saves for AI-generated cocktails.
+Conversational AI Mixologist — phase 2 only: Try another from the same request.
 
 ## In this phase
 
-- Additive nullable `cocktails.expires_at`. NULL means permanent.
-- No Authorization header is a Guest save that expires about 24 hours after the server writes it. A valid Keeper token saves permanently. A supplied but invalid or expired Keeper token is 401 and inserts nothing.
-- Narrow `POST /api/cocktails/generated` route. Guests cannot set `id`, `collection`, `expires_at`, `bartender_fav`, `image_url`, `source_url`, or update an existing cocktail.
-- Existing Keeper cocktail CRUD stays behind `requireAdmin`.
-- Cocktail list/read paths exclude expired rows. Opportunistic cleanup deletes expired Guest rows only.
-- Generated-recipe UI shows Save cocktail for Guest and Keeper, with “Saved for 24 hours” vs “Saved to cocktails”, plus a restrained temporary label on library/detail cards.
+- `POST /api/ai/mixologist` accepts `mode: "retry"` with the original prompt and previous recipe. Omitted mode stays generate.
+- Retry asks for a materially different cocktail. The shelf summary is rebuilt per request. Required-bottle validation is unchanged.
+- MixologistPanel remembers the prompt that produced the current recipe. Later textarea edits do not change what Try another sends.
+- A failed retry leaves the previous recipe up. A successful retry replaces it and clears the saved state. Save still uses the phase 1 generated-cocktail route.
 
 ## Not in this phase
 
-- Try another / Retry
 - Conversational refinement
 - AI chat history
 - New LLM providers, React Router, cocktail image-search changes, or unrelated cocktail UI redesigns
+- Changes to the 24-hour Guest save architecture
