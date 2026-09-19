@@ -1,9 +1,19 @@
 # Current task
 
-PR160 — Interface Depth & Motion System is ready for review (stronger depth + homepage hero underlap). Shared elevation + motion tokens live in `client/src/depth-motion.css` (loaded after `styles.css` and `home-hero.css`). Homepage opening uses sticky back-plane hero + foreground scrim (mobile portrait is the primary review target).
+Conversational AI Mixologist — phase 1 only: safe temporary Guest saves for AI-generated cocktails.
 
-Depth 0–4 surface planes; resting Depth-2 cards float with contact + ambient shadow, edge highlight, and restrained warm bounce-light; fine-pointer hover lifts ~8–9px into Depth 3; Depth-4 overlays (modal/More/lightbox); touch press scale without sticky hover; `prefers-reduced-motion` suppresses movement but keeps static elevation. Frontend presentation only — no backend/schema/API changes, Guest privacy preserved, More-panel Keeper unlock unchanged, PR159 brand hero preserved.
+## In this phase
 
-Most recently completed before this: **PR159** homepage brand hero & filigree refinement; **PR158** inventory filter sentinel reliability; **PR157** cocktail photo framing / Keeper photo selection.
+- Additive nullable `cocktails.expires_at`. NULL means permanent.
+- Keeper AI saves stay permanent. Guest AI saves expire about 24 hours after the server writes them.
+- Narrow `POST /api/cocktails/generated` route. Guests cannot set `id`, `collection`, `expires_at`, `bartender_fav`, `image_url`, `source_url`, or update an existing cocktail.
+- Existing Keeper cocktail CRUD stays behind `requireAdmin`.
+- Cocktail list/read paths exclude expired rows. Opportunistic cleanup deletes expired Guest rows only.
+- Generated-recipe UI shows Save cocktail for Guest and Keeper, with “Saved for 24 hours” vs “Saved to cocktails”, plus a restrained temporary label on library/detail cards.
 
-Next after PR160 lands: live NAS/mobile verify photo framing; SearXNG health/backoff follow-up; otherwise evidence-driven live-use work.
+## Not in this phase
+
+- Try another / Retry
+- Conversational refinement
+- AI chat history
+- New LLM providers, React Router, cocktail image-search changes, or unrelated cocktail UI redesigns

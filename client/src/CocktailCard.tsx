@@ -1,5 +1,5 @@
 import { GlassWater, Star } from "lucide-react";
-import { cocktailReadinessPresentation, missingIngredientSummary } from "./cocktail-card";
+import { cocktailReadinessPresentation, missingIngredientSummary, temporaryCocktailLabel } from "./cocktail-card";
 import { cocktailMethodSummary } from "./cocktail-instructions";
 import "./cocktail-card.css";
 
@@ -15,6 +15,7 @@ export type CocktailCardDrink = {
   missing?: unknown;
   notes?: unknown;
   bartender_fav?: unknown;
+  expires_at?: unknown;
 };
 
 type CocktailCardProps = {
@@ -35,6 +36,7 @@ export function CocktailCard({ drink, admin, onOpen, onToggleFavorite, favoriteB
   const notes = String(drink.notes ?? "").trim();
   const missing = missingIngredientSummary(drink.missing);
   const favorite = Number(drink.bartender_fav ?? 0) > 0;
+  const temporary = temporaryCocktailLabel(drink.expires_at);
   const styleLine = [collection, season && season !== "All" ? season : "", method, glassware].filter(Boolean).join(" · ");
 
   return (
@@ -47,6 +49,7 @@ export function CocktailCard({ drink, admin, onOpen, onToggleFavorite, favoriteB
           <div className="cocktail-card-heading">
             <span className={`cocktail-readiness cocktail-readiness-${readiness.tone}`}>{readiness.label}</span>
             {favorite ? <span className="cocktail-favorite-tag"><Star size={13} aria-hidden="true"/> Favorite</span> : null}
+            {temporary ? <span className="cocktail-temp-tag">{temporary}</span> : null}
           </div>
           <h3>{drink.name}</h3>
           {styleLine ? <p className="cocktail-card-style">{styleLine}</p> : null}

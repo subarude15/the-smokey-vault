@@ -35,7 +35,7 @@ import { BottleVotes, scoreLabel, voterId } from "./BottleVotes";
 import { SbMark } from "./SbMark";
 import { SmokeyBarrelWordmark } from "./SmokeyBarrelWordmark";
 import { HopFiligree } from "./HopFiligree";
-import { MISSING_ONE_HINT } from "./cocktail-card";
+import { MISSING_ONE_HINT, temporaryCocktailLabel } from "./cocktail-card";
 import { OverviewStats } from "./OverviewStats";
 import {
   coerceSpiritFlavorSelection,
@@ -2715,6 +2715,7 @@ type CocktailDrink = Item & {
   image_url?: string;
   source_url?: string;
   bartender_fav?: number;
+  expires_at?: string | null;
 };
 type ImportedRecipe = {
   name: string;
@@ -3027,6 +3028,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
             <div className="card-icon">{drink.image_url ? <img src={String(drink.image_url)} alt={drink.name}/> : <Star/>}</div>
             <div>
               <span className="eyebrow">{readinessLabel(drink.readiness, !admin)}</span>
+              {temporaryCocktailLabel(drink.expires_at) ? <span className="cocktail-temp-tag">{temporaryCocktailLabel(drink.expires_at)}</span> : null}
               <strong>{drink.name}</strong>
               <small>{drink.method} · {drink.glassware}</small>
             </div>
@@ -3064,7 +3066,7 @@ function Cocktails({ admin, sharedUrl, onSharedConsumed, focusMixologist = false
         />
       ))}</div>}
     <div className="mixologist-divider" role="separator" aria-hidden="true" />
-    <MixologistPanel admin={admin} sectionRef={mixologistSectionRef} promptRef={mixologistPromptRef}/>
+    <MixologistPanel admin={admin} sectionRef={mixologistSectionRef} promptRef={mixologistPromptRef} onSaved={load}/>
     {selected && <RecipeModal
       drink={selected}
       admin={admin}
@@ -3090,6 +3092,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
   const lines = cocktailLines(drink);
   const groups = substituteGroups(lines);
   const custom = drink.collection === "Custom Cocktails";
+  const temporary = temporaryCocktailLabel(drink.expires_at);
   const showFindPhoto = canFindCocktailPhoto(admin, imageUrl);
 
   useEffect(() => {
@@ -3163,6 +3166,7 @@ function RecipeModal({ drink, admin, close, onChanged, onDeleted }:{
         <header className="modal-header">
           <div>
             <span className="eyebrow">{drink.collection}{drink.season !== "All" ? ` · ${drink.season}` : ""}{fav ? " · FAVORITE" : ""}</span>
+            {temporary ? <span className="cocktail-temp-tag">{temporary}</span> : null}
             <h2>{drink.name}</h2>
             <p>{[cocktailMethodSummary(drink.method), drink.glassware].filter(Boolean).join(" · ")}</p>
           </div>
@@ -3335,16 +3339,17 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
 
 type GeneratedRecipe = { name:string; ingredients:string[]; method:string; glassware:string; garnish:string; season:string; notes:string };
 
-function MixologistPanel({ admin, sectionRef, promptRef }: {
+function MixologistPanel({ sectionRef, promptRef, onSaved }: {
   admin: boolean;
   sectionRef?: RefObject<HTMLElement | null>;
   promptRef?: RefObject<HTMLTextAreaElement | null>;
+  onSaved?: () => void;
 }) {
   const [prompt,setPrompt] = useState("");
   const [recipe,setRecipe] = useState<GeneratedRecipe>();
   const [loading,setLoading] = useState(false);
   const [error,setError] = useState("");
-  const [saved,setSaved] = useState(false);
+  const [saved,setSaved] = useState<"" | "keeper" | "guest">("");
   const [waitMs,setWaitMs] = useState(0);
 
   useEffect(() => {
@@ -3359,7 +3364,7 @@ function MixologistPanel({ admin, sectionRef, promptRef }: {
   }, [loading]);
 
   async function ask(request=prompt){
-    setLoading(true);setRecipe(undefined);setError("");setSaved(false);
+    setLoading(true);setRecipe(undefined);setError("");setSaved("");
     let timedOut = false;
     const abort = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -3376,7 +3381,29 @@ function MixologistPanel({ admin, sectionRef, promptRef }: {
       setLoading(false);
     }
   }
-  async function save(){if(!recipe)return;if(!admin){setError("Unlock Keeper Mode to save this recipe to Custom Cocktails.");return;}try{await api("/cocktails/custom",{method:"POST",body:JSON.stringify(recipe)});setSaved(true);setError("");}catch(e){setError(e instanceof Error?e.message:"Could not save the recipe.");}}
+  async function save() {
+    if (!recipe || saved) return;
+    try {
+      const data = await api<{ temporary?: boolean }>("/cocktails/generated", {
+        method: "POST",
+        body: JSON.stringify({
+          name: recipe.name,
+          ingredients: recipe.ingredients,
+          method: recipe.method,
+          glassware: recipe.glassware,
+          garnish: recipe.garnish,
+          season: recipe.season,
+          notes: recipe.notes
+        })
+      });
+      setSaved(data.temporary ? "guest" : "keeper");
+      setError("");
+      onSaved?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the recipe.");
+    }
+  }
+  const saveLabel = saved === "guest" ? "Saved for 24 hours" : saved === "keeper" ? "Saved to cocktails" : "Save cocktail";
   const loadingCopy = mixologistLoadingStep(waitMs);
   return (
     <section className="mixologist-panel" ref={sectionRef} id="ask-the-mixologist" aria-labelledby="mixologist-heading">
@@ -3396,7 +3423,7 @@ function MixologistPanel({ admin, sectionRef, promptRef }: {
       </div>
       {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
       {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
-      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={save}><Save/> {saved?"Saved to Custom Cocktails":"Add to Custom Cocktails"}</button>{!admin&&<small>Keeper unlock required to save.</small>}</div></article>}
+      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={() => void save()} disabled={saved !== ""}><Save/> {saveLabel}</button></div></article>}
     </div>
     </section>
   );

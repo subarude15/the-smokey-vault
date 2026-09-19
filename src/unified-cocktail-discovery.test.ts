@@ -162,17 +162,22 @@ test("P. generated recipes still render correctly", () => {
   assert.match(panel, /recipe\.season/);
 });
 
-test("Q. Keeper can still save generated recipes to Custom Cocktails", () => {
+test("Q. Keeper and Guest can save a generated recipe", () => {
   const panel = mixologistPanelSlice();
-  assert.match(panel, /\/cocktails\/custom/);
-  assert.match(panel, /Add to Custom Cocktails/);
-  assert.match(panel, /Saved to Custom Cocktails/);
+  assert.match(panel, /\/cocktails\/generated/);
+  assert.match(panel, /Save cocktail/);
+  assert.match(panel, /Saved to cocktails/);
+  assert.match(panel, /Saved for 24 hours/);
+  assert.doesNotMatch(panel, /\/cocktails\/custom/);
+  assert.doesNotMatch(panel, /Unlock Keeper Mode to save/);
 });
 
-test("R. guests do not gain recipe-save permission", () => {
+test("R. guest generated saves stay on the narrow route", () => {
   const panel = mixologistPanelSlice();
-  assert.match(panel, /if\s*\(\s*!admin\s*\)/);
-  assert.match(panel, /Unlock Keeper Mode to save this recipe to Custom Cocktails/);
+  assert.match(panel, /temporary/);
+  assert.doesNotMatch(panel, /expires_at/);
+  assert.doesNotMatch(panel, /bartender_fav/);
+  assert.doesNotMatch(panel, /image_url/);
 });
 
 test("S. redundant Recommend from the shelf AI action is removed", () => {

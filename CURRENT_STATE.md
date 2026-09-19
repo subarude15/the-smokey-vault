@@ -1,11 +1,14 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-11
+Last updated: 2026-09-19
 
 ## Current position
 
-Most recently completed:
-- **PR159** — Homepage Brand Hero & Filigree Refinement (ready for review on its branch): stacked Smokey Barrel vector wordmark, continuous hop-vine filigree, single SB medallion, no Patron/Lounge homepage copy.
+Most recently in progress:
+- **Conversational AI Mixologist, phase 1** — 24-hour Guest saves for AI-generated cocktails. Keeper saves remain permanent. Retry and conversational refinement are still upcoming and are not in this phase.
+
+Previously ready for review:
+- **PR160** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`.
 
 Previously completed:
 - **PR158** — Inventory filter sentinel reliability. Mapped inventory `<option>` elements now set explicit `value={value}` so “All families” / “All flavors” / etc. keep the internal `"All"` sentinel instead of submitting label text.
@@ -13,11 +16,9 @@ Previously completed:
 - **PR156** — Bottle Library flavor data audit + facet reliability.
 - **PR155** — Cocktail image discovery observability + production reliability.
 
-Currently working on:
-- **PR160 ready for review** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`: visible resting card float, ~8–9px hover lift, edge lighting, warm bounce-light, Depth-4 overlays, touch press, hero layering + reveal, and CSS sticky homepage hero underlap (content + scrim pass over the hero; no parallax). Reduced-motion keeps static elevation. Presentation only; Guest redaction and More-panel Keeper unlock unchanged.
-
-Next planned:
-- Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up. Otherwise evidence-driven Brewery Lab / live-use follow-up.
+Next planned, after this phase is reviewed:
+- Try another / Retry, then conversational refinement. AI chat history stays out until those land.
+- Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
 
 ## Recent architectural decisions
 
