@@ -36,7 +36,7 @@ import { SbMark } from "./SbMark";
 import { SmokeyBarrelWordmark } from "./SmokeyBarrelWordmark";
 import { HopFiligree } from "./HopFiligree";
 import { MISSING_ONE_HINT, temporaryCocktailLabel } from "./cocktail-card";
-import { emptyMixologistView, mixologistActionsLocked, mixologistGenerateBody, mixologistRetryBody, reduceMixologist, type MixologistRecipe } from "./mixologist-retry";
+import { emptyMixologistView, MIXOLOGIST_REFINEMENTS, mixologistActionsLocked, mixologistGenerateBody, mixologistRefineBody, mixologistRetryBody, reduceMixologist, type MixologistRecipe } from "./mixologist-retry";
 import { OverviewStats } from "./OverviewStats";
 import {
   coerceSpiritFlavorSelection,
@@ -3365,10 +3365,13 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
     return () => window.clearInterval(tick);
   }, [loading]);
 
-  async function run(request: string, previous?: MixologistRecipe) {
+  async function run(request: string, previous?: MixologistRecipe, refinement?: string) {
     if (busy.current || view.saving) return;
+    const change = refinement?.trim();
+    if (refinement !== undefined && (!change || !previous)) return;
     busy.current = true;
-    setView((current) => reduceMixologist(current, previous ? { type: "retry-start" } : { type: "generate-start" }));
+    const asked = view.askedPrompt;
+    setView((current) => reduceMixologist(current, change ? { type: "refine-start" } : previous ? { type: "retry-start" } : { type: "generate-start" }));
     let timedOut = false;
     const abort = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -3378,10 +3381,10 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
     try {
       const data = await api<{recipe:GeneratedRecipe}>("/ai/mixologist", {
         method:"POST",
-        body: JSON.stringify(previous ? mixologistRetryBody(request, previous) : mixologistGenerateBody(request)),
+        body: JSON.stringify(change && previous ? mixologistRefineBody(asked, previous, change) : previous ? mixologistRetryBody(request, previous) : mixologistGenerateBody(request)),
         signal: abort.signal
       });
-      setView((current) => reduceMixologist(current, { type: "success", recipe: data.recipe, prompt: request }));
+      setView((current) => reduceMixologist(current, { type: "success", recipe: data.recipe, prompt: change ? asked : request }));
     } catch (e) {
       setView((current) => reduceMixologist(current, { type: "failure", error: mixologistFailureMessage(e, timedOut) }));
     } finally {
@@ -3437,9 +3440,9 @@ function MixologistPanel({ sectionRef, promptRef, onSaved }: {
       <div className="mixologist-actions">
         <button className="primary" disabled={locked||!view.textarea} aria-busy={loading} onClick={() => void run(view.textarea)}>{loading?<LoaderCircle className="spinner"/>:<Sparkles/>} {loading?"Crafting your recipe…":"Create my cocktail"}</button>
       </div>
-      {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{view.retrying ? "Trying another drink…" : loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
+      {loading&&<div className="ai-loading" aria-live="polite" aria-busy="true"><LoaderCircle className="spinner"/><div><strong>{view.refining ? "Adjusting the drink…" : view.retrying ? "Trying another drink…" : loadingCopy.title}</strong><span>{loadingCopy.detail}</span></div></div>}
       {error&&<div className="ai-error"><CircleAlert/><div><strong>Could not complete that request</strong><span>{error}</span></div></div>}
-      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={() => void save()} disabled={locked || saved !== ""}><Save/> {saveLabel}</button><button type="button" className="secondary" onClick={() => void run(view.askedPrompt, recipe)} disabled={locked}>Try another</button></div></article>}
+      {recipe&&<article className="generated-recipe"><div className="generated-heading"><div><span className="eyebrow">CUSTOM CREATION · {recipe.season.toUpperCase()}</span><h2>{recipe.name}</h2><p>{recipe.notes}</p></div><Sparkles/></div><div className="recipe-modal-body"><div><span className="eyebrow">INGREDIENTS</span><ul>{recipe.ingredients.map((ingredient)=><li key={ingredient}>{ingredient}</li>)}</ul></div><div className="recipe-details"><div><span>METHOD</span><strong>{recipe.method}</strong></div><div><span>GLASS</span><strong>{recipe.glassware}</strong></div><div><span>GARNISH</span><strong>{recipe.garnish}</strong></div></div></div><div className="generated-actions"><button className="primary" onClick={() => void save()} disabled={locked || saved !== ""}><Save/> {saveLabel}</button><button type="button" className="secondary" onClick={() => void run(view.askedPrompt, recipe)} disabled={locked}>Try another</button></div><div className="mixologist-refine"><span className="eyebrow">Want to change it?</span><textarea aria-label="Ask the mixologist to adjust this drink" placeholder="Ask the mixologist to adjust this drink…" value={view.refinementText} disabled={locked} onChange={(e) => setView((current) => reduceMixologist(current, { type: "edit-refinement", text: e.target.value }))}/><div className="prompt-chips">{MIXOLOGIST_REFINEMENTS.map(([label, text]) => <button type="button" key={label} disabled={locked} onClick={() => setView((current) => reduceMixologist(current, { type: "edit-refinement", text }))}>{label}</button>)}</div><button type="button" className="secondary" disabled={locked || !view.refinementText.trim()} onClick={() => void run(view.askedPrompt, recipe, view.refinementText)}>Update drink</button></div></article>}
     </div>
     </section>
   );

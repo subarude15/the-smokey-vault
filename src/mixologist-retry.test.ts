@@ -15,6 +15,7 @@ import {
 import {
   mixologistGenerateRequest,
   mixologistLlmPrompt,
+  mixologistRefineRequest,
   mixologistRetryRequest
 } from "./mixologist_prompt.js";
 import { db } from "./db.js";
@@ -22,6 +23,7 @@ import {
   emptyMixologistView,
   mixologistActionsLocked,
   mixologistGenerateBody,
+  mixologistRefineBody,
   mixologistRetryBody,
   reduceMixologist,
   tryAnotherVisible,
@@ -110,6 +112,36 @@ test("retry prompt includes the original request, the previous recipe, and a dem
   assert.match(llm, /Prefer bottles actually on the shelf/);
 });
 
+test("refine prompt keeps the original request, the current recipe, and the latest change", () => {
+  const bottle = shelfBottleFromItem({
+    name: "Bourbon",
+    brand: "Buffalo Trace",
+    category: "Whiskey",
+    fill_level: 100,
+    stock_count: 1
+  }, "spirit");
+  const request = mixologistRefineRequest(
+    "Something smoky and not too sweet.",
+    previous,
+    "I don't want rum. Make it vodka based instead.",
+    bottle
+  );
+  assert.match(request, /Something smoky and not too sweet/);
+  assert.match(request, /Smoky Old Fashioned/);
+  assert.match(request, /60 ml bourbon/);
+  assert.match(request, /I don't want rum\. Make it vodka based instead/);
+  assert.match(request, /Current cocktail:/);
+  assert.match(request, /User refinement:/);
+  assert.match(request, /FULL revised recipe/);
+  assert.match(request, /output format/);
+  assert.match(request, /HARD REQUIREMENT/);
+  assert.match(request, new RegExp(bottle.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const llm = mixologistLlmPrompt([{ name: bottle.label, kind: "spirit" }], request);
+  assert.match(llm, /Shelf:/);
+  assert.doesNotMatch(mixologistGenerateRequest("bright", null), /User refinement/);
+  assert.doesNotMatch(mixologistRetryRequest("bright", previous), /User refinement/);
+});
+
 test("malformed retry model output still fails the existing recipe parser", () => {
   assert.throws(() => parseGeneratedRecipe("Here is a nice drink, not JSON."), (error: unknown) => {
     assert.ok(error instanceof AiRecipeParseError);
@@ -121,6 +153,7 @@ test("malformed retry model output still fails the existing recipe parser", () =
   assert.match(route, /mixologistShelfSummary\(currentShelf\(\)\)/);
   assert.match(route, /mixologistGenerateRequest/);
   assert.match(route, /mixologistRetryRequest/);
+  assert.match(route, /mixologistRefineRequest/);
   assert.doesNotMatch(route, /INSERT|UPDATE|DELETE/);
 });
 
@@ -150,6 +183,24 @@ test("retry mode rejects a missing prompt, a bad previous recipe, and an unknown
     payload: { mode: "chat", prompt: "make it less sweet" }
   });
   assert.equal(unknown.statusCode, 400);
+  const missingRefinement = await app.inject({
+    method: "POST",
+    url: "/api/ai/mixologist",
+    payload: { mode: "refine", prompt: "Something smoky", previous_recipe: previous }
+  });
+  assert.equal(missingRefinement.statusCode, 400);
+  const blankRefinement = await app.inject({
+    method: "POST",
+    url: "/api/ai/mixologist",
+    payload: { mode: "refine", prompt: "Something smoky", previous_recipe: previous, refinement: "   " }
+  });
+  assert.equal(blankRefinement.statusCode, 400);
+  const badRefineRecipe = await app.inject({
+    method: "POST",
+    url: "/api/ai/mixologist",
+    payload: { mode: "refine", prompt: "Something smoky", previous_recipe: { name: "Only a name" }, refinement: "Make it less sweet." }
+  });
+  assert.equal(badRefineRecipe.statusCode, 400);
   assert.equal(cocktailCount(), before);
 });
 
@@ -213,6 +264,7 @@ test("a pending save locks retry and generation until it settles", () => {
   view = reduceMixologist(view, { type: "retry-start" });
   assert.equal(mixologistActionsLocked(view), true);
   assert.equal(reduceMixologist(view, { type: "save-start" }), view);
+  assert.equal(reduceMixologist(view, { type: "refine-start" }), view);
 });
 
 test("MixologistPanel shows Try another only beside a recipe and locks both actions while loading", () => {
@@ -229,5 +281,51 @@ test("MixologistPanel shows Try another only beside a recipe and locks both acti
   assert.match(panel, /disabled=\{locked\}>Try another/);
   assert.match(panel, /name: recipe\.name/);
   assert.match(panel, /Trying another drink/);
-  assert.doesNotMatch(panel, /make it less sweet/);
+  assert.match(panel, /Want to change it\?/);
+  assert.match(panel, /Update drink/);
+  assert.match(panel, /mixologistRefineBody/);
+  assert.match(panel, /refine-start/);
+  assert.match(panel, /run\(view\.askedPrompt, recipe, view\.refinementText\)/);
+  assert.doesNotMatch(panel, /Message history/);
+});
+
+test("refinement revises the current drink and keeps the original request", () => {
+  let view = reduceMixologist(emptyMixologistView(), { type: "success", recipe: previous, prompt: "Something smoky and not too sweet" });
+  assert.equal(tryAnotherVisible(view), true);
+  view = reduceMixologist(view, { type: "edit-refinement", text: "Make it less sweet." });
+  view = reduceMixologist(view, { type: "save-start" });
+  assert.equal(reduceMixologist(view, { type: "refine-start" }), view);
+  view = reduceMixologist(view, { type: "save-success", saved: "guest" });
+  assert.equal(view.saved, "guest");
+
+  view = reduceMixologist(view, { type: "edit-refinement", text: "Make it less sweet." });
+  const body = mixologistRefineBody(view.askedPrompt, view.recipe!, view.refinementText);
+  assert.equal(body.mode, "refine");
+  assert.equal(body.prompt, "Something smoky and not too sweet");
+  assert.equal(body.refinement, "Make it less sweet.");
+  assert.equal(body.previous_recipe.name, "Smoky Old Fashioned");
+
+  view = reduceMixologist(view, { type: "refine-start" });
+  assert.equal(mixologistActionsLocked(view), true);
+  assert.equal(view.recipe?.name, "Smoky Old Fashioned");
+  assert.equal(view.refinementText, "Make it less sweet.");
+  assert.equal(reduceMixologist(view, { type: "retry-start" }), view);
+  assert.equal(reduceMixologist(view, { type: "generate-start" }), view);
+  assert.equal(reduceMixologist(view, { type: "save-start" }), view);
+
+  const failed = reduceMixologist(view, { type: "failure", error: "The AI service could not be reached." });
+  assert.equal(failed.recipe?.name, "Smoky Old Fashioned");
+  assert.equal(failed.refinementText, "Make it less sweet.");
+  assert.equal(failed.askedPrompt, "Something smoky and not too sweet");
+  assert.equal(mixologistActionsLocked(failed), false);
+
+  view = reduceMixologist(failed, { type: "refine-start" });
+  view = reduceMixologist(view, { type: "success", recipe: next, prompt: view.askedPrompt });
+  assert.equal(view.recipe?.name, "Highball Shift");
+  assert.equal(view.askedPrompt, "Something smoky and not too sweet");
+  assert.equal(view.saved, "");
+  assert.equal(view.refinementText, "");
+  const retry = mixologistRetryBody(view.askedPrompt, view.recipe!);
+  assert.equal(retry.previous_recipe.name, "Highball Shift");
+  assert.equal(retry.prompt, "Something smoky and not too sweet");
 });
