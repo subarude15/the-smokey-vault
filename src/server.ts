@@ -13,7 +13,8 @@ import { applyBrewImageOwnershipOnWrite, prepareBrewWrite, preparePackagedWrite,
 import { canonicalGtin } from "./cola_client.js";
 import { parseGeneratedRecipe, parseGeneratedRecipeSave, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { guestCocktailExpiresAt, listActiveCocktails, purgeExpiredCocktails, sqliteUtc } from "./cocktail_expiry.js";
-import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottlePrompt, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
+import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
+import { mixologistGenerateRequest, mixologistLlmPrompt, mixologistRetryRequest, type MixologistPromptRecipe } from "./mixologist_prompt.js";
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
@@ -1356,18 +1357,41 @@ async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS
   throw lastError;
 }
 
-app.post<{ Body: { prompt?: string; required_bottle?: RequiredBottleRef } }>("/api/ai/mixologist", async (request, reply) => {
+app.post<{ Body: { prompt?: string; required_bottle?: RequiredBottleRef; mode?: string; previous_recipe?: unknown } }>("/api/ai/mixologist", async (request, reply) => {
+  const mode = request.body?.mode ?? "generate";
+  if (mode !== "generate" && mode !== "retry") {
+    return reply.code(400).send({ error: "Unknown mixologist mode." });
+  }
   const shelf = mixologistShelfSummary(currentShelf());
-  const requiredRef = request.body.required_bottle;
+  const requiredRef = request.body?.required_bottle;
   const requiredBottle = requiredRef ? requiredBottleFromRef(requiredRef) : null;
-  const requestText = requiredBottle
-    ? mixologistRequiredBottlePrompt(requiredBottle, request.body.prompt)
-    : (request.body.prompt ?? "Create a cocktail");
+  let previous: MixologistPromptRecipe | null = null;
+  let requestText: string;
+  if (mode === "retry") {
+    const prompt = request.body?.prompt ?? "";
+    if (!prompt.trim() && !requiredBottle) {
+      return reply.code(400).send({ error: "The original request is required to try another." });
+    }
+    try {
+      previous = parseGeneratedRecipe(JSON.stringify(request.body?.previous_recipe ?? null));
+    } catch (error) {
+      if (error instanceof AiRecipeParseError) {
+        return reply.code(400).send({ error: "A previous recipe is required to try another." });
+      }
+      throw error;
+    }
+    requestText = mixologistRetryRequest(prompt, previous, requiredBottle);
+  } else {
+    requestText = mixologistGenerateRequest(request.body?.prompt, requiredBottle);
+  }
   try {
-    const result = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${requestText}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`, undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
+    const result = await callLlm(mixologistLlmPrompt(shelf, requestText), undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
     let recipe = parseGeneratedRecipe(result);
     if (requiredBottle && !generatedRecipeIncludesBottle(recipe, requiredBottle)) {
-      const retry = await callLlm(`You are the house mixologist for The Smokey Vault. Prefer bottles actually on the shelf. Name the specific bottles when you can. Pantry staples (citrus, sugar, soda water, mint, egg white, espresso, ice) are assumed. Shelf: ${JSON.stringify(shelf)}. Request: ${mixologistRequiredBottleRetryPrompt(requiredBottle)}. Return ONLY valid JSON with this exact shape: {"name":"string","ingredients":["exact measured ingredient"],"method":"string","glassware":"string","garnish":"string","season":"All|Spring|Summer|Fall|Winter|Holiday","notes":"brief tasting note and one substitution"}. Do not use markdown.`, undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
+      const enforcement = previous
+        ? `${mixologistRequiredBottleRetryPrompt(requiredBottle)}\n\n${mixologistRetryRequest(request.body?.prompt ?? "", previous, requiredBottle)}`
+        : mixologistRequiredBottleRetryPrompt(requiredBottle);
+      const retry = await callLlm(mixologistLlmPrompt(shelf, enforcement), undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
       recipe = parseGeneratedRecipe(retry);
       if (!generatedRecipeIncludesBottle(recipe, requiredBottle)) {
         return reply.code(502).send({ error: "Couldn't find a drink for this bottle yet." });
