@@ -5,7 +5,7 @@ Last updated: 2026-09-19
 ## Current position
 
 Most recently in progress:
-- **Conversational AI Mixologist, phase 2** — Try another regenerates a different cocktail from the original prompt plus the previous recipe. Phase 1 Guest 24-hour saves are complete. Conversational refinement is next and is not in this phase.
+- **Conversational AI Mixologist, phase 3** — a follow-up revises the cocktail on screen. The original request stays put so Try another still means the first ask. Phases 1 and 2 are complete. Persistent chat history is not in this phase.
 
 Previously ready for review:
 - **PR160** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`.
@@ -17,7 +17,6 @@ Previously completed:
 - **PR155** — Cocktail image discovery observability + production reliability.
 
 Next planned, after this phase is reviewed:
-- Conversational refinement. AI chat history stays out until that lands.
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
 
 ## Recent architectural decisions

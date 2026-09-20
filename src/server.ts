@@ -14,7 +14,7 @@ import { canonicalGtin } from "./cola_client.js";
 import { parseGeneratedRecipe, parseGeneratedRecipeSave, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { guestCocktailExpiresAt, listActiveCocktails, purgeExpiredCocktails, sqliteUtc } from "./cocktail_expiry.js";
 import { buildShelf, generatedRecipeIncludesBottle, matchCocktail, mixologistRequiredBottleRetryPrompt, mixologistShelfSummary, requiredBottleFromRef, type RequiredBottleRef } from "./cocktails.js";
-import { mixologistGenerateRequest, mixologistLlmPrompt, mixologistRetryRequest, type MixologistPromptRecipe } from "./mixologist_prompt.js";
+import { mixologistGenerateRequest, mixologistLlmPrompt, mixologistRefineRequest, mixologistRetryRequest, type MixologistPromptRecipe } from "./mixologist_prompt.js";
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
@@ -1357,30 +1357,40 @@ async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS
   throw lastError;
 }
 
-app.post<{ Body: { prompt?: string; required_bottle?: RequiredBottleRef; mode?: string; previous_recipe?: unknown } }>("/api/ai/mixologist", async (request, reply) => {
+app.post<{ Body: { prompt?: string; required_bottle?: RequiredBottleRef; mode?: string; previous_recipe?: unknown; refinement?: string } }>("/api/ai/mixologist", async (request, reply) => {
   const mode = request.body?.mode ?? "generate";
-  if (mode !== "generate" && mode !== "retry") {
+  if (mode !== "generate" && mode !== "retry" && mode !== "refine") {
     return reply.code(400).send({ error: "Unknown mixologist mode." });
   }
   const shelf = mixologistShelfSummary(currentShelf());
   const requiredRef = request.body?.required_bottle;
   const requiredBottle = requiredRef ? requiredBottleFromRef(requiredRef) : null;
   let previous: MixologistPromptRecipe | null = null;
+  let refinement = "";
   let requestText: string;
-  if (mode === "retry") {
+  if (mode === "retry" || mode === "refine") {
     const prompt = request.body?.prompt ?? "";
-    if (!prompt.trim() && !requiredBottle) {
+    if (mode === "refine" && !prompt.trim()) {
+      return reply.code(400).send({ error: "The original request is required to adjust this drink." });
+    }
+    if (mode === "retry" && !prompt.trim() && !requiredBottle) {
       return reply.code(400).send({ error: "The original request is required to try another." });
+    }
+    if (mode === "refine") {
+      refinement = String(request.body?.refinement ?? "");
+      if (!refinement.trim()) return reply.code(400).send({ error: "Tell the mixologist what to change." });
     }
     try {
       previous = parseGeneratedRecipe(JSON.stringify(request.body?.previous_recipe ?? null));
     } catch (error) {
       if (error instanceof AiRecipeParseError) {
-        return reply.code(400).send({ error: "A previous recipe is required to try another." });
+        return reply.code(400).send({ error: mode === "refine" ? "A current recipe is required to adjust this drink." : "A previous recipe is required to try another." });
       }
       throw error;
     }
-    requestText = mixologistRetryRequest(prompt, previous, requiredBottle);
+    requestText = mode === "refine"
+      ? mixologistRefineRequest(prompt, previous, refinement, requiredBottle)
+      : mixologistRetryRequest(prompt, previous, requiredBottle);
   } else {
     requestText = mixologistGenerateRequest(request.body?.prompt, requiredBottle);
   }
@@ -1388,8 +1398,13 @@ app.post<{ Body: { prompt?: string; required_bottle?: RequiredBottleRef; mode?: 
     const result = await callLlm(mixologistLlmPrompt(shelf, requestText), undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
     let recipe = parseGeneratedRecipe(result);
     if (requiredBottle && !generatedRecipeIncludesBottle(recipe, requiredBottle)) {
-      const enforcement = previous
-        ? `${mixologistRequiredBottleRetryPrompt(requiredBottle)}\n\n${mixologistRetryRequest(request.body?.prompt ?? "", previous, requiredBottle)}`
+      const followUp = previous
+        ? mode === "refine"
+          ? mixologistRefineRequest(request.body?.prompt ?? "", previous, refinement, requiredBottle)
+          : mixologistRetryRequest(request.body?.prompt ?? "", previous, requiredBottle)
+        : "";
+      const enforcement = followUp
+        ? `${mixologistRequiredBottleRetryPrompt(requiredBottle)}\n\n${followUp}`
         : mixologistRequiredBottleRetryPrompt(requiredBottle);
       const retry = await callLlm(mixologistLlmPrompt(shelf, enforcement), undefined, AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS);
       recipe = parseGeneratedRecipe(retry);

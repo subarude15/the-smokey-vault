@@ -86,12 +86,13 @@ Shared frontend elevation + motion language is implemented (`client/src/depth-mo
 
 Phase 1 is complete: no Authorization header is a Guest save with `expires_at` about 24 hours ahead; a valid Keeper token saves permanently (`expires_at` NULL); a supplied but invalid or expired Keeper token is 401 and inserts nothing.
 
-Phase 2 is **Try another**. The same `POST /api/ai/mixologist` route accepts the original prompt and the previous recipe, rebuilds the current shelf summary, and asks for a materially different cocktail. The panel remembers the prompt that produced the current recipe, so later textarea edits do not change the retry. A failed retry leaves that recipe up. Save behavior from phase 1 is unchanged.
+Phase 2 is complete: **Try another** asks for a materially different cocktail from the original prompt and the current recipe. A pending save locks every mixologist action until it settles.
 
-Still upcoming, and not part of phase 2:
+Phase 3 is **adjust this drink**. The same route accepts one follow-up (`mode: "refine"`) plus the original prompt and the recipe on screen. The follow-up does not replace the original prompt. A failed adjustment leaves that recipe up. Saving still writes only the recipe currently shown, and does not edit a cocktail that was already saved.
 
-- Phase 3: conversational refinement
-- AI chat history
+Still upcoming, and not part of phase 3:
+
+- Persistent AI chat history
 
 ### Idle — evidence-driven follow-up
 

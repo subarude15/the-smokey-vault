@@ -1,17 +1,17 @@
 # Current task
 
-Conversational AI Mixologist — phase 2 only: Try another from the same request.
+Conversational AI Mixologist — phase 3 only: revise the cocktail currently on screen.
 
 ## In this phase
 
-- `POST /api/ai/mixologist` accepts `mode: "retry"` with the original prompt and previous recipe. Omitted mode stays generate.
-- Retry asks for a materially different cocktail. The shelf summary is rebuilt per request. Required-bottle validation is unchanged.
-- MixologistPanel remembers the prompt that produced the current recipe. Later textarea edits do not change what Try another sends.
-- A failed retry leaves the previous recipe up. A successful retry replaces it and clears the saved state. Save still uses the phase 1 generated-cocktail route.
+- `POST /api/ai/mixologist` accepts `mode: "refine"` with the original prompt, the current recipe, and one refinement. Generate and retry stay as they are.
+- The original prompt is not replaced by the follow-up. Try another still uses that prompt and the latest visible recipe.
+- A failed refinement leaves the recipe and the typed change in place. A successful one replaces the recipe, clears the saved label, and clears the box.
+- Save, Try another, Create, and Update drink share one busy lock.
 
 ## Not in this phase
 
-- Conversational refinement
-- AI chat history
-- New LLM providers, React Router, cocktail image-search changes, or unrelated cocktail UI redesigns
+- Persistent AI chat history, accounts, or a chat transcript
+- New LLM providers, React Router, cocktail image-search changes, or an unrelated Mixologist redesign
 - Changes to the 24-hour Guest save architecture
+- Automatic edits of a cocktail that was already saved
