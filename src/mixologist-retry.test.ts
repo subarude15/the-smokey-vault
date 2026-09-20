@@ -160,7 +160,8 @@ test("Try another reuses the prompt that created the current recipe and replaces
   assert.equal(mixologistActionsLocked(view), true);
   assert.equal(view.recipe, undefined);
   view = reduceMixologist(view, { type: "success", recipe: previous, prompt: "Something spicy with tequila" });
-  view = reduceMixologist(view, { type: "saved", saved: "guest" });
+  view = reduceMixologist(view, { type: "save-start" });
+  view = reduceMixologist(view, { type: "save-success", saved: "guest" });
   view = reduceMixologist(view, { type: "edit", text: "a totally different sentence" });
   assert.equal(tryAnotherVisible(view), true);
   assert.equal(view.askedPrompt, "Something spicy with tequila");
@@ -187,6 +188,33 @@ test("Try another reuses the prompt that created the current recipe and replaces
   assert.equal(view.askedPrompt, "Something spicy with tequila");
 });
 
+test("a pending save locks retry and generation until it settles", () => {
+  let view = reduceMixologist(emptyMixologistView(), { type: "success", recipe: previous, prompt: "Something spicy with tequila" });
+  view = reduceMixologist(view, { type: "save-start" });
+  assert.equal(mixologistActionsLocked(view), true);
+  assert.equal(view.saving, true);
+  assert.equal(reduceMixologist(view, { type: "retry-start" }), view);
+  assert.equal(reduceMixologist(view, { type: "generate-start" }), view);
+  assert.equal(reduceMixologist(view, { type: "save-start" }), view);
+  assert.equal(view.recipe?.name, "Smoky Old Fashioned");
+
+  const failed = reduceMixologist(view, { type: "save-failure", error: "Could not save the recipe." });
+  assert.equal(mixologistActionsLocked(failed), false);
+  assert.equal(failed.saving, false);
+  assert.equal(failed.recipe?.name, "Smoky Old Fashioned");
+  assert.equal(failed.error, "Could not save the recipe.");
+
+  view = reduceMixologist(view, { type: "save-success", saved: "guest" });
+  assert.equal(mixologistActionsLocked(view), false);
+  assert.equal(view.saved, "guest");
+  assert.equal(view.recipe?.name, "Smoky Old Fashioned");
+  assert.equal(reduceMixologist(view, { type: "save-success", saved: "keeper" }), view);
+
+  view = reduceMixologist(view, { type: "retry-start" });
+  assert.equal(mixologistActionsLocked(view), true);
+  assert.equal(reduceMixologist(view, { type: "save-start" }), view);
+});
+
 test("MixologistPanel shows Try another only beside a recipe and locks both actions while loading", () => {
   const panel = mixologistPanel();
   assert.match(panel, /Try another/);
@@ -195,8 +223,10 @@ test("MixologistPanel shows Try another only beside a recipe and locks both acti
   assert.match(panel, /mixologistRetryBody/);
   assert.match(panel, /retry-start/);
   assert.match(panel, /generate-start/);
-  assert.match(panel, /disabled=\{loading \|\| saved !== ""\}/);
-  assert.match(panel, /disabled=\{loading\}>Try another/);
+  assert.match(panel, /save-start/);
+  assert.match(panel, /Saving…/);
+  assert.match(panel, /disabled=\{locked \|\| saved !== ""\}/);
+  assert.match(panel, /disabled=\{locked\}>Try another/);
   assert.match(panel, /name: recipe\.name/);
   assert.match(panel, /Trying another drink/);
   assert.doesNotMatch(panel, /make it less sweet/);
