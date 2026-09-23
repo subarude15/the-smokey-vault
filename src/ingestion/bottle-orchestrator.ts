@@ -38,8 +38,8 @@ import {
   type LookupOptions,
   type LookupResult
 } from "../lookup.js";
-import { parseVisionLabel, type VisionLabel } from "../vision_label.js";
-import { labelProductWithLocalOllama } from "./llm-enrichment.js";
+import { parseVisionLabel, type VisionLabel, VISION_LABEL_PROMPT } from "../vision_label.js";
+import { callLlm } from "../ai_client.js";
 import { runSmartFallback, type SmartFallbackDeps, type SmartFallbackQuery } from "./smart-fallback.js";
 import { candidateFromLookup, type BottleCandidate } from "./candidate/index.js";
 
@@ -52,14 +52,21 @@ export type LabelIngestionResult = {
 
 export type BottleOrchestratorDeps = {
   lookupByBarcode?: (code: string, options?: LookupOptions) => Promise<LookupResult>;
-  labelWithLocalOllama?: (imageBase64: string) => Promise<ProductSchema>;
+  identifyVisionLabel?: (imageBase64: string) => Promise<VisionLabel>;
   catalogBeerSuggestions?: (query: string, limit?: number) => Promise<LabelIngestionResult["suggestions"]>;
   smartFallback?: (query: SmartFallbackQuery, deps?: SmartFallbackDeps) => Promise<ProductSchema | null>;
 };
 
+async function defaultIdentifyVisionLabel(imageBase64: string): Promise<VisionLabel> {
+  const image = imageBase64.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "").trim();
+  if (!image) throw new Error("Image required");
+  const content = await callLlm(VISION_LABEL_PROMPT, image);
+  return parseVisionLabel(content);
+}
+
 const defaultDeps: Required<BottleOrchestratorDeps> = {
   lookupByBarcode: lookupProduct,
-  labelWithLocalOllama: labelProductWithLocalOllama,
+  identifyVisionLabel: defaultIdentifyVisionLabel,
   catalogBeerSuggestions: searchCatalogBeerSuggestions,
   smartFallback: runSmartFallback
 };
@@ -99,16 +106,8 @@ export async function identifyByLocalLabelImage(
   deps: BottleOrchestratorDeps = {}
 ): Promise<LabelIngestionResult> {
   const resolved = resolveDeps(deps);
-  const product = await resolved.labelWithLocalOllama(imageBase64);
-  const suggestions = product.product_type === "beer"
-    ? await resolved.catalogBeerSuggestions(`${product.brand} ${product.name}`.trim(), 5)
-    : [];
-  return {
-    source: "label",
-    upc: product.upc || undefined,
-    product,
-    suggestions
-  };
+  const parsed = await resolved.identifyVisionLabel(imageBase64);
+  return assembleVisionLabelResult(parsed, "", deps);
 }
 
 /**
