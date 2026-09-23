@@ -1985,7 +1985,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
             return <div className="fill"><span style={{width:`${gauge.pct}%`}}/><small>{gauge.label}</small></div>;
           })()}
           {module.id === "brews" && <BrewPipeline status={String(item.status ?? "")}/>}
-        </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" onClick={() => setEditing(item)}><Settings size={17}/></button>{module.id !== "taps" && <button className="icon-button danger" onClick={() => remove(item.id)}><Trash2 size={17}/></button>}</div>}
+        </div>{admin && <div className="card-actions" onClick={(e)=>e.stopPropagation()}><button className="icon-button" aria-label={`Settings for ${item.name || "item"}`} onClick={() => setEditing(item)}><Settings size={17}/></button>{module.id !== "taps" && <button className="icon-button danger" aria-label={`Delete ${item.name || "item"}`} onClick={() => remove(item.id)}><Trash2 size={17}/></button>}</div>}
       </button>;
       })}</div>}
     {finderOpen && <BottleFinder module={module} onClose={() => setFinderOpen(false)} onPick={(values) => {
@@ -2291,7 +2291,7 @@ function BottleFinder({ module, onClose, onPick }:{
       <section className="modal finder-modal">
         <header className="modal-header">
           <div><span className="eyebrow">{module.id === "taps" || module.id === "brews" || module.id === "packaged_beer" ? "FIND A BEER" : "FIND A BOTTLE"}</span><h2>Search and add</h2></div>
-          <button type="button" className="icon-button" onClick={onClose}><X/></button>
+          <button type="button" className="icon-button" aria-label="Close search" onClick={onClose}><X/></button>
         </header>
         <label className="search finder-search"><Search/><input autoFocus value={query} onChange={(e)=>setQuery(e.target.value)} placeholder={module.id === "taps" || module.id === "brews" || module.id === "packaged_beer" ? "House IPA, Nugget Nectar…" : "Eagle Rare, Lagavulin, Champagne…"}/></label>
         <p className="scanner-status">{loading ? "Searching…" : status}</p>
@@ -2451,7 +2451,7 @@ function ItemForm({ module,item,review,source,close,saved }:{module:Module;item:
       return abv != null ? { ...next, calculated_abv: abv } : next;
     });
   }
-  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2>{review && source && source !== "not_found" ? <span className="chip static source-chip">{LOOKUP_SOURCE_LABELS[source] ?? source}</span> : null}</div><button type="button" className="icon-button" onClick={close}><X/></button></header>
+  return <div className={`modal-backdrop ${review?"review-backdrop":""}`}><form className="modal form-modal" onSubmit={submit}><header className="modal-header"><div><span className="eyebrow">{review?"FROM THE CAMERA":existing?"EDIT":"NEW"} {module.singular.toUpperCase()}</span><h2>{module.id === "taps" ? `Tap ${form.tap_number ?? ""}` : existing ? String(item![module.primary]) : review ? "Check this bottle" : `Add ${module.singular}`}</h2>{review && source && source !== "not_found" ? <span className="chip static source-chip">{LOOKUP_SOURCE_LABELS[source] ?? source}</span> : null}</div><button type="button" className="icon-button" aria-label="Close modal" onClick={close}><X/></button></header>
     {recovered && <div className="draft-restore">
       <div><strong>Unsaved draft found</strong><span>You left this form part-way through. Restore what you had typed?</span></div>
       <div className="draft-restore-actions">
@@ -3310,7 +3310,7 @@ function RecipeImportModal({ admin, close, saved, initialUrl }:{
             <h2>Import a recipe</h2>
             <p>Paste a URL from Punch, Liquor.com, a blog, or anywhere that publishes a recipe. On Android you can also Share to The Smokey Barrel Bar &amp; Brewing. The vault reads the page and grabs a photo when it can.</p>
           </div>
-          <button type="button" className="icon-button" onClick={close}><X/></button>
+          <button type="button" className="icon-button" aria-label="Close import recipe" onClick={close}><X/></button>
         </header>
         <label className="search finder-search"><Link/><input value={url} onChange={(e) => setUrl(e.target.value)} onPaste={takePastedLink} placeholder="https://…/paper-plane" autoFocus/></label>
         <div className="import-actions">
