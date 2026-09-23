@@ -78,9 +78,19 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
-### In review — PR160 Interface Depth & Motion System
+### Recently completed — PR160 Interface Depth & Motion System
 
 Shared frontend elevation + motion language is implemented (`client/src/depth-motion.css`): Depth 0–4 surface/elevation tokens with clear resting card float (contact + ambient shadow, edge highlight, restrained warm bounce-light), fine-pointer hover lift (~8–9px + ~1.012–1.015 scale into Depth 3), Depth-4 overlays (modal/More/lightbox), touch press scale, brief page/grid enters, layered homepage hero reveal, CSS sticky homepage hero underlap (content scrolls over the hero with a soft leading scrim; no parallax / no scroll listeners), and `prefers-reduced-motion` (movement off, static elevation kept). No backend/schema/API changes; Guest redaction unchanged; Smokey Barrel brand art preserved as separate vectors.
+
+### Upcoming — Hybrid barcode + AI label scanner
+
+The next concrete product track is a three-PR scanner improvement. Keep deterministic barcode decoding as the fast path and use multimodal AI only as label evidence/fallback. PR161 is an unrelated tooling PR, so scanner work begins at PR162.
+
+- **PR162 — Unified label-vision ingestion:** consolidate the local Ollama and configurable cloud label paths behind one shared ingestion boundary; remove hardcoded LAN/model assumptions; keep label extraction limited to product identity/facts rather than inventory state.
+- **PR163 — Label evidence, verification, and source precedence:** decoded barcode wins; catalog/Vault evidence outranks raw vision; label-read GTINs must pass existing checksum rules; ambiguous identity remains Keeper review; reuse current candidate/provenance/ownership architecture.
+- **PR164 — Hybrid Keeper scanning experience:** successful barcode scans remain unchanged and do not invoke AI; genuine lookup misses can continue in-place to an explicit **Read front label** action, then catalog-assisted review/save without losing the authoritative scanned UPC.
+
+Automatic label capture is explicitly deferred until live use after PR164 proves that the extra automation is worthwhile. Do not send every camera frame or every successful barcode scan to an LLM.
 
 ### Upcoming — Conversational AI Mixologist
 
@@ -96,7 +106,7 @@ Still upcoming, and not part of phase 3:
 
 ### Idle — evidence-driven follow-up
 
-PR157–PR159 product items are complete; PR160 is ready for review. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
+PR157–PR160 product items are complete. PR161 is an open tooling-only native-build fix and is not part of the product roadmap. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
 
 Stability-first, but prioritize concrete product usability problems observed in the live bar. Prefer small, testable PRs. Do not open speculative discovery features. Start a new numbered Track C entry only when a concrete next item exists.
 
@@ -114,7 +124,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR154 are complete. The roadmap now returns to evidence-driven Brewery Lab / live-use follow-up; start a new numbered entry only when a concrete next item exists.
+These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The next concrete product work is the hybrid barcode + AI label scanner in PR162–PR164; PR161 is tooling-only and does not consume a product slot.
 
 1. **PR136 — Cocktail cards + responsive Keeper workspace refinements** (done)
    - Improve recipe-card readiness hierarchy, ingredient/missing-state scanning, and contextual Keeper actions.
@@ -205,14 +215,34 @@ These are explicitly desired near-term product improvements based on real househ
    - PR124 established guest-friendly presentation, Keeper-owned editorial fields/images, and Brewfather-safe sync ownership.
    - Do not immediately expand Brewery Lab architecture for polish; use Nick’s real usage to identify the next concrete issue.
 
+23. **PR162 — Unified label-vision ingestion**
+   - **Goal:** Replace the two partially separate label-reading paths with one configurable vision ingestion pipeline while leaving deterministic barcode decoding unchanged.
+   - **Scope:** Keep ZXing as the barcode decoder; consolidate `/api/scan/label`, `/api/ai/vision-label`, and import-queue label reads behind one shared implementation; remove hardcoded Ollama host/model assumptions; respect existing provider/failover configuration and `OLLAMA_HOST` / `OLLAMA_VISION_MODEL` where applicable; normalize label vision to product identity/facts only (name, brand/producer/brewery, category/style, ABV, volume, visible UPC, product type); do not ask vision to produce fill level or inventory counts; preserve Catalog.beer suggestions.
+   - **Acceptance:** Existing barcode behavior is unchanged; label routes return compatible normalized data through one implementation; no hardcoded LAN Ollama address is required; inventory count/fill defaults remain in the inventory-write layer; no schema migration; focused tests plus full test/build/diff-check pass.
+24. **PR163 — Label evidence, verification, and source precedence**
+   - **Goal:** Treat AI vision as useful evidence rather than an authoritative inventory source.
+   - **Scope:** A UPC decoded by ZXing is authoritative and cannot be replaced by an LLM-read UPC; a label-read UPC is eligible only when no decoded barcode exists and it passes existing GTIN normalization/checksum validation; recognized label identity should query existing Vault/catalog/search paths before direct inventory creation; strong existing evidence outranks raw vision; label fields may fill missing review information but must not silently overwrite stronger accepted/Keeper values; ambiguous identity stays `needs_review`; reuse current candidate/provenance/enrichment infrastructure and do not resurrect `enrichment_field_overrides`.
+   - **Acceptance:** Conflicting label UPCs cannot replace a decoded code; invalid vision GTINs are discarded rather than repaired; strong catalog matches can enrich a label candidate while preserving the scan code; ambiguous or label-only results require explicit Keeper confirmation; focused precedence/regression tests plus full test/build/diff-check pass.
+25. **PR164 — Hybrid Keeper barcode → label-assist scanner**
+   - **Goal:** Make barcode scanning and AI label recognition feel like one progressive scanner instead of separate workflows.
+   - **Scope:** Barcode remains the first/fast path in `ScanSessionScanner`; successful hits behave as today and never invoke AI; a genuine lookup miss or insufficient identity offers an in-flow **Read front label** action; carry the authoritative scanned UPC throughout; show clear staged feedback and catalog suggestions; require confirmation for ambiguous label-only identity; preserve manual entry, name search, duplicate cooldown, session counts, undo, Import Review, and multi-bottle scanning; reuse/extract current label-review UI rather than creating a parallel system.
+   - **Acceptance:** Common barcode hits stay fast; a miss can progress to label reading without abandoning the scan session; the original UPC remains visible/authoritative; failed label reads retain retry/search/manual/scan-another fallbacks; after save the Keeper can immediately scan the next bottle; successful barcode scans never trigger vision; focused state tests plus full test/build/diff-check pass.
+   - **Deferred:** Do not auto-fire label vision after every miss yet. Evaluate automatic miss-only label capture only after PR164 is deployed and real bar use demonstrates repeated manual label-assist taps.
+
 ## Open PR status
 
+- **#161** Native-build `allowScripts` fix — tooling-only open PR; unrelated to scanner product work and must not be folded into PR162–PR164.
 - **#121** Google Stitch `DESIGN.md` — draft branding/theme documentation; intentionally deferred. Supported appearance is Light/Dark only (PR127).
 - **#78** Agentage memory MCP — draft tooling only; not product roadmap.
 - **#53** Enrichment review actions — closed unmerged and superseded by PR123; do not rebase or merge.
 
 ## Relevant code
 
+- `client/src/Scanner.tsx` / `client/src/ScanSessionScanner.tsx` — deterministic ZXing barcode capture; PR164 must preserve this as the fast path and must not invoke AI on successful scans.
+- `client/src/ImportReview.tsx` — current miss-only label capture, name search, and review UI; PR164 should reuse/extract this behavior rather than create a second review system.
+- `src/scan-session.ts` — scan-session inventory mutation, quantity increment, undo, and enrichment queue semantics; inventory defaults belong here/write preparation, not in vision evidence.
+- `src/ingestion/bottle-orchestrator.ts` — composition root for barcode, local/cloud label, and smart-fallback ingestion; PR162–PR163 should centralize scanner evidence here or in adjacent ingestion modules.
+- `src/ingestion/llm-enrichment.ts` / `src/vision_label.ts` / `src/ai_providers.ts` — current local vision schema, cloud label parsing, and provider/failover configuration targeted by PR162.
 - `client/src/depth-motion.css` — PR160 shared elevation + motion tokens and site-wide depth/lift/press/reveal behaviors (imported from `main.tsx` after `styles.css` and `home-hero.css`).
 - `client/src/shell-nav.ts` — pure shell navigation helpers (primary/More selection, Guest/Keeper partition, tab visibility/order); PR142 `landingFeedbackCtaEnabled` shares `pageEnabled("next")` with Guest nav.
 - `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path.
