@@ -85,6 +85,18 @@ import {
   type ScanSessionUndo
 } from "./scan-session.js";
 import { BrewfatherError, isBrewfatherConfigured, syncBrews } from "./brewfather.js";
+import {
+  createBrewRecipe,
+  createBrewRecipeSchema,
+  createBrewSession,
+  createBrewSessionSchema,
+  deleteBrewRecipe,
+  getBrewRecipe,
+  listBrewRecipes,
+  listBrewSessions,
+  updateBrewRecipe,
+  updateBrewRecipeSchema
+} from "./brew_sheets.js";
 import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
 
 import {
@@ -287,6 +299,70 @@ app.post<{ Body: { currentPin?: string; newPin?: string } }>("/api/auth/pin", as
   if (!newPin || !/^\d{4,12}$/.test(newPin)) return reply.code(400).send({ error: "PIN must be 4–12 digits" });
   setPin(newPin);
   return { ok: true };
+});
+
+
+app.get("/api/admin/brewery/recipes", {
+  schema: { tags: ["Brewery"], summary: "List keeper-only brew sheet recipes" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return { recipes: listBrewRecipes() };
+});
+
+app.get<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id", {
+  schema: { tags: ["Brewery"], summary: "Get one keeper-only brew sheet recipe" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid recipe id" });
+  const recipe = getBrewRecipe(id);
+  if (!recipe) return reply.code(404).send({ error: "Recipe not found" });
+  return { recipe, sessions: listBrewSessions(id) };
+});
+
+app.post("/api/admin/brewery/recipes", {
+  schema: { tags: ["Brewery"], summary: "Create a keeper-only brew sheet recipe" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const parsed = createBrewRecipeSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid brew recipe", issues: parsed.error.issues });
+  return reply.code(201).send({ recipe: createBrewRecipe(parsed.data) });
+});
+
+app.patch<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id", {
+  schema: { tags: ["Brewery"], summary: "Update a keeper-only brew sheet recipe" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid recipe id" });
+  const parsed = updateBrewRecipeSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid brew recipe", issues: parsed.error.issues });
+  const recipe = updateBrewRecipe(id, parsed.data);
+  if (!recipe) return reply.code(404).send({ error: "Recipe not found" });
+  return { recipe };
+});
+
+app.delete<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id", {
+  schema: { tags: ["Brewery"], summary: "Delete a keeper-only brew sheet recipe" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid recipe id" });
+  if (!deleteBrewRecipe(id)) return reply.code(404).send({ error: "Recipe not found" });
+  return reply.code(204).send();
+});
+
+app.post<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id/sessions", {
+  schema: { tags: ["Brewery"], summary: "Start a numbered brew session from a keeper recipe" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid recipe id" });
+  const parsed = createBrewSessionSchema.safeParse(request.body ?? {});
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid brew session", issues: parsed.error.issues });
+  const session = createBrewSession(id, parsed.data);
+  if (!session) return reply.code(404).send({ error: "Recipe not found" });
+  return reply.code(201).send({ session });
 });
 
 const BACKFILL_JOB_TYPES = new Set<EnrichmentBackfillJobType>(["metadata", "tasting_notes", "image"]);

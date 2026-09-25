@@ -46,6 +46,30 @@ CREATE TABLE IF NOT EXISTS brews (
   display_name TEXT DEFAULT '', guest_description TEXT DEFAULT '', keeper_owns_image INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS brew_recipes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  style TEXT DEFAULT '',
+  source_text TEXT DEFAULT '',
+  recipe_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_brew_recipes_updated ON brew_recipes(updated_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS brew_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipe_id INTEGER NOT NULL,
+  brew_number INTEGER NOT NULL,
+  brewed_at TEXT,
+  status TEXT NOT NULL DEFAULT 'Planned',
+  actuals_json TEXT NOT NULL DEFAULT '{}',
+  notes TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(recipe_id) REFERENCES brew_recipes(id) ON DELETE CASCADE,
+  UNIQUE(recipe_id, brew_number)
+);
+CREATE INDEX IF NOT EXISTS idx_brew_sessions_recipe ON brew_sessions(recipe_id, brew_number DESC);
 CREATE TABLE IF NOT EXISTS packaged_beer (
   id INTEGER PRIMARY KEY AUTOINCREMENT, brewery TEXT DEFAULT '', name TEXT NOT NULL, style TEXT DEFAULT '',
   count INTEGER DEFAULT 1, pack_date TEXT, abv REAL DEFAULT 0, upc TEXT DEFAULT '', image_url TEXT DEFAULT '',
