@@ -1086,6 +1086,8 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .brew-sheet-builder .toolbar{align-items:flex-end}
 .brew-sheet-builder .page-title{margin:0;flex:1;min-width:min(100%,280px)}
 .brew-sheet-actions{display:flex;flex-wrap:wrap;gap:10px}
+.brew-sheet-pdf{display:contents}
+.brew-sheet-pdf-error{flex-basis:100%;color:var(--muted);font-size:12px;line-height:1.45}
 .brew-sheet-actions .secondary:disabled{opacity:.5;cursor:not-allowed}
 .brew-sheet-source{width:100%;min-height:280px;resize:vertical;line-height:1.45}
 .brew-sheet-editor{border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:16px}

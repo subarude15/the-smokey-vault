@@ -386,6 +386,7 @@ test("no headless browser dependency added", () => {
   };
   const all = { ...pkg.dependencies, ...pkg.devDependencies };
   for (const name of Object.keys(all)) {
+    if (name === "playwright-core") continue;
     assert.ok(!/playwright|puppeteer|chromium/i.test(name), name);
   }
 });

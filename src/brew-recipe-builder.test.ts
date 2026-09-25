@@ -11,6 +11,7 @@ import {
   beginAnalyze,
   BLANK_KETTLE,
   brewAgainRequest,
+  canDownloadBrewSheetPdf,
   brewRecipeSaveBody,
   brewSheetFingerprint,
   BREW_SHEET_SOURCE_MAX_CHARS,
@@ -246,6 +247,15 @@ test("opening a saved recipe restores source text, draft, and saved id", () => {
   assert.equal(brewRecipeSaveBody(opened)?.sourceText, CANDY_TEXT);
   assert.match(builderSrc, /savedId \? "PATCH" : "POST"/);
   assert.equal(leaveNeedsConfirm(opened, brewSheetFingerprint(opened)), false);
+  const baseline = brewSheetFingerprint(opened);
+  assert.equal(canDownloadBrewSheetPdf(opened, baseline), true);
+  assert.equal(canDownloadBrewSheetPdf({ ...opened, phase: "preview", previewReturn: "review" }, baseline), true);
+  assert.equal(canDownloadBrewSheetPdf({ ...opened, savedId: null }, baseline), false);
+  assert.equal(canDownloadBrewSheetPdf(emptyBuilderState(), ""), false);
+  const dirty = withDraft(opened, setWaterField(opened.draft!, "source", "Changed"));
+  assert.equal(canDownloadBrewSheetPdf(dirty, baseline), false);
+  assert.match(builderSrc, /BrewSheetPdfDownload/);
+  assert.doesNotMatch(appSrc, /Download PDF/);
 });
 
 test("New Recipe clears the editor and leaves saved library cards in place", () => {

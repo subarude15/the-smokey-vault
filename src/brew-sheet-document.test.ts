@@ -149,7 +149,7 @@ test("missing recipe values are omitted instead of invented", () => {
   assert.equal(sheet.measurements.length, 0);
 });
 
-test("preview is a keeper brew-sheet view and does not add a PDF stack", () => {
+test("preview stays the canonical document and PDF download is keeper-only", () => {
   const opened = openSavedRecipe({
     recipe: { id: 4, sourceText: "original", recipe: candy },
     sessions: [{ id: 1, brewNumber: 2, brewedAt: null, createdAt: "2026-09-25 12:00:00", status: "Planned" }]
@@ -169,12 +169,16 @@ test("preview is a keeper brew-sheet view and does not add a PDF stack", () => {
   assert.match(appSrc, /page === BREW_SHEET_PAGE_ID && admin && <BrewRecipeBuilder\/>/);
   assert.doesNotMatch(documentSrc, /fetch\(|\bapi\(/);
   assert.match(previewSrc, /Print Preview/);
-  assert.doesNotMatch(previewSrc, /Download PDF|application\/pdf/);
+  assert.match(previewSrc, /Download PDF/);
+  assert.match(builderSrc, /canDownload=\{pdfReady\}/);
+  assert.doesNotMatch(appSrc, /Download PDF/);
   assert.match(sheetCss, /@page brew-sheet/);
   assert.match(sheetCss, /@media print/);
-  assert.equal(packageJson.includes("playwright"), false);
+  assert.match(packageJson, /"playwright-core"/);
   assert.equal(packageJson.includes("puppeteer"), false);
   assert.equal(packageJson.includes("pdfkit"), false);
+  assert.equal(packageJson.includes("jspdf"), false);
+  assert.equal(packageJson.includes("html2canvas"), false);
   assert.equal(documentSrc.includes("function BrewSheetDocument"), true);
   assert.equal(builderSrc.includes("function BrewSheetDocument"), false);
 });

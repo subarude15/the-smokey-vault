@@ -1,7 +1,7 @@
 import "./brew-sheet-document.css";
 import { brewSheetModel, type SheetPair, type SheetTable } from "./brew-sheet-document";
 
-/** Canonical Smokey Barrel brew sheet. Preview and a later PDF export should both render this. */
+/** Canonical Smokey Barrel brew sheet. Preview and PDF export both render this. */
 export function BrewSheetDocument({ recipe }: { recipe: unknown }) {
   const sheet = brewSheetModel(recipe);
   const meta = [sheet.style, sheet.system, sheet.fermenter].filter(Boolean);

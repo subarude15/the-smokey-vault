@@ -56,7 +56,9 @@
 .brew-doc-notes p{margin-bottom:6px;white-space:pre-wrap;overflow-wrap:anywhere}
 .brew-doc-pad{min-height:78px;margin-top:4px;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 14px,#d5dde3 15px)}
 .brew-doc tr,.brew-doc-checks li,.brew-doc-measures li,.brew-doc-stage,.brew-doc-water div{break-inside:avoid}
-.brew-doc h2,.brew-doc h3{break-after:avoid}
+.brew-doc h2,.brew-doc h3,.brew-doc caption{break-after:avoid}
+/* Short sections stay with their heading. Long tables (6+ rows) may split. */
+.brew-doc-section:not(:has(tr:nth-child(6))){break-inside:avoid}
 .brew-sheet-page{page:brew-sheet}
 @page brew-sheet{size:Letter;margin:0.45in}
 @media print{
