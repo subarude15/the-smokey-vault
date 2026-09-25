@@ -7,24 +7,36 @@ import {
   ANALYZE_EMPTY_MESSAGE,
   ANALYZE_FAILURE_MESSAGE,
   addRow,
+  addSession,
   beginAnalyze,
   BLANK_KETTLE,
+  brewAgainRequest,
   brewRecipeSaveBody,
+  brewSheetFingerprint,
   BREW_SHEET_SOURCE_MAX_CHARS,
   builderIsDirty,
   canAnalyze,
+  deleteRecipeConfirm,
   draftFromParsed,
   editSaved,
   emptyBuilderState,
   failAnalyze,
   finishAnalyze,
   finishSave,
+  leaveNeedsConfirm,
+  openSavedRecipe,
   publicAnalyzeError,
   publicSaveError,
+  recipeCardLine,
+  recipeCardsFromList,
   removeRow,
   savedRecipeId,
+  sessionViews,
   setWaterField,
+  showCreatedSession,
+  sortSessions,
   updateRow,
+  withDraft,
   withRawText
 } from "../client/src/brew-recipe-builder.ts";
 import { BREW_SHEET_NAV_LABEL, BREW_SHEET_PAGE_ID } from "../client/src/brew-sheet-page.ts";
@@ -190,4 +202,114 @@ test("guests cannot reach the Brew Sheet Builder", () => {
   assert.equal(BREW_SHEET_SOURCE_MAX_CHARS, 100_000);
   const parser = readFileSync(join(root, "src/brew_recipe_parser.ts"), "utf8");
   assert.match(parser, /export const BREW_RECIPE_PARSE_MAX_CHARS = 100_000/);
+  assert.match(builderSrc, /initialLibraryState/);
+  assert.doesNotMatch(appSrc, /page === "brew_sheets" && </);
+});
+
+const savedPayload = {
+  recipe: {
+    id: 4,
+    name: "Candy Cloud Hazy DIPA",
+    style: "Hazy DIPA",
+    sourceText: CANDY_TEXT,
+    updatedAt: "2026-09-25 18:04:00",
+    recipe: { ...candyRecipe, targetOg: "1.080", targetFg: "1.020", targetAbv: "~7.8%", estimatedIbu: "25" }
+  },
+  sessions: [
+    { id: 2, brewNumber: 1, brewedAt: "2026-06-02", status: "Completed", createdAt: "2026-06-02 12:00:00" },
+    { id: 8, brewNumber: 3, brewedAt: null, status: "Planned", createdAt: "2026-09-25 18:04:00" },
+    { id: 5, brewNumber: 2, brewedAt: "2026-08-14", status: "Completed", createdAt: "2026-08-14 09:00:00" }
+  ]
+};
+
+test("library cards summarize saved recipes without the full document", () => {
+  const cards = recipeCardsFromList({ recipes: [savedPayload.recipe, { id: 0, name: "skip" }] });
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].name, "Candy Cloud Hazy DIPA");
+  assert.equal(cards[0].style, "Hazy DIPA");
+  assert.equal(cards[0].targetOg, "1.080");
+  assert.equal(cards[0].updatedLabel, "Updated Sep 25, 2026");
+  assert.match(recipeCardLine(cards[0]), /Target OG 1\.080/);
+  assert.match(recipeCardLine(cards[0]), /7\.8% ABV/);
+  assert.equal(JSON.stringify(cards[0]).includes("sodiumPpm"), false);
+});
+
+test("opening a saved recipe restores source text, draft, and saved id", () => {
+  const opened = openSavedRecipe(savedPayload);
+  assert.ok(opened);
+  assert.equal(opened.phase, "review");
+  assert.equal(opened.rawText, CANDY_TEXT);
+  assert.equal(opened.savedId, 4);
+  assert.equal(opened.draft?.beerName, "Candy Cloud Hazy DIPA");
+  assert.equal(opened.draft?.water.sodiumPpm, "40");
+  assert.deepEqual(opened.sessions.map((session) => session.brewNumber), [3, 2, 1]);
+  assert.equal(brewRecipeSaveBody(opened)?.sourceText, CANDY_TEXT);
+  assert.match(builderSrc, /savedId \? "PATCH" : "POST"/);
+  assert.equal(leaveNeedsConfirm(opened, brewSheetFingerprint(opened)), false);
+});
+
+test("New Recipe clears the editor and leaves saved library cards in place", () => {
+  const cards = recipeCardsFromList({ recipes: [savedPayload.recipe] });
+  const opened = openSavedRecipe(savedPayload);
+  assert.ok(opened);
+  const next = emptyBuilderState();
+  assert.equal(next.phase, "paste");
+  assert.equal(next.savedId, null);
+  assert.equal(next.draft, null);
+  assert.equal(next.rawText, "");
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].id, 4);
+  assert.equal(builderIsDirty(next), false);
+});
+
+test("Brew Again posts a session on the existing recipe and shows it first", () => {
+  const request = brewAgainRequest(4);
+  assert.equal(request.path, "/admin/brewery/recipes/4/sessions");
+  assert.equal(request.method, "POST");
+  assert.deepEqual(request.body, { status: "Planned" });
+  const opened = openSavedRecipe(savedPayload);
+  assert.ok(opened);
+  const created = { id: 9, brewNumber: 4, brewedAt: null, createdAt: "2026-09-25 19:00:00", status: "Planned" };
+  const next = showCreatedSession(opened, created);
+  assert.equal(next.phase, "saved");
+  assert.equal(next.savedId, 4);
+  assert.equal(next.brewNotice, "Brew #4 created");
+  assert.equal(next.sessions[0].brewNumber, 4);
+  assert.equal(next.draft, opened.draft);
+  const edited = addSession(withDraft(opened, setWaterField(opened.draft!, "source", "RO")), created);
+  assert.equal(edited.phase, "review");
+  assert.equal(edited.draft?.water.sodiumPpm, "40");
+  assert.equal(edited.sessions[0].brewNumber, 4);
+  const savedAfter = finishSave(next, 4);
+  assert.equal(savedAfter.phase, "saved");
+  assert.equal(savedAfter.brewNotice, "");
+  assert.equal(savedAfter.sessions[0].brewNumber, 4);
+});
+
+test("session display sorts by brew number and does not renumber", () => {
+  const sessions = sortSessions(sessionViews(savedPayload.sessions));
+  assert.deepEqual(sessions.map((session) => session.brewNumber), [3, 2, 1]);
+  assert.deepEqual(savedPayload.sessions.map((session) => session.brewNumber), [1, 3, 2]);
+});
+
+test("deleting a recipe requires a confirmation that names brew sessions", () => {
+  const message = deleteRecipeConfirm("Candy Cloud Hazy DIPA");
+  assert.match(message, /Candy Cloud Hazy DIPA/);
+  assert.match(message, /brew sessions/);
+  assert.match(builderSrc, /deleteRecipeConfirm/);
+  assert.match(builderSrc, /window\.confirm\(deleteRecipeConfirm/);
+});
+
+test("open, edit, and save keep unknown nested recipe keys", () => {
+  const opened = openSavedRecipe(savedPayload);
+  assert.ok(opened?.draft);
+  const edited = withDraft(opened, setWaterField(opened.draft, "source", "100% RO"));
+  const body = brewRecipeSaveBody(edited);
+  assert.equal(body?.name, "Candy Cloud Hazy DIPA");
+  assert.equal(body?.style, "Hazy DIPA");
+  assert.equal(body?.sourceText, CANDY_TEXT);
+  assert.equal(body?.recipe.water.source, "100% RO");
+  assert.equal(body?.recipe.water.sodiumPpm, "40");
+  assert.equal(body?.recipe.water.magnesiumPpm, "10");
+  assert.equal(body?.recipe.fermentation.pitchRate, "1.0");
 });
