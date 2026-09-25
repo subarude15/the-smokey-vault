@@ -131,7 +131,7 @@ test("remaining Guest tabs appear in More with no duplicates; full coverage", ()
 });
 
 test("Guest Mode excludes Keeper-only operations; brewery stays Guest-capable", () => {
-  for (const id of ["scan", "import", "restock", "settings", "messages", "brews"]) {
+  for (const id of ["scan", "import", "restock", "settings", "messages", "brews", "brew_sheets"]) {
     assert.equal(isKeeperOnlyPage(id), true);
     assert.equal(GUEST_HIDDEN_PAGES.has(id), true);
   }
@@ -143,9 +143,10 @@ test("Guest Mode excludes Keeper-only operations; brewery stays Guest-capable", 
 });
 
 test("Keeper Operations order includes Homebrew Log and unread-capable messages", () => {
-  const ops = sortKeeperOperations(nav(["settings", "messages", "brews", "scan", "import", "restock"]));
+  const ops = sortKeeperOperations(nav(["settings", "messages", "brews", "brew_sheets", "scan", "import", "restock"]));
   assert.deepEqual(ops.map((item) => item.id), [...KEEPER_OPERATION_IDS]);
   assert.ok(KEEPER_OPERATION_IDS.includes("brews"));
+  assert.ok(KEEPER_OPERATION_IDS.includes("brew_sheets"));
   assert.ok(KEEPER_OPERATION_IDS.includes("messages"));
   assert.ok(KEEPER_PAGES.has("messages"));
 });

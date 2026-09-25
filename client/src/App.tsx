@@ -89,6 +89,8 @@ import {
 import { Scanner, ScanResult, ScanReviewOutcome } from "./Scanner";
 import { ImportReview } from "./ImportReview";
 import { BreweryLab } from "./BreweryLab";
+import { BrewRecipeBuilder } from "./BrewRecipeBuilder";
+import { BREW_SHEET_NAV_LABEL, BREW_SHEET_PAGE_ID } from "./brew-sheet-page";
 import { ContactModal, GuestFooter } from "./ContactModal";
 import { EventsPage } from "./EventsPage";
 import { parseEventIdFromSearch, syncEventDeepLinkUrl } from "./event-deep-link";
@@ -655,6 +657,7 @@ export default function App() {
     .sort((a, b) => tabRank(a.id, tabOrder) - tabRank(b.id, tabOrder));
   const keeperNav = sortKeeperOperations([
     { id:"brews",label:"Homebrew Log",icon:FlaskConical },
+    { id:BREW_SHEET_PAGE_ID,label:BREW_SHEET_NAV_LABEL,icon:ClipboardPaste },
     { id:"messages",label:"Inbox",icon:Mail,badge:unread },
     { id:"scan",label:"Scan bottles",icon:ScanBarcode },
     { id:"import",label:"Import Review",icon:Upload },
@@ -827,6 +830,7 @@ export default function App() {
           {page === "restock" && admin && <RestockPage go={navigate}/>}
           {page === "messages" && admin && <MessagesInbox onUnreadChange={setUnread}/>}
           {page === "brewery" && <BreweryLab admin={admin} keeperName={house.keeperName} go={navigate}/>}
+          {page === BREW_SHEET_PAGE_ID && admin && <BrewRecipeBuilder/>}
           {page === "patrons" && <PatronsPage admin={admin} keeperName={house.keeperName}/>}
           {page === "staff" && <StaffPage admin={admin} keeperName={house.keeperName}/>}
           {page === "gallery" && <GalleryPage admin={admin} keeperName={house.keeperName}/>}
