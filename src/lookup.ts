@@ -84,7 +84,7 @@ export {
 /** Re-exports: implementations live under src/ingestion/ (behavior unchanged). */
 export { parseProductSchema } from "./ingestion/normalize.js";
 export { searchWebSnippets } from "./ingestion/web-search.js";
-export { labelProductWithLocalOllama, lookupProductFromRawText } from "./ingestion/llm-enrichment.js";
+export { lookupProductFromRawText } from "./ingestion/llm-enrichment.js";
 export {
   ensureColaCacheTable,
   getFromCache,

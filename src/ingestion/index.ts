@@ -1,5 +1,5 @@
 export { searchWebSnippets, searchWebHits, type WebSearchHit } from "./web-search.js";
-export { labelProductWithLocalOllama, lookupProductFromRawText } from "./llm-enrichment.js";
+export { lookupProductFromRawText } from "./llm-enrichment.js";
 export { parseProductSchema, inventoryRecordToProduct, smartWebQuery } from "./normalize.js";
 export { runSmartFallback, type SmartFallbackDeps, type SmartFallbackQuery } from "./smart-fallback.js";
 export {

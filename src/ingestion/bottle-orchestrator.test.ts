@@ -79,7 +79,7 @@ test("identifyByBarcodeWithCandidate keeps LookupResult and attaches provenance"
 test("identifyByLocalLabelImage asks Catalog.beer only for beer product_type", async () => {
   let suggestionQuery = "";
   const beer = await identifyByLocalLabelImage("base64-beer", {
-    labelWithLocalOllama: async () => sampleProduct,
+    identifyVisionLabel: async () => ({ ...sampleProduct, volume_ml: 355 }),
     catalogBeerSuggestions: async (query) => {
       suggestionQuery = query;
       return [{
@@ -97,7 +97,7 @@ test("identifyByLocalLabelImage asks Catalog.beer only for beer product_type", a
 
   let called = false;
   const spirit = await identifyByLocalLabelImage("base64-spirit", {
-    labelWithLocalOllama: async () => ({
+    identifyVisionLabel: async () => ({
       ...sampleProduct,
       product_type: "spirit",
       name: "Eagle Rare",
