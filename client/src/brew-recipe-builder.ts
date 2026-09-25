@@ -15,8 +15,13 @@ export const ANALYZE_FAILURE_MESSAGE = "We couldn’t turn those brewing instruc
 export const SAVE_FAILURE_MESSAGE = "Couldn’t save this brew recipe.";
 export const SAVE_NAME_MESSAGE = "A beer name is required before this recipe can be saved.";
 export const NEW_RECIPE_CONFIRM = "Start a new brew recipe? This screen will be cleared. A recipe you already saved stays saved.";
+export const LEAVE_RECIPE_CONFIRM = "Go back to recipes? Unsaved changes on this screen will be cleared. A recipe you already saved stays saved.";
+export const BREW_AGAIN_UNSAVED_CONFIRM = "Brew Again uses the saved recipe. Unsaved edits on this screen are not included in the new brew session.";
+export const LOAD_FAILURE_MESSAGE = "Couldn’t load brew recipes.";
+export const BREW_AGAIN_FAILURE_MESSAGE = "Couldn’t start a new brew session.";
+export const DELETE_FAILURE_MESSAGE = "Couldn’t delete this brew recipe.";
 
-export type BuilderPhase = "paste" | "review" | "saved";
+export type BuilderPhase = "library" | "paste" | "review" | "saved";
 export type BrewRecord = Record<string, unknown>;
 export type BrewRowList = "fermentables" | "kettleAdditions" | "whirlpoolAdditions" | "dryHopStages";
 export type BrewStringList = "warnings" | "checklist";
@@ -67,12 +72,33 @@ export type BrewRecipeSaveBody = {
   recipe: BrewRecipeDraft;
 };
 
+export type BrewSessionView = {
+  id: number;
+  brewNumber: number;
+  brewedAt: string | null;
+  createdAt: string;
+  status: string;
+};
+
+export type RecipeCard = {
+  id: number;
+  name: string;
+  style: string;
+  targetOg: string;
+  targetFg: string;
+  targetAbv: string;
+  estimatedIbu: string;
+  updatedLabel: string;
+};
+
 export type BuilderState = {
   phase: BuilderPhase;
   rawText: string;
   draft: BrewRecipeDraft | null;
   savedId: number | null;
-  busy: "idle" | "analyzing" | "saving";
+  sessions: BrewSessionView[];
+  brewNotice: string;
+  busy: "idle" | "analyzing" | "saving" | "loading" | "brewing" | "deleting";
   error: string;
 };
 
@@ -83,7 +109,21 @@ export const BLANK_DRY_HOP: BrewRecord = { stage: "", variety: "", amount: "", w
 export const BLANK_FERMENTATION_STEP: BrewRecord = { when: "", temperature: "", gravity: "", action: "" };
 
 export function emptyBuilderState(): BuilderState {
-  return { phase: "paste", rawText: "", draft: null, savedId: null, busy: "idle", error: "" };
+  return {
+    phase: "paste",
+    rawText: "",
+    draft: null,
+    savedId: null,
+    sessions: [],
+    brewNotice: "",
+    busy: "idle",
+    error: ""
+  };
+}
+
+/** Library is the workspace home. Paste stays a separate phase so New Recipe is unchanged. */
+export function initialLibraryState(): BuilderState {
+  return { ...emptyBuilderState(), phase: "library" };
 }
 
 export function fieldText(value: unknown): string {
@@ -287,7 +327,7 @@ export function beginSave(state: BuilderState): BuilderState {
 }
 
 export function finishSave(state: BuilderState, id: number): BuilderState {
-  return { ...state, busy: "idle", error: "", phase: "saved", savedId: id };
+  return { ...state, busy: "idle", error: "", phase: "saved", savedId: id, brewNotice: "" };
 }
 
 export function failSave(state: BuilderState): BuilderState {
@@ -311,4 +351,160 @@ export function builderIsDirty(state: BuilderState): boolean {
 
 export function publicSaveError(): string {
   return SAVE_FAILURE_MESSAGE;
+}
+
+const BREW_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+function positiveId(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/** SQLite timestamps and ISO dates both start YYYY-MM-DD. */
+export function formatBrewDate(value: string | null | undefined): string {
+  if (!value) return "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (!match) return "";
+  const month = BREW_MONTHS[Number(match[2]) - 1];
+  if (!month) return "";
+  return `${month} ${Number(match[3])}, ${match[1]}`;
+}
+
+export function recipeUpdatedLabel(updatedAt: unknown): string {
+  const formatted = formatBrewDate(typeof updatedAt === "string" ? updatedAt : "");
+  return formatted ? `Updated ${formatted}` : "";
+}
+
+export function recipeCardLine(card: Pick<RecipeCard, "targetOg" | "targetFg" | "targetAbv" | "estimatedIbu">): string {
+  const parts: string[] = [];
+  if (card.targetOg) parts.push(`Target OG ${card.targetOg}`);
+  if (card.targetFg) parts.push(`FG ${card.targetFg}`);
+  if (card.targetAbv) parts.push(/abv/i.test(card.targetAbv) ? card.targetAbv : `${card.targetAbv} ABV`);
+  if (card.estimatedIbu) parts.push(/ibu/i.test(card.estimatedIbu) ? card.estimatedIbu : `${card.estimatedIbu} IBU`);
+  return parts.join(" • ");
+}
+
+export function recipeCardSummary(row: unknown): RecipeCard | null {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const record = row as BrewRecord;
+  const id = positiveId(record.id);
+  const draft = draftFromParsed(record.recipe);
+  const name = draft?.beerName || asString(record.name).trim();
+  if (id == null || !name) return null;
+  return {
+    id,
+    name,
+    style: draft?.style || asString(record.style),
+    targetOg: draft?.targetOg ?? "",
+    targetFg: draft?.targetFg ?? "",
+    targetAbv: draft?.targetAbv ?? "",
+    estimatedIbu: draft?.estimatedIbu ?? "",
+    updatedLabel: recipeUpdatedLabel(record.updatedAt)
+  };
+}
+
+export function recipeCardsFromList(payload: unknown): RecipeCard[] {
+  const recipes = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as { recipes?: unknown }).recipes
+    : payload;
+  if (!Array.isArray(recipes)) return [];
+  return recipes.map(recipeCardSummary).filter((card): card is RecipeCard => card != null);
+}
+
+export function sessionView(row: unknown): BrewSessionView | null {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const record = row as BrewRecord;
+  const id = positiveId(record.id);
+  const brewNumber = typeof record.brewNumber === "number" && Number.isInteger(record.brewNumber) && record.brewNumber > 0
+    ? record.brewNumber
+    : null;
+  if (id == null || brewNumber == null) return null;
+  const brewedAt = typeof record.brewedAt === "string" && record.brewedAt.trim() ? record.brewedAt : null;
+  return {
+    id,
+    brewNumber,
+    brewedAt,
+    createdAt: asString(record.createdAt),
+    status: asString(record.status) || "Planned"
+  };
+}
+
+export function sortSessions(sessions: BrewSessionView[]): BrewSessionView[] {
+  return [...sessions].sort((a, b) => b.brewNumber - a.brewNumber || b.id - a.id);
+}
+
+export function sessionViews(value: unknown): BrewSessionView[] {
+  if (!Array.isArray(value)) return [];
+  return sortSessions(value.map(sessionView).filter((row): row is BrewSessionView => row != null));
+}
+
+export function sessionDateLabel(session: Pick<BrewSessionView, "brewedAt" | "createdAt">): string {
+  return formatBrewDate(session.brewedAt || session.createdAt);
+}
+
+export function sessionFromPayload(payload: unknown): BrewSessionView | null {
+  if (!payload || typeof payload !== "object") return null;
+  return sessionView((payload as { session?: unknown }).session);
+}
+
+export function openSavedRecipe(payload: unknown): BuilderState | null {
+  if (!payload || typeof payload !== "object") return null;
+  const body = payload as { recipe?: unknown; sessions?: unknown };
+  if (!body.recipe || typeof body.recipe !== "object" || Array.isArray(body.recipe)) return null;
+  const recipe = body.recipe as BrewRecord;
+  const id = positiveId(recipe.id);
+  const draft = draftFromParsed(recipe.recipe);
+  if (id == null || !draft) return null;
+  return {
+    phase: "review",
+    rawText: asString(recipe.sourceText),
+    draft,
+    savedId: id,
+    sessions: sessionViews(body.sessions),
+    brewNotice: "",
+    busy: "idle",
+    error: ""
+  };
+}
+
+export function brewSheetFingerprint(state: Pick<BuilderState, "rawText" | "draft" | "savedId">): string {
+  return JSON.stringify({ rawText: state.rawText, draft: state.draft, savedId: state.savedId });
+}
+
+export function leaveNeedsConfirm(state: BuilderState, baseline: string): boolean {
+  if (state.phase === "library" || state.busy !== "idle") return false;
+  if (state.phase === "paste") return state.rawText.trim().length > 0;
+  if (state.savedId == null) return state.draft != null || state.rawText.trim().length > 0;
+  return brewSheetFingerprint(state) !== baseline;
+}
+
+export function brewAgainRequest(recipeId: number): { path: string; method: "POST"; body: { status: "Planned" } } {
+  return {
+    path: `/admin/brewery/recipes/${recipeId}/sessions`,
+    method: "POST",
+    body: { status: "Planned" }
+  };
+}
+
+export function addSession(state: BuilderState, session: BrewSessionView): BuilderState {
+  const sessions = sortSessions([session, ...state.sessions.filter((row) => row.id !== session.id)]);
+  return {
+    ...state,
+    sessions,
+    brewNotice: `Brew #${session.brewNumber} created`,
+    busy: "idle",
+    error: ""
+  };
+}
+
+export function showCreatedSession(state: BuilderState, session: BrewSessionView): BuilderState {
+  return { ...addSession(state, session), phase: "saved" };
+}
+
+export function deleteRecipeConfirm(name: string): string {
+  const label = name.trim() || "this brew recipe";
+  return `Delete ${label}? This also deletes its brew sessions. This cannot be undone.`;
+}
+
+export function failBrew(state: BuilderState): BuilderState {
+  return { ...state, busy: "idle", error: BREW_AGAIN_FAILURE_MESSAGE };
 }

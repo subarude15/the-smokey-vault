@@ -1095,8 +1095,17 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .brew-sheet-source-preview{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:14px 16px}
 .brew-sheet-source-preview summary{cursor:pointer;font-weight:600;min-height:44px;display:flex;align-items:center}
 .brew-sheet-source-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;font:inherit;color:var(--muted)}
+.brew-sheet-list{display:flex;flex-direction:column;gap:12px}
+.brew-sheet-card h2,.brew-sheet-builder .settings-card h2{font:400 28px var(--font-display);font-synthesis:none;margin:0}
+.brew-sheet-card p{margin:0}
+.brew-sheet-meta{color:var(--muted);font-size:14px;line-height:1.45}
+.brew-sheet-sessions{display:flex;flex-direction:column}
+.brew-sheet-session{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;padding:12px 0;border-bottom:1px solid var(--line)}
+.brew-sheet-session strong{font-size:16px}
+.brew-sheet-delete{color:#e9796d}
 @media(max-width:700px){
   .brew-sheet-builder .toolbar{align-items:stretch}
   .brew-sheet-row{grid-template-columns:1fr}
   .brew-sheet-actions .primary,.brew-sheet-actions .secondary{flex:1}
+  .brew-sheet-session{flex-direction:column;align-items:flex-start;gap:2px}
 }
