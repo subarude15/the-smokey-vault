@@ -474,6 +474,13 @@ export function brewSheetFingerprint(state: Pick<BuilderState, "rawText" | "draf
   return JSON.stringify({ rawText: state.rawText, draft: state.draft, savedId: state.savedId });
 }
 
+/** A saved, unmodified recipe can export. Dirty drafts would not match the PDF. */
+export function canDownloadBrewSheetPdf(state: BuilderState, baseline: string): boolean {
+  if (state.savedId == null) return false;
+  if (state.phase !== "review" && state.phase !== "saved" && state.phase !== "preview") return false;
+  return !leaveNeedsConfirm(state, baseline);
+}
+
 export function leaveNeedsConfirm(state: BuilderState, baseline: string): boolean {
   if (state.phase === "library" || state.busy !== "idle") return false;
   if (state.phase === "paste") return state.rawText.trim().length > 0;

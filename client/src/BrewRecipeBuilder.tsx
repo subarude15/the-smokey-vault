@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, CircleAlert, LoaderCircle, Plus, Save } from "lucide-react";
 import { api, ApiError } from "./api";
 import { BrewRecipeEditor } from "./BrewRecipeEditor";
-import { BrewSheetPreview } from "./BrewSheetPreview";
+import { BrewSheetPdfDownload, BrewSheetPreview } from "./BrewSheetPreview";
 import {
   ANALYZE_EMPTY_MESSAGE,
   ANALYZE_TOO_LONG_MESSAGE,
@@ -32,6 +32,7 @@ import {
   finishSave,
   initialLibraryState,
   leaveNeedsConfirm,
+  canDownloadBrewSheetPdf,
   closePreview,
   openPreview,
   openSavedRecipe,
@@ -104,6 +105,8 @@ export function BrewRecipeBuilder() {
   const copy = heading(state.phase, state.draft?.beerName.trim() ?? "", state.brewNotice);
   const analyzing = state.busy === "analyzing";
   const saving = state.busy === "saving";
+  const pdfReady = canDownloadBrewSheetPdf(state, baseline);
+  const beerName = state.draft?.beerName ?? "";
 
   async function refreshLibrary(announce: boolean) {
     if (announce) setLibraryStatus("loading");
@@ -321,6 +324,7 @@ export function BrewRecipeBuilder() {
           <div className="brew-sheet-actions">
             <button type="button" className="secondary" onClick={() => setState(editSaved)}>Edit Recipe</button>
             <button type="button" className="secondary" onClick={() => setState(openPreview)}>Preview Brew Sheet</button>
+            {pdfReady && state.savedId != null && <BrewSheetPdfDownload recipeId={state.savedId} beerName={beerName}/>}
             <button type="button" className="primary" onClick={() => { if (state.savedId != null) void brewAgain(state.savedId); }} disabled={state.busy !== "idle" || state.savedId == null}>
               {state.busy === "brewing" ? <LoaderCircle className="spinner" size={16}/> : null}
               {state.busy === "brewing" ? "Starting brew…" : "Brew Again"}
@@ -332,7 +336,13 @@ export function BrewRecipeBuilder() {
         </section>
       )}
       {state.phase === "preview" && state.draft && (
-        <BrewSheetPreview recipe={state.draft} onBack={() => setState(closePreview)}/>
+        <BrewSheetPreview
+          recipe={state.draft}
+          recipeId={state.savedId}
+          beerName={beerName}
+          canDownload={pdfReady}
+          onBack={() => setState(closePreview)}
+        />
       )}
       {state.savedId != null && (state.phase === "review" || state.phase === "saved") && (
         <BrewHistory sessions={state.sessions} notice={state.phase === "review" ? state.brewNotice : ""}/>
@@ -347,6 +357,7 @@ export function BrewRecipeBuilder() {
             {state.savedId != null && (
               <button type="button" className="secondary" onClick={() => setState(openPreview)}>Preview Brew Sheet</button>
             )}
+            {pdfReady && state.savedId != null && <BrewSheetPdfDownload recipeId={state.savedId} beerName={beerName}/>}
             {state.savedId != null && (
               <button type="button" className="secondary" onClick={() => { if (state.savedId != null) void brewAgain(state.savedId); }} disabled={state.busy !== "idle"}>
                 Brew Again

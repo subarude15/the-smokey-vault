@@ -34,6 +34,7 @@
     "fastify": "latest",
     "lucide-react": "latest",
     "nanoid": "latest",
+    "playwright-core": "^1.63.0",
     "qrcode.react": "^4.2.0",
     "react": "latest",
     "react-dom": "latest",

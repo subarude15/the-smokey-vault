@@ -103,6 +103,14 @@ import {
   brewRecipeParseStatus,
   parseBrewRecipeFromText
 } from "./brew_recipe_parser.js";
+import {
+  BREW_SHEET_PDF_ERROR,
+  brewSheetPdfFilename,
+  claimBrewSheetTicket,
+  isLoopbackAddress,
+  redactBrewSheetSecrets,
+  renderBrewSheetPdf
+} from "./brew_sheet_pdf.js";
 import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
 
 import {
@@ -168,7 +176,18 @@ import { serializeEnrichmentViewForCaller, serializeInventoryItemForCaller, seri
  * trusting that header when directly exposed lets a client invent its own address.
  */
 const trustProxy = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY?.trim() ?? "");
-const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024, trustProxy });
+const app = Fastify({
+  logger: {
+    redact: {
+      paths: ["req.url"],
+      censor(value) {
+        return typeof value === "string" ? redactBrewSheetSecrets(value) : value;
+      }
+    }
+  },
+  bodyLimit: 15 * 1024 * 1024,
+  trustProxy
+});
 const resolvedSecret = resolveSessionSecret(process.env.SESSION_SECRET, getSetting("sessionSecret"));
 if (resolvedSecret.persist) setSetting("sessionSecret", resolvedSecret.secret);
 const secret = resolvedSecret.secret;
@@ -369,6 +388,39 @@ app.post<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id/sessions", 
   const session = createBrewSession(id, parsed.data);
   if (!session) return reply.code(404).send({ error: "Recipe not found" });
   return reply.code(201).send({ session });
+});
+
+app.get<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id/pdf", {
+  schema: { tags: ["Brewery"], summary: "Download a keeper-only brew sheet PDF" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: "Invalid recipe id" });
+  const saved = getBrewRecipe(id);
+  if (!saved) return reply.code(404).send({ error: "Recipe not found" });
+  try {
+    const pdf = await renderBrewSheetPdf({ recipe: saved.recipe, name: saved.name });
+    const filename = brewSheetPdfFilename(saved.name);
+    return reply
+      .type("application/pdf")
+      .header("content-disposition", `attachment; filename="${filename}"`)
+      .header("cache-control", "private, no-store")
+      .send(pdf);
+  } catch (error) {
+    const detail = redactBrewSheetSecrets(error instanceof Error ? error.message : "unknown");
+    request.log.error({ detail }, "Brew sheet PDF failed");
+    return reply.code(503).send({ error: BREW_SHEET_PDF_ERROR });
+  }
+});
+
+app.get<{ Params: { token: string } }>("/api/brew-sheet-render/:token", {
+  logLevel: "silent",
+  schema: { hide: true }
+}, async (request, reply) => {
+  if (!isLoopbackAddress(request.ip)) return reply.code(404).send({ error: "Not found" });
+  const recipe = claimBrewSheetTicket(request.params.token);
+  if (!recipe) return reply.code(404).send({ error: "Not found" });
+  return { recipe };
 });
 
 app.post<{ Body: { text?: unknown } }>("/api/admin/brewery/parse-recipe", {

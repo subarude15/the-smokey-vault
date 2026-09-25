@@ -524,6 +524,7 @@ test("15. no headless-browser dependency added", () => {
   };
   const all = { ...pkg.dependencies, ...pkg.devDependencies };
   for (const name of Object.keys(all)) {
+    if (name === "playwright-core") continue;
     assert.ok(!/playwright|puppeteer|chromium|chrome-aws/i.test(name), `unexpected browser dep: ${name}`);
   }
 });

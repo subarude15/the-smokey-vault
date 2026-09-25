@@ -5,9 +5,10 @@ Last updated: 2026-09-25
 ## Current position
 
 Most recently ready for review:
-- **PR172** — Smokey Barrel brew sheet preview. A saved recipe renders through one print-style HTML document. No PDF download yet.
+- **PR173** — Keeper-only brew sheet PDF. Download PDF prints the PR172 `BrewSheetDocument` with system Chromium (`playwright-core`, `CHROMIUM_PATH`, default `/usr/bin/chromium`). No PDF is stored.
 
 Previously ready, not yet the latest slice:
+- **PR172** — Smokey Barrel brew sheet preview. The same document and CSS feed the PDF print page.
 - **PR171** — Brew recipe library and Brew Again. Saved recipes, open/edit, and numbered `brew_sessions` without copying the recipe.
 
 Previously merged:
@@ -28,7 +29,7 @@ Next planned, after this phase is reviewed:
 
 ## Recent architectural decisions
 
-- Brew sheets (PR168–PR172): `brew_recipes` and `brew_sessions` stay separate from the homebrew `brews` log. Parsing and saving are separate actions. Brew Again inserts a numbered session on the existing recipe. The keeper preview renders `BrewSheetDocument` from the saved recipe; PDF export should reuse that document later. The builder is a Keeper Operations page (`brew_sheets`), not a replacement for Brewery Lab. Guest navigation does not list it.
+- Brew sheets (PR168–PR173): `brew_recipes` and `brew_sessions` stay separate from the homebrew `brews` log. Parsing and saving are separate actions. Brew Again inserts a numbered session on the existing recipe. Preview and PDF both render `BrewSheetDocument`. `GET /api/admin/brewery/recipes/:id/pdf` is keeper-only and generates the file in memory. Chromium reads a loopback-only short-lived render token, not a public recipe URL. Dirty unsaved edits do not offer Download PDF. The print page loads static Outfit files because Chromium’s variable-font PDF export collapses to Thin. The Docker image also installs Liberation Sans for when that fetch fails. The app stays up if Chromium is missing. The builder is a Keeper Operations page (`brew_sheets`), not a replacement for Brewery Lab. Guest navigation does not list it.
 
 - Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--surface-*`, `--elevation-1..4`, `--edge-*`, `--lift-card`, `--press-*`) applied site-wide. Resting Depth-2 must be obvious without hover. Hover motion is fine-pointer-gated (~8–9px); touch uses press scale with sticky-hover cancelled; reduced-motion disables movement but must not flatten static elevation. Homepage underlap is CSS sticky + scrim only (no scroll listeners / parallax). Do not add a second competing token system or a JS animation library for this.
 
