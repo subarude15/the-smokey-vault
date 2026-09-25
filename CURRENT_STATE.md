@@ -1,14 +1,16 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-19
+Last updated: 2026-09-25
 
 ## Current position
 
-Most recently in progress:
-- **Conversational AI Mixologist, phase 3** — a follow-up revises the cocktail on screen. The original request stays put so Try another still means the first ask. Phases 1 and 2 are complete. Persistent chat history is not in this phase.
+Most recently ready for review:
+- **PR169** — AI brew recipe parser. Keeper-only `POST /api/admin/brewery/parse-recipe` turns pasted brewing instructions into a validated `BrewRecipeDocument` through the existing AI failover caller. Parsing does not save a recipe. No Brewery UI or PDF in this slice.
 
-Previously ready for review:
-- **PR160** — Interface Depth & Motion System (strengthened). Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`.
+Previously merged:
+- **PR168** — Keeper-only brew sheet foundation: `brew_recipes`, `brew_sessions`, and the structured recipe document, separate from the homebrew `brews` log.
+- **PR165** — Conversational AI Mixologist phase 3 (refine the cocktail on screen). Persistent chat history is still not built.
+- **PR160** — Interface Depth & Motion System. Shared frontend Depth 0–4 elevation/motion in `client/src/depth-motion.css`.
 
 Previously completed:
 - **PR158** — Inventory filter sentinel reliability. Mapped inventory `<option>` elements now set explicit `value={value}` so “All families” / “All flavors” / etc. keep the internal `"All"` sentinel instead of submitting label text.
@@ -20,6 +22,8 @@ Next planned, after this phase is reviewed:
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
 
 ## Recent architectural decisions
+
+- Brew sheets (PR168–PR169): `brew_recipes` and `brew_sessions` stay separate from the homebrew `brews` log. Parsing and saving are separate actions. `src/brew_recipe_parser.ts` owns the brew prompt and `BrewRecipeDocument` check; the route calls the existing `callLlm` failover path. Guest APIs are unchanged. UI, HTML preview, and PDF export are later slices.
 
 - Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--surface-*`, `--elevation-1..4`, `--edge-*`, `--lift-card`, `--press-*`) applied site-wide. Resting Depth-2 must be obvious without hover. Hover motion is fine-pointer-gated (~8–9px); touch uses press scale with sticky-hover cancelled; reduced-motion disables movement but must not flatten static elevation. Homepage underlap is CSS sticky + scrim only (no scroll listeners / parallax). Do not add a second competing token system or a JS animation library for this.
 

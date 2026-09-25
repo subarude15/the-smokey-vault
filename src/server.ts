@@ -97,6 +97,12 @@ import {
   updateBrewRecipe,
   updateBrewRecipeSchema
 } from "./brew_sheets.js";
+import {
+  BREW_RECIPE_PARSE_MAX_TOKENS,
+  BrewRecipeParseError,
+  brewRecipeParseStatus,
+  parseBrewRecipeFromText
+} from "./brew_recipe_parser.js";
 import { canonicalizeLocalImageUrl, imagesDir, isLocalImagePath, localizeImage, saveImageBuffer } from "./images.js";
 
 import {
@@ -363,6 +369,29 @@ app.post<{ Params: { id: string } }>("/api/admin/brewery/recipes/:id/sessions", 
   const session = createBrewSession(id, parsed.data);
   if (!session) return reply.code(404).send({ error: "Recipe not found" });
   return reply.code(201).send({ session });
+});
+
+app.post<{ Body: { text?: unknown } }>("/api/admin/brewery/parse-recipe", {
+  schema: { tags: ["Brewery"], summary: "Parse pasted brewing instructions into a structured recipe without saving" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const text = typeof request.body?.text === "string" ? request.body.text : "";
+  try {
+    const recipe = await parseBrewRecipeFromText(
+      text,
+      (prompt) => callLlm(prompt, undefined, AI_TIMEOUT_MS, BREW_RECIPE_PARSE_MAX_TOKENS)
+    );
+    return { recipe };
+  } catch (error) {
+    if (error instanceof BrewRecipeParseError) {
+      return reply.code(brewRecipeParseStatus(error)).send({ error: error.message });
+    }
+    app.log.error(
+      { status: error instanceof AiRequestError ? error.statusCode : undefined },
+      "Brew recipe parse failed"
+    );
+    return reply.code(502).send({ error: "The AI could not parse this brewing recipe" });
+  }
 });
 
 const BACKFILL_JOB_TYPES = new Set<EnrichmentBackfillJobType>(["metadata", "tasting_notes", "image"]);
@@ -1349,11 +1378,11 @@ async function aiFetch(provider: string, url: string, init: RequestInit, timeout
   }
 }
 
-async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS): Promise<string> {
+async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS, maxTokens?: number): Promise<string> {
   if (provider === "anthropic") {
     const content: unknown[] = [{ type: "text", text: prompt }];
     if (image) content.unshift({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } });
-    const response = await aiFetch(provider, `${baseUrl}/v1/messages`, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: "user", content }] }) }, timeoutMs);
+    const response = await aiFetch(provider, `${baseUrl}/v1/messages`, { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model, max_tokens: maxTokens ?? 1200, messages: [{ role: "user", content }] }) }, timeoutMs);
     const data = await response.json() as { content?: Array<{ text: string }>; error?: { message?: string } };
     if (!response.ok) {
       app.log.error({ provider, status: response.status, payload: data }, "AI upstream request failed");
@@ -1368,7 +1397,10 @@ async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, pr
     const response = await aiFetch(provider, `${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ contents: [{ role: "user", parts }] })
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        ...(maxTokens ? { generationConfig: { maxOutputTokens: maxTokens } } : {})
+      })
     }, timeoutMs);
     const data = await response.json() as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -1389,7 +1421,11 @@ async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, pr
     headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) },
     body: JSON.stringify(isOllama
       ? { model, stream: false, messages: [{ role: "user", content: prompt, ...(image ? { images: [image] } : {}) }] }
-      : { model, messages: [{ role: "user", content: image ? [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image}` } }] : prompt }] })
+      : {
+          model,
+          ...(maxTokens ? { max_tokens: maxTokens } : {}),
+          messages: [{ role: "user", content: image ? [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image}` } }] : prompt }]
+        })
   }, timeoutMs);
   const data = await response.json() as { message?: { content: string }; choices?: Array<{ message: { content: string } }>; error?: unknown };
   if (!response.ok) {
@@ -1406,7 +1442,7 @@ async function requestAi({ provider, key, baseUrl, model }: AiProviderConfig, pr
  * rate limit, a timeout, or an upstream fault. A rejected key stops the walk, since
  * every provider would reject it the same way.
  */
-async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS) {
+async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS, maxTokens?: number) {
   const primary = resolveAiConfig();
   if (primary.provider !== "ollama" && !primary.key) {
     throw new AiRequestError("Set AI_API_KEY in the server .env to read labels and mix drinks.", 400);
@@ -1415,7 +1451,7 @@ async function callLlm(prompt: string, image?: string, timeoutMs = AI_TIMEOUT_MS
   let lastError: unknown = new AiRequestError("No AI provider is configured.", 400);
   for (const [index, config] of chain.entries()) {
     try {
-      return await requestAi(config, prompt, image, timeoutMs);
+      return await requestAi(config, prompt, image, timeoutMs, maxTokens);
     } catch (error) {
       lastError = error;
       const retryable = error instanceof AiRequestError ? error.retryable : true;
