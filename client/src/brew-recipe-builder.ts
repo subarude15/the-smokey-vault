@@ -21,7 +21,7 @@ export const LOAD_FAILURE_MESSAGE = "Couldn’t load brew recipes.";
 export const BREW_AGAIN_FAILURE_MESSAGE = "Couldn’t start a new brew session.";
 export const DELETE_FAILURE_MESSAGE = "Couldn’t delete this brew recipe.";
 
-export type BuilderPhase = "library" | "paste" | "review" | "saved";
+export type BuilderPhase = "library" | "paste" | "review" | "saved" | "preview";
 export type BrewRecord = Record<string, unknown>;
 export type BrewRowList = "fermentables" | "kettleAdditions" | "whirlpoolAdditions" | "dryHopStages";
 export type BrewStringList = "warnings" | "checklist";
@@ -98,6 +98,8 @@ export type BuilderState = {
   savedId: number | null;
   sessions: BrewSessionView[];
   brewNotice: string;
+  /** Where Preview returns. Null outside the preview phase. */
+  previewReturn: "review" | "saved" | null;
   busy: "idle" | "analyzing" | "saving" | "loading" | "brewing" | "deleting";
   error: string;
 };
@@ -116,6 +118,7 @@ export function emptyBuilderState(): BuilderState {
     savedId: null,
     sessions: [],
     brewNotice: "",
+    previewReturn: null,
     busy: "idle",
     error: ""
   };
@@ -461,6 +464,7 @@ export function openSavedRecipe(payload: unknown): BuilderState | null {
     savedId: id,
     sessions: sessionViews(body.sessions),
     brewNotice: "",
+    previewReturn: null,
     busy: "idle",
     error: ""
   };
@@ -498,6 +502,18 @@ export function addSession(state: BuilderState, session: BrewSessionView): Build
 
 export function showCreatedSession(state: BuilderState, session: BrewSessionView): BuilderState {
   return { ...addSession(state, session), phase: "saved" };
+}
+
+/** Preview is a view of the current saved draft. It does not copy the recipe. */
+export function openPreview(state: BuilderState): BuilderState {
+  if (!state.draft || state.savedId == null) return state;
+  if (state.phase !== "review" && state.phase !== "saved") return state;
+  return { ...state, phase: "preview", previewReturn: state.phase, error: "" };
+}
+
+export function closePreview(state: BuilderState): BuilderState {
+  if (state.phase !== "preview") return state;
+  return { ...state, phase: state.previewReturn === "review" ? "review" : "saved", previewReturn: null };
 }
 
 export function deleteRecipeConfirm(name: string): string {
