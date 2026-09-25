@@ -1,3 +1,5 @@
+import { BREW_SHEET_PDF_ERROR, brewSheetPdfFilename, pdfFilenameFromDisposition } from "../../src/brew_sheet_pdf_shared";
+
 export type Item = Record<string, string | number | null> & { id: number };
 
 const TOKEN_KEY = "smokey-token";
@@ -170,6 +172,28 @@ export async function downloadExport(format: "db" | "json" | "csv", table?: stri
   link.download = format === "db" ? "smokeyvault.db" : `smokeyvault.${format}`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadBrewSheetPdf(recipeId: number, beerName: string) {
+  const sentAuth = Boolean(adminToken);
+  const response = await fetch(`/api/admin/brewery/recipes/${recipeId}/pdf`, {
+    headers: adminToken ? { authorization: `Bearer ${adminToken}` } : {}
+  });
+  if (!response.ok) {
+    if (response.status === 401) rejectKeeperSessionIfAuthenticated(sentAuth);
+    throw new Error(BREW_SHEET_PDF_ERROR);
+  }
+  const blob = await response.blob();
+  const fallback = brewSheetPdfFilename(beerName);
+  const filename = pdfFilenameFromDisposition(response.headers.get("content-disposition"), fallback);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export const tokenExists = () => Boolean(adminToken);
