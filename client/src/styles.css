@@ -1082,6 +1082,7 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 
 /* Keeper brew sheet builder. Uses the existing settings cards and form grid. */
 .brew-sheet-builder{display:flex;flex-direction:column;gap:16px;max-width:980px}
+.brew-sheet-builder.is-preview{max-width:none}
 .brew-sheet-builder .toolbar{align-items:flex-end}
 .brew-sheet-builder .page-title{margin:0;flex:1;min-width:min(100%,280px)}
 .brew-sheet-actions{display:flex;flex-wrap:wrap;gap:10px}

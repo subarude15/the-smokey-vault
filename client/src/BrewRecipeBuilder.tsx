@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, CircleAlert, LoaderCircle, Plus, Save } from "lucide-react";
 import { api, ApiError } from "./api";
 import { BrewRecipeEditor } from "./BrewRecipeEditor";
+import { BrewSheetPreview } from "./BrewSheetPreview";
 import {
   ANALYZE_EMPTY_MESSAGE,
   ANALYZE_TOO_LONG_MESSAGE,
@@ -31,6 +32,8 @@ import {
   finishSave,
   initialLibraryState,
   leaveNeedsConfirm,
+  closePreview,
+  openPreview,
   openSavedRecipe,
   publicAnalyzeError,
   recipeCardLine,
@@ -63,6 +66,13 @@ function heading(phase: BuilderPhase, beerName: string, brewNotice: string): { t
       return {
         title: "Review the recipe.",
         subtitle: "Edit anything that looks off. Nothing is stored until you save."
+      };
+    case "preview":
+      return {
+        title: "Brew sheet preview.",
+        subtitle: beerName
+          ? `Print-style sheet for ${beerName}. Nothing is exported from this screen.`
+          : "Print-style sheet for this saved recipe. Nothing is exported from this screen."
       };
     case "saved":
       if (brewNotice) {
@@ -241,13 +251,13 @@ export function BrewRecipeBuilder() {
     : state.error;
 
   return (
-    <div className="brew-sheet-builder">
-      {state.phase !== "library" && (
+    <div className={state.phase === "preview" ? "brew-sheet-builder is-preview" : "brew-sheet-builder"}>
+      {state.phase !== "library" && state.phase !== "preview" && (
         <button type="button" className="secondary back-button" onClick={backToLibrary} disabled={state.busy !== "idle"}>
           <ArrowLeft size={16}/> Back to Recipes
         </button>
       )}
-      <div className="toolbar">
+      {state.phase !== "preview" && <div className="toolbar">
         <div className="page-title">
           <span className="eyebrow">Smokey Barrel Brewery</span>
           <h1>{copy.title}</h1>
@@ -263,7 +273,7 @@ export function BrewRecipeBuilder() {
             <Plus size={16}/> New Brew Recipe
           </button>
         )}
-      </div>
+      </div>}
       {alert && (
         <div className="ai-error" role="alert">
           <CircleAlert size={18}/>
@@ -310,6 +320,7 @@ export function BrewRecipeBuilder() {
         <section className="settings-card">
           <div className="brew-sheet-actions">
             <button type="button" className="secondary" onClick={() => setState(editSaved)}>Edit Recipe</button>
+            <button type="button" className="secondary" onClick={() => setState(openPreview)}>Preview Brew Sheet</button>
             <button type="button" className="primary" onClick={() => { if (state.savedId != null) void brewAgain(state.savedId); }} disabled={state.busy !== "idle" || state.savedId == null}>
               {state.busy === "brewing" ? <LoaderCircle className="spinner" size={16}/> : null}
               {state.busy === "brewing" ? "Starting brew…" : "Brew Again"}
@@ -320,7 +331,10 @@ export function BrewRecipeBuilder() {
           </div>
         </section>
       )}
-      {state.savedId != null && state.phase !== "library" && state.phase !== "paste" && (
+      {state.phase === "preview" && state.draft && (
+        <BrewSheetPreview recipe={state.draft} onBack={() => setState(closePreview)}/>
+      )}
+      {state.savedId != null && (state.phase === "review" || state.phase === "saved") && (
         <BrewHistory sessions={state.sessions} notice={state.phase === "review" ? state.brewNotice : ""}/>
       )}
       {state.phase === "review" && state.draft && (
@@ -330,6 +344,9 @@ export function BrewRecipeBuilder() {
               {saving ? <LoaderCircle className="spinner" size={16}/> : <Save size={16}/>}
               {saving ? "Saving…" : state.savedId ? "Save changes" : "Save Recipe"}
             </button>
+            {state.savedId != null && (
+              <button type="button" className="secondary" onClick={() => setState(openPreview)}>Preview Brew Sheet</button>
+            )}
             {state.savedId != null && (
               <button type="button" className="secondary" onClick={() => { if (state.savedId != null) void brewAgain(state.savedId); }} disabled={state.busy !== "idle"}>
                 Brew Again

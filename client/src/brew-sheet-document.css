@@ -1,0 +1,79 @@
+/* Printable Smokey Barrel brew sheet. Colors stay on the paper, not the app theme. */
+.brew-sheet-preview{display:flex;flex-direction:column;gap:14px;min-width:0}
+.brew-sheet-preview-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.brew-sheet-fit{container-type:inline-size;width:min(100%,8.5in);margin-inline:auto}
+.brew-sheet-page{
+  width:8.5in;
+  background:#fff;
+  box-shadow:0 16px 40px rgb(0 0 0 / 28%);
+  zoom:min(1, calc(100cqi / 8.5in));
+}
+.brew-doc{
+  box-sizing:border-box;
+  padding:0.42in 0.46in 0.5in;
+  color:#1b2836;
+  font:11px/1.35 "Outfit",system-ui,sans-serif;
+  background:#fff;
+}
+.brew-doc *{box-sizing:border-box}
+.brew-doc h1,.brew-doc h2,.brew-doc h3,.brew-doc p{margin:0}
+.brew-doc-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.brew-doc-brewery{margin:0;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#16324a}
+.brew-doc h1{margin-top:2px;font:700 22px/1.15 "Outfit",system-ui,sans-serif;color:#1b2836;overflow-wrap:anywhere}
+.brew-doc-meta{margin-top:3px;color:#4d5b68;font-size:11px}
+.brew-doc-mark{margin:0;font:800 13px/1 "Outfit",system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#0f6f8a;white-space:nowrap}
+.brew-doc-rule{height:3px;margin:8px 0 10px;border:0;background:#1a7fa3}
+.brew-doc-warnings{margin:0 0 8px;padding:6px 8px;border:1px solid #e4b2a6;background:#fff1ec;color:#7a2e1f}
+.brew-doc-warnings strong{display:block;margin-bottom:2px;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.brew-doc-warnings ul{margin:0;padding-left:16px}
+.brew-doc-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px 10px;margin-bottom:8px;padding:8px 10px;background:#d9eef3;border-left:4px solid #0f766e}
+.brew-doc-stats span,.brew-doc-water dt,.brew-doc-pairs dt{display:block;color:#3e5564;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.brew-doc-stats strong{display:block;font-size:13px;font-weight:700;overflow-wrap:anywhere}
+.brew-doc-stats em{display:block;margin-top:2px;color:#3e5564;font-style:normal;font-size:10px}
+.brew-doc-water{margin-bottom:8px;padding:7px 10px;background:#e8f5e6;border-left:4px solid #2f7d32}
+.brew-doc-water h2{margin:0 0 4px;color:#1d5c28;font:700 11px/1.2 "Outfit",system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase}
+.brew-doc-water dl,.brew-doc-pairs{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin:0}
+.brew-doc-water div,.brew-doc-pairs div{min-width:0}
+.brew-doc dd{margin:0;overflow-wrap:anywhere}
+.brew-doc-split{display:grid;grid-template-columns:1.15fr .85fr;gap:12px;align-items:start}
+.brew-doc-stack,.brew-doc-section{min-width:0}
+.brew-doc-section{margin-top:8px}
+.brew-doc-section h2{display:flex;align-items:center;gap:6px;margin:0 0 4px;padding:3px 8px;background:#d7e7f2;color:#16324a;font:700 11px/1.2 "Outfit",system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase}
+.brew-doc-section h2 span{display:grid;place-items:center;width:15px;height:15px;background:#0f6f8a;color:#fff;font-size:10px}
+.brew-doc-section h3{margin:6px 0 2px;font-size:11px;font-weight:700;color:#16324a}
+.brew-doc-yeast{margin-bottom:3px;font-weight:700}
+.brew-doc table{width:100%;border-collapse:collapse;font-size:10.5px}
+.brew-doc caption{caption-side:top;padding:4px 0 2px;color:#16324a;font-size:10px;font-weight:700;letter-spacing:.04em;text-align:left;text-transform:uppercase}
+.brew-doc th{padding:3px 5px;background:#243140;color:#fff;font-weight:600;text-align:left}
+.brew-doc td{padding:3px 5px;border-bottom:1px solid #d5dde3;vertical-align:top;overflow-wrap:anywhere}
+.brew-doc-checks,.brew-doc-measures{list-style:none;margin:4px 0 0;padding:0}
+.brew-doc-checks{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px}
+.brew-doc-checks li{display:flex;gap:6px;align-items:flex-start}
+.brew-doc-box{width:9px;height:9px;margin-top:2px;border:1px solid #243140;flex:none}
+.brew-doc-measures{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.brew-doc-measures li{display:flex;align-items:flex-end;gap:6px;min-width:0}
+.brew-doc-line{flex:1;border-bottom:1px solid #7d8b96;min-height:.9em}
+.brew-doc-notes p{margin-bottom:6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.brew-doc-pad{min-height:78px;margin-top:4px;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 14px,#d5dde3 15px)}
+.brew-doc tr,.brew-doc-checks li,.brew-doc-measures li,.brew-doc-stage,.brew-doc-water div{break-inside:avoid}
+.brew-doc h2,.brew-doc h3{break-after:avoid}
+.brew-sheet-page{page:brew-sheet}
+@page brew-sheet{size:Letter;margin:0.45in}
+@media print{
+  body:has(.brew-sheet-page){background:#fff !important}
+  body:has(.brew-sheet-page) .sidebar,
+  body:has(.brew-sheet-page) .topbar,
+  body:has(.brew-sheet-page) .mobile-bottom-nav,
+  body:has(.brew-sheet-page) .more-sheet,
+  body:has(.brew-sheet-page) .more-sheet-overlay,
+  body:has(.brew-sheet-page) .brew-sheet-preview-bar,
+  body:has(.brew-sheet-page) .toolbar,
+  body:has(.brew-sheet-page) .guest-footer,
+  body:has(.brew-sheet-page) .backup-banner,
+  body:has(.brew-sheet-page) .nav-hint-banner{display:none !important}
+  body:has(.brew-sheet-page) .app-shell{display:block !important;background:#fff !important}
+  body:has(.brew-sheet-page) main,
+  body:has(.brew-sheet-page) .brew-sheet-builder{max-width:none !important;padding:0 !important;background:#fff !important}
+  body:has(.brew-sheet-page) .brew-sheet-page{zoom:1 !important;width:auto;box-shadow:none}
+  body:has(.brew-sheet-page) .brew-doc{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
