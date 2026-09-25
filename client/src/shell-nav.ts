@@ -4,6 +4,7 @@
  * without mounting App.
  */
 import type { EnabledTabs, TabKey } from "./catalog";
+import { BREW_SHEET_NAV_LABEL, BREW_SHEET_PAGE_ID } from "./brew-sheet-page";
 
 /** Operational pages Guest Mode must never land on or list. */
 export const GUEST_HIDDEN_PAGES = new Set([
@@ -12,7 +13,8 @@ export const GUEST_HIDDEN_PAGES = new Set([
   "restock",
   "settings",
   "messages",
-  "brews"
+  "brews",
+  BREW_SHEET_PAGE_ID
 ]);
 
 /**
@@ -25,7 +27,8 @@ export const KEEPER_PAGES = new Set([
   "import",
   "restock",
   "settings",
-  "messages"
+  "messages",
+  BREW_SHEET_PAGE_ID
 ]);
 
 /** Which Guest tab switch controls each page. */
@@ -75,7 +78,8 @@ export const NAV_LABELS: Record<string, string> = {
   import: "Import",
   messages: "Inbox",
   restock: "Restock",
-  settings: "Settings"
+  settings: "Settings",
+  [BREW_SHEET_PAGE_ID]: BREW_SHEET_NAV_LABEL
 };
 
 /**
@@ -236,6 +240,7 @@ export function includeModuleInCollectionNav(moduleId: string, admin: boolean): 
 /** Stable Keeper Operations order for rail + More. */
 export const KEEPER_OPERATION_IDS = [
   "brews",
+  BREW_SHEET_PAGE_ID,
   "scan",
   "restock",
   "import",

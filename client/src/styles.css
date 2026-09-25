@@ -1079,3 +1079,24 @@ html[data-theme="light"] .kiosk-lock{color:#fff}
 .generated-actions{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
 .mixologist-refine{display:grid;gap:8px;margin-top:14px}
 .mixologist-refine textarea{min-height:64px;width:100%}
+
+/* Keeper brew sheet builder. Uses the existing settings cards and form grid. */
+.brew-sheet-builder{display:flex;flex-direction:column;gap:16px;max-width:980px}
+.brew-sheet-builder .toolbar{align-items:flex-end}
+.brew-sheet-builder .page-title{margin:0;flex:1;min-width:min(100%,280px)}
+.brew-sheet-actions{display:flex;flex-wrap:wrap;gap:10px}
+.brew-sheet-actions .secondary:disabled{opacity:.5;cursor:not-allowed}
+.brew-sheet-source{width:100%;min-height:280px;resize:vertical;line-height:1.45}
+.brew-sheet-editor{border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:16px}
+.brew-sheet-section h2{font:400 26px var(--font-display);font-synthesis:none;margin:0}
+.brew-sheet-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end;padding-bottom:12px;border-bottom:1px solid var(--line);min-width:0}
+.brew-sheet-row label{min-width:0}
+.brew-sheet-row .brew-sheet-remove{justify-self:start}
+.brew-sheet-source-preview{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:14px 16px}
+.brew-sheet-source-preview summary{cursor:pointer;font-weight:600;min-height:44px;display:flex;align-items:center}
+.brew-sheet-source-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;font:inherit;color:var(--muted)}
+@media(max-width:700px){
+  .brew-sheet-builder .toolbar{align-items:stretch}
+  .brew-sheet-row{grid-template-columns:1fr}
+  .brew-sheet-actions .primary,.brew-sheet-actions .secondary{flex:1}
+}
