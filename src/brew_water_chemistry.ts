@@ -6,6 +6,9 @@
  * Preview and PDF both read the result through brewSheetModel — no second path.
  *
  * Source water for this PR: 100% RO / distilled (starting ions treated as zero).
+ *
+ * Mash-pH acid dosing: structured API is ready for a future established model.
+ * This PR does not emit a numeric lactic mL dose from a homemade MCU equation.
  */
 
 export type MineralIon =
@@ -33,6 +36,11 @@ export type BrewingSaltProfile = {
   form: string;
   /** ppm contributed to treated water by 1.0 g of salt per US gallon. */
   contributionsPerGramPerGallon: IonContributions;
+  /**
+   * When false, the salt stays in metadata only and is never auto-selected by
+   * the deterministic solver (e.g. dry chalk dissolution is not modeled).
+   */
+  autoSelectable: boolean;
 };
 
 /**
@@ -45,6 +53,7 @@ export const BREWMASTER_CALCIUM_CHLORIDE: BrewingSaltProfile = {
   id: "calcium_chloride_brewmaster",
   label: "Calcium Chloride",
   form: "Brewmaster Calcium Chloride (published product brewing contribution)",
+  autoSelectable: true,
   contributionsPerGramPerGallon: {
     calciumPpm: 72,
     chloridePpm: 127.5
@@ -61,6 +70,7 @@ export const BREWING_SALT_PROFILES: BrewingSaltProfile[] = [
     id: "gypsum",
     label: "Gypsum",
     form: "CaSO4·2H2O (gypsum / calcium sulfate dihydrate)",
+    autoSelectable: true,
     contributionsPerGramPerGallon: {
       calciumPpm: 61.5,
       sulfatePpm: 147.4
@@ -70,6 +80,7 @@ export const BREWING_SALT_PROFILES: BrewingSaltProfile[] = [
     id: "epsom",
     label: "Epsom Salt",
     form: "MgSO4·7H2O (Epsom salt / magnesium sulfate heptahydrate)",
+    autoSelectable: true,
     contributionsPerGramPerGallon: {
       magnesiumPpm: 26.1,
       sulfatePpm: 102.9
@@ -79,6 +90,7 @@ export const BREWING_SALT_PROFILES: BrewingSaltProfile[] = [
     id: "sodium_chloride",
     label: "Sodium Chloride",
     form: "NaCl (standard food-grade non-iodized salt)",
+    autoSelectable: true,
     contributionsPerGramPerGallon: {
       sodiumPpm: 103.9,
       chloridePpm: 160.3
@@ -88,6 +100,7 @@ export const BREWING_SALT_PROFILES: BrewingSaltProfile[] = [
     id: "baking_soda",
     label: "Baking Soda",
     form: "NaHCO3 (sodium bicarbonate)",
+    autoSelectable: true,
     contributionsPerGramPerGallon: {
       sodiumPpm: 72.3,
       bicarbonatePpm: 191.8
@@ -96,7 +109,8 @@ export const BREWING_SALT_PROFILES: BrewingSaltProfile[] = [
   {
     id: "chalk",
     label: "Chalk",
-    form: "CaCO3 (calcium carbonate); dry addition assumes full contribution in the model",
+    form: "CaCO3 (calcium carbonate); dry chalk dissolution is not modeled and is never auto-selected",
+    autoSelectable: false,
     contributionsPerGramPerGallon: {
       calciumPpm: 105.8,
       bicarbonatePpm: 158.4
@@ -108,6 +122,15 @@ const SALT_BY_ID = Object.fromEntries(BREWING_SALT_PROFILES.map((salt) => [salt.
   BrewingSaltId,
   BrewingSaltProfile
 >;
+
+const ALL_IONS: MineralIon[] = [
+  "calciumPpm",
+  "magnesiumPpm",
+  "sodiumPpm",
+  "chloridePpm",
+  "sulfatePpm",
+  "bicarbonatePpm"
+];
 
 const ION_LABELS: Record<MineralIon, string> = {
   calciumPpm: "Calcium",
@@ -132,6 +155,12 @@ export const MINERAL_MATCH_TOLERANCE_PPM = 1;
 
 /** Default guidance when recipe has no targetMashPh. Room-temp mash-pH measurement range. */
 export const DEFAULT_MASH_PH = { low: 5.2, high: 5.4, target: 5.3 } as const;
+
+/** Safe lactic line until an established mash-pH acid model is plugged in. */
+export const LACTIC_DOSE_DEFERRED_LABEL = "Determine starting dose from measured mash pH";
+
+export const VOLUME_INSUFFICIENT_MESSAGE =
+  "Strike-only or sparge-only water is not enough to calculate salt additions. Provide both strike and sparge volumes, or an explicit total water volume.";
 
 export type ParsedPpmTarget = {
   raw: string;
@@ -169,12 +198,23 @@ export type WaterMineralResult = {
   residualsPpm: Partial<Record<MineralIon, number>>;
 };
 
+/**
+ * Mash-pH guidance. Dose fields stay null until a defensible, documented model
+ * is selected and wired in — do not invent mL from a homemade MCU equation.
+ */
 export type MashPhGuidance = {
   target: { low: number; high: number; target: number; label: string; fromRecipe: boolean };
+  /** Configured mash acid for this brewery. */
+  acid: "88% lactic";
+  /** Reserved for a future established untreated-mash-pH prediction. */
   predictedUntreatedMashPh: number | null;
+  /** Reserved for a future model that decides whether acid is needed. */
   acidNeeded: boolean | null;
+  /** Reserved for a future numeric 88% lactic starting dose (mL). */
   lacticAcid88Ml: number | null;
   confidence: "estimated" | "unavailable";
+  /** Keeper / sheet-facing dose line. */
+  lacticLabel: string;
   note: string;
   measuredWriteIn: true;
 };
@@ -183,6 +223,10 @@ export type WaterChemistryResult = {
   minerals: WaterMineralResult;
   mashPh: MashPhGuidance;
 };
+
+export type SaltSelection =
+  | { ok: true; salts: BrewingSaltId[] }
+  | { ok: false; reason: string };
 
 /** Parse "200–225 ppm", "200-225 ppm", "200 to 225 ppm", "150 ppm", "~150 ppm". */
 export function parsePpmTarget(raw: unknown): ParsedPpmTarget {
@@ -231,6 +275,12 @@ export function parseGallons(raw: unknown): number | null {
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+/**
+ * Treatment volume rules:
+ * A) strike + sparge both known → total = sum, mash/sparge split allowed
+ * B) explicit totalWater only (incomplete strike/sparge) → total grams only, no split
+ * Lone strike or lone sparge without totalWater → insufficient (totalGal null)
+ */
 export function parseWaterVolumes(water: Record<string, unknown>): WaterVolumes {
   const strikeGal = parseGallons(water.strikeWater);
   const spargeGal = parseGallons(water.spargeWater);
@@ -240,11 +290,7 @@ export function parseWaterVolumes(water: Record<string, unknown>): WaterVolumes 
     ? strikeGal + spargeGal
     : explicitTotal != null
       ? explicitTotal
-      : strikeGal != null
-        ? strikeGal
-        : spargeGal != null
-          ? spargeGal
-          : null;
+      : null;
   return { strikeGal, spargeGal, totalGal, canSplit };
 }
 
@@ -256,6 +302,14 @@ export function formatGrams(grams: number): string {
 export function formatPpm(ppm: number, digits = 1): string {
   const factor = 10 ** digits;
   return `${(Math.round(ppm * factor) / factor).toFixed(digits)} ppm`;
+}
+
+export function ionLabel(ion: MineralIon): string {
+  return ION_LABELS[ion];
+}
+
+export function ionShort(ion: MineralIon): string {
+  return ION_SHORT[ion];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -288,32 +342,65 @@ function parsePhRange(raw: unknown): { low: number; high: number; target: number
 }
 
 /**
- * Choose the smallest sensible salt set for the supplied targets.
- * Does not enable baking soda / chalk / Epsom / NaCl unless the targets need them.
+ * Choose salts only when the recipe already constrains the desired profile.
+ * The calculator must not invent a Cl/SO4 or Na/HCO3 balance the recipe omitted.
+ * Chalk is never auto-selected (dry dissolution is not modeled).
  */
-export function selectSaltsForTargets(targets: Partial<Record<MineralIon, number>>): BrewingSaltId[] {
+export function selectSaltsForTargets(targets: Partial<Record<MineralIon, number>>): SaltSelection {
   const has = (ion: MineralIon) => targets[ion] != null && Number.isFinite(targets[ion]);
+  const hasCa = has("calciumPpm");
+  const hasMg = has("magnesiumPpm");
+  const hasNa = has("sodiumPpm");
+  const hasCl = has("chloridePpm");
+  const hasSo4 = has("sulfatePpm");
+  const hasHco3 = has("bicarbonatePpm");
+
+  if (hasCa && !hasCl && !hasSo4) {
+    return {
+      ok: false,
+      reason: "Calcium target requires a chloride and/or sulfate target before salt additions can be calculated."
+    };
+  }
+  if (hasNa && !hasCl && !hasHco3) {
+    return {
+      ok: false,
+      reason: "Sodium target requires chloride or bicarbonate/alkalinity guidance before selecting a sodium salt."
+    };
+  }
+  if (hasCl && !hasCa && !hasNa) {
+    return {
+      ok: false,
+      reason: "Chloride target requires a calcium and/or sodium target before salt additions can be calculated."
+    };
+  }
+  if (hasSo4 && !hasCa && !hasMg) {
+    return {
+      ok: false,
+      reason: "Sulfate target requires a calcium and/or magnesium target before salt additions can be calculated."
+    };
+  }
+  if (hasHco3 && !hasNa) {
+    return {
+      ok: false,
+      reason: "Bicarbonate target requires sodium guidance before selecting baking soda. Dry chalk dissolution is not modeled."
+    };
+  }
+
   const salts: BrewingSaltId[] = [];
+  if (hasCa && hasCl) salts.push("calcium_chloride_brewmaster");
+  if (hasCa && hasSo4) salts.push("gypsum");
+  if (hasMg) salts.push("epsom");
+  if (hasNa && hasCl) salts.push("sodium_chloride");
+  if (hasNa && hasHco3) salts.push("baking_soda");
 
-  if (has("calciumPpm") || has("chloridePpm")) salts.push("calcium_chloride_brewmaster");
-  if (has("calciumPpm") || has("sulfatePpm")) salts.push("gypsum");
-  if (has("magnesiumPpm")) salts.push("epsom");
-
-  const needBicarb = has("bicarbonatePpm");
-  if (needBicarb) {
-    salts.push("baking_soda");
-    if (has("calciumPpm")) salts.push("chalk");
+  const selectable = salts.filter((id) => SALT_BY_ID[id].autoSelectable);
+  if (!selectable.length) {
+    return {
+      ok: false,
+      reason: "Mineral targets are under-specified for a deterministic salt selection."
+    };
   }
-
-  if (has("sodiumPpm") && !needBicarb) salts.push("sodium_chloride");
-  if (has("sodiumPpm") && needBicarb && !salts.includes("baking_soda")) salts.push("baking_soda");
-
-  // Extra chloride without calcium: NaCl can supply Cl without more Ca from CaCl2 alone.
-  if (has("chloridePpm") && !has("calciumPpm") && !salts.includes("sodium_chloride")) {
-    salts.push("sodium_chloride");
-  }
-
-  return [...new Set(salts)];
+  return { ok: true, salts: [...new Set(selectable)] };
 }
 
 /**
@@ -346,19 +433,19 @@ export function solveNonNegativeLeastSquares(A: number[][], b: number[], iterati
   return x;
 }
 
+/** Rebuild achieved ppm for every ion the selected salts can contribute. */
 function achievedFromGramsPerGallon(
   gramsPerGallon: number[],
-  saltIds: BrewingSaltId[],
-  ions: MineralIon[]
+  saltIds: BrewingSaltId[]
 ): Partial<Record<MineralIon, number>> {
   const achieved: Partial<Record<MineralIon, number>> = {};
-  for (const ion of ions) {
+  for (const ion of ALL_IONS) {
     let sum = 0;
     saltIds.forEach((id, index) => {
       const contrib = SALT_BY_ID[id].contributionsPerGramPerGallon[ion] ?? 0;
       sum += contrib * gramsPerGallon[index];
     });
-    achieved[ion] = sum;
+    if (sum > 1e-12) achieved[ion] = sum;
   }
   return achieved;
 }
@@ -384,16 +471,8 @@ function emptyMineralResult(
 
 export function calculateMineralProfile(water: Record<string, unknown>): WaterMineralResult {
   const volumes = parseWaterVolumes(water);
-  const ionKeys: MineralIon[] = [
-    "calciumPpm",
-    "magnesiumPpm",
-    "sodiumPpm",
-    "chloridePpm",
-    "sulfatePpm",
-    "bicarbonatePpm"
-  ];
 
-  const targetDisplay = ionKeys.flatMap((ion) => {
+  const targetDisplay = ALL_IONS.flatMap((ion) => {
     const rawValue = water[ion];
     if (rawValue == null || rawValue === "") return [];
     const parsed = parsePpmTarget(rawValue);
@@ -426,30 +505,22 @@ export function calculateMineralProfile(water: Record<string, unknown>): WaterMi
   }
 
   if (volumes.totalGal == null || volumes.totalGal <= 0) {
-    const message = volumes.canSplit
-      ? "Add strike and sparge water volumes to calculate salt additions."
-      : "Add strike and sparge water volumes to calculate salt additions.";
-    return emptyMineralResult(volumes, targetDisplay, targets, message);
+    return emptyMineralResult(volumes, targetDisplay, targets, VOLUME_INSUFFICIENT_MESSAGE);
   }
 
-  // Need a known treatment volume. Prefer strike+sparge; allow total-only for total grams (no split).
-  if (!volumes.canSplit && volumes.totalGal == null) {
-    return emptyMineralResult(
-      volumes,
-      targetDisplay,
-      targets,
-      "Add strike and sparge water volumes to calculate salt additions."
-    );
+  const selection = selectSaltsForTargets(targets);
+  if (!selection.ok) {
+    return emptyMineralResult(volumes, targetDisplay, targets, selection.reason);
   }
 
-  const saltIds = selectSaltsForTargets(targets);
+  const saltIds = selection.salts;
   const ions = parseableTargets;
   const A = ions.map((ion) =>
     saltIds.map((id) => SALT_BY_ID[id].contributionsPerGramPerGallon[ion] ?? 0)
   );
   const b = ions.map((ion) => targets[ion] ?? 0);
   const gramsPerGallon = solveNonNegativeLeastSquares(A, b);
-  const achieved = achievedFromGramsPerGallon(gramsPerGallon, saltIds, ions);
+  const achieved = achievedFromGramsPerGallon(gramsPerGallon, saltIds);
 
   const residualsPpm: Partial<Record<MineralIon, number>> = {};
   let matched = true;
@@ -477,17 +548,12 @@ export function calculateMineralProfile(water: Record<string, unknown>): WaterMi
   });
 
   if (!salts.length) {
-    return {
-      source: "RO / distilled",
+    return emptyMineralResult(
       volumes,
-      targets,
       targetDisplay,
-      achieved,
-      salts: [],
-      status: "incomplete",
-      statusMessage: "No mineral targets were supplied by this recipe.",
-      residualsPpm
-    };
+      targets,
+      "No salt additions were produced for the supplied mineral targets."
+    );
   }
 
   return {
@@ -505,64 +571,18 @@ export function calculateMineralProfile(water: Record<string, unknown>): WaterMi
   };
 }
 
-type GrainRow = {
-  pounds: number;
-  lovibond: number | null;
-  isMaltLike: boolean;
-};
-
-function parsePounds(raw: unknown): number | null {
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return raw;
-  if (typeof raw !== "string") return null;
-  const text = raw.trim().toLowerCase().replace(/~/g, "").replace(/\s+/g, " ");
-  const lb = text.match(/^(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)\b/);
-  if (lb) return Number(lb[1]);
-  const oz = text.match(/^(\d+(?:\.\d+)?)\s*(?:oz|ounce|ounces)\b/);
-  if (oz) return Number(oz[1]) / 16;
-  const kg = text.match(/^(\d+(?:\.\d+)?)\s*(?:kg|kilogram|kilograms)\b/);
-  if (kg) return Number(kg[1]) * 2.20462262;
-  const g = text.match(/^(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b/);
-  if (g) return Number(g[1]) / 453.59237;
-  return null;
-}
-
-function parseLovibond(row: Record<string, unknown>): number | null {
-  for (const key of ["lovibond", "color", "colorLovibond", "l"]) {
-    const value = row[key];
-    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
-    if (typeof value === "string") {
-      const match = value.trim().replace(/°?\s*l(ovibond)?/i, "").match(/^(\d+(?:\.\d+)?)/);
-      if (match) {
-        const n = Number(match[1]);
-        if (Number.isFinite(n) && n >= 0) return n;
-      }
-    }
-  }
-  return null;
-}
-
-function isNonMaltAdjunct(name: string): boolean {
-  return /\b(rice\s*hulls?|maltodextrin|sugar|dextrose|lactose|honey|cand[yi]|table\s*sugar|corn\s*sugar)\b/i.test(name);
-}
-
 /**
- * Mash-pH / 88% lactic starting-dose model (estimate, not exact).
+ * Mash-pH / 88% lactic guidance.
  *
- * Assumptions:
- * - Source water alkalinity ≈ 0 (RO / distilled).
- * - Base untreated mash pH for a pale grist on RO water ≈ 5.75.
- * - Color-based acidity via MCU = Σ(°L × lb) / strike gallons (only rows with color).
- * - predictedUntreatedMashPh = 5.75 - 0.022 × MCU / (1 + 0.035 × MCU)
- *   (saturating so very dark mashes stay in a plausible band).
- * - Buffering ≈ 45 mEq per kg grain per pH unit (conservative mid-range literature value).
- * - 88% w/w lactic acid ≈ 11.8 mEq/mL.
- * - Dose applies to mash only — no sparge acidification in this PR.
- * - Requires color/lovibond on enough of the malt-like grist mass (≥70%).
+ * Preserves recipe targetMashPh (else defaults to 5.2–5.4) and the measured
+ * write-in line. Numeric lactic mL stays null until an established model is
+ * selected — do not invent a dose from a homemade MCU formula.
  */
 export function calculateMashPhGuidance(input: {
   water: Record<string, unknown>;
   fermentables: unknown;
 }): MashPhGuidance {
+  void input.fermentables;
   const fromRecipe = parsePhRange(input.water.targetMashPh);
   const target = fromRecipe
     ? {
@@ -580,79 +600,15 @@ export function calculateMashPhGuidance(input: {
         fromRecipe: false
       };
 
-  const unavailable = (note: string): MashPhGuidance => ({
+  return {
     target,
+    acid: "88% lactic",
     predictedUntreatedMashPh: null,
     acidNeeded: null,
     lacticAcid88Ml: null,
     confidence: "unavailable",
-    note,
-    measuredWriteIn: true
-  });
-
-  const volumes = parseWaterVolumes(input.water);
-  if (volumes.strikeGal == null || volumes.strikeGal <= 0) {
-    return unavailable("88% lactic acid: calculate after mash pH measurement / insufficient malt acidity data");
-  }
-
-  const rows = Array.isArray(input.fermentables) ? input.fermentables.filter(isRecord) : [];
-  const grains: GrainRow[] = rows.flatMap((row) => {
-    const pounds = parsePounds(row.amount);
-    if (pounds == null || pounds <= 0) return [];
-    const name = String(row.ingredient ?? row.name ?? row.malt ?? "");
-    return [{
-      pounds,
-      lovibond: parseLovibond(row),
-      isMaltLike: !isNonMaltAdjunct(name)
-    }];
-  });
-
-  const maltLike = grains.filter((grain) => grain.isMaltLike);
-  const maltMass = maltLike.reduce((sum, grain) => sum + grain.pounds, 0);
-  if (maltMass <= 0) {
-    return unavailable("88% lactic acid: calculate after mash pH measurement / insufficient malt acidity data");
-  }
-
-  const coloredMass = maltLike
-    .filter((grain) => grain.lovibond != null)
-    .reduce((sum, grain) => sum + grain.pounds, 0);
-  if (coloredMass / maltMass < 0.7) {
-    return unavailable("88% lactic acid: calculate after mash pH measurement / insufficient malt acidity data");
-  }
-
-  let mcu = 0;
-  for (const grain of maltLike) {
-    if (grain.lovibond == null) continue;
-    mcu += (grain.lovibond * grain.pounds) / volumes.strikeGal;
-  }
-
-  const predicted = 5.75 - (0.022 * mcu) / (1 + 0.035 * mcu);
-  const acidNeeded = predicted > target.high + 0.02;
-  if (!acidNeeded) {
-    return {
-      target,
-      predictedUntreatedMashPh: predicted,
-      acidNeeded: false,
-      lacticAcid88Ml: null,
-      confidence: "estimated",
-      note: "None recommended initially. Verify mash pH after dough-in.",
-      measuredWriteIn: true
-    };
-  }
-
-  const deltaPh = predicted - target.target;
-  const grainKg = maltMass / 2.20462262;
-  const bufferingMeqPerKgPerPh = 45;
-  const lacticMeqPerMl = 11.8;
-  const lacticAcid88Ml = (deltaPh * bufferingMeqPerKgPerPh * grainKg) / lacticMeqPerMl;
-
-  return {
-    target,
-    predictedUntreatedMashPh: predicted,
-    acidNeeded: true,
-    lacticAcid88Ml,
-    confidence: "estimated",
-    note: "Starting dose only. Verify mash pH after dough-in.",
+    lacticLabel: LACTIC_DOSE_DEFERRED_LABEL,
+    note: "Not calculated — malt acidity data/model insufficient. Verify mash pH after dough-in.",
     measuredWriteIn: true
   };
 }

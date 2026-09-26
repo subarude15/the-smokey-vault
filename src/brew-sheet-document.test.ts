@@ -106,7 +106,8 @@ test("water chemistry uses deterministic salt calc and keeps leftover scalars", 
   assert.ok(sheet.waterChemistry?.saltTable);
   assert.ok(sheet.waterChemistry?.achievedProfile.length);
   assert.ok(sheet.waterChemistry?.mashPh.target);
-  assert.ok(sheet.waterChemistry?.mashPh.lactic);
+  assert.match(sheet.waterChemistry?.mashPh.lactic ?? "", /Determine starting dose from measured mash pH|Not calculated/i);
+  assert.doesNotMatch(sheet.waterChemistry?.mashPh.lactic ?? "", /\d+(\.\d+)?\s*mL/i);
   assert.equal(sheet.waterChemistry?.mashPh.measuredWriteIn, true);
   assert.equal(sheet.water.some((pair) => pair.label === "Profile" || pair.value.includes("hidden")), false);
   assert.ok(sheet.measurements.includes("Mash pH"));

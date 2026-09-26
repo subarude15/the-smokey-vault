@@ -10,7 +10,9 @@ import {
   calculateWaterChemistry,
   formatGrams,
   formatPpm,
+  ionShort,
   type MashPhGuidance,
+  type MineralIon,
   type WaterMineralResult
 } from "../../src/brew_water_chemistry";
 
@@ -274,15 +276,6 @@ function formatVolumeGal(value: number | null): string | null {
   return `${value.toFixed(2)} gal`;
 }
 
-function lacticLabel(mashPh: MashPhGuidance): string {
-  if (mashPh.confidence === "unavailable" || mashPh.lacticAcid88Ml == null) {
-    return "Not calculated — insufficient malt acidity data";
-  }
-  if (mashPh.acidNeeded === false) return "None recommended initially";
-  const ml = Math.round(mashPh.lacticAcid88Ml * 100) / 100;
-  return `${ml.toFixed(2)} mL starting dose`;
-}
-
 function buildWaterChemistry(chemistry: ReturnType<typeof calculateWaterChemistry>): BrewSheetWaterChemistry {
   const minerals = chemistry.minerals;
   const volumes: SheetPair[] = [];
@@ -319,9 +312,10 @@ function buildWaterChemistry(chemistry: ReturnType<typeof calculateWaterChemistr
     : null;
 
   const achievedProfile = Object.entries(minerals.achieved).map(([ion, ppm]) => {
-    const row = minerals.targetDisplay.find((item) => item.ion === ion);
+    const key = ion as MineralIon;
+    const row = minerals.targetDisplay.find((item) => item.ion === key);
     return {
-      label: row?.short ?? ion,
+      label: row?.short ?? ionShort(key),
       value: formatPpm(ppm as number, 1)
     };
   });
@@ -335,7 +329,7 @@ function buildWaterChemistry(chemistry: ReturnType<typeof calculateWaterChemistr
     statusMessage: minerals.statusMessage,
     mashPh: {
       target: chemistry.mashPh.target.label,
-      lactic: lacticLabel(chemistry.mashPh),
+      lactic: chemistry.mashPh.lacticLabel,
       note: chemistry.mashPh.note,
       measuredWriteIn: true
     }

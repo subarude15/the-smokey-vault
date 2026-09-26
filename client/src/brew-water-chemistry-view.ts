@@ -6,6 +6,8 @@ import {
   calculateWaterChemistry,
   formatGrams,
   formatPpm,
+  ionLabel,
+  type MineralIon,
   type WaterChemistryResult
 } from "../../src/brew_water_chemistry";
 import type { BrewRecipeDraft } from "./brew-recipe-builder";
@@ -60,18 +62,10 @@ function toView(result: WaterChemistryResult): WaterChemistryView {
   const totalSalts = minerals.salts.map((salt) => ({ label: salt.label, value: formatGrams(salt.totalGrams) }));
 
   const achieved = Object.entries(minerals.achieved).map(([ion, ppm]) => {
-    const row = minerals.targetDisplay.find((item) => item.ion === ion);
-    return { label: row?.label ?? ion, value: formatPpm(ppm as number, 1) };
+    const key = ion as MineralIon;
+    const row = minerals.targetDisplay.find((item) => item.ion === key);
+    return { label: row?.label ?? ionLabel(key), value: formatPpm(ppm as number, 1) };
   });
-
-  let lactic: string;
-  if (mashPh.confidence === "unavailable" || mashPh.lacticAcid88Ml == null) {
-    lactic = "calculate after mash pH measurement / insufficient malt acidity data";
-  } else if (mashPh.acidNeeded === false) {
-    lactic = "None recommended initially";
-  } else {
-    lactic = `${(Math.round(mashPh.lacticAcid88Ml * 100) / 100).toFixed(2)} mL calculated starting dose`;
-  }
 
   return {
     source: minerals.source,
@@ -84,7 +78,7 @@ function toView(result: WaterChemistryResult): WaterChemistryView {
     achieved,
     mineralStatus: minerals.statusMessage,
     mashPhTarget: mashPh.target.label,
-    lactic,
+    lactic: mashPh.lacticLabel,
     mashPhNote: mashPh.note,
     measuredLine: "Measured Mash pH: __________"
   };
