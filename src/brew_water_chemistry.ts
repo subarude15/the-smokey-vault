@@ -343,7 +343,7 @@ function parsePhRange(raw: unknown): { low: number; high: number; target: number
 
 /**
  * Choose salts only when the recipe already constrains the desired profile.
- * The calculator must not invent a Cl/SO4 or Na/HCO3 balance the recipe omitted.
+ * The calculator must not invent a Cl/SO4, Mg/SO4, or Na/HCO3 balance the recipe omitted.
  * Chalk is never auto-selected (dry dissolution is not modeled).
  */
 export function selectSaltsForTargets(targets: Partial<Record<MineralIon, number>>): SaltSelection {
@@ -373,6 +373,12 @@ export function selectSaltsForTargets(targets: Partial<Record<MineralIon, number
       reason: "Chloride target requires a calcium and/or sodium target before salt additions can be calculated."
     };
   }
+  if (hasMg && !hasSo4) {
+    return {
+      ok: false,
+      reason: "Magnesium target requires a sulfate target before Epsom salt additions can be calculated."
+    };
+  }
   if (hasSo4 && !hasCa && !hasMg) {
     return {
       ok: false,
@@ -389,7 +395,7 @@ export function selectSaltsForTargets(targets: Partial<Record<MineralIon, number
   const salts: BrewingSaltId[] = [];
   if (hasCa && hasCl) salts.push("calcium_chloride_brewmaster");
   if (hasCa && hasSo4) salts.push("gypsum");
-  if (hasMg) salts.push("epsom");
+  if (hasMg && hasSo4) salts.push("epsom");
   if (hasNa && hasCl) salts.push("sodium_chloride");
   if (hasNa && hasHco3) salts.push("baking_soda");
 
@@ -495,12 +501,16 @@ export function calculateMineralProfile(water: Record<string, unknown>): WaterMi
   if (!targetDisplay.length) {
     return emptyMineralResult(volumes, targetDisplay, targets, "No mineral targets were supplied by this recipe.");
   }
-  if (!parseableTargets.length) {
+  // Any explicit but unparseable mineral target blocks the solver — do not
+  // silently solve a reduced profile that omits a requested ion.
+  const invalidTargets = targetDisplay.filter((row) => row.calcPpm == null);
+  if (invalidTargets.length > 0) {
+    const ions = invalidTargets.map((row) => row.short).join(", ");
     return emptyMineralResult(
       volumes,
       targetDisplay,
       targets,
-      "Mineral targets could not be parsed confidently. Salt additions were not calculated."
+      `One or more mineral targets could not be parsed confidently (${ions}). Salt additions were not calculated.`
     );
   }
 

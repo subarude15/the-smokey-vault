@@ -180,15 +180,28 @@ test("gypsum treatment exposes both calcium and sulfate in the achieved profile"
   assert.ok((result.achieved.calciumPpm ?? 0) > 0);
 });
 
-test("Epsom without a sulfate target still exposes achieved sulfate counter-ion", () => {
+test("magnesium-only profile is rejected as under-specified", () => {
+  const selection = selectSaltsForTargets({ magnesiumPpm: 10 });
+  assert.equal(selection.ok, false);
+  if (!selection.ok) assert.match(selection.reason, /sulfate target/i);
   const result = calculateMineralProfile({
     totalWater: "10 gal",
     magnesiumPpm: "10 ppm"
   });
+  assert.equal(result.salts.length, 0);
+  assert.equal(result.status, "incomplete");
+  assert.match(result.statusMessage ?? "", /Magnesium target requires a sulfate target/i);
+});
+
+test("magnesium + sulfate allows Epsom and shows achieved Mg and SO4", () => {
+  const result = calculateMineralProfile({
+    totalWater: "10 gal",
+    magnesiumPpm: "10 ppm",
+    sulfatePpm: "100 ppm"
+  });
   assert.ok(result.salts.some((salt) => salt.id === "epsom"));
   assert.ok((result.achieved.magnesiumPpm ?? 0) > 0);
   assert.ok((result.achieved.sulfatePpm ?? 0) > 0);
-  assert.equal(result.targets.sulfatePpm, undefined);
 });
 
 test("achieved profile exposes chloride from CaCl2", () => {
@@ -199,16 +212,6 @@ test("achieved profile exposes chloride from CaCl2", () => {
   });
   assert.ok(result.salts.some((salt) => salt.id === "calcium_chloride_brewmaster"));
   assert.ok((result.achieved.chloridePpm ?? 0) > 0);
-});
-
-test("achieved profile exposes sulfate from Epsom", () => {
-  const result = calculateMineralProfile({
-    ...candyWater,
-    magnesiumPpm: "10 ppm"
-  });
-  assert.ok(result.salts.some((salt) => salt.id === "epsom"));
-  assert.ok((result.achieved.magnesiumPpm ?? 0) > 0);
-  assert.ok((result.achieved.sulfatePpm ?? 0) > 0);
 });
 
 test("chloride and calcium prefer calcium chloride; sulfate introduces gypsum", () => {
@@ -222,13 +225,15 @@ test("chloride and calcium prefer calcium chloride; sulfate introduces gypsum", 
   assert.equal(ids.includes("sodium_chloride"), false);
 });
 
-test("magnesium target can introduce Epsom when Ca/Cl/SO4 already constrain the profile", () => {
+test("Candy Cloud + explicit magnesium still allows Epsom when SO4 is targeted", () => {
   const result = calculateMineralProfile({
     ...candyWater,
     magnesiumPpm: "10 ppm"
   });
   assert.ok(result.salts.some((salt) => salt.id === "epsom"));
   assert.ok((result.achieved.magnesiumPpm ?? 0) > 0);
+  assert.ok((result.achieved.sulfatePpm ?? 0) > 0);
+  assert.equal(result.targets.sulfatePpm, 57.5);
 });
 
 test("sodium with chloride uses sodium chloride without baking soda", () => {
@@ -378,6 +383,36 @@ test("unparseable mineral targets are retained without guessing", () => {
   assert.equal(result.targetDisplay[0]?.raw, "a lot");
   assert.equal(result.targetDisplay[0]?.calcPpm, null);
   assert.match(result.statusMessage ?? "", /could not be parsed/i);
+});
+
+test("any explicit malformed mineral target blocks the solver even when others parse", () => {
+  const result = calculateMineralProfile({
+    strikeWater: "5.50 gal",
+    spargeWater: "4.50 gal",
+    calciumPpm: "110 ppm",
+    sulfatePpm: "60 ppm",
+    chloridePpm: "a lot"
+  });
+  assert.equal(result.salts.length, 0);
+  assert.equal(result.status, "incomplete");
+  assert.match(result.statusMessage ?? "", /could not be parsed/i);
+  const chloride = result.targetDisplay.find((row) => row.ion === "chloridePpm");
+  assert.equal(chloride?.raw, "a lot");
+  assert.equal(chloride?.calcPpm, null);
+  assert.equal(result.targets.calciumPpm, 110);
+  assert.equal(result.targets.sulfatePpm, 60);
+});
+
+test("fully parseable Candy Cloud mineral targets still calculate salts", () => {
+  const result = calculateMineralProfile({
+    strikeWater: "5.50 gal",
+    spargeWater: "4.50 gal",
+    calciumPpm: "100–120 ppm",
+    chloridePpm: "200–225 ppm",
+    sulfatePpm: "50–65 ppm"
+  });
+  assert.ok(result.salts.length > 0);
+  assert.notEqual(result.status, "incomplete");
 });
 
 test("targetMashPh from the recipe is preserved; absent defaults to 5.2–5.4", () => {
