@@ -1,13 +1,14 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## Current position
 
 Most recently ready for review:
-- **PR173** — Keeper-only brew sheet PDF. Download PDF prints the PR172 `BrewSheetDocument` with system Chromium (`playwright-core`, `CHROMIUM_PATH`, default `/usr/bin/chromium`). No PDF is stored.
+- **PR174** — Brewery water chemistry and mash pH guidance. Deterministic salt grams from recipe water targets/volumes (RO starting ions = 0; under-specified profiles rejected; chalk not auto-selected). Mash-pH keeps recipe/default target + measured write-in; 88% lactic dose is deferred until an established model is chosen (no homemade MCU mL). Feeds the existing `BrewSheetDocument` preview/PDF path; AI parser still does not invent salt weights. No DB migration.
 
 Previously ready, not yet the latest slice:
+- **PR173** — Keeper-only brew sheet PDF. Download PDF prints the PR172 `BrewSheetDocument` with system Chromium (`playwright-core`, `CHROMIUM_PATH`, default `/usr/bin/chromium`). No PDF is stored.
 - **PR172** — Smokey Barrel brew sheet preview. The same document and CSS feed the PDF print page.
 - **PR171** — Brew recipe library and Brew Again. Saved recipes, open/edit, and numbered `brew_sessions` without copying the recipe.
 
@@ -29,7 +30,7 @@ Next planned, after this phase is reviewed:
 
 ## Recent architectural decisions
 
-- Brew sheets (PR168–PR173): `brew_recipes` and `brew_sessions` stay separate from the homebrew `brews` log. Parsing and saving are separate actions. Brew Again inserts a numbered session on the existing recipe. Preview and PDF both render `BrewSheetDocument`. `GET /api/admin/brewery/recipes/:id/pdf` is keeper-only and generates the file in memory. Chromium reads a loopback-only short-lived render token, not a public recipe URL. Dirty unsaved edits do not offer Download PDF. The print page loads static Outfit files because Chromium’s variable-font PDF export collapses to Thin. The Docker image also installs Liberation Sans for when that fetch fails. The app stays up if Chromium is missing. The builder is a Keeper Operations page (`brew_sheets`), not a replacement for Brewery Lab. Guest navigation does not list it.
+- Brew sheets (PR168–PR174): `brew_recipes` and `brew_sessions` stay separate from the homebrew `brews` log. Parsing and saving are separate actions. Brew Again inserts a numbered session on the existing recipe. Preview and PDF both render `BrewSheetDocument`. Water mineral salt grams come only from `src/brew_water_chemistry.ts` (never from the AI parser); mash-pH target guidance is shown without inventing a lactic mL dose until a documented model is wired. Treatment volume requires strike+sparge or explicit totalWater — lone strike/sparge does not invent total. `GET /api/admin/brewery/recipes/:id/pdf` is keeper-only and generates the file in memory. Chromium reads a loopback-only short-lived render token, not a public recipe URL. Dirty unsaved edits do not offer Download PDF. The print page loads static Outfit files because Chromium’s variable-font PDF export collapses to Thin. The Docker image also installs Liberation Sans for when that fetch fails. The app stays up if Chromium is missing. The builder is a Keeper Operations page (`brew_sheets`), not a replacement for Brewery Lab. Guest navigation does not list it.
 
 - Interface depth/motion (PR160): One shared CSS token layer (`--motion-*`, `--surface-*`, `--elevation-1..4`, `--edge-*`, `--lift-card`, `--press-*`) applied site-wide. Resting Depth-2 must be obvious without hover. Hover motion is fine-pointer-gated (~8–9px); touch uses press scale with sticky-hover cancelled; reduced-motion disables movement but must not flatten static elevation. Homepage underlap is CSS sticky + scrim only (no scroll listeners / parallax). Do not add a second competing token system or a JS animation library for this.
 

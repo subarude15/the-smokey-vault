@@ -94,13 +94,31 @@ test("target stats include only values the recipe actually has", () => {
   assert.equal(sheet.stats.some((stat) => stat.label === "Estimated IBU" || stat.value === "1.050"), false);
 });
 
-test("water keeps unknown scalar fields and skips nested objects", () => {
+test("water chemistry uses deterministic salt calc and keeps leftover scalars", () => {
   const sheet = brewSheetModel(candy);
-  const sodium = sheet.water.find((pair) => pair.label === "Sodium ppm");
-  const magnesium = sheet.water.find((pair) => pair.label === "Magnesium ppm");
-  assert.equal(sodium?.value, "40");
-  assert.equal(magnesium?.value, "10");
+  assert.ok(sheet.waterChemistry);
+  assert.equal(sheet.waterChemistry?.source, "RO / distilled");
+  assert.ok(sheet.waterChemistry?.targetProfile.some((pair) => pair.label === "Ca"));
+  assert.ok(sheet.waterChemistry?.targetProfile.some((pair) => pair.label === "Cl"));
+  assert.ok(sheet.waterChemistry?.targetProfile.some((pair) => pair.label === "SO4"));
+  assert.ok(sheet.waterChemistry?.targetProfile.some((pair) => pair.label === "Na"));
+  assert.ok(sheet.waterChemistry?.targetProfile.some((pair) => pair.label === "Mg"));
+  assert.ok(sheet.waterChemistry?.saltTable);
+  assert.ok(sheet.waterChemistry?.achievedProfile.length);
+  assert.ok(sheet.waterChemistry?.mashPh.target);
+  assert.match(sheet.waterChemistry?.mashPh.lactic ?? "", /Determine starting dose from measured mash pH|Not calculated/i);
+  assert.doesNotMatch(sheet.waterChemistry?.mashPh.lactic ?? "", /\d+(\.\d+)?\s*mL/i);
+  assert.equal(sheet.waterChemistry?.mashPh.measuredWriteIn, true);
   assert.equal(sheet.water.some((pair) => pair.label === "Profile" || pair.value.includes("hidden")), false);
+  assert.ok(sheet.measurements.includes("Mash pH"));
+});
+
+test("BrewSheetDocument still owns preview and PDF chemistry rendering", () => {
+  assert.match(documentSrc, /waterChemistry/);
+  assert.match(documentSrc, /88% Lactic Acid/);
+  assert.match(documentSrc, /Measured pH/);
+  assert.match(documentSrc, /Salt additions|saltTable/);
+  assert.doesNotMatch(documentSrc, /fetch\(|\bapi\(/);
 });
 
 test("kettle additions stay separate from whirlpool additions", () => {
@@ -140,6 +158,7 @@ test("missing recipe values are omitted instead of invented", () => {
   const sheet = brewSheetModel({ beerName: "Only a name" });
   assert.equal(sheet.stats.length, 0);
   assert.equal(sheet.water.length, 0);
+  assert.equal(sheet.waterChemistry, null);
   assert.equal(sheet.fermentables, null);
   assert.equal(sheet.kettle, null);
   assert.equal(sheet.whirlpool, null);

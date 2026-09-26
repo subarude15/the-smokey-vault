@@ -1,12 +1,40 @@
 /**
  * Turns a BrewRecipeDocument into the sections of the Smokey Barrel brew sheet.
  * Rendering lives in BrewSheetDocument.tsx. No values are invented.
+ *
+ * Mineral salt grams and mash-pH starting guidance come from the deterministic
+ * calculator in src/brew_water_chemistry.ts — never from the AI parser.
  */
+
+import {
+  calculateWaterChemistry,
+  formatGrams,
+  formatPpm,
+  ionShort,
+  type MashPhGuidance,
+  type MineralIon,
+  type WaterMineralResult
+} from "../../src/brew_water_chemistry";
 
 export type SheetPair = { label: string; value: string };
 export type SheetStat = SheetPair & { writeIn: string | null };
 export type SheetTable = { columns: string[]; rows: string[][] };
 export type DryHopBlock = { stage: string; table: SheetTable };
+
+export type BrewSheetWaterChemistry = {
+  source: string;
+  volumes: SheetPair[];
+  targetProfile: SheetPair[];
+  saltTable: SheetTable | null;
+  achievedProfile: SheetPair[];
+  statusMessage: string | null;
+  mashPh: {
+    target: string;
+    lactic: string;
+    note: string | null;
+    measuredWriteIn: boolean;
+  };
+};
 
 export type BrewSheetModel = {
   beerName: string;
@@ -14,7 +42,9 @@ export type BrewSheetModel = {
   system: string;
   fermenter: string;
   stats: SheetStat[];
+  /** Leftover water scalars not covered by the chemistry block (notes, mash temp, etc.). */
   water: SheetPair[];
+  waterChemistry: BrewSheetWaterChemistry | null;
   fermentables: SheetTable | null;
   kettle: SheetTable | null;
   whirlpool: SheetTable | null;
@@ -32,6 +62,22 @@ export type BrewSheetModel = {
 };
 
 type Column = { label: string; keys: string[] };
+
+/** Keys handled by the chemistry block — omitted from the leftover water pair list. */
+const CHEMISTRY_WATER_KEYS = new Set([
+  "source",
+  "strikeWater",
+  "spargeWater",
+  "totalWater",
+  "targetMashPh",
+  "chloridePpm",
+  "sulfatePpm",
+  "calciumPpm",
+  "sodiumPpm",
+  "magnesiumPpm",
+  "bicarbonatePpm",
+  "alkalinityPpm"
+]);
 
 const WATER_LABELS: Record<string, string> = {
   source: "Water source",
@@ -225,8 +271,88 @@ function dryHopBlocks(value: unknown): DryHopBlock[] {
   });
 }
 
+function formatVolumeGal(value: number | null): string | null {
+  if (value == null) return null;
+  return `${value.toFixed(2)} gal`;
+}
+
+function buildWaterChemistry(chemistry: ReturnType<typeof calculateWaterChemistry>): BrewSheetWaterChemistry {
+  const minerals = chemistry.minerals;
+  const volumes: SheetPair[] = [];
+  const strike = formatVolumeGal(minerals.volumes.strikeGal);
+  const sparge = formatVolumeGal(minerals.volumes.spargeGal);
+  const total = formatVolumeGal(minerals.volumes.totalGal);
+  if (strike) volumes.push({ label: "Strike water", value: strike });
+  if (sparge) volumes.push({ label: "Sparge water", value: sparge });
+  if (total) volumes.push({ label: "Total water", value: total });
+
+  const targetProfile = minerals.targetDisplay.map((row) => ({
+    label: row.short,
+    value: row.calcPpm != null
+      ? `${formatPpm(row.calcPpm, row.calcPpm % 1 === 0 ? 0 : 1).replace(" ppm", "")} ppm`
+      : row.raw
+  }));
+
+  const canSplit = minerals.volumes.canSplit;
+  const saltTable: SheetTable | null = minerals.salts.length
+    ? {
+        columns: canSplit ? ["Salt", "Mash", "Sparge", "Total"] : ["Salt", "Total"],
+        rows: minerals.salts.map((salt) => {
+          if (canSplit) {
+            return [
+              salt.label,
+              formatGrams(salt.mashGrams as number),
+              formatGrams(salt.spargeGrams as number),
+              formatGrams(salt.totalGrams)
+            ];
+          }
+          return [salt.label, formatGrams(salt.totalGrams)];
+        })
+      }
+    : null;
+
+  const achievedProfile = Object.entries(minerals.achieved).map(([ion, ppm]) => {
+    const key = ion as MineralIon;
+    const row = minerals.targetDisplay.find((item) => item.ion === key);
+    return {
+      label: row?.short ?? ionShort(key),
+      value: formatPpm(ppm as number, 1)
+    };
+  });
+
+  return {
+    source: minerals.source,
+    volumes,
+    targetProfile,
+    saltTable,
+    achievedProfile,
+    statusMessage: minerals.statusMessage,
+    mashPh: {
+      target: chemistry.mashPh.target.label,
+      lactic: chemistry.mashPh.lacticLabel,
+      note: chemistry.mashPh.note,
+      measuredWriteIn: true
+    }
+  };
+}
+
+function waterSectionPresent(water: Record<string, unknown>, chemistry: BrewSheetWaterChemistry, leftovers: SheetPair[]): boolean {
+  if (leftovers.length) return true;
+  return Boolean(
+    chemistry.volumes.length
+    || chemistry.targetProfile.length
+    || chemistry.saltTable
+    || chemistry.achievedProfile.length
+    || sheetScalar(water.source)
+    || sheetScalar(water.targetMashPh)
+    || sheetScalar(water.strikeWater)
+    || sheetScalar(water.spargeWater)
+  );
+}
+
 function measurements(input: {
   water: Record<string, unknown>;
+  showMashPh: boolean;
   boilTime: string;
   targetOg: string;
   targetFg: string;
@@ -237,7 +363,12 @@ function measurements(input: {
   packaging: boolean;
 }): string[] {
   const lines: string[] = [];
-  if (sheetScalar(input.water.targetMashPh) || sheetScalar(input.water.mashTemperature) || sheetScalar(input.water.mashTemp)) {
+  if (
+    input.showMashPh
+    || sheetScalar(input.water.targetMashPh)
+    || sheetScalar(input.water.mashTemperature)
+    || sheetScalar(input.water.mashTemp)
+  ) {
     lines.push("Mash pH");
   }
   if (sheetScalar(input.water.preBoilGravity) || sheetScalar(input.water.preBoilVolume) || input.boilTime) {
@@ -284,13 +415,19 @@ export function brewSheetModel(recipe: unknown): BrewSheetModel {
     stat("Mash efficiency", row.mashEfficiency)
   ].filter((item): item is SheetStat => item != null);
 
+  const chemistry = calculateWaterChemistry({ water, fermentables: row.fermentables });
+  const waterChemistry = buildWaterChemistry(chemistry);
+  const leftoverWater = pairsFromRecord(water, Object.keys(WATER_LABELS), CHEMISTRY_WATER_KEYS);
+  const showChemistry = waterSectionPresent(water, waterChemistry, leftoverWater);
+
   return {
     beerName: sheetScalar(row.beerName) ?? "",
     style: sheetScalar(row.style) ?? "",
     system: sheetScalar(row.system) ?? "",
     fermenter: sheetScalar(row.fermenter) ?? "",
     stats,
-    water: pairsFromRecord(water, Object.keys(WATER_LABELS), new Set()),
+    water: leftoverWater,
+    waterChemistry: showChemistry ? waterChemistry : null,
     fermentables: sheetTable(row.fermentables, FERMENTABLE_COLUMNS),
     kettle: sheetTable(row.kettleAdditions, KETTLE_COLUMNS),
     whirlpool,
@@ -305,6 +442,7 @@ export function brewSheetModel(recipe: unknown): BrewSheetModel {
     checklist: strings(row.checklist),
     measurements: measurements({
       water,
+      showMashPh: showChemistry,
       boilTime,
       targetOg,
       targetFg,
@@ -317,3 +455,5 @@ export function brewSheetModel(recipe: unknown): BrewSheetModel {
     notes: sheetScalar(row.notes) ?? ""
   };
 }
+
+export type { WaterMineralResult, MashPhGuidance };
