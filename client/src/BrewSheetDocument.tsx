@@ -1,5 +1,5 @@
 import "./brew-sheet-document.css";
-import { brewSheetModel, type SheetPair, type SheetTable } from "./brew-sheet-document";
+import { brewSheetModel, type BrewSheetWaterChemistry, type SheetPair, type SheetTable } from "./brew-sheet-document";
 
 /** Canonical Smokey Barrel brew sheet. Preview and PDF export both render this. */
 export function BrewSheetDocument({ recipe }: { recipe: unknown }) {
@@ -10,6 +10,7 @@ export function BrewSheetDocument({ recipe }: { recipe: unknown }) {
   );
   const left = Boolean(sheet.fermentables || sheet.kettle || sheet.whirlpool);
   const right = Boolean(sheet.dryHops.length || showFermentation);
+  const showWater = Boolean(sheet.waterChemistry || sheet.water.length);
 
   return (
     <article className="brew-doc">
@@ -41,17 +42,20 @@ export function BrewSheetDocument({ recipe }: { recipe: unknown }) {
           ))}
         </section>
       )}
-      {sheet.water.length > 0 && (
+      {showWater && (
         <section className="brew-doc-water" aria-label="Water and mash">
           <h2>Water / mash profile</h2>
-          <dl>
-            {sheet.water.map((pair) => (
-              <div key={pair.label}>
-                <dt>{pair.label}</dt>
-                <dd>{pair.value}</dd>
-              </div>
-            ))}
-          </dl>
+          {sheet.waterChemistry ? <WaterChemistryBlock chemistry={sheet.waterChemistry}/> : null}
+          {sheet.water.length > 0 && (
+            <dl className="brew-doc-water-extra">
+              {sheet.water.map((pair) => (
+                <div key={pair.label}>
+                  <dt>{pair.label}</dt>
+                  <dd>{pair.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </section>
       )}
       {(left || right) && (
@@ -126,6 +130,78 @@ export function BrewSheetDocument({ recipe }: { recipe: unknown }) {
         <div className="brew-doc-pad" aria-hidden="true"/>
       </section>
     </article>
+  );
+}
+
+function WaterChemistryBlock({ chemistry }: { chemistry: BrewSheetWaterChemistry }) {
+  return (
+    <div className="brew-doc-chem">
+      <dl className="brew-doc-chem-meta">
+        <div>
+          <dt>Source</dt>
+          <dd>{chemistry.source}</dd>
+        </div>
+        {chemistry.volumes.map((pair) => (
+          <div key={pair.label}>
+            <dt>{pair.label}</dt>
+            <dd>{pair.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {chemistry.targetProfile.length > 0 && (
+        <div className="brew-doc-chem-block">
+          <h3>Target mineral profile</h3>
+          <dl className="brew-doc-chem-ions">
+            {chemistry.targetProfile.map((pair) => (
+              <div key={`target-${pair.label}`}>
+                <dt>{pair.label}</dt>
+                <dd>{pair.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+      {chemistry.saltTable && (
+        <div className="brew-doc-chem-block">
+          <h3>Salt additions</h3>
+          <SheetTableView table={chemistry.saltTable}/>
+        </div>
+      )}
+      {chemistry.achievedProfile.length > 0 && (
+        <div className="brew-doc-chem-block">
+          <h3>Achieved profile</h3>
+          <dl className="brew-doc-chem-ions">
+            {chemistry.achievedProfile.map((pair) => (
+              <div key={`achieved-${pair.label}`}>
+                <dt>{pair.label}</dt>
+                <dd>{pair.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+      {chemistry.statusMessage && <p className="brew-doc-chem-status">{chemistry.statusMessage}</p>}
+      <div className="brew-doc-chem-block brew-doc-mash-ph">
+        <h3>Mash pH</h3>
+        <dl className="brew-doc-chem-meta">
+          <div>
+            <dt>Target</dt>
+            <dd>{chemistry.mashPh.target}</dd>
+          </div>
+          <div>
+            <dt>88% Lactic Acid</dt>
+            <dd>{chemistry.mashPh.lactic}</dd>
+          </div>
+          {chemistry.mashPh.measuredWriteIn && (
+            <div>
+              <dt>Measured pH</dt>
+              <dd className="brew-doc-writein">__________</dd>
+            </div>
+          )}
+        </dl>
+        {chemistry.mashPh.note && <p className="brew-doc-chem-note">{chemistry.mashPh.note}</p>}
+      </div>
+    </div>
   );
 }
 

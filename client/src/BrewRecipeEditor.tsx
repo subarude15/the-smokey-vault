@@ -29,6 +29,7 @@ import {
   type BrewScalarField,
   type BrewStringList
 } from "./brew-recipe-builder";
+import { waterChemistryView } from "./brew-water-chemistry-view";
 
 const BASIC: { key: BrewScalarField; label: string }[] = [
   { key: "beerName", label: "Beer name" },
@@ -52,10 +53,13 @@ const WATER: { key: string; label: string }[] = [
   { key: "source", label: "Source" },
   { key: "strikeWater", label: "Strike water" },
   { key: "spargeWater", label: "Sparge water" },
+  { key: "totalWater", label: "Total water" },
   { key: "targetMashPh", label: "Target mash pH" },
   { key: "chloridePpm", label: "Chloride ppm" },
   { key: "sulfatePpm", label: "Sulfate ppm" },
   { key: "calciumPpm", label: "Calcium ppm" },
+  { key: "sodiumPpm", label: "Sodium ppm" },
+  { key: "magnesiumPpm", label: "Magnesium ppm" },
   { key: "notes", label: "Notes" }
 ];
 
@@ -67,7 +71,8 @@ const ROWS: { list: BrewRowList; title: string; add: string; blank: BrewRecord; 
     blank: BLANK_FERMENTABLE,
     fields: [
       { key: "ingredient", label: "Ingredient" },
-      { key: "amount", label: "Amount" }
+      { key: "amount", label: "Amount" },
+      { key: "lovibond", label: "Lovibond / color" }
     ]
   },
   {
@@ -138,6 +143,65 @@ function RemoveButton({ label, onClick }: { label: string; onClick: () => void }
   return <button type="button" className="secondary brew-sheet-remove" onClick={onClick}>{label}</button>;
 }
 
+function WaterChemistryPanel({ chemistry }: { chemistry: ReturnType<typeof waterChemistryView> }) {
+  return (
+    <div className="brew-water-calc" aria-live="polite">
+      <p className="brew-water-calc-title">Calculated water treatment</p>
+      <div className="brew-water-calc-grid">
+        <div>
+          <span className="brew-water-calc-label">Source water</span>
+          <p>{chemistry.source}</p>
+        </div>
+        <div>
+          <span className="brew-water-calc-label">Water volumes</span>
+          {chemistry.volumes.length ? chemistry.volumes.map((row) => (
+            <p key={row.label}>{row.label}: {row.value}</p>
+          )) : <p className="field-hint">Add strike and sparge volumes to calculate salts.</p>}
+        </div>
+      </div>
+      <div>
+        <span className="brew-water-calc-label">Target mineral profile</span>
+        {chemistry.targets.length ? chemistry.targets.map((row) => (
+          <p key={row.label}>{row.label}: {row.value}</p>
+        )) : <p className="field-hint">No mineral targets were supplied by this recipe.</p>}
+      </div>
+      {chemistry.totalSalts.length > 0 ? (
+        <div className="brew-water-calc-grid">
+          {chemistry.canSplit ? (
+            <>
+              <div>
+                <span className="brew-water-calc-label">Mash salt additions</span>
+                {chemistry.mashSalts.map((row) => <p key={`mash-${row.label}`}>{row.label} — {row.value}</p>)}
+              </div>
+              <div>
+                <span className="brew-water-calc-label">Sparge salt additions</span>
+                {chemistry.spargeSalts.map((row) => <p key={`sparge-${row.label}`}>{row.label} — {row.value}</p>)}
+              </div>
+            </>
+          ) : (
+            <div>
+              <span className="brew-water-calc-label">Calculated salt additions</span>
+              {chemistry.totalSalts.map((row) => <p key={`total-${row.label}`}>{row.label} — {row.value}</p>)}
+            </div>
+          )}
+          <div>
+            <span className="brew-water-calc-label">Achieved profile</span>
+            {chemistry.achieved.map((row) => <p key={`ach-${row.label}`}>{row.label}: {row.value}</p>)}
+          </div>
+        </div>
+      ) : null}
+      {chemistry.mineralStatus && <p className="field-hint">{chemistry.mineralStatus}</p>}
+      <div>
+        <span className="brew-water-calc-label">Mash pH</span>
+        <p>Target mash pH: {chemistry.mashPhTarget}</p>
+        <p>88% Lactic Acid — {chemistry.lactic}</p>
+        <p className="field-hint">{chemistry.mashPhNote}</p>
+        <p>{chemistry.measuredLine}</p>
+      </div>
+    </div>
+  );
+}
+
 export function BrewRecipeEditor({
   draft,
   disabled,
@@ -147,6 +211,7 @@ export function BrewRecipeEditor({
   disabled: boolean;
   onChange: (draft: BrewRecipeDraft) => void;
 }) {
+  const chemistry = waterChemistryView(draft);
   return (
     <fieldset className="brew-sheet-editor" disabled={disabled}>
       <Section title="Basic info">
@@ -184,6 +249,7 @@ export function BrewRecipeEditor({
             />
           ))}
         </div>
+        <WaterChemistryPanel chemistry={chemistry}/>
       </Section>
       {ROWS.map((section) => (
         <Section key={section.list} title={section.title}>

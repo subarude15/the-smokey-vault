@@ -146,6 +146,10 @@ test("parseBrewRecipeFromText accepts a Candy Cloud-like recipe and does not sav
   assert.match(prompt, /Do not invent missing brewing values/);
   assert.match(prompt, /Do not calculate values that are not explicitly supplied/);
   assert.match(prompt, /Do not invent salt weights/);
+  assert.match(prompt, /deterministic water-chemistry module/);
+  assert.match(prompt, /sodiumPpm/);
+  assert.match(prompt, /magnesiumPpm/);
+  assert.match(prompt, /totalWater/);
   assert.match(prompt, /Return only a JSON object/);
   assert.match(prompt, /kettleAdditions/);
   assert.match(prompt, /whirlpoolAdditions/);

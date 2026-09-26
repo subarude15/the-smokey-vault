@@ -66,6 +66,7 @@ Do not redesign, summarize, or improve the recipe.
 Do not invent missing brewing values.
 Do not calculate values that are not explicitly supplied. A clearly stated approximation may be normalized ("about 25 IBU" may become "25"). Keep ranges, units, temperatures, and gravity values as written.
 Do not invent salt weights from ppm targets.
+Salt gram amounts are calculated later by a deterministic water-chemistry module. Never output salt addition masses.
 Preserve ingredient names exactly, including proprietary names.
 Preserve quantities, timings (Day 2, Day 3, 10 min, 20 min), gravity triggers, and temperatures.
 Keep boil additions, whirlpool additions, dry-hop stages, fermentation steps, and packaging steps in their own fields.
@@ -89,8 +90,8 @@ Top-level keys, all required in the object (use "" , [] , or {} when the text do
 - targetAbv: string
 - estimatedIbu: string
 - mashEfficiency: string
-- water: object. Use only keys you can support from the text, such as source, strikeWater, spargeWater, targetMashPh, chloridePpm, sulfatePpm, calciumPpm, notes
-- fermentables: array of objects with ingredient and amount
+- water: object. Use only keys you can support from the text, such as source, strikeWater, spargeWater, totalWater, targetMashPh, chloridePpm, sulfatePpm, calciumPpm, sodiumPpm, magnesiumPpm, notes. Keep ppm targets and volumes as written ranges or values. Do not invent salt weights.
+- fermentables: array of objects with ingredient and amount. Include lovibond or color only when the text states them.
 - kettleAdditions: array of objects for boil additions, with ingredient, amount, and time
 - whirlpoolAdditions: array of objects with ingredient, amount, temperature, and time
 - dryHopStages: array of objects with stage, variety, amount, when, temperature, and gravity when stated
