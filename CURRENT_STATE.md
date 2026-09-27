@@ -5,9 +5,10 @@ Last updated: 2026-09-27
 ## Current position
 
 Most recently ready for review:
-- Guest message email. `POST /api/messages` still stores the guest contact form in SQLite, then emails every address in `MESSAGE_NOTIFICATION_EMAILS` over SMTP (`src/mail.ts`). A mail failure is logged and the guest still gets HTTP 201. No recipients means no send. Discord's five-minute unanswered alert is unchanged. No schema change.
+- Guest contact confirmation copy. After send, `ContactModal` says the smoke signals are on their way (no Discord wording for guests). Keeper Discord alert behavior is unchanged.
 
 Previously ready, not yet the latest slice:
+- Guest message email. `POST /api/messages` still stores the guest contact form in SQLite, then emails every address in `MESSAGE_NOTIFICATION_EMAILS` over SMTP (`src/mail.ts`). A mail failure is logged and the guest still gets HTTP 201. No recipients means no send. Discord's five-minute unanswered alert is unchanged. No schema change.
 - **PR174** — Brewery water chemistry and mash pH guidance. Deterministic salt grams from recipe water targets/volumes (RO starting ions = 0; under-specified profiles rejected; chalk not auto-selected). Mash-pH keeps recipe/default target + measured write-in; 88% lactic dose is deferred until an established model is chosen (no homemade MCU mL). Feeds the existing `BrewSheetDocument` preview/PDF path; AI parser still does not invent salt weights. No DB migration.
 - **PR173** — Keeper-only brew sheet PDF. Download PDF prints the PR172 `BrewSheetDocument` with system Chromium (`playwright-core`, `CHROMIUM_PATH`, default `/usr/bin/chromium`). No PDF is stored.
 - **PR172** — Smokey Barrel brew sheet preview. The same document and CSS feed the PDF print page.

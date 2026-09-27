@@ -49,7 +49,7 @@ export function ContactModal({ close, keeperName }: { close: () => void; keeperN
           <div><span className="eyebrow">MESSAGE SENT</span><h2>We got it.</h2></div>
           <button type="button" className="icon-button" onClick={close} aria-label="Close"><X/></button>
         </header>
-        <p>{keeperName} will get back to you with the address and the details. If we take longer than five minutes, our Discord starts nagging us.</p>
+        <p>Message sent! The smoke signals are on their way. {keeperName} will get back to you with the address and the details.</p>
         <footer className="modal-footer"><button type="button" className="primary" onClick={close}>Cheers</button></footer>
       </section>
     </div>;
