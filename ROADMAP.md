@@ -8,6 +8,7 @@ The Smokey Vault is a private, self-hosted home-bar appliance for a LAN kiosk an
 
 - Inventory: spirits (Bottle Library), wine cellar, packaged beer, draft taps, and homebrew log
 - Guest Mode: digital bar menu / speakeasy portal (cocktails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
+- Guest messages stay in SQLite. When `MESSAGE_NOTIFICATION_EMAILS` and SMTP are set, the server also emails those owners on a successful submit. Mail failure does not reject the message. Discord's unanswered alert stays as it is.
 - Keeper Mode: PIN unlock for scanning, enrichment, import review, restock, settings, and safe per-item deletion
 - Cocktail matcher, substitutions, and optional AI mixologist
 - Brewery Lab with optional Brewfather sync

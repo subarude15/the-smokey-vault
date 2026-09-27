@@ -159,12 +159,13 @@ import {
 } from "./gallery-social.js";
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
 import {
-  adjustPatronVisits, castDailyVote, createEvent, createEventSubscriber, createMerch, createMessage, createPatron,
+  adjustPatronVisits, castDailyVote, createEvent, createEventSubscriber, createMerch, createPatron,
   dailyVoteTallies, deleteEvent, deleteEventSubscriber, deleteMerch, deleteMessage,
   deletePatron, getEvent, listEvents, listEventSubscribers, listLeaderboard, listMerch, listMessages, listPatrons,
   markMessageRead, SpeakeasyError, unreadMessageCount, updateEvent, updateMerch, updatePatron
 } from "./speakeasy.js";
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
+import { acceptGuestMessage, relevantPageUrl, vaultLinkFromRequest } from "./message-notification.js";
 import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
 import { previewInventoryCleanup } from "./inventory-cleanup-preview.js";
 import { serializeEnrichmentViewForCaller, serializeInventoryItemForCaller, serializeOverviewForCaller } from "./guest-inventory-response.js";
@@ -1934,7 +1935,20 @@ app.post<{ Body: { sender_name?: string; contact_info?: string; body?: string } 
   schema: { tags: ["Messages"], summary: "Send the keeper a message from the guest portal" }
 }, async (request, reply) => {
   try {
-    const message = createMessage(request.body ?? {});
+    const vaultUrl = vaultLinkFromRequest({
+      configured: process.env.VAULT_PUBLIC_URL,
+      protocol: request.protocol,
+      host: request.headers.host
+    });
+    const message = await acceptGuestMessage(request.body ?? {}, {
+      pageUrl: relevantPageUrl(request.headers.referer, [request.headers.host, process.env.VAULT_PUBLIC_URL, vaultUrl]),
+      vaultUrl,
+      logger: {
+        info: (fields, message) => request.log.info(fields, message),
+        warn: (fields, message) => request.log.warn(fields, message),
+        error: (fields, message) => request.log.error(fields, message)
+      }
+    });
     return reply.code(201).send({ ok: true, id: message.id, created_at: message.created_at });
   } catch (error) {
     return speakeasyFail(reply, error, "Could not send that message");

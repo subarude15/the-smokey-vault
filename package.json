@@ -34,6 +34,7 @@
     "fastify": "latest",
     "lucide-react": "latest",
     "nanoid": "latest",
+    "nodemailer": "^7.0.9",
     "playwright-core": "^1.63.0",
     "qrcode.react": "^4.2.0",
     "react": "latest",
