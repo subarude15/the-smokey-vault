@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "agentage-memory": {
+      "url": "https://memory.agentage.io/mcp"
+    }
+  }
+}
