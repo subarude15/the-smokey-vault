@@ -164,6 +164,10 @@ import {
   deletePatron, getEvent, listEvents, listEventSubscribers, listLeaderboard, listMerch, listMessages, listPatrons,
   markMessageRead, SpeakeasyError, unreadMessageCount, updateEvent, updateMerch, updatePatron
 } from "./speakeasy.js";
+import {
+  createEventRsvp, deleteEventRsvp, eventRsvpPayload, updateEventRsvp
+} from "./event-rsvps.js";
+import { notifyOwnersOfWebsiteRsvp } from "./rsvp-notification.js";
 import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
 import { acceptGuestMessage, relevantPageUrl, vaultLinkFromRequest } from "./message-notification.js";
 import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
@@ -2027,6 +2031,74 @@ app.delete<{ Params: { id: string } }>("/api/events/:id", { schema: { tags: ["Ev
   if (!deleteEvent(Number(request.params.id))) return reply.code(404).send({ error: "Event not found" });
   return reply.code(204).send();
 });
+
+app.get<{ Params: { id: string } }>("/api/events/:id/rsvps", {
+  schema: { tags: ["Events"], summary: "Keeper RSVP list for one event" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return eventRsvpPayload(Number(request.params.id));
+  } catch (error) {
+    return speakeasyFail(reply, error, "Could not load RSVPs");
+  }
+});
+
+app.post<{ Params: { id: string }; Body: Record<string, unknown> }>("/api/events/:id/rsvps", {
+  schema: { tags: ["Events"], summary: "RSVP to an event (guest website or Keeper manual entry)" }
+}, async (request, reply) => {
+  const admin = isAdmin(request.headers.authorization);
+  const eventId = Number(request.params.id);
+  try {
+    const rsvp = createEventRsvp(eventId, request.body ?? {}, admin ? "keeper" : "guest");
+    if (!admin) {
+      try {
+        const event = getEvent(eventId, false);
+        await notifyOwnersOfWebsiteRsvp(event, rsvp, {
+          logger: {
+            info: (fields, message) => request.log.info(fields, message),
+            warn: (fields, message) => request.log.warn(fields, message),
+            error: (fields, message) => request.log.error(fields, message)
+          }
+        });
+      } catch (error) {
+        request.log.error({ err: error, eventId, rsvpId: rsvp.id }, "Website RSVP email notification failed");
+      }
+    }
+    if (admin) return reply.code(201).send(rsvp);
+    return reply.code(201).send({ ok: true, id: rsvp.id });
+  } catch (error) {
+    return speakeasyFail(reply, error, "Could not save that RSVP");
+  }
+});
+
+app.put<{ Params: { eventId: string; rsvpId: string }; Body: Record<string, unknown> }>(
+  "/api/events/:eventId/rsvps/:rsvpId",
+  { schema: { tags: ["Events"], summary: "Update an RSVP" } },
+  async (request, reply) => {
+    if (requireAdmin(request, reply)) return;
+    try {
+      return updateEventRsvp(Number(request.params.eventId), Number(request.params.rsvpId), request.body ?? {});
+    } catch (error) {
+      return speakeasyFail(reply, error, "Could not update that RSVP");
+    }
+  }
+);
+
+app.delete<{ Params: { eventId: string; rsvpId: string } }>(
+  "/api/events/:eventId/rsvps/:rsvpId",
+  { schema: { tags: ["Events"], summary: "Delete an RSVP" } },
+  async (request, reply) => {
+    if (requireAdmin(request, reply)) return;
+    try {
+      if (!deleteEventRsvp(Number(request.params.eventId), Number(request.params.rsvpId))) {
+        return reply.code(404).send({ error: "RSVP not found" });
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      return speakeasyFail(reply, error, "Could not remove that RSVP");
+    }
+  }
+);
 
 app.get("/api/event-subscribers", { schema: { tags: ["Events"], summary: "Party invite list" } }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;

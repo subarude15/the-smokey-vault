@@ -167,6 +167,25 @@ CREATE TABLE IF NOT EXISTS event_subscribers (
   notes TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS event_rsvps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  contact_info TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL CHECK(status IN ('going', 'maybe', 'declined')),
+  party_size INTEGER NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'website' CHECK(source IN ('website', 'facebook', 'text', 'phone', 'other')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+  CHECK (
+    (status = 'declined' AND party_size = 0) OR
+    (status IN ('going', 'maybe') AND party_size >= 1)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_event_rsvps_event ON event_rsvps(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_rsvps_event_status ON event_rsvps(event_id, status);
 CREATE TABLE IF NOT EXISTS merch_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
