@@ -5,7 +5,7 @@ Last updated: 2026-10-04
 ## Current position
 
 Most recently ready for review:
-- Per-event RSVP tracker. Dedicated `event_rsvps` table (not `event_subscribers`). Guests RSVP Going / Maybe / Can't make it on a published upcoming event detail page. Keeper Mode manages the full list (including Facebook/text/phone manual entries), summary counts, and CSV export. Website RSVPs email `MESSAGE_NOTIFICATION_EMAILS` when SMTP is configured; mail failure does not reject the RSVP. Invite List / Get the invite is unchanged.
+- Per-event RSVP tracker. Dedicated `event_rsvps` table (not `event_subscribers`). Guests RSVP Going / Maybe / Can't make it on a published upcoming event detail page. Same-day RSVP stays open through the America/New_York civil date (not the Docker/host timezone). Keeper Mode manages the full list (including Facebook/text/phone manual entries), summary counts, and CSV export. Website RSVPs email `MESSAGE_NOTIFICATION_EMAILS` when SMTP is configured; mail failure does not reject the RSVP. Invite List / Get the invite is unchanged.
 
 Previously ready, not yet the latest slice:
 - Guest contact confirmation copy. After send, `ContactModal` says the smoke signals are on their way (no Discord wording for guests). Keeper Discord alert behavior is unchanged.

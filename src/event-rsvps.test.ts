@@ -17,6 +17,7 @@ const { db } = await import("./db.js");
 const { createEvent, createEventSubscriber, deleteEvent, listEventSubscribers } = await import("./speakeasy.js");
 const { createEventRsvp, eventRsvpPayload, summarizeEventRsvps } = await import("./event-rsvps.js");
 const { setGuestMessageMailTransportForTests } = await import("./message-notification.js");
+const { civilDateInTimeZone, isUpcomingEventDate } = await import("./event-calendar.js");
 const { buildRsvpsCsv, formatRsvpSummary } = await import("../client/src/event-rsvps.ts");
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -202,6 +203,82 @@ test("RSVP records stay isolated by event", async () => {
   createEventRsvp(tasting.id, { name: "Only Tasting", status: "maybe" }, "keeper");
   assert.deepEqual(eventRsvpPayload(bash.id).rsvps.map((row) => row.name), ["Only Bash"]);
   assert.deepEqual(eventRsvpPayload(tasting.id).rsvps.map((row) => row.name), ["Only Tasting"]);
+});
+
+function shiftYmd(ymd: string, days: number): string {
+  const [year, month, day] = ymd.split("-").map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day + days));
+  return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** Models a UTC container treating YYYY-MM-DD as ending at 23:59:59.999 UTC. */
+function utcContainerWouldClose(ymd: string, now: Date): boolean {
+  const [year, month, day] = ymd.split("-").map(Number);
+  return now.getTime() > Date.UTC(year, month - 1, day, 23, 59, 59, 999);
+}
+
+test("guest RSVP stays open through the Eastern calendar day even when UTC would have closed it", () => {
+  cleanup();
+  const lateEasternSummer = new Date("2026-07-05T03:30:00.000Z");
+  assert.equal(utcContainerWouldClose("2026-07-04", lateEasternSummer), true);
+  assert.equal(isUpcomingEventDate("2026-07-04", lateEasternSummer), true);
+
+  const event = createEvent({ title: "Fireworks", event_date: "2026-07-04", is_published: 1 });
+  const rsvp = createEventRsvp(
+    event.id,
+    { name: "Late", status: "going" },
+    "guest",
+    lateEasternSummer
+  );
+  assert.equal(rsvp.name, "Late");
+
+  const easternMidnight = new Date("2026-07-05T04:00:00.000Z");
+  assert.throws(
+    () => createEventRsvp(event.id, { name: "After midnight", status: "going" }, "guest", easternMidnight),
+    (err: unknown) => err instanceof Error && /already happened/i.test(err.message)
+  );
+
+  const lateEasternWinter = new Date("2026-12-06T03:30:00.000Z");
+  assert.equal(utcContainerWouldClose("2026-12-05", lateEasternWinter), true);
+  const winter = createEvent({ title: "Winter", event_date: "2026-12-05", is_published: 1 });
+  assert.equal(
+    createEventRsvp(winter.id, { name: "Still going", status: "maybe" }, "guest", lateEasternWinter).status,
+    "maybe"
+  );
+});
+
+test("guest RSVP day boundary follows America/New_York, not the process timezone", async () => {
+  cleanup();
+  const today = civilDateInTimeZone(new Date());
+  const yesterday = shiftYmd(today, -1);
+  const tomorrow = shiftYmd(today, 1);
+
+  const todayEvent = createEvent({ title: "Tonight", event_date: today, is_published: 1 });
+  const yesterdayEvent = createEvent({ title: "Last night", event_date: yesterday, is_published: 1 });
+  const tomorrowEvent = createEvent({ title: "Tomorrow", event_date: tomorrow, is_published: 1 });
+
+  const todayRes = await app.inject({
+    method: "POST",
+    url: `/api/events/${todayEvent.id}/rsvps`,
+    payload: { name: "Today Guest", status: "going" }
+  });
+  assert.equal(todayRes.statusCode, 201);
+
+  const yesterdayRes = await app.inject({
+    method: "POST",
+    url: `/api/events/${yesterdayEvent.id}/rsvps`,
+    payload: { name: "Too Late", status: "going" }
+  });
+  assert.equal(yesterdayRes.statusCode, 400);
+  assert.match(yesterdayRes.json().error, /already happened/i);
+  assert.equal(eventRsvpPayload(yesterdayEvent.id).rsvps.length, 0);
+
+  const tomorrowRes = await app.inject({
+    method: "POST",
+    url: `/api/events/${tomorrowEvent.id}/rsvps`,
+    payload: { name: "Early Bird", status: "maybe" }
+  });
+  assert.equal(tomorrowRes.statusCode, 201);
 });
 
 test("guest cannot RSVP to a past event; Keeper can still view history", async () => {

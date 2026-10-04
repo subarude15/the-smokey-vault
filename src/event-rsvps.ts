@@ -13,34 +13,13 @@ import {
   type RsvpSource,
   type RsvpStatus
 } from "./speakeasy-shared.js";
+import { isUpcomingEventDate } from "./event-calendar.js";
 import { getEvent, SpeakeasyError } from "./speakeasy.js";
 
 const RSVP_COLUMNS =
   "id, event_id, name, contact_info, status, party_size, notes, source, created_at, updated_at";
 
 export type RsvpActor = "guest" | "keeper";
-
-const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})/;
-
-/** ponytail: same civil-day rule as client/src/event-date.ts; share the helper if a third caller appears. */
-function isUpcomingEventDate(raw: string, now = new Date()): boolean {
-  const match = YMD_RE.exec(String(raw ?? "").trim());
-  if (match) {
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const local = new Date(year, month - 1, day, 23, 59, 59, 999);
-    if (
-      local.getFullYear() === year &&
-      local.getMonth() === month - 1 &&
-      local.getDate() === day
-    ) {
-      return local.getTime() >= now.getTime();
-    }
-  }
-  const stamp = Date.parse(String(raw ?? "").trim());
-  return !Number.isFinite(stamp) || stamp >= now.getTime() - 86_400_000;
-}
 
 function isRsvpStatus(value: string): value is RsvpStatus {
   return (RSVP_STATUSES as readonly string[]).includes(value);
@@ -115,9 +94,9 @@ export function eventRsvpPayload(eventId: number): { rsvps: EventRsvp[]; summary
   return { rsvps, summary: summarizeEventRsvps(rsvps) };
 }
 
-function assertGuestMayRsvp(eventId: number): void {
+function assertGuestMayRsvp(eventId: number, now?: Date): void {
   const event = getEvent(eventId, false);
-  if (!isUpcomingEventDate(event.event_date)) {
+  if (!isUpcomingEventDate(event.event_date, now)) {
     throw new SpeakeasyError("This event has already happened. RSVPs are closed.");
   }
 }
@@ -125,9 +104,10 @@ function assertGuestMayRsvp(eventId: number): void {
 export function createEventRsvp(
   eventId: number,
   input: Record<string, unknown>,
-  actor: RsvpActor
+  actor: RsvpActor,
+  now?: Date
 ): EventRsvp {
-  if (actor === "guest") assertGuestMayRsvp(eventId);
+  if (actor === "guest") assertGuestMayRsvp(eventId, now);
   else getEvent(eventId, true);
 
   const name = clipText(input.name, MAX_PATRON_NAME);
