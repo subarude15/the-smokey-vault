@@ -79,7 +79,7 @@ export function EventSubscriberList({
               : `${subscribers.length} people on the list`}
           </h2>
           <p className="subscriber-panel-lede">
-            Guests who asked for party and event updates. Separate from inbox messages.
+            Guests who asked for future party updates — not RSVPs for a specific event. Separate from inbox messages.
           </p>
         </div>
       </div>

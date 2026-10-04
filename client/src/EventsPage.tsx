@@ -5,6 +5,8 @@ import { MAX_CONTACT_INFO, MAX_PATRON_NAME, type EventSubscriber, type HouseEven
 import { EventDetail } from "./EventDetail";
 import { emptyEventDraft, EventEditor, eventToEditorValues, type EventEditorValues } from "./EventEditor";
 import { EventImageMedia } from "./EventImageMedia";
+import { EventRsvpForm } from "./EventRsvpForm";
+import { EventRsvpKeeper } from "./EventRsvpKeeper";
 import { EventSubscriberList } from "./EventSubscriberList";
 import {
   buildEventDeepLink,
@@ -21,7 +23,7 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
   const [subscriberError, setSubscriberError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [rsvp, setRsvp] = useState({ name: "", contact_info: "", notes: "" });
+  const [inviteSignup, setInviteSignup] = useState({ name: "", contact_info: "", notes: "" });
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(() =>
     parseEventIdFromSearch(typeof window !== "undefined" ? window.location.search : "")
@@ -272,8 +274,8 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
   async function subscribe() {
     setBusy(true);
     try {
-      await api("/event-subscribers", { method: "POST", body: JSON.stringify(rsvp) });
-      setRsvp({ name: "", contact_info: "", notes: "" });
+      await api("/event-subscribers", { method: "POST", body: JSON.stringify(inviteSignup) });
+      setInviteSignup({ name: "", contact_info: "", notes: "" });
       setNotice("You are on the list. Watch for an invite.");
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not add you to the list");
@@ -419,6 +421,8 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
           onShare={() => void shareEvent(selectedEvent)}
           onCopyLink={() => void shareEvent(selectedEvent, true)}
         />
+        {!admin ? <EventRsvpForm event={selectedEvent} /> : null}
+        {admin ? <EventRsvpKeeper event={selectedEvent} onNotice={setNotice} /> : null}
         {notice && <div className="toast">{notice}</div>}
       </>
     );
@@ -431,7 +435,7 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
       <p>
         {admin
           ? "Publish an event and it shows up on every guest device."
-          : `Join the list and ${keeperName} will send you the address and details.`}
+          : `RSVP on an event page, or join the invite list so ${keeperName} can send future party details.`}
       </p>
     </div>
 
@@ -480,35 +484,37 @@ export function EventsPage({ admin, keeperName }: { admin: boolean; keeperName: 
       <section className="settings-card rsvp-card">
         <span className="eyebrow">PARTY LIST</span>
         <h3>Get the invite</h3>
-        <p>We will text or email you the address and the plan for the next bash.</p>
+        <p>
+          Tell us about future events — not a reply to one night. Open an upcoming event to RSVP Going, Maybe, or Can&apos;t make it.
+        </p>
         <label>
           <span>Name</span>
           <input
-            value={rsvp.name}
+            value={inviteSignup.name}
             maxLength={MAX_PATRON_NAME}
-            onChange={(e) => setRsvp({ ...rsvp, name: e.target.value })}
+            onChange={(e) => setInviteSignup({ ...inviteSignup, name: e.target.value })}
           />
         </label>
         <label>
           <span>Phone or email</span>
           <input
-            value={rsvp.contact_info}
+            value={inviteSignup.contact_info}
             maxLength={MAX_CONTACT_INFO}
-            onChange={(e) => setRsvp({ ...rsvp, contact_info: e.target.value })}
+            onChange={(e) => setInviteSignup({ ...inviteSignup, contact_info: e.target.value })}
           />
         </label>
         <label>
           <span>Anything we should know?</span>
           <textarea
-            value={rsvp.notes}
-            onChange={(e) => setRsvp({ ...rsvp, notes: e.target.value })}
+            value={inviteSignup.notes}
+            onChange={(e) => setInviteSignup({ ...inviteSignup, notes: e.target.value })}
             placeholder="Plus one, dietary notes, favorite pour…"
           />
         </label>
         <button
           type="button"
           className="primary"
-          disabled={busy || !rsvp.name.trim() || !rsvp.contact_info.trim()}
+          disabled={busy || !inviteSignup.name.trim() || !inviteSignup.contact_info.trim()}
           onClick={() => void subscribe()}
         >
           Add me to the list

@@ -210,43 +210,54 @@ function resolveTransport(env: NodeJS.ProcessEnv, explicit: MailTransport | null
 }
 
 /**
+ * Sends owner mail over the shared SMTP path. Never throws: failures are logged.
+ * No recipients (feature off) is silent. Recipients without SMTP are a warning.
+ */
+export async function deliverOwnerMail(
+  mail: Omit<OutboundMail, "to">,
+  deps: NotifyDeps = {},
+  log: { context?: Record<string, unknown>; sent: string; failed: string; skippedSmtp: string }
+): Promise<NotifyOutcome> {
+  const env = deps.env ?? process.env;
+  const recipients = parseNotificationEmails(env.MESSAGE_NOTIFICATION_EMAILS);
+  if (recipients.length === 0) return { status: "skipped", reason: "no_recipients" };
+
+  const transport = resolveTransport(env, deps.transport);
+  const context = { ...log.context, recipients: recipients.length };
+  if (!transport) {
+    deps.logger?.warn(context, log.skippedSmtp);
+    return { status: "skipped", reason: "smtp_unconfigured" };
+  }
+
+  // Redact even when host/from are missing, so a thrown client error cannot echo SMTP_PASS into logs.
+  const secret = (env.SMTP_PASS ?? "").replace(/[\r\n]/g, "");
+  try {
+    await transport.send({ ...mail, to: recipients });
+    deps.logger?.info(context, log.sent);
+    return { status: "sent", recipients };
+  } catch (error) {
+    const safe = redactSecret(errorText(error), secret);
+    deps.logger?.error({ ...context, error: safe }, log.failed);
+    return { status: "failed", recipients, error: safe };
+  }
+}
+
+/**
  * Sends the owner notification. Never throws: a provider failure is logged and returned.
  * No recipients (feature off) is silent. Recipients without SMTP are a warning.
  */
 export async function notifyOwnersOfGuestMessage(message: GuestMessageNotice, deps: NotifyDeps = {}): Promise<NotifyOutcome> {
-  const env = deps.env ?? process.env;
-  const recipients = parseNotificationEmails(env.MESSAGE_NOTIFICATION_EMAILS);
-  const messageId = message.id;
-  if (recipients.length === 0) return { status: "skipped", reason: "no_recipients" };
-
-  const transport = resolveTransport(env, deps.transport);
-  if (!transport) {
-    deps.logger?.warn(
-      { messageId, recipients: recipients.length },
-      "Guest message email notification skipped: SMTP is not configured"
-    );
-    return { status: "skipped", reason: "smtp_unconfigured" };
-  }
-
   const built = buildGuestMessageMail({
     ...message,
     pageUrl: deps.pageUrl,
     vaultUrl: deps.vaultUrl
   });
-  // Redact even when host/from are missing, so a thrown client error cannot echo SMTP_PASS into logs.
-  const secret = (env.SMTP_PASS ?? "").replace(/[\r\n]/g, "");
-  try {
-    await transport.send({ ...built, to: recipients });
-    deps.logger?.info({ messageId, recipients: recipients.length }, "Emailed guest message notification");
-    return { status: "sent", recipients };
-  } catch (error) {
-    const safe = redactSecret(errorText(error), secret);
-    deps.logger?.error(
-      { messageId, recipients: recipients.length, error: safe },
-      "Guest message email notification failed"
-    );
-    return { status: "failed", recipients, error: safe };
-  }
+  return deliverOwnerMail(built, deps, {
+    context: { messageId: message.id },
+    sent: "Emailed guest message notification",
+    failed: "Guest message email notification failed",
+    skippedSmtp: "Guest message email notification skipped: SMTP is not configured"
+  });
 }
 
 /**

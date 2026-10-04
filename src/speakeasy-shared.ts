@@ -119,6 +119,11 @@ export const MAX_PATRON_NAME = 60;
 export const MAX_PATRON_NICKNAME = 40;
 export const MAX_MESSAGE_BODY = 2000;
 export const MAX_CONTACT_INFO = 200;
+export const MAX_RSVP_PARTY_SIZE = 50;
+export const RSVP_STATUSES = ["going", "maybe", "declined"] as const;
+export type RsvpStatus = (typeof RSVP_STATUSES)[number];
+export const RSVP_SOURCES = ["website", "facebook", "text", "phone", "other"] as const;
+export type RsvpSource = (typeof RSVP_SOURCES)[number];
 export const MAX_STAFF_NAME = 80;
 export const MAX_STAFF_ROLE = 60;
 export const MAX_STAFF_BIO = 600;
@@ -251,6 +256,26 @@ export type EventSubscriber = {
   contact_info: string;
   notes: string;
   created_at: string;
+};
+
+export type EventRsvp = {
+  id: number;
+  event_id: number;
+  name: string;
+  contact_info: string;
+  status: RsvpStatus;
+  party_size: number;
+  notes: string;
+  source: RsvpSource;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventRsvpSummary = {
+  going: number;
+  maybe: number;
+  declined: number;
+  expected_guests: number;
 };
 
 export type MerchItem = {

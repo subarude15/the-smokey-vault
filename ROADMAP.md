@@ -9,6 +9,7 @@ The Smokey Vault is a private, self-hosted home-bar appliance for a LAN kiosk an
 - Inventory: spirits (Bottle Library), wine cellar, packaged beer, draft taps, and homebrew log
 - Guest Mode: digital bar menu / speakeasy portal (cocktails, patrons, events, tip jar, merch, staff, gallery, messages) with no public internet exposure and no payments
 - Guest messages stay in SQLite. When `MESSAGE_NOTIFICATION_EMAILS` and SMTP are set, the server also emails those owners on a successful submit. Mail failure does not reject the message. Discord's unanswered alert stays as it is.
+- Events: guests can RSVP on a published upcoming event; Keepers track the complete per-event guest list (website + manual Facebook/text/phone/other). The general Invite List (`event_subscribers`) remains “tell me about future events.”
 - Keeper Mode: PIN unlock for scanning, enrichment, import review, restock, settings, and safe per-item deletion
 - Cocktail matcher, substitutions, and optional AI mixologist
 - Brewery Lab with optional Brewfather sync
@@ -253,9 +254,10 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/overview.ts` / `src/overview.test.ts` — Overview snapshot and hero-copy behavior; PR150 should keep the response contract and remove redundant presentation, not add a second count source.
 - `client/src/catalog.ts` / `client/src/BottlePublicContent.tsx` — existing inventory field definitions and public bottle presentation; PR151–PR152 must preserve `flavors`, `tasting_notes`, and Keeper-authored `tags` as distinct source fields.
 - `client/src/theme.ts` — Light/Dark theme presets, obsolete-value fallback, and cycle helpers.
-- `client/src/EventsPage.tsx` — guest Events UI, signup form, and Keeper Invite List wiring.
+- `client/src/EventsPage.tsx` — guest Events UI, Get the invite signup, per-event RSVP form/Keeper dashboard, and Invite List wiring.
 - `client/src/EventEditor.tsx` / `EventImageAdjuster.tsx` / `EventImageMedia.tsx` / `src/event-image-framing.ts` — PR140 event photo framing (draft Adjust photo; CSS focal/zoom; non-destructive).
 - `client/src/EventDetail.tsx` — guest/Keeper event detail hero with shared framing.
+- `client/src/EventRsvpForm.tsx` / `EventRsvpKeeper.tsx` / `client/src/event-rsvps.ts` — per-event RSVP guest form, Keeper list/summary/CSV helpers.
 - `client/src/EventSubscriberList.tsx` — Keeper-only invite list management (search, remove, export, copy).
 - `client/src/event-subscribers.ts` — pure invite-list helpers (contact href, filter, CSV, copy).
 - `client/src/GalleryPage.tsx` — guest/Keeper gallery album browsing, grid, lightbox, and multi-select batch upload UI.
@@ -266,14 +268,16 @@ These are explicitly desired near-term product improvements based on real househ
 - `client/src/BottlePublicContent.tsx` — shared bottle facts and guest-facing content.
 - `src/brewfather.ts` — one-way Brewfather sync; must not overwrite Keeper presentation fields/images.
 - `src/speakeasy.ts` — event CRUD, event subscribers, messages, and guest-safe published-event detail access.
-- `src/speakeasy-shared.ts` — event/gallery types and shared constraints.
+- `src/event-rsvps.ts` — per-event RSVP validation, persistence, and summary counts (`event_rsvps`).
+- `src/rsvp-notification.ts` — website RSVP owner email via the shared SMTP helper in `message-notification.ts`.
+- `src/speakeasy-shared.ts` — event/gallery/RSVP types and shared constraints.
 - `src/gallery.ts` — gallery album/media persistence, upload validation, movement, and safe deletion behavior. One shared temp-file persistence core backs both the small buffer path (`saveGalleryUpload`) and the streamed large-video path (`saveGalleryUploadFromStream`); PR144 keeper videos stream to `galleryDir/tmp` and finalize with an atomic rename.
 - `src/speakeasy-shared.ts` — Gallery limit source of truth: `GUEST_GALLERY_MAX_BYTES`, `resolveKeeperGalleryMaxBytes` (bounded `KEEPER_GALLERY_MAX_VIDEO_MB` parsing), `formatGalleryLimit`, and `galleryOversizeMessage`.
 - `src/guest-inventory-response.ts` — Guest inventory allowlists and forbidden keys.
 - `client/src/EnrichmentPanel.tsx` — enrichment status, missing fields, provenance, conflicts, and diagnostics.
 - `client/src/CommercialTapEnrichmentPanel.tsx` — Keeper “Find beer details” action for commercial taps.
 - `src/commercial_tap_enrichment.ts` — commercial tap identity/image enrichment (reuses official beer discovery).
-- `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, event subscribers, and authorization boundaries.
+- `src/server.ts` — inventory/API routes, cocktail recipe import/image localization, gallery routes, events, event RSVPs, event subscribers, and authorization boundaries.
 - `src/cocktails.ts` — cocktail matching/recipe behavior; cocktail rows already support `image_url`.
 - `client/src/cocktail-instructions.ts` — cocktail method parsing plus PR145 deterministic step generation (`resolveCocktailInstructions` / `buildCocktailSteps`) for built-in recipes; rendered by `CocktailRecipeInstructions`.
 - `src/cocktail_image.ts` — safe fill-missing cocktail image discovery (`findCocktailImage`) and the PR145 bounded boot `backfillMissingCocktailImages`; PR154 should preserve its safety boundaries while improving alias/near-match verification and Keeper no-result diagnostics.
