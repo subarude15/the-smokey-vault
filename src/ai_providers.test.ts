@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAiFailoverChain, defaultAiModel, isRetryableAiStatus, resolveAiModel, type AiProviderConfig } from "./ai_providers.js";
+import {
+  buildAiFailoverChain,
+  defaultAiModel,
+  isRetryableAiStatus,
+  resolveAiModel,
+  type AiProviderConfig
+} from "./ai_providers.js";
 
 const gemini: AiProviderConfig = {
   provider: "gemini",
@@ -9,47 +15,74 @@ const gemini: AiProviderConfig = {
   model: "gemini-3.6-flash"
 };
 
-test("only providers holding an environment key join the chain", () => {
-  const chain = buildAiFailoverChain(gemini, { OPENAI_API_KEY: "openai-key", ANTHROPIC_API_KEY: "anthropic-key" });
-  assert.deepEqual(chain.map((config) => config.provider), ["gemini", "anthropic", "openai"]);
-});
+const ollama: AiProviderConfig = {
+  provider: "ollama",
+  key: "",
+  baseUrl: "http://localhost:11434",
+  model: "gemma4"
+};
 
-test("the chain follows gemini, openrouter, anthropic, then openai if a key is present", () => {
-  const openai: AiProviderConfig = { provider: "openai", key: "k", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" };
-  const chain = buildAiFailoverChain(openai, {
-    ANTHROPIC_API_KEY: "a",
-    OPENROUTER_API_KEY: "b",
-    GEMINI_API_KEY: "c"
+test("blank AI_FALLBACK_PROVIDER is primary-only even when other API keys exist", () => {
+  const chain = buildAiFailoverChain(ollama, {
+    GEMINI_API_KEY: "gemini-key",
+    OPENAI_API_KEY: "openai-key",
+    OPENROUTER_API_KEY: "router-key",
+    ANTHROPIC_API_KEY: "anthropic-key"
   });
-  assert.deepEqual(chain.map((config) => config.provider), ["openai", "gemini", "openrouter", "anthropic"]);
+  assert.deepEqual(chain.map((config) => config.provider), ["ollama"]);
 });
 
-test("the primary provider is never queued twice, even holding its own env key", () => {
-  const chain = buildAiFailoverChain(gemini, { GEMINI_API_KEY: "primary-key", OPENAI_API_KEY: "openai-key" });
-  assert.deepEqual(chain.map((config) => config.provider), ["gemini", "openai"]);
+test("whitespace AI_FALLBACK_PROVIDER is primary-only", () => {
+  const chain = buildAiFailoverChain(ollama, {
+    AI_FALLBACK_PROVIDER: "  ",
+    GEMINI_API_KEY: "gemini-key",
+    OPENAI_API_KEY: "openai-key"
+  });
+  assert.deepEqual(chain.map((config) => config.provider), ["ollama"]);
 });
 
-test("a lone provider with no other keys yields a chain of one", () => {
-  assert.deepEqual(buildAiFailoverChain(gemini, {}).map((config) => config.provider), ["gemini"]);
+test("AI_FALLBACK_PROVIDER=gemini builds exactly [primary, gemini]", () => {
+  const chain = buildAiFailoverChain(ollama, {
+    AI_FALLBACK_PROVIDER: "gemini",
+    GEMINI_API_KEY: "gemini-key",
+    OPENAI_API_KEY: "openai-should-not-join",
+    GEMINI_MODEL: "gemini-3.6-flash"
+  });
+  assert.deepEqual(chain.map((config) => config.provider), ["ollama", "gemini"]);
+  assert.equal(chain[1].model, "gemini-3.6-flash");
+  assert.equal(chain[1].key, "gemini-key");
 });
 
-test("blank and whitespace-only keys are ignored", () => {
-  const chain = buildAiFailoverChain(gemini, { OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "   " });
+test("AI_FALLBACK_PROVIDER without a key yields primary only", () => {
+  const chain = buildAiFailoverChain(ollama, { AI_FALLBACK_PROVIDER: "gemini" });
+  assert.deepEqual(chain.map((config) => config.provider), ["ollama"]);
+});
+
+test("AI_FALLBACK_PROVIDER matching primary yields primary only", () => {
+  const chain = buildAiFailoverChain(gemini, {
+    AI_FALLBACK_PROVIDER: "gemini",
+    GEMINI_API_KEY: "gemini-key",
+    OPENAI_API_KEY: "openai-key"
+  });
   assert.deepEqual(chain.map((config) => config.provider), ["gemini"]);
 });
 
 test("a fallback carries its own model, not the primary's", () => {
-  const chain = buildAiFailoverChain(gemini, { OPENAI_API_KEY: "openai-key" });
-  assert.equal(chain[1].model, defaultAiModel("openai"));
-  assert.notEqual(chain[1].model, gemini.model, "handing a Gemini model to OpenAI would just fail again");
-  assert.equal(chain[1].baseUrl, "https://api.openai.com/v1");
-  assert.equal(chain[1].key, "openai-key");
+  const chain = buildAiFailoverChain(
+    { ...ollama, model: "gemma4" },
+    { AI_FALLBACK_PROVIDER: "gemini", GEMINI_API_KEY: "gemini-key" }
+  );
+  assert.equal(chain[1].model, defaultAiModel("gemini"));
+  assert.notEqual(chain[1].model, "gemma4");
+  assert.equal(chain[1].baseUrl, "https://generativelanguage.googleapis.com/v1beta");
 });
 
-test("a stalled Ollama box fails over to a cloud key", () => {
-  const ollama: AiProviderConfig = { provider: "ollama", key: "", baseUrl: "http://localhost:11434", model: "llama3.2" };
-  const chain = buildAiFailoverChain(ollama, { GEMINI_API_KEY: "gemini-key" });
-  assert.deepEqual(chain.map((config) => config.provider), ["ollama", "gemini"]);
+test("lone primary with no fallback env yields a chain of one", () => {
+  assert.deepEqual(buildAiFailoverChain(gemini, {}).map((config) => config.provider), ["gemini"]);
+});
+
+test("default Ollama chat model is gemma4", () => {
+  assert.equal(defaultAiModel("ollama"), "gemma4");
 });
 
 test("rate limits, timeouts, and upstream faults are retryable", () => {
@@ -60,24 +93,15 @@ test("rate limits, timeouts, and upstream faults are retryable", () => {
   assert.equal(isRetryableAiStatus(503), true);
 });
 
-test("a retired model name moves on to the next provider", () => {
+test("a retired model name is retryable for fallback", () => {
   assert.equal(isRetryableAiStatus(404), true);
 });
 
-test("a rejected key or a bad request stops the walk", () => {
+test("a rejected key or a bad request does not fallback", () => {
   assert.equal(isRetryableAiStatus(400), false);
   assert.equal(isRetryableAiStatus(401), false);
   assert.equal(isRetryableAiStatus(403), false);
   assert.equal(isRetryableAiStatus(422), false);
-});
-
-test("OpenRouter is the first failover, and OpenAI is last and only with a key", () => {
-  const chain = buildAiFailoverChain(gemini, {
-    OPENROUTER_API_KEY: "router-key",
-    ANTHROPIC_API_KEY: "anthropic-key",
-    OPENAI_API_KEY: "openai-key"
-  });
-  assert.deepEqual(chain.map((config) => config.provider), ["gemini", "openrouter", "anthropic", "openai"]);
 });
 
 test("retired Gemini model names fall back to the current Flash alias", () => {

@@ -85,6 +85,10 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 Shared frontend elevation + motion language is implemented (`client/src/depth-motion.css`): Depth 0–4 surface/elevation tokens with clear resting card float (contact + ambient shadow, edge highlight, restrained warm bounce-light), fine-pointer hover lift (~8–9px + ~1.012–1.015 scale into Depth 3), Depth-4 overlays (modal/More/lightbox), touch press scale, brief page/grid enters, layered homepage hero reveal, CSS sticky homepage hero underlap (content scrolls over the hero with a soft leading scrim; no parallax / no scroll listeners), and `prefers-reduced-motion` (movement off, static elevation kept). No backend/schema/API changes; Guest redaction unchanged; Smokey Barrel brand art preserved as separate vectors.
 
+### Recently completed (uncommitted) — Optional Ollama → Gemini AI fallback
+
+`callLlm` is centralized in `src/ai_client.ts`. Primary defaults favor Ollama + `gemma4`. Set `AI_FALLBACK_PROVIDER=gemini` (plus `GEMINI_API_KEY`) for a single automatic fallback after primary failure; blank uses the primary only (no implicit multi-key chain). Structured callers may pass `validate` so unusable JSON retries the fallback. Keepers see primary/fallback + Ollama reachability on enrichment health without probing Gemini.
+
 ### Upcoming — Hybrid barcode + AI label scanner
 
 The next concrete product track is a three-PR scanner improvement. Keep deterministic barcode decoding as the fast path and use multimodal AI only as label evidence/fallback. PR161 is an unrelated tooling PR, so scanner work begins at PR162.
