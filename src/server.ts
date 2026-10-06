@@ -28,10 +28,12 @@ import {
   type BottleSearchHit
 } from "./lookup.js";
 import {
-  assembleVisionLabelResult,
-  identifyByBarcode,
-  identifyByLocalLabelImage
+  identifyByBarcode
 } from "./ingestion/bottle-orchestrator.js";
+import {
+  identifyFromLabelImageBuffer,
+  validateVisionLabelText
+} from "./scan_label_pipeline.js";
 import {
   attachInventoryDisplayFlavors,
   attachInventoryDisplayImageUrl,
@@ -133,8 +135,6 @@ import {
   resolveCocktailImageSelection
 } from "./cocktail_image.js";
 import { getBuildInfo } from "./build-info.js";
-import { parseVisionLabel, VISION_LABEL_PROMPT } from "./vision_label.js";
-import { downscaleVisionImage } from "./vision_image.js";
 import { createReview, deleteReview, listReviews, REVIEW_TABLES } from "./reviews.js";
 import { addNextRequest, deleteNextRequest, listNextBoards, voteNextRequest } from "./requests.js";
 import { castVote, getVoteTally, summarizeVotes, voteTallies, VOTE_TABLES } from "./votes.js";
@@ -1303,16 +1303,37 @@ app.get<{ Params: { code: string }; Querystring: { enrich?: string; refresh?: st
 );
 
 app.post<{ Body: { image?: string; imageBase64?: string; base64Image?: string } }>("/api/scan/label", {
-  schema: { tags: ["Lookup"], summary: "Read a base64 product label image with local Ollama vision" }
+  schema: { tags: ["Lookup"], summary: "Barcode-first label scan (exact lookup, then dedicated vision)" }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   const image = String(request.body?.image ?? request.body?.imageBase64 ?? request.body?.base64Image ?? "").trim();
   if (!image) return reply.code(400).send({ error: "Base64 image required" });
   try {
-    return await identifyByLocalLabelImage(image);
+    const raw = image.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "");
+    const buffer = Buffer.from(raw, "base64");
+    if (!buffer.length) return reply.code(400).send({ error: "Base64 image required" });
+    return await identifyFromLabelImageBuffer(buffer, {
+      saveImage: (buf) => {
+        try {
+          return saveImageBuffer(buf);
+        } catch {
+          return "";
+        }
+      },
+      visionWithCallLlm: (prompt, imageBase64) => callLlm({
+        prompt,
+        image: imageBase64,
+        validate: validateVisionLabelText
+      }),
+      log: (message, fields) => {
+        if (fields) app.log.info(fields, message);
+        else app.log.info(message);
+      }
+    });
   } catch (error) {
-    app.log.error({ error }, "Local Ollama vision-label request failed");
-    return reply.code(502).send({ error: error instanceof Error ? error.message : "Could not read that label" });
+    app.log.error({ error }, "Label scan request failed");
+    const status = error instanceof AiRequestError ? error.statusCode : 502;
+    return reply.code(status).send({ error: error instanceof Error ? error.message : "Could not read that label" });
   }
 });
 
@@ -1742,26 +1763,29 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
   if (!file) return reply.code(400).send({ error: "Image required" });
   try {
     const buffer = await file.toBuffer();
-    const scaled = await downscaleVisionImage(buffer);
-    const parsed = parseVisionLabel(await callLlm({
-      prompt: VISION_LABEL_PROMPT,
-      image: scaled.base64,
-      validate: (raw) => {
-        parseVisionLabel(raw);
+    const labeled = await identifyFromLabelImageBuffer(buffer, {
+      saveImage: (buf) => {
+        try {
+          return saveImageBuffer(buf, file.mimetype, file.filename);
+        } catch {
+          return "";
+        }
+      },
+      visionWithCallLlm: (prompt, imageBase64) => callLlm({
+        prompt,
+        image: imageBase64,
+        validate: validateVisionLabelText
+      }),
+      log: (message, fields) => {
+        if (fields) app.log.info(fields, message);
+        else app.log.info(message);
       }
-    }));
-    let imageUrl = "";
-    try {
-      imageUrl = saveImageBuffer(buffer, file.mimetype, file.filename);
-    } catch {
-      imageUrl = "";
-    }
-    const labeled = await assembleVisionLabelResult(parsed, imageUrl);
+    });
     const params = request.params as { id?: string };
     const query = request.query as { row?: string };
     const queueId = Number(params.id ?? query.row ?? "");
     if (Number.isInteger(queueId) && queueId > 0) {
-      const row = applyLabelToImportRow(queueId, labeled.product, parsed.upc);
+      const row = applyLabelToImportRow(queueId, labeled.product as Record<string, unknown>, labeled.upc);
       if (!row) return reply.code(404).send({ error: "Import row not found" });
       return {
         source: "label" as const,
@@ -1771,7 +1795,11 @@ async function handleVisionLabel(request: FastifyRequest, reply: FastifyReply) {
         product: row.product,
         reason: row.reason,
         message: row.message,
-        suggestions: labeled.suggestions
+        suggestions: labeled.suggestions,
+        identification_method: labeled.identification_method,
+        barcode_detected: labeled.barcode_detected,
+        barcode_format: labeled.barcode_format,
+        barcode_value: labeled.barcode_value
       };
     }
     return labeled;

@@ -1,8 +1,6 @@
 import { type ProductSchema } from "../cola_client.js";
 import { parseProductSchema } from "./normalize.js";
-
-const LOCAL_OLLAMA_BASE_URL = "http://192.168.1.184:11434";
-const LOCAL_OLLAMA_CHAT_URL = `${LOCAL_OLLAMA_BASE_URL}/api/chat`;
+import { ollamaChatUrl, ollamaVisionModel } from "./enrichment/ollama-config.js";
 
 const PRODUCT_JSON_FORMAT = {
   type: "object",
@@ -60,18 +58,29 @@ const PRODUCT_SCHEMA_PROMPT = `Return ONLY valid JSON matching this product sche
 }
 Do not include markdown, prose, or keys outside the schema.`;
 
+const DEFAULT_LABEL_PROMPT =
+  `Read this bottle, can, wine label, or product image and identify the beverage product. ${PRODUCT_SCHEMA_PROMPT}`;
+
 type OllamaChatResponse = {
   message?: { content?: string };
   error?: unknown;
 };
 
+export type LocalOllamaLabelOptions = {
+  /** Override the default product-schema prompt (scan pipeline may pass barcode context). */
+  prompt?: string;
+  /** Override OLLAMA_VISION_MODEL for this call only. */
+  model?: string;
+  timeoutMs?: number;
+};
+
 async function fetchLocalOllamaProduct(options: {
-  model: "llama3.1" | "llama3.2-vision";
+  model: string;
   prompt: string;
   imageBase64?: string;
   timeoutMs?: number;
 }): Promise<ProductSchema> {
-  const response = await fetch(LOCAL_OLLAMA_CHAT_URL, {
+  const response = await fetch(ollamaChatUrl(), {
     method: "POST",
     headers: { "content-type": "application/json" },
     signal: AbortSignal.timeout(options.timeoutMs ?? 60_000),
@@ -101,13 +110,21 @@ async function fetchLocalOllamaProduct(options: {
   return parseProductSchema(data.message?.content ?? "");
 }
 
-export async function labelProductWithLocalOllama(imageBase64: string): Promise<ProductSchema> {
+/**
+ * Dedicated vision-model label read (OLLAMA_VISION_MODEL; deploy with qwen2.5vl:7b).
+ * Does not use AI_MODEL / Gemma — that path is callLlm for general generation.
+ */
+export async function labelProductWithLocalOllama(
+  imageBase64: string,
+  options: LocalOllamaLabelOptions = {}
+): Promise<ProductSchema> {
   const image = imageBase64.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "").trim();
   if (!image) throw new Error("Image required");
   return fetchLocalOllamaProduct({
-    model: "llama3.2-vision",
+    model: options.model || ollamaVisionModel(),
     imageBase64: image,
-    prompt: `Read this bottle, can, wine label, or product image and identify the beverage product. ${PRODUCT_SCHEMA_PROMPT}`
+    prompt: options.prompt?.trim() || DEFAULT_LABEL_PROMPT,
+    timeoutMs: options.timeoutMs
   });
 }
 
