@@ -7,9 +7,6 @@ export type AiProviderConfig = {
 
 type Env = Record<string, string | undefined>;
 
-/** Tried in this order when the configured provider cannot answer. */
-export const AI_FAILOVER_ORDER = ["gemini", "openrouter", "anthropic", "openai"] as const;
-
 const ENV_KEY_BY_PROVIDER: Record<string, string> = {
   gemini: "GEMINI_API_KEY",
   openai: "OPENAI_API_KEY",
@@ -18,7 +15,10 @@ const ENV_KEY_BY_PROVIDER: Record<string, string> = {
 };
 
 export function defaultAiBaseUrl(provider: string, env: Env = process.env) {
-  if (provider === "ollama") return env.OLLAMA_HOST || "http://host.docker.internal:11434";
+  if (provider === "ollama") {
+    // OLLAMA_HOST is the supported name; OLLAMA_BASE_URL is accepted as a compatibility alias.
+    return env.OLLAMA_HOST || env.OLLAMA_BASE_URL || "http://host.docker.internal:11434";
+  }
   if (provider === "anthropic") return "https://api.anthropic.com";
   if (provider === "openrouter") return "https://openrouter.ai/api/v1";
   if (provider === "gemini") return "https://generativelanguage.googleapis.com/v1beta";
@@ -26,10 +26,10 @@ export function defaultAiBaseUrl(provider: string, env: Env = process.env) {
 }
 
 export function defaultAiModel(provider: string) {
-  if (provider === "ollama") return "llama3.2-vision";
+  if (provider === "ollama") return "gemma4";
   if (provider === "anthropic") return "claude-sonnet-4-20250514";
   if (provider === "gemini") return "gemini-3.6-flash";
-  // Free, 1M context, and accepts images, so vision label reads survive a failover.
+  // Free, 1M context, and accepts images, so vision label reads survive a fallback.
   if (provider === "openrouter") return "stealth/ox-alpha";
   return "gpt-4o-mini";
 }
@@ -52,31 +52,50 @@ export function resolveAiModel(provider: string, model: string) {
 }
 
 /**
- * Rate limits, timeouts, and upstream faults are worth asking someone else about.
+ * Provider-specific model env aliases (used when AI_MODEL is blank).
+ * OLLAMA_MODEL / GEMINI_MODEL never override AI_MODEL.
+ */
+export function providerModelFromEnv(provider: string, env: Env = process.env) {
+  if (provider === "ollama") return env.OLLAMA_MODEL?.trim() || "";
+  if (provider === "gemini") return env.GEMINI_MODEL?.trim() || "";
+  return "";
+}
+
+/**
+ * Rate limits, timeouts, and upstream faults are worth asking the configured fallback about.
  * A rejected key or a malformed request would fail the same way everywhere, so those
- * surface immediately instead of burning through every provider.
+ * surface immediately instead of burning another provider.
  *
  * 404 counts as retryable because providers retire model names on their own schedule.
- * A model that vanished here may well exist at the next provider, and stalling the whole
- * chain on a rename is worse than spending one extra request to find out.
  */
 export function isRetryableAiStatus(status: number) {
   return status === 404 || status === 408 || status === 429 || status >= 500;
 }
 
+function keyForProvider(provider: string, env: Env) {
+  const envName = ENV_KEY_BY_PROVIDER[provider];
+  return envName ? env[envName]?.trim() || "" : "";
+}
+
 /**
- * The configured provider first, then every other provider holding an environment key.
- * Fallbacks deliberately use their own default model and endpoint: AI_MODEL and
- * AI_BASE_URL describe the primary provider, and handing a Gemini model name to OpenAI
- * would just fail a second time.
+ * Builds the provider attempt list for callLlm.
+ *
+ * Fallback is explicitly opt-in via AI_FALLBACK_PROVIDER:
+ * - missing / blank / whitespace → primary only (API keys alone never add providers)
+ * - set (e.g. gemini) → [primary, that one] when the fallback has a key (ollama needs none)
+ *
+ * Fallbacks use their own model and endpoint — never the primary's AI_MODEL / AI_BASE_URL.
  */
 export function buildAiFailoverChain(primary: AiProviderConfig, env: Env = process.env): AiProviderConfig[] {
-  const chain = [primary];
-  for (const provider of AI_FAILOVER_ORDER) {
-    if (provider === primary.provider) continue;
-    const key = env[ENV_KEY_BY_PROVIDER[provider]]?.trim();
-    if (!key) continue;
-    chain.push({ provider, key, baseUrl: defaultAiBaseUrl(provider, env), model: defaultAiModel(provider) });
-  }
-  return chain;
+  const explicit = env.AI_FALLBACK_PROVIDER?.trim().toLowerCase() || "";
+  if (!explicit || explicit === primary.provider) return [primary];
+
+  const key = explicit === "ollama" ? "" : keyForProvider(explicit, env);
+  if (explicit !== "ollama" && !key) return [primary];
+
+  const model = resolveAiModel(explicit, providerModelFromEnv(explicit, env) || defaultAiModel(explicit));
+  return [
+    primary,
+    { provider: explicit, key, baseUrl: defaultAiBaseUrl(explicit, env), model }
+  ];
 }

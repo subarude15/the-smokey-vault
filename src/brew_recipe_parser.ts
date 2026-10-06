@@ -117,7 +117,11 @@ function stripSingleJsonFence(raw: string): string {
   return (fenced ? fenced[1] : trimmed).trim();
 }
 
-function brewRecipeFromAiText(raw: string): BrewRecipeDocument {
+/**
+ * Parses/validates a model reply into a BrewRecipeDocument.
+ * Used by parseBrewRecipeFromText and as callLlm `validate` for structured fallback.
+ */
+export function parseBrewRecipeAiText(raw: string): BrewRecipeDocument {
   const payload = stripSingleJsonFence(raw);
   if (!payload) throw new BrewRecipeParseError("malformed");
   let value: unknown;
@@ -133,7 +137,7 @@ function brewRecipeFromAiText(raw: string): BrewRecipeDocument {
 
 /**
  * Turns pasted brewing instructions into a validated BrewRecipeDocument.
- * `complete` is the app's existing AI caller (configured provider, then failover).
+ * `complete` is the app's existing AI caller (configured provider + optional fallback).
  * This function does not write a recipe or a brew session.
  */
 export async function parseBrewRecipeFromText(
@@ -147,5 +151,5 @@ export async function parseBrewRecipeFromText(
     throw new BrewRecipeParseError("too_long");
   }
   const raw = await complete(brewRecipeParsePrompt(rawText));
-  return brewRecipeFromAiText(typeof raw === "string" ? raw : "");
+  return parseBrewRecipeAiText(typeof raw === "string" ? raw : "");
 }
