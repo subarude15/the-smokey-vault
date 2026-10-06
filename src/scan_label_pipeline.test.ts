@@ -69,6 +69,7 @@ function collectLogs() {
 test("barcode exact local match returns without calling vision AI", async () => {
   let visionCalls = 0;
   let callLlmCalls = 0;
+  let saveCalls = 0;
   const result = await identifyFromLabelImageBuffer(SAMPLE_BUFFER, {
     decodeBarcode: async () => upcDecoded(),
     lookupBarcode: async () => readyLookup("vault"),
@@ -80,7 +81,10 @@ test("barcode exact local match returns without calling vision AI", async () => 
       callLlmCalls += 1;
       return JSON.stringify(visionLabel());
     },
-    saveImage: () => "/api/media/images/x.jpg"
+    saveImage: () => {
+      saveCalls += 1;
+      return "/api/media/images/scan.jpg";
+    }
   });
   assert.equal(result.identification_method, "barcode_exact");
   assert.equal(result.barcode_detected, true);
@@ -88,10 +92,13 @@ test("barcode exact local match returns without calling vision AI", async () => 
   assert.equal(result.product.name, "Exact Bottle");
   assert.equal(visionCalls, 0);
   assert.equal(callLlmCalls, 0);
+  assert.equal(saveCalls, 0);
+  assert.equal((result.product as { image_url?: string }).image_url, undefined);
 });
 
 test("barcode exact catalog match returns without calling vision AI", async () => {
   let visionCalls = 0;
+  let saveCalls = 0;
   const result = await identifyFromLabelImageBuffer(SAMPLE_BUFFER, {
     decodeBarcode: async () => upcDecoded(),
     lookupBarcode: async () => readyLookup("cache"),
@@ -99,11 +106,71 @@ test("barcode exact catalog match returns without calling vision AI", async () =
       visionCalls += 1;
       return visionLabel();
     },
-    saveImage: () => ""
+    saveImage: () => {
+      saveCalls += 1;
+      return "/api/media/images/scan.jpg";
+    }
   });
   assert.equal(result.identification_method, "barcode_exact");
   assert.equal(result.barcode_lookup_source, "cache");
   assert.equal(visionCalls, 0);
+  assert.equal(saveCalls, 0);
+});
+
+test("exact barcode match does not inject uploaded scan as image_url", async () => {
+  let saveCalls = 0;
+  const lookup = readyLookup("vault");
+  lookup.product = {
+    ...lookup.product!,
+    // Catalog has no artwork — must stay empty rather than becoming the barcode close-up.
+    image_url: null
+  };
+  const result = await identifyFromLabelImageBuffer(SAMPLE_BUFFER, {
+    decodeBarcode: async () => upcDecoded(),
+    lookupBarcode: async () => lookup,
+    visionWithOllama: async () => visionLabel(),
+    saveImage: () => {
+      saveCalls += 1;
+      return "/api/media/images/barcode-closeup.jpg";
+    }
+  });
+  assert.equal(result.identification_method, "barcode_exact");
+  assert.equal(saveCalls, 0);
+  assert.equal((result.product as { image_url?: unknown }).image_url, null);
+});
+
+test("exact barcode match preserves lookup image_url when present", async () => {
+  const lookup = readyLookup("fwgs");
+  lookup.product = {
+    ...lookup.product!,
+    image_url: "https://cdn.example.com/catalog-bottle.jpg"
+  };
+  const result = await identifyFromLabelImageBuffer(SAMPLE_BUFFER, {
+    decodeBarcode: async () => upcDecoded(),
+    lookupBarcode: async () => lookup,
+    visionWithOllama: async () => visionLabel(),
+    saveImage: () => "/api/media/images/should-not-save.jpg"
+  });
+  assert.equal(result.identification_method, "barcode_exact");
+  assert.equal(
+    (result.product as { image_url?: string }).image_url,
+    "https://cdn.example.com/catalog-bottle.jpg"
+  );
+});
+
+test("vision path still calls saveImage", async () => {
+  let saveCalls = 0;
+  const result = await identifyFromLabelImageBuffer(SAMPLE_BUFFER, {
+    decodeBarcode: async () => null,
+    visionWithOllama: async () => visionLabel({ name: "Saved Vision" }),
+    saveImage: () => {
+      saveCalls += 1;
+      return "/api/media/images/label.jpg";
+    }
+  });
+  assert.equal(result.identification_method, "vision");
+  assert.equal(saveCalls, 1);
+  assert.equal((result.product as { image_url?: string }).image_url, "/api/media/images/label.jpg");
 });
 
 test("unknown valid barcode continues to vision", async () => {

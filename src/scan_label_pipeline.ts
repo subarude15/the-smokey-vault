@@ -60,9 +60,9 @@ Use ${key} as the upc field unless the printed digits clearly disagree.
 Do not invent a different UPC.`;
 }
 
-function productFromLookup(result: LookupResult, imageUrl: string): LabelIngestionResult["product"] {
+/** Exact barcode path: return lookup product as-is (never inject the uploaded scan photo). */
+function productFromLookup(result: LookupResult): LabelIngestionResult["product"] {
   const product = { ...(result.product ?? {}) } as Record<string, unknown>;
-  if (imageUrl && !product.image_url) product.image_url = imageUrl;
   if (result.upc && !product.upc) product.upc = result.upc;
   return product as LabelIngestionResult["product"];
 }
@@ -117,13 +117,6 @@ export async function identifyFromLabelImageBuffer(
     barcode_detected: Boolean(decoded)
   });
 
-  let imageUrl = "";
-  try {
-    imageUrl = saveImage(buffer);
-  } catch {
-    imageUrl = "";
-  }
-
   if (decoded?.normalized.isLookupKey) {
     const lookupKey = decoded.normalized.canonical;
     const tLookup = now();
@@ -151,10 +144,11 @@ export async function identifyFromLabelImageBuffer(
         barcode_match: true,
         source: lookup.source
       });
+      // Exact hit: return lookup product/image as-is. Do not persist or attach the scan photo.
       return {
         source: "label",
         upc: lookup.upc || lookupKey,
-        product: productFromLookup(lookup, imageUrl),
+        product: productFromLookup(lookup),
         suggestions: [],
         identification_method: "barcode_exact",
         barcode_detected: true,
@@ -177,6 +171,14 @@ export async function identifyFromLabelImageBuffer(
     });
   } else {
     scanLog(log, "[SCAN] barcode_match=false", { barcode_match: false });
+  }
+
+  // Vision path only: persist the uploaded image for label evidence / review.
+  let imageUrl = "";
+  try {
+    imageUrl = saveImage(buffer);
+  } catch {
+    imageUrl = "";
   }
 
   scanLog(log, "[SCAN] vision_fallback=true", {
