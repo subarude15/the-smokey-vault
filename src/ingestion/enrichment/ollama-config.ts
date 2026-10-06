@@ -36,7 +36,9 @@ export function ollamaChatUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * Vision model for product-image verification only (not AI_MODEL / label reading).
+ * Dedicated vision model for label/image reads and product-image verification
+ * (not AI_MODEL / Gemma general reasoning). Deploy with qwen2.5vl:7b;
+ * default remains llama3.2-vision when unset so existing hosts keep working.
  * Precedence: OLLAMA_VISION_MODEL → SMOKEY_OLLAMA_VISION_MODEL → llama3.2-vision.
  */
 export function ollamaVisionModel(env: NodeJS.ProcessEnv = process.env): string {

@@ -12,11 +12,14 @@
  *
  * 2. Overnight import — import_queue job → identifyByBarcode (mode: batch)
  *
- * 3. Local Ollama label — POST /api/scan/label
- *    → identifyByLocalLabelImage → labelProductWithLocalOllama → optional Catalog.beer
+ * 3. Label image scan — POST /api/scan/label | /api/ai/vision-label | import-queue/:id/label
+ *    → identifyFromLabelImageBuffer (src/scan_label_pipeline.ts)
+ *    → decodeBarcode (ZXing) → identifyByBarcode exact hit → return barcode_exact
+ *    → else dedicated OLLAMA_VISION_MODEL label read → assembleVisionLabelResult
+ *    → on vision failure, optional callLlm (Gemma / Gemini fallback)
  *
- * 4. Cloud AI vision — POST /api/ai/vision-label | import-queue/:id/label
- *    → server callLlm + parseVisionLabel → assembleVisionLabelResult
+ * 4. Legacy helper — identifyByLocalLabelImage still wraps labelProductWithLocalOllama
+ *    for unit tests; HTTP routes use the barcode-first pipeline above.
  *
  * 5. Smart fallback — identifyWithSmartFallback
  *    → barcode/catalog lookup → name search → SearXNG → local llama3.1 text extract
