@@ -4,7 +4,6 @@ import { api } from "./api";
 import {
   parseUtcTimestamp,
   vaultDayDate,
-  type Patron,
   type PatronDailyVisitLog,
   type PatronVisitHistory
 } from "./catalog";
