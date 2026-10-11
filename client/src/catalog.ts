@@ -171,12 +171,19 @@ export {
   serializeTabOrder,
   DEFAULT_TAB_ORDER,
   tipHandles,
+  parseUtcTimestamp,
+  parseVaultDay,
+  vaultDayBounds,
   vaultDayDate
 } from "../../src/speakeasy-shared";
 export type {
   TabKey,
   EnabledTabs,
   Patron,
+  PatronVisit,
+  PatronCheckInResult,
+  PatronVisitHistory,
+  PatronDailyVisitLog,
   GuestMessage,
   HouseEvent,
   EventSubscriber,

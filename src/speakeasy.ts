@@ -6,8 +6,11 @@ import {
 } from "./event-image-framing.js";
 import {
   clipBody, clipText, LEADERBOARD_SIZE, MAX_CONTACT_INFO, MAX_MESSAGE_BODY, MAX_PATRON_NAME,
-  MAX_PATRON_NICKNAME, MESSAGE_ALERT_DELAY_MS, vaultDayDate,
-  type DailyVoteResult, type EventSubscriber, type GuestMessage, type HouseEvent, type MerchItem, type Patron
+  MAX_PATRON_NICKNAME, MESSAGE_ALERT_DELAY_MS, parseUtcTimestamp, parseVaultDay, vaultDayBounds,
+  vaultDayDate,
+  type DailyVoteResult, type EventSubscriber, type GuestMessage, type HouseEvent, type MerchItem,
+  type Patron, type PatronCheckInResult, type PatronDailyVisitLog, type PatronVisit,
+  type PatronVisitHistory
 } from "./speakeasy-shared.js";
 
 export class SpeakeasyError extends Error {
@@ -22,9 +25,43 @@ const PATRON_COLUMNS = "id, name, nickname, visit_count, notes, created_at, upda
 
 /* ---------------------------------- Patrons --------------------------------- */
 
+function recordedVisitCount(patronId: number): number {
+  const row = db.prepare("SELECT COUNT(*) AS n FROM patron_visits WHERE patron_id=?").get(patronId) as { n: number };
+  return Number(row?.n ?? 0);
+}
+
+function lastCheckInAt(patronId: number): string | null {
+  const row = db.prepare(
+    "SELECT checked_in_at FROM patron_visits WHERE patron_id=? ORDER BY checked_in_at DESC, id DESC LIMIT 1"
+  ).get(patronId) as { checked_in_at: string } | undefined;
+  return row?.checked_in_at ?? null;
+}
+
+function withLastCheckIn(patron: Patron): Patron {
+  return { ...patron, last_check_in_at: lastCheckInAt(patron.id) };
+}
+
+function formatLocalTime(iso: string): string {
+  const date = parseUtcTimestamp(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 export function listPatrons(limit?: number): Patron[] {
   const sql = `SELECT ${PATRON_COLUMNS} FROM patrons ORDER BY visit_count DESC, updated_at ASC${limit ? " LIMIT ?" : ""}`;
   return (limit ? db.prepare(sql).all(limit) : db.prepare(sql).all()) as Patron[];
+}
+
+/** Keeper leaderboard rows include the newest dated check-in for UI labels. */
+export function listPatronsForKeeper(): Patron[] {
+  return (db.prepare(`
+    SELECT ${PATRON_COLUMNS},
+      (SELECT v.checked_in_at FROM patron_visits v
+        WHERE v.patron_id = patrons.id
+        ORDER BY v.checked_in_at DESC, v.id DESC LIMIT 1) AS last_check_in_at
+    FROM patrons
+    ORDER BY visit_count DESC, updated_at ASC
+  `).all() as Patron[]);
 }
 
 export function listLeaderboard(): Patron[] {
@@ -41,15 +78,23 @@ export function createPatron(input: { name?: unknown; nickname?: unknown; notes?
   const existing = db.prepare("SELECT id FROM patrons WHERE name=? COLLATE NOCASE").get(name) as { id: number } | undefined;
   if (existing) throw new SpeakeasyError(`${name} is already on the leaderboard`, 409);
   const visits = Number(input.visit_count);
-  const result = db.prepare(
-    "INSERT INTO patrons(name, nickname, visit_count, notes) VALUES(?, ?, ?, ?)"
-  ).run(
-    name,
-    clipText(input.nickname, MAX_PATRON_NICKNAME),
-    Number.isFinite(visits) && visits > 0 ? Math.floor(visits) : 1,
-    clipBody(input.notes, MAX_MESSAGE_BODY)
-  );
-  return getPatron(Number(result.lastInsertRowid))!;
+  const visitCount = Number.isFinite(visits) && visits > 0 ? Math.floor(visits) : 1;
+  const checkedInAt = new Date().toISOString();
+  const patronId = db.transaction(() => {
+    const result = db.prepare(
+      "INSERT INTO patrons(name, nickname, visit_count, notes) VALUES(?, ?, ?, ?)"
+    ).run(
+      name,
+      clipText(input.nickname, MAX_PATRON_NICKNAME),
+      visitCount,
+      clipBody(input.notes, MAX_MESSAGE_BODY)
+    );
+    const id = Number(result.lastInsertRowid);
+    // One dated check-in for the walk-in that created the row; extra count stays legacy.
+    db.prepare("INSERT INTO patron_visits(patron_id, checked_in_at) VALUES(?, ?)").run(id, checkedInAt);
+    return id;
+  })();
+  return withLastCheckIn(getPatron(patronId)!);
 }
 
 export function updatePatron(id: number, input: { nickname?: unknown; notes?: unknown; visit_count?: unknown }): Patron {
@@ -64,15 +109,128 @@ export function updatePatron(id: number, input: { nickname?: unknown; notes?: un
     input.visit_count !== undefined && Number.isFinite(visits) ? Math.max(0, Math.floor(visits)) : patron.visit_count,
     id
   );
-  return getPatron(id)!;
+  return withLastCheckIn(getPatron(id)!);
 }
 
+/**
+ * Log a dated check-in and bump visit_count in one transaction.
+ * A second check-in in the same vault day requires `force: true` after Keeper confirmation.
+ */
+export function checkInPatron(
+  id: number,
+  opts: { force?: boolean; now?: Date } = {}
+): PatronCheckInResult {
+  const patron = getPatron(id);
+  if (!patron) throw new SpeakeasyError("Patron not found", 404);
+  const now = opts.now ?? new Date();
+  const day = vaultDayDate(now);
+  const { start, end } = vaultDayBounds(day);
+  const previous = db.prepare(`
+    SELECT id, patron_id, checked_in_at FROM patron_visits
+    WHERE patron_id=? AND checked_in_at >= ? AND checked_in_at < ?
+    ORDER BY checked_in_at DESC, id DESC LIMIT 1
+  `).get(id, start.toISOString(), end.toISOString()) as PatronVisit | undefined;
+
+  if (previous && !opts.force) {
+    return {
+      ok: false,
+      needs_confirmation: true,
+      previous_check_in_at: previous.checked_in_at,
+      patron: withLastCheckIn(patron),
+      notice: `${patron.name} already checked in today at ${formatLocalTime(previous.checked_in_at)}. Check in again?`
+    };
+  }
+
+  const checkedInAt = now.toISOString();
+  const visitId = db.transaction(() => {
+    const inserted = db.prepare(
+      "INSERT INTO patron_visits(patron_id, checked_in_at) VALUES(?, ?)"
+    ).run(id, checkedInAt);
+    db.prepare(
+      "UPDATE patrons SET visit_count=visit_count+1, updated_at=CURRENT_TIMESTAMP WHERE id=?"
+    ).run(id);
+    return Number(inserted.lastInsertRowid);
+  })();
+
+  const updated = withLastCheckIn(getPatron(id)!);
+  return {
+    ok: true,
+    patron: updated,
+    visit: { id: visitId, patron_id: id, checked_in_at: checkedInAt },
+    notice: `Checked in ${patron.name} at ${formatLocalTime(checkedInAt)}`
+  };
+}
+
+/**
+ * +1 creates a dated check-in (forced — callers that need duplicate confirmation use checkInPatron).
+ * -1 only reduces legacy surplus (visit_count above dated rows); dated visits are voided by id.
+ */
 export function adjustPatronVisits(id: number, delta: number): Patron {
   const patron = getPatron(id);
   if (!patron) throw new SpeakeasyError("Patron not found", 404);
-  const next = Math.max(0, patron.visit_count + delta);
-  db.prepare("UPDATE patrons SET visit_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(next, id);
-  return getPatron(id)!;
+  if (delta > 0) {
+    const result = checkInPatron(id, { force: true });
+    if (!result.ok) throw new SpeakeasyError("Could not log that visit");
+    return result.patron;
+  }
+  if (delta < 0) {
+    const legacy = patron.visit_count - recordedVisitCount(id);
+    if (legacy <= 0) {
+      throw new SpeakeasyError("Open this patron to remove a specific recorded visit", 400);
+    }
+    const next = Math.max(0, patron.visit_count - 1);
+    db.prepare("UPDATE patrons SET visit_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(next, id);
+    return withLastCheckIn(getPatron(id)!);
+  }
+  return withLastCheckIn(patron);
+}
+
+export function getPatronVisitHistory(id: number): PatronVisitHistory {
+  const patron = getPatron(id);
+  if (!patron) throw new SpeakeasyError("Patron not found", 404);
+  const visits = db.prepare(`
+    SELECT id, patron_id, checked_in_at FROM patron_visits
+    WHERE patron_id=? ORDER BY checked_in_at DESC, id DESC
+  `).all(id) as PatronVisit[];
+  return {
+    patron: withLastCheckIn(patron),
+    visits,
+    legacy_visit_count: Math.max(0, patron.visit_count - visits.length)
+  };
+}
+
+export function listVisitsForVaultDay(vaultDayInput?: unknown, now = new Date()): PatronDailyVisitLog {
+  const vaultDay = parseVaultDay(vaultDayInput) ?? vaultDayDate(now);
+  const { start, end } = vaultDayBounds(vaultDay);
+  const visits = db.prepare(`
+    SELECT v.id, v.patron_id, v.checked_in_at, p.name, p.nickname
+    FROM patron_visits v
+    JOIN patrons p ON p.id = v.patron_id
+    WHERE v.checked_in_at >= ? AND v.checked_in_at < ?
+    ORDER BY v.checked_in_at DESC, v.id DESC
+  `).all(start.toISOString(), end.toISOString()) as Array<PatronVisit & { name: string; nickname: string }>;
+  const unique = new Set(visits.map((visit) => visit.patron_id));
+  return {
+    vault_day: vaultDay,
+    visits,
+    check_in_count: visits.length,
+    unique_visitor_count: unique.size
+  };
+}
+
+export function deletePatronVisit(patronId: number, visitId: number): Patron {
+  const visit = db.prepare(
+    "SELECT id FROM patron_visits WHERE id=? AND patron_id=?"
+  ).get(visitId, patronId) as { id: number } | undefined;
+  if (!visit) throw new SpeakeasyError("Visit not found", 404);
+  const patron = getPatron(patronId);
+  if (!patron) throw new SpeakeasyError("Patron not found", 404);
+  db.transaction(() => {
+    db.prepare("DELETE FROM patron_visits WHERE id=?").run(visitId);
+    const next = Math.max(0, patron.visit_count - 1);
+    db.prepare("UPDATE patrons SET visit_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(next, patronId);
+  })();
+  return withLastCheckIn(getPatron(patronId)!);
 }
 
 export function deletePatron(id: number): boolean {

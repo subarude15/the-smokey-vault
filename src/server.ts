@@ -169,9 +169,10 @@ import {
 } from "./gallery-social.js";
 import { createStaff, deleteStaff, listStaff, moveStaff, StaffError, updateStaff } from "./staff.js";
 import {
-  adjustPatronVisits, castDailyVote, createEvent, createEventSubscriber, createMerch, createPatron,
-  dailyVoteTallies, deleteEvent, deleteEventSubscriber, deleteMerch, deleteMessage,
-  deletePatron, getEvent, listEvents, listEventSubscribers, listLeaderboard, listMerch, listMessages, listPatrons,
+  adjustPatronVisits, castDailyVote, checkInPatron, createEvent, createEventSubscriber, createMerch,
+  createPatron, dailyVoteTallies, deleteEvent, deleteEventSubscriber, deleteMerch, deleteMessage,
+  deletePatron, deletePatronVisit, getEvent, getPatronVisitHistory, listEvents, listEventSubscribers,
+  listLeaderboard, listMerch, listMessages, listPatronsForKeeper, listVisitsForVaultDay,
   markMessageRead, SpeakeasyError, unreadMessageCount, updateEvent, updateMerch, updatePatron
 } from "./speakeasy.js";
 import {
@@ -1825,7 +1826,18 @@ app.get("/api/patrons", {
   schema: { tags: ["Patrons"], summary: "Regulars leaderboard (top 15 for guests, all for admin)" }
 }, async (request) => {
   const admin = isAdmin(request.headers.authorization);
-  return { patrons: admin ? listPatrons() : listLeaderboard(), admin };
+  return { patrons: admin ? listPatronsForKeeper() : listLeaderboard(), admin };
+});
+
+app.get<{ Querystring: { date?: string } }>("/api/patrons/visits", {
+  schema: { tags: ["Patrons"], summary: "Keeper daily check-in log for a vault day (rolls at 4:00 AM)" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return listVisitsForVaultDay(request.query?.date);
+  } catch (error) {
+    return speakeasyFail(reply, error, "Could not load the visit log");
+  }
 });
 
 app.post<{ Body: { name?: string; nickname?: string; notes?: string; visit_count?: number } }>("/api/patrons", {
@@ -1850,19 +1862,58 @@ app.put<{ Params: { id: string }; Body: { nickname?: string; notes?: string; vis
   }
 });
 
-app.post<{ Params: { id: string } }>("/api/patrons/:id/increment", {
-  schema: { tags: ["Patrons"], summary: "Log another visit" }
+app.get<{ Params: { id: string } }>("/api/patrons/:id/visits", {
+  schema: { tags: ["Patrons"], summary: "Keeper visit history for one regular" }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   try {
-    return adjustPatronVisits(Number(request.params.id), 1);
+    return getPatronVisitHistory(Number(request.params.id));
   } catch (error) {
-    return speakeasyFail(reply, error, "Could not log that visit");
+    return speakeasyFail(reply, error, "Could not load visit history");
   }
 });
 
+app.delete<{ Params: { id: string; visitId: string } }>("/api/patrons/:id/visits/:visitId", {
+  schema: { tags: ["Patrons"], summary: "Void one recorded check-in" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  try {
+    return deletePatronVisit(Number(request.params.id), Number(request.params.visitId));
+  } catch (error) {
+    return speakeasyFail(reply, error, "Could not remove that visit");
+  }
+});
+
+app.post<{ Params: { id: string }; Body: { force?: boolean; confirm_duplicate?: boolean } }>(
+  "/api/patrons/:id/check-in",
+  { schema: { tags: ["Patrons"], summary: "Record a dated check-in (duplicate same vault day needs confirmation)" } },
+  async (request, reply) => {
+    if (requireAdmin(request, reply)) return;
+    try {
+      const force = Boolean(request.body?.force || request.body?.confirm_duplicate);
+      return checkInPatron(Number(request.params.id), { force });
+    } catch (error) {
+      return speakeasyFail(reply, error, "Could not log that visit");
+    }
+  }
+);
+
+app.post<{ Params: { id: string }; Body: { force?: boolean; confirm_duplicate?: boolean } }>(
+  "/api/patrons/:id/increment",
+  { schema: { tags: ["Patrons"], summary: "Log another visit (same as check-in)" } },
+  async (request, reply) => {
+    if (requireAdmin(request, reply)) return;
+    try {
+      const force = Boolean(request.body?.force || request.body?.confirm_duplicate);
+      return checkInPatron(Number(request.params.id), { force });
+    } catch (error) {
+      return speakeasyFail(reply, error, "Could not log that visit");
+    }
+  }
+);
+
 app.post<{ Params: { id: string } }>("/api/patrons/:id/decrement", {
-  schema: { tags: ["Patrons"], summary: "Remove a logged visit" }
+  schema: { tags: ["Patrons"], summary: "Reduce legacy (pre-history) visit surplus only" }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   try {

@@ -488,8 +488,39 @@ body.nav-open{overflow:hidden}
 .patron-identity small{color:var(--muted);font-size:12px}
 .patron-visits{color:var(--muted);font-size:13px;white-space:nowrap}
 .patron-actions{display:flex;gap:6px}
+.patron-open-history{display:block;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.patron-open-history:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:8px}
+.patron-open-history .eyebrow{display:block}
+.patron-open-history h2{margin:0 0 8px}
+.patron-open-history p{margin:0}
+.patron-last-checkin{display:block;margin-top:4px;color:var(--accent);font-size:12px;font-weight:500}
+.patron-visit-log-open{margin-left:auto}
+.patron-history-modal,.patron-visit-log-modal{width:min(calc(100% - 24px),34rem);max-height:min(88vh,720px);display:flex;flex-direction:column}
+.patron-history-nick{margin:4px 0 0;color:var(--muted)}
+.patron-history-summary,.patron-visit-log-summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 16px}
+.patron-history-summary div,.patron-visit-log-summary div{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.patron-history-summary span,.patron-visit-log-summary span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}
+.patron-history-summary strong,.patron-visit-log-summary strong{font-size:16px}
+.patron-history-list{display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:0;flex:1;margin-bottom:8px}
+.patron-history-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.patron-history-row strong{display:block;font-size:14px}
+.patron-history-row small{color:var(--muted);font-size:12px}
+.patron-history-row-link{width:100%;border:1px solid var(--line);background:var(--surface);color:inherit;text-align:left;cursor:pointer}
+.patron-history-row-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.patron-history-legacy{padding:12px 14px;border:1px dashed var(--line);border-radius:12px;background:var(--surface-2)}
+.patron-history-legacy strong{display:block;font-size:14px;margin-bottom:4px}
+.patron-history-legacy span{color:var(--muted);font-size:12px;line-height:1.4}
+.patron-history-empty{margin:0;padding:18px;color:var(--muted);text-align:center}
+.patron-visit-log-date{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.patron-visit-log-date input{min-height:44px}
 .board-footnote{margin-top:16px;color:var(--muted);font-size:13px}
-@media(max-width:700px){.legend-banner{flex-wrap:wrap;gap:14px;padding:20px}.legend-actions{margin-left:0}.patron-row{flex-wrap:wrap}}
+@media(max-width:700px){
+  .legend-banner{flex-wrap:wrap;gap:14px;padding:20px}
+  .legend-actions{margin-left:0}
+  .patron-row{flex-wrap:wrap}
+  .patron-add .patron-visit-log-open{margin-left:0;width:100%}
+  .patron-history-summary,.patron-visit-log-summary{grid-template-columns:1fr}
+}
 
 /* --------------------------------- Tip jar --------------------------------- */
 .tip-jar-card,.bartender-card{margin-bottom:26px;padding:24px 26px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}

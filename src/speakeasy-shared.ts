@@ -222,6 +222,43 @@ export type Patron = {
   notes: string;
   created_at: string;
   updated_at: string;
+  /** ISO UTC timestamp of the newest recorded check-in; Keeper list only. */
+  last_check_in_at?: string | null;
+};
+
+export type PatronVisit = {
+  id: number;
+  patron_id: number;
+  checked_in_at: string;
+};
+
+export type PatronCheckInResult =
+  | {
+      ok: true;
+      patron: Patron;
+      visit: PatronVisit;
+      notice: string;
+    }
+  | {
+      ok: false;
+      needs_confirmation: true;
+      previous_check_in_at: string;
+      patron: Patron;
+      notice: string;
+    };
+
+export type PatronVisitHistory = {
+  patron: Patron;
+  visits: PatronVisit[];
+  /** visit_count minus dated rows — pre-history loyalty, never invented as dated rows. */
+  legacy_visit_count: number;
+};
+
+export type PatronDailyVisitLog = {
+  vault_day: string;
+  visits: Array<PatronVisit & { name: string; nickname: string }>;
+  check_in_count: number;
+  unique_visitor_count: number;
 };
 
 export type GuestMessage = {
@@ -369,6 +406,51 @@ export function vaultDayDate(now: Date = new Date()): string {
   const month = String(shifted.getMonth() + 1).padStart(2, "0");
   const day = String(shifted.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+const VAULT_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Parse a vault-day `YYYY-MM-DD` or return null when the string is not a calendar date. */
+export function parseVaultDay(value: unknown): string | null {
+  const raw = String(value ?? "").trim();
+  const match = VAULT_DAY_RE.exec(raw);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const probe = new Date(year, month - 1, day);
+  if (
+    probe.getFullYear() !== year ||
+    probe.getMonth() !== month - 1 ||
+    probe.getDate() !== day
+  ) {
+    return null;
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+/**
+ * Local-time half-open bounds for a vault day: [4:00 AM that date, 4:00 AM next date).
+ * Convert to ISO UTC for SQLite comparisons against `checked_in_at`.
+ */
+export function vaultDayBounds(vaultDay: string): { start: Date; end: Date } {
+  const parsed = parseVaultDay(vaultDay);
+  if (!parsed) throw new Error(`Invalid vault day: ${vaultDay}`);
+  const [year, month, day] = parsed.split("-").map(Number) as [number, number, number];
+  const start = new Date(year, month - 1, day, VAULT_DAY_ROLL_HOUR, 0, 0, 0);
+  const end = new Date(start.getTime());
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+/**
+ * Normalize SQLite `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS` UTC) or ISO strings to a Date.
+ */
+export function parseUtcTimestamp(value: string): Date {
+  const raw = String(value ?? "").trim();
+  if (!raw) return new Date(NaN);
+  if (raw.includes("T") || raw.endsWith("Z")) return new Date(raw);
+  return new Date(`${raw.replace(" ", "T")}Z`);
 }
 
 export function clipText(value: unknown, max: number): string {

@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleAlert, Crown, Minus, Plus, Trash2, Users } from "lucide-react";
 import { api } from "./api";
-import { MAX_PATRON_NAME, MAX_PATRON_NICKNAME, TOP_PATRON_BANNER, type Patron } from "./catalog";
+import { MAX_PATRON_NAME, MAX_PATRON_NICKNAME, TOP_PATRON_BANNER, type Patron, type PatronCheckInResult } from "./catalog";
+import {
+  lastCheckInLabel,
+  PatronHistoryModal,
+  PatronVisitLogModal,
+  VisitLogButton
+} from "./PatronVisitsPanels";
 
 export function usePatrons(): { patrons: Patron[]; reload: () => void; error: string } {
   const [patrons, setPatrons] = useState<Patron[]>([]);
@@ -12,6 +18,18 @@ export function usePatrons(): { patrons: Patron[]; reload: () => void; error: st
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load the leaderboard."));
   }, []);
   useEffect(() => { reload(); }, [reload]);
+  // Keep an open tab fresh when the Keeper returns from another app/screen.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") reload();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [reload]);
   return { patrons, reload, error };
 }
 
@@ -25,6 +43,10 @@ export function PatronsPage({ admin, keeperName }: { admin: boolean; keeperName:
   const [nickname, setNickname] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checkingInId, setCheckingInId] = useState<number | null>(null);
+  const [historyPatronId, setHistoryPatronId] = useState<number | null>(null);
+  const [showVisitLog, setShowVisitLog] = useState(false);
+  const checkInGuard = useRef(new Set<number>());
 
   async function addPatron() {
     if (!name.trim()) return;
@@ -42,9 +64,40 @@ export function PatronsPage({ admin, keeperName }: { admin: boolean; keeperName:
     }
   }
 
-  async function adjust(patron: Patron, direction: "increment" | "decrement") {
+  async function checkIn(patron: Patron, force = false) {
+    if (checkInGuard.current.has(patron.id)) return;
+    checkInGuard.current.add(patron.id);
+    setCheckingInId(patron.id);
     try {
-      await api(`/patrons/${patron.id}/${direction}`, { method: "POST" });
+      const result = await api<PatronCheckInResult>(`/patrons/${patron.id}/check-in`, {
+        method: "POST",
+        body: JSON.stringify({ force })
+      });
+      if (!result.ok && result.needs_confirmation) {
+        const confirmed = confirm(result.notice);
+        if (confirmed) {
+          checkInGuard.current.delete(patron.id);
+          await checkIn(patron, true);
+          return;
+        }
+        setNotice(result.notice);
+        return;
+      }
+      if (result.ok) {
+        setNotice(result.notice);
+        reload();
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not update that visit count");
+    } finally {
+      checkInGuard.current.delete(patron.id);
+      setCheckingInId(null);
+    }
+  }
+
+  async function reduceLegacy(patron: Patron) {
+    try {
+      await api(`/patrons/${patron.id}/decrement`, { method: "POST" });
       reload();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not update that visit count");
@@ -59,6 +112,11 @@ export function PatronsPage({ admin, keeperName }: { admin: boolean; keeperName:
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not remove that patron");
     }
+  }
+
+  function openHistory(patronId: number) {
+    setShowVisitLog(false);
+    setHistoryPatronId(patronId);
   }
 
   const [champion, ...rest] = patrons;
@@ -78,19 +136,31 @@ export function PatronsPage({ admin, keeperName }: { admin: boolean; keeperName:
       <label><span>Name</span><input value={name} maxLength={MAX_PATRON_NAME} onChange={(e) => setName(e.target.value)} placeholder="Who just walked in?"/></label>
       <label><span>Nickname</span><input value={nickname} maxLength={MAX_PATRON_NICKNAME} onChange={(e) => setNickname(e.target.value)} placeholder="Optional"/></label>
       <button type="button" className="primary" disabled={busy || !name.trim()} onClick={() => void addPatron()}><Plus size={17}/> Add regular</button>
+      <VisitLogButton onClick={() => setShowVisitLog(true)}/>
     </div>}
 
     {!patrons.length ? <div className="empty-state"><Users size={38}/><h3>No regulars yet</h3><p>{admin ? "Add the first name to start the hall of fame." : "The board is still being written."}</p></div> : <>
       {champion && <section className="legend-banner">
         <Crown size={44}/>
-        <div>
-          <span className="eyebrow">{TOP_PATRON_BANNER}</span>
-          <h2>{champion.name}</h2>
-          <p>{champion.nickname ? `“${champion.nickname}” · ` : ""}{visitLabel(champion.visit_count)} and counting.</p>
+        <div className={admin ? "patron-identity-tap" : undefined}>
+          {admin ? (
+            <button type="button" className="patron-open-history" onClick={() => openHistory(champion.id)}>
+              <span className="eyebrow">{TOP_PATRON_BANNER}</span>
+              <h2>{champion.name}</h2>
+              <p>{champion.nickname ? `“${champion.nickname}” · ` : ""}{visitLabel(champion.visit_count)} and counting.</p>
+              {lastCheckInLabel(champion.last_check_in_at) && (
+                <small className="patron-last-checkin">{lastCheckInLabel(champion.last_check_in_at)}</small>
+              )}
+            </button>
+          ) : <>
+            <span className="eyebrow">{TOP_PATRON_BANNER}</span>
+            <h2>{champion.name}</h2>
+            <p>{champion.nickname ? `“${champion.nickname}” · ` : ""}{visitLabel(champion.visit_count)} and counting.</p>
+          </>}
         </div>
         {admin && <div className="legend-actions">
-          <button type="button" className="icon-button" aria-label={`Log a visit for ${champion.name}`} onClick={() => void adjust(champion, "increment")}><Plus size={18}/></button>
-          <button type="button" className="icon-button" aria-label={`Remove a visit for ${champion.name}`} onClick={() => void adjust(champion, "decrement")}><Minus size={18}/></button>
+          <button type="button" className="icon-button" aria-label={`Log a visit for ${champion.name}`} disabled={checkingInId === champion.id} onClick={() => void checkIn(champion)}><Plus size={18}/></button>
+          <button type="button" className="icon-button" aria-label={`Reduce legacy visit count for ${champion.name}`} onClick={() => void reduceLegacy(champion)}><Minus size={18}/></button>
         </div>}
       </section>}
 
@@ -99,13 +169,23 @@ export function PatronsPage({ admin, keeperName }: { admin: boolean; keeperName:
           <li key={patron.id} className="patron-row">
             <span className="patron-rank">#{index + 2}</span>
             <div className="patron-identity">
-              <strong>{patron.name}</strong>
-              {patron.nickname ? <small>“{patron.nickname}”</small> : null}
+              {admin ? (
+                <button type="button" className="patron-open-history" onClick={() => openHistory(patron.id)}>
+                  <strong>{patron.name}</strong>
+                  {patron.nickname ? <small>“{patron.nickname}”</small> : null}
+                  {lastCheckInLabel(patron.last_check_in_at) && (
+                    <small className="patron-last-checkin">{lastCheckInLabel(patron.last_check_in_at)}</small>
+                  )}
+                </button>
+              ) : <>
+                <strong>{patron.name}</strong>
+                {patron.nickname ? <small>“{patron.nickname}”</small> : null}
+              </>}
             </div>
             <span className="patron-visits">{visitLabel(patron.visit_count)}</span>
             {admin && <div className="patron-actions">
-              <button type="button" className="icon-button" aria-label={`Log a visit for ${patron.name}`} onClick={() => void adjust(patron, "increment")}><Plus size={16}/></button>
-              <button type="button" className="icon-button" aria-label={`Remove a visit for ${patron.name}`} onClick={() => void adjust(patron, "decrement")}><Minus size={16}/></button>
+              <button type="button" className="icon-button" aria-label={`Log a visit for ${patron.name}`} disabled={checkingInId === patron.id} onClick={() => void checkIn(patron)}><Plus size={16}/></button>
+              <button type="button" className="icon-button" aria-label={`Reduce legacy visit count for ${patron.name}`} onClick={() => void reduceLegacy(patron)}><Minus size={16}/></button>
               <button type="button" className="icon-button danger" aria-label={`Remove ${patron.name}`} onClick={() => void remove(patron)}><Trash2 size={16}/></button>
             </div>}
           </li>
@@ -113,6 +193,20 @@ export function PatronsPage({ admin, keeperName }: { admin: boolean; keeperName:
       </ol>
       {!admin && patrons.length >= 15 && <p className="board-footnote">Top 15 shown. Keep showing up.</p>}
     </>}
+
+    {admin && showVisitLog && (
+      <PatronVisitLogModal
+        onClose={() => setShowVisitLog(false)}
+        onOpenPatron={(patronId) => openHistory(patronId)}
+      />
+    )}
+    {admin && historyPatronId != null && (
+      <PatronHistoryModal
+        patronId={historyPatronId}
+        onClose={() => setHistoryPatronId(null)}
+        onChanged={reload}
+      />
+    )}
 
     {notice && <div className="toast">{notice}</div>}
   </>;
