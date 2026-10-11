@@ -5,7 +5,7 @@ Last updated: 2026-10-11
 ## Current position
 
 Most recently ready for review:
-- **Patron visit history + daily check-in log** (draft PR). Additive `patron_visits` table; Keeper check-in timestamps, per-patron history, vault-day Visit Log (4 AM), duplicate confirmation, void-by-visit-id. Cumulative `visit_count` / guest leaderboard ranking unchanged; no fabricated dated rows for legacy counts.
+- **Patron visit history + daily check-in log** (draft [#180](https://github.com/subarude15/the-smokey-vault/pull/180)). Additive `patron_visits` table; Keeper check-in timestamps, per-patron history, vault-day Visit Log (4 AM), duplicate confirmation, void-by-visit-id. Cumulative `visit_count` / guest leaderboard ranking unchanged; no fabricated dated rows for legacy counts.
 
 Previously ready / merged:
 - **PR179** — Barcode-first label scan pipeline (`identifyFromLabelImageBuffer`).
