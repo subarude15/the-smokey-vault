@@ -1,15 +1,16 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-10-06
+Last updated: 2026-10-11
 
 ## Current position
 
-Most recently ready for review (uncommitted — do not push until requested):
-- **Barcode-first label scan pipeline.** Shared `identifyFromLabelImageBuffer` for `/api/scan/label`, `/api/ai/vision-label`, and import-queue label. Flow: ZXing decode on the uploaded image → existing `identifyByBarcode` exact lookup (vault → caches → FWGS/COLA/OFF/upcitemdb) → only on miss, dedicated `OLLAMA_VISION_MODEL` vision (deploy `qwen2.5vl:7b`; default `llama3.2-vision`) → `callLlm` Gemma/Gemini fallback on vision failure. Exact hits set `identification_method: "barcode_exact"` and never call AI. `[SCAN]` timing logs; decoded GTIN outranks AI `upc`. No EmbeddingGemma / vector work.
+Most recently ready for review:
+- **Patron visit history + daily check-in log** (draft [#180](https://github.com/subarude15/the-smokey-vault/pull/180)). Additive `patron_visits` table; Keeper check-in timestamps, per-patron history, vault-day Visit Log (4 AM), duplicate confirmation, void-by-visit-id. Cumulative `visit_count` / guest leaderboard ranking unchanged; no fabricated dated rows for legacy counts.
 
-Previously ready:
-- Optional AI provider fallback (Ollama/Gemma 4 primary → Gemini). Shared `callLlm` in `src/ai_client.ts`; `AI_FALLBACK_PROVIDER=gemini` retries once after primary failure. Guest `/api/house` stays `aiConfigured` only.
-- Per-event RSVP tracker. Dedicated `event_rsvps` table. Guests RSVP Going / Maybe / Can't make it. Keeper manages list + CSV. Website RSVPs email when SMTP configured.
+Previously ready / merged:
+- **PR179** — Barcode-first label scan pipeline (`identifyFromLabelImageBuffer`).
+- **PR178** — Optional Ollama → Gemini AI fallback (`callLlm`).
+- **PR177** — Per-event RSVP tracker.
 - Guest contact confirmation copy; guest message email via `MESSAGE_NOTIFICATION_EMAILS`.
 - **PR174** — Brewery water chemistry and mash pH guidance.
 - **PR173** — Keeper-only brew sheet PDF.
@@ -21,19 +22,21 @@ Previously ready:
 - **PR165** — Conversational AI Mixologist phase 3.
 - **PR160** — Interface Depth & Motion System.
 
-Next planned, after this phase is reviewed:
-- Commit/PR for barcode-first scan when approved; then PR163 remaining precedence/ownership and PR164 Keeper progressive scanner UX.
+Next planned:
+- PR163 remaining precedence/ownership and PR164 Keeper progressive scanner UX.
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
 
 ## Recent architectural decisions
 
-- Label scan: `src/scan_label_pipeline.ts` is the composition root for image label routes. Deterministic `@zxing/library` decode (already a dependency; pure JS + sharp greyscale) runs before any LLM. Exact catalog hits bypass all AI. Vision uses `ollamaVisionModel()` / `ollamaChatUrl()`, not `AI_MODEL`. `llama3.2-vision` remains the unset default; production should set `OLLAMA_VISION_MODEL=qwen2.5vl:7b`.
+- Patron check-ins: `patron_visits` stores dated rows (`id`, `patron_id`, `checked_in_at` UTC ISO). `visit_count` remains the leaderboard source of truth and must stay ≥ recorded dated rows (`updatePatron` enforces this). Legacy surplus = `visit_count - COUNT(visits)`. Vault-day rollover (4 AM) and Keeper time labels use `America/New_York`, not host/browser TZ (DST can make a vault day 23h or 25h). Same vault-day repeats need Keeper confirmation (`force` / `confirm_duplicate`). Void removes a specific visit row and decrements count; Minus only reduces legacy surplus. Invalid `?date=` on the Visit Log is HTTP 400.
 
-- AI client: `src/ai_client.ts` owns `callLlm` / `requestAi`. `AI_FALLBACK_PROVIDER` is opt-in. Callers may pass `validate` for structured-output fallback. Default Ollama chat model is `gemma4`.
+- Label scan: `src/scan_label_pipeline.ts` is the composition root for image label routes. Exact catalog hits bypass all AI. Production should set `OLLAMA_VISION_MODEL=qwen2.5vl:7b`.
+
+- AI client: `src/ai_client.ts` owns `callLlm` / `requestAi`. `AI_FALLBACK_PROVIDER` is opt-in.
 
 - Per-event RSVPs: `event_rsvps` is the master guest list for one event. `event_subscribers` stays the future-events invite list.
 
-- Brew sheets (PR168–PR174): `brew_recipes` / `brew_sessions` separate from homebrew `brews` log. Water salt grams from `src/brew_water_chemistry.ts` only.
+- Brew sheets (PR168–PR174): `brew_recipes` / `brew_sessions` separate from homebrew `brews` log.
 
 - Guest inventory/enrichment responses stay server-allowlisted; coarse availability only.
 - App routing remains state-based in `App.tsx`.

@@ -131,6 +131,14 @@ CREATE TABLE IF NOT EXISTS patrons (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_patrons_ranking ON patrons(visit_count DESC, updated_at ASC);
+CREATE TABLE IF NOT EXISTS patron_visits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patron_id INTEGER NOT NULL,
+  checked_in_at TEXT NOT NULL,
+  FOREIGN KEY (patron_id) REFERENCES patrons(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_patron_visits_patron_time ON patron_visits(patron_id, checked_in_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_patron_visits_time ON patron_visits(checked_in_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS daily_votes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   target_table TEXT NOT NULL,
