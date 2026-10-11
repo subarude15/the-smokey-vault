@@ -133,7 +133,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The hybrid barcode + AI label scanner continues in PR162–PR164; PR161 is tooling-only and does not consume a product slot. Patron visit history / daily check-in log is an additional Keeper usability item in flight.
 
-**Patron visit history + daily check-in log** (draft — in review)
+**Patron visit history + daily check-in log** (draft [#180](https://github.com/subarude15/the-smokey-vault/pull/180) — in review)
 - Additive `patron_visits` (id, patron_id, checked_in_at UTC). Never fabricates dated rows for historical `visit_count`.
 - Keeper Regulars: last check-in label, check-in success toast with time, per-patron history modal, Visit Log (vault day 4 AM), duplicate same-day confirmation, void specific visit.
 - Guest leaderboard unchanged (top 15, no check-in metadata). Event RSVP check-ins untouched.
