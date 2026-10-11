@@ -2,40 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarDays, CircleAlert, Trash2, X } from "lucide-react";
 import { api } from "./api";
 import {
-  parseUtcTimestamp,
+  formatBarDateTime,
+  formatBarTime,
+  isSameBarCalendarDay,
   vaultDayDate,
   type PatronDailyVisitLog,
   type PatronVisitHistory
 } from "./catalog";
 
-function formatTime(iso: string): string {
-  const date = parseUtcTimestamp(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function formatDateTime(iso: string): string {
-  const date = parseUtcTimestamp(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
-}
-
 export function lastCheckInLabel(iso: string | null | undefined, now = new Date()): string | null {
   if (!iso) return null;
-  const date = parseUtcTimestamp(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  if (sameDay) return `Checked in today at ${formatTime(iso)}`;
-  return `Last check-in ${formatDateTime(iso)}`;
+  if (isSameBarCalendarDay(iso, now)) return `Checked in today at ${formatBarTime(iso)}`;
+  return `Last check-in ${formatBarDateTime(iso)}`;
 }
 
 export function PatronHistoryModal({
@@ -93,7 +71,7 @@ export function PatronHistoryModal({
 
         {patron && <div className="patron-history-summary">
           <div><span>Total visits</span><strong>{patron.visit_count}</strong></div>
-          <div><span>Last check-in</span><strong>{patron.last_check_in_at ? formatDateTime(patron.last_check_in_at) : "No dated visits yet"}</strong></div>
+          <div><span>Last check-in</span><strong>{patron.last_check_in_at ? formatBarDateTime(patron.last_check_in_at) : "No dated visits yet"}</strong></div>
         </div>}
 
         <div className="patron-history-list">
@@ -109,13 +87,13 @@ export function PatronHistoryModal({
           {history?.visits.map((visit) => (
             <div key={visit.id} className="patron-history-row">
               <div>
-                <strong>{formatDateTime(visit.checked_in_at)}</strong>
+                <strong>{formatBarDateTime(visit.checked_in_at)}</strong>
                 <small>Recorded visit</small>
               </div>
               <button
                 type="button"
                 className="icon-button danger"
-                aria-label={`Remove check-in at ${formatDateTime(visit.checked_in_at)}`}
+                aria-label={`Remove check-in at ${formatBarDateTime(visit.checked_in_at)}`}
                 disabled={busyId === visit.id}
                 onClick={() => void voidVisit(visit.id)}
               >
@@ -192,7 +170,7 @@ export function PatronVisitLogModal({
                 <strong>{visit.name}</strong>
                 {visit.nickname ? <small>“{visit.nickname}”</small> : <small>Regular</small>}
               </div>
-              <span className="patron-visits">{formatTime(visit.checked_in_at)}</span>
+              <span className="patron-visits">{formatBarTime(visit.checked_in_at)}</span>
             </button>
           ))}
         </div>

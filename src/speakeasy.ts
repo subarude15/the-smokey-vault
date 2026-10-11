@@ -5,8 +5,8 @@ import {
   normalizeEventImageFraming
 } from "./event-image-framing.js";
 import {
-  clipBody, clipText, LEADERBOARD_SIZE, MAX_CONTACT_INFO, MAX_MESSAGE_BODY, MAX_PATRON_NAME,
-  MAX_PATRON_NICKNAME, MESSAGE_ALERT_DELAY_MS, parseUtcTimestamp, parseVaultDay, vaultDayBounds,
+  clipBody, clipText, formatBarTime, LEADERBOARD_SIZE, MAX_CONTACT_INFO, MAX_MESSAGE_BODY,
+  MAX_PATRON_NAME, MAX_PATRON_NICKNAME, MESSAGE_ALERT_DELAY_MS, parseVaultDay, vaultDayBounds,
   vaultDayDate,
   type DailyVoteResult, type EventSubscriber, type GuestMessage, type HouseEvent, type MerchItem,
   type Patron, type PatronCheckInResult, type PatronDailyVisitLog, type PatronVisit,
@@ -39,12 +39,6 @@ function lastCheckInAt(patronId: number): string | null {
 
 function withLastCheckIn(patron: Patron): Patron {
   return { ...patron, last_check_in_at: lastCheckInAt(patron.id) };
-}
-
-function formatLocalTime(iso: string): string {
-  const date = parseUtcTimestamp(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 export function listPatrons(limit?: number): Patron[] {
@@ -100,13 +94,25 @@ export function createPatron(input: { name?: unknown; nickname?: unknown; notes?
 export function updatePatron(id: number, input: { nickname?: unknown; notes?: unknown; visit_count?: unknown }): Patron {
   const patron = getPatron(id);
   if (!patron) throw new SpeakeasyError("Patron not found", 404);
-  const visits = Number(input.visit_count);
+  let nextCount = patron.visit_count;
+  if (input.visit_count !== undefined) {
+    const visits = Number(input.visit_count);
+    if (!Number.isFinite(visits)) throw new SpeakeasyError("Visit count must be a number", 400);
+    nextCount = Math.max(0, Math.floor(visits));
+    const recorded = recordedVisitCount(id);
+    if (nextCount < recorded) {
+      throw new SpeakeasyError(
+        `Visit count cannot be below ${recorded} recorded check-in${recorded === 1 ? "" : "s"}`,
+        400
+      );
+    }
+  }
   db.prepare(
     "UPDATE patrons SET nickname=?, notes=?, visit_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
   ).run(
     input.nickname === undefined ? patron.nickname : clipText(input.nickname, MAX_PATRON_NICKNAME),
     input.notes === undefined ? patron.notes : clipBody(input.notes, MAX_MESSAGE_BODY),
-    input.visit_count !== undefined && Number.isFinite(visits) ? Math.max(0, Math.floor(visits)) : patron.visit_count,
+    nextCount,
     id
   );
   return withLastCheckIn(getPatron(id)!);
@@ -137,7 +143,7 @@ export function checkInPatron(
       needs_confirmation: true,
       previous_check_in_at: previous.checked_in_at,
       patron: withLastCheckIn(patron),
-      notice: `${patron.name} already checked in today at ${formatLocalTime(previous.checked_in_at)}. Check in again?`
+      notice: `${patron.name} already checked in today at ${formatBarTime(previous.checked_in_at)}. Check in again?`
     };
   }
 
@@ -157,7 +163,7 @@ export function checkInPatron(
     ok: true,
     patron: updated,
     visit: { id: visitId, patron_id: id, checked_in_at: checkedInAt },
-    notice: `Checked in ${patron.name} at ${formatLocalTime(checkedInAt)}`
+    notice: `Checked in ${patron.name} at ${formatBarTime(checkedInAt)}`
   };
 }
 
@@ -200,7 +206,18 @@ export function getPatronVisitHistory(id: number): PatronVisitHistory {
 }
 
 export function listVisitsForVaultDay(vaultDayInput?: unknown, now = new Date()): PatronDailyVisitLog {
-  const vaultDay = parseVaultDay(vaultDayInput) ?? vaultDayDate(now);
+  const omitted =
+    vaultDayInput === undefined ||
+    vaultDayInput === null ||
+    (typeof vaultDayInput === "string" && vaultDayInput.trim() === "");
+  let vaultDay: string;
+  if (omitted) {
+    vaultDay = vaultDayDate(now);
+  } else {
+    const parsed = parseVaultDay(vaultDayInput);
+    if (!parsed) throw new SpeakeasyError("Invalid vault day date", 400);
+    vaultDay = parsed;
+  }
   const { start, end } = vaultDayBounds(vaultDay);
   const visits = db.prepare(`
     SELECT v.id, v.patron_id, v.checked_in_at, p.name, p.nickname
@@ -227,7 +244,9 @@ export function deletePatronVisit(patronId: number, visitId: number): Patron {
   if (!patron) throw new SpeakeasyError("Patron not found", 404);
   db.transaction(() => {
     db.prepare("DELETE FROM patron_visits WHERE id=?").run(visitId);
-    const next = Math.max(0, patron.visit_count - 1);
+    const recorded = recordedVisitCount(patronId);
+    // Never leave visit_count below remaining dated rows.
+    const next = Math.max(recorded, patron.visit_count - 1);
     db.prepare("UPDATE patrons SET visit_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(next, patronId);
   })();
   return withLastCheckIn(getPatron(patronId)!);

@@ -174,7 +174,13 @@ export {
   parseUtcTimestamp,
   parseVaultDay,
   vaultDayBounds,
-  vaultDayDate
+  vaultDayDate,
+  formatBarTime,
+  formatBarDateTime,
+  isSameBarCalendarDay,
+  BAR_TIMEZONE,
+  instantFromZonedParts,
+  civilDateInBar
 } from "../../src/speakeasy-shared";
 export type {
   TabKey,

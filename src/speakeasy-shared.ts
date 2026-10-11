@@ -396,19 +396,99 @@ export function serializeEnabledTabs(tabs: EnabledTabs): string {
 }
 
 /**
- * Date string for the current vault day. Anything before 4:00 AM local time still
- * belongs to the previous calendar day so late-night votes are not double counted.
+ * Bar timezone for vault-day rollover and Keeper-facing check-in labels.
+ * Independent of the NAS host clock / browser locale (Pennsylvania home bar).
  */
-export function vaultDayDate(now: Date = new Date()): string {
-  const shifted = new Date(now.getTime());
-  if (shifted.getHours() < VAULT_DAY_ROLL_HOUR) shifted.setDate(shifted.getDate() - 1);
-  const year = shifted.getFullYear();
-  const month = String(shifted.getMonth() + 1).padStart(2, "0");
-  const day = String(shifted.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+export const BAR_TIMEZONE = "America/New_York";
 
 const VAULT_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+type ZonedParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/** Wall-clock parts of an instant in `timeZone` (hourCycle h23). */
+export function zonedParts(instant: Date, timeZone = BAR_TIMEZONE): ZonedParts {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(instant);
+  const lookup = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? NaN);
+  return {
+    year: lookup("year"),
+    month: lookup("month"),
+    day: lookup("day"),
+    hour: lookup("hour"),
+    minute: lookup("minute"),
+    second: lookup("second")
+  };
+}
+
+/**
+ * Convert a wall-clock civil time in `timeZone` to a UTC Date.
+ * Two-pass correction handles DST spring-forward / fall-back boundaries.
+ */
+export function instantFromZonedParts(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute = 0,
+  second = 0,
+  timeZone = BAR_TIMEZONE
+): Date {
+  const wanted = Date.UTC(year, month - 1, day, hour, minute, second);
+  const guess = new Date(wanted);
+  const asWall = zonedParts(guess, timeZone);
+  const asIfUtc = Date.UTC(
+    asWall.year, asWall.month - 1, asWall.day, asWall.hour, asWall.minute, asWall.second
+  );
+  let result = wanted - (asIfUtc - wanted);
+  const check = zonedParts(new Date(result), timeZone);
+  const checkUtc = Date.UTC(
+    check.year, check.month - 1, check.day, check.hour, check.minute, check.second
+  );
+  if (checkUtc !== wanted) result += wanted - checkUtc;
+  return new Date(result);
+}
+
+/** Civil YYYY-MM-DD in the bar timezone (not the host TZ). */
+export function civilDateInBar(now: Date = new Date(), timeZone = BAR_TIMEZONE): string {
+  const { year, month, day } = zonedParts(now, timeZone);
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+/**
+ * Date string for the current vault day in America/New_York.
+ * Anything before 4:00 AM bar time still belongs to the previous civil day.
+ */
+export function vaultDayDate(now: Date = new Date(), timeZone = BAR_TIMEZONE): string {
+  const parts = zonedParts(now, timeZone);
+  let { year, month, day } = parts;
+  if (parts.hour < VAULT_DAY_ROLL_HOUR) {
+    const prev = new Date(Date.UTC(year, month - 1, day - 1));
+    year = prev.getUTCFullYear();
+    month = prev.getUTCMonth() + 1;
+    day = prev.getUTCDate();
+  }
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
 
 /** Parse a vault-day `YYYY-MM-DD` or return null when the string is not a calendar date. */
 export function parseVaultDay(value: unknown): string | null {
@@ -418,11 +498,12 @@ export function parseVaultDay(value: unknown): string | null {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  const probe = new Date(year, month - 1, day);
+  // UTC probe rejects impossible civil days without using the host timezone.
+  const probe = new Date(Date.UTC(year, month - 1, day));
   if (
-    probe.getFullYear() !== year ||
-    probe.getMonth() !== month - 1 ||
-    probe.getDate() !== day
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
   ) {
     return null;
   }
@@ -430,16 +511,24 @@ export function parseVaultDay(value: unknown): string | null {
 }
 
 /**
- * Local-time half-open bounds for a vault day: [4:00 AM that date, 4:00 AM next date).
- * Convert to ISO UTC for SQLite comparisons against `checked_in_at`.
+ * Half-open vault-day bounds in America/New_York: [4:00 AM that date, 4:00 AM next date).
+ * DST makes some vault days 23h or 25h of real time; wall-clock still rolls at 4 AM.
  */
-export function vaultDayBounds(vaultDay: string): { start: Date; end: Date } {
+export function vaultDayBounds(vaultDay: string, timeZone = BAR_TIMEZONE): { start: Date; end: Date } {
   const parsed = parseVaultDay(vaultDay);
   if (!parsed) throw new Error(`Invalid vault day: ${vaultDay}`);
   const [year, month, day] = parsed.split("-").map(Number) as [number, number, number];
-  const start = new Date(year, month - 1, day, VAULT_DAY_ROLL_HOUR, 0, 0, 0);
-  const end = new Date(start.getTime());
-  end.setDate(end.getDate() + 1);
+  const start = instantFromZonedParts(year, month, day, VAULT_DAY_ROLL_HOUR, 0, 0, timeZone);
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  const end = instantFromZonedParts(
+    next.getUTCFullYear(),
+    next.getUTCMonth() + 1,
+    next.getUTCDate(),
+    VAULT_DAY_ROLL_HOUR,
+    0,
+    0,
+    timeZone
+  );
   return { start, end };
 }
 
@@ -451,6 +540,42 @@ export function parseUtcTimestamp(value: string): Date {
   if (!raw) return new Date(NaN);
   if (raw.includes("T") || raw.endsWith("Z")) return new Date(raw);
   return new Date(`${raw.replace(" ", "T")}Z`);
+}
+
+/** Keeper-facing clock time in the bar timezone. */
+export function formatBarTime(iso: string, timeZone = BAR_TIMEZONE): string {
+  const date = parseUtcTimestamp(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+/** Keeper-facing weekday + date + time in the bar timezone. */
+export function formatBarDateTime(iso: string, timeZone = BAR_TIMEZONE): string {
+  const date = parseUtcTimestamp(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+/** True when `iso` and `now` share the same America/New_York civil calendar day. */
+export function isSameBarCalendarDay(
+  iso: string,
+  now: Date = new Date(),
+  timeZone = BAR_TIMEZONE
+): boolean {
+  const date = parseUtcTimestamp(iso);
+  if (Number.isNaN(date.getTime())) return false;
+  return civilDateInBar(date, timeZone) === civilDateInBar(now, timeZone);
 }
 
 export function clipText(value: unknown, max: number): string {

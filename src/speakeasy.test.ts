@@ -3,9 +3,14 @@ import { test } from "node:test";
 import {
   AI_MIXOLOGIST_PROVIDER_TIMEOUT_MS, AI_MIXOLOGIST_TIMEOUT_MS, AI_TIMEOUT_MS, AI_UNAVAILABLE_NOTICE,
   DEFAULT_ENABLED_TABS, DEFAULT_TAB_ORDER, MIXOLOGIST_LOADING_STEP_MS, TAB_KEYS, appleCashLink,
-  mixologistFailureMessage, mixologistLoadingStep, parseEnabledTabs, parseTabOrder, patronRank,
-  serializeEnabledTabs, tipHandles, vaultDayDate
+  instantFromZonedParts, mixologistFailureMessage, mixologistLoadingStep, parseEnabledTabs,
+  parseTabOrder, patronRank, serializeEnabledTabs, tipHandles, vaultDayDate
 } from "./speakeasy-shared.js";
+
+/** Wall-clock America/New_York → UTC instant (month is 1–12). */
+function ny(y: number, m: number, d: number, h: number, min = 0) {
+  return instantFromZonedParts(y, m, d, h, min, 0);
+}
 import { db, setSetting } from "./db.js";
 import { flushDiscordAlerts, messageEmbed } from "./discord.js";
 import {
@@ -42,12 +47,12 @@ test("mixologist loading copy starts on the shelf and then measures", () => {
   assert.equal(mixologistLoadingStep(MIXOLOGIST_LOADING_STEP_MS * 2).title, "Checking the shelf…");
 });
 
-test("the vault day rolls at 4:00 AM so late-night votes stay on one date", () => {
-  assert.equal(vaultDayDate(new Date(2026, 7, 22, 23, 30)), "2026-08-22");
-  assert.equal(vaultDayDate(new Date(2026, 7, 23, 1, 15)), "2026-08-22");
-  assert.equal(vaultDayDate(new Date(2026, 7, 23, 3, 59)), "2026-08-22");
-  assert.equal(vaultDayDate(new Date(2026, 7, 23, 4, 0)), "2026-08-23");
-  assert.equal(vaultDayDate(new Date(2026, 0, 1, 2, 0)), "2025-12-31");
+test("the vault day rolls at 4:00 AM America/New_York so late-night votes stay on one date", () => {
+  assert.equal(vaultDayDate(ny(2026, 8, 22, 23, 30)), "2026-08-22");
+  assert.equal(vaultDayDate(ny(2026, 8, 23, 1, 15)), "2026-08-22");
+  assert.equal(vaultDayDate(ny(2026, 8, 23, 3, 59)), "2026-08-22");
+  assert.equal(vaultDayDate(ny(2026, 8, 23, 4, 0)), "2026-08-23");
+  assert.equal(vaultDayDate(ny(2026, 1, 1, 2, 0)), "2025-12-31");
 });
 
 test("enabled tabs fall back to the house defaults for bad input", () => {
