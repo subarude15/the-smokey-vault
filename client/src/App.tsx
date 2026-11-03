@@ -948,8 +948,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   const [snap, setSnap] = useState<OverviewSnapshot>();
   const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
   const [error, setError] = useState("");
+  // Eyebrow = time-of-day only. Configurable homepage message is a separate hero statement;
+  // when disabled it is hidden for Guest and Keeper alike (no alternate greeting fallback).
   const greeting = overviewGreeting(new Date(), !admin);
-  // Time-of-day eyebrow stays independent; published homepage message is Keeper-configured.
   const homepageMessage = publishedHomepageMessage(settings);
   function load() {
     setError("");
@@ -976,11 +977,7 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         <span className="hero-wordmark" role="heading" aria-level={1}>
           <SmokeyBarrelWordmark/>
         </span>
-        {homepageMessage ? (
-          <p className="hero-message">{homepageMessage}</p>
-        ) : admin ? (
-          <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
-        ) : null}
+        {homepageMessage ? <p className="hero-message">{homepageMessage}</p> : null}
         <p className="hero-lede">{overviewHeroLede(!admin)}</p>
       </div>
       {/* Decorative hop-vine filigree only — non-interactive, aria-hidden, and it

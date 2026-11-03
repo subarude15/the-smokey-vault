@@ -148,6 +148,16 @@ test("guests cannot write settings; Keeper Settings owns the editor", async () =
   assert.doesNotMatch(appSrc, /page === "settings" && !admin/);
 });
 
+test("disabled homepage message hides for Guest and Keeper with no greeting fallback", () => {
+  // Time-of-day eyebrow only; never restore line/emphasize when the statement is off.
+  assert.match(appSrc, /\{greeting\.eyebrow\}/);
+  assert.match(appSrc, /homepageMessage \? <p className="hero-message">\{homepageMessage\}<\/p> : null/);
+  assert.doesNotMatch(appSrc, /homepageMessage \?[\s\S]*admin \?[\s\S]*hero-greeting/);
+  assert.doesNotMatch(appSrc, /greeting\.line.*greeting\.emphasize/);
+  // overviewHeroLede stays a separate description under the optional statement.
+  assert.match(appSrc, /className="hero-lede">\{overviewHeroLede\(!admin\)\}/);
+});
+
 test("hero message sits under the wordmark with contrast and underlap padding", () => {
   // Message is inside hero-copy after the wordmark (not orphaned under filigree).
   assert.match(
@@ -158,6 +168,9 @@ test("hero message sits under the wordmark with contrast and underlap padding", 
   assert.match(homeHeroCss, /white-space:\s*pre-wrap/);
   assert.match(homeHeroCss, /--hero-underlap-pad/);
   assert.match(homeHeroCss, /color-mix\(in srgb,var\(--text\)/);
+  // Light + Dark both use primary-text mixes (not muted-only).
+  assert.match(homeHeroCss, /\[data-theme="light"\] \.hero \.hero-message/);
+  assert.match(homeHeroCss, /\[data-theme="dark"\] \.hero \.hero-message/);
   // Underlap must not dive a full topbar-height into the hero (message protection).
   assert.match(depthCss, /min\(28vh,220px\) \+ 40px/);
   assert.match(depthCss, /min\(18vh,132px\) \+ 32px/);
