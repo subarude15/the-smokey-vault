@@ -5,6 +5,7 @@ Last updated: 2026-11-03
 ## Current position
 
 Most recently ready for review:
+- **Editable Homepage Message + Mobile Hero Layout** (draft [#182](https://github.com/subarude15/the-smokey-vault/pull/182)). Keeper Settings edit/preview/enable/reset for a plain-text homepage message (settings keys, no new table). Guests read via `/api/house` only. Disabled hides the statement for Guest and Keeper (no alternate greeting fallback). Hero underlap/contrast/spacing fixed so the message stays under the wordmark and clear of CTAs / bottom nav. Rebased onto [#181](https://github.com/subarude15/the-smokey-vault/pull/181) tip for sequential merge.
 - **Keeper tap reassignment** (draft [#181](https://github.com/subarude15/the-smokey-vault/pull/181)). Move/swap by exchanging `tap_number`, preserving row `id` and beer fields. Keeper-only `POST /api/inventory/taps/:id/reassign` + touch-friendly “Move to tap” destination picker on occupied tap cards.
 
 Previously ready / merged:
@@ -26,8 +27,11 @@ Previously ready / merged:
 Next planned:
 - PR163 remaining precedence/ownership and PR164 Keeper progressive scanner UX.
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
+- Live phone/tablet verify homepage message + hero underlap after this PR deploys.
 
 ## Recent architectural decisions
+
+- Homepage message: reuse `settings` + `PUBLIC_SETTING_KEYS` (`homepage_message`, `homepage_message_enabled`). Sanitize on write (`src/homepage-message.ts`); React text nodes for display (no HTML). Disable hides without clearing for Guest and Keeper. Time-of-day `overviewGreeting` eyebrow stays independent of the configurable message; `overviewHeroLede` remains a separate description.
 
 - Tap reassignment swaps `tap_number` between existing tap rows inside a SQLite transaction (temp negative number avoids UNIQUE collisions). Beer content, enrichment jobs, reviews, and votes stay on the same `taps.id`. Empty destination = move; occupied = swap (with Keeper confirm). No schema migration.
 
@@ -48,6 +52,7 @@ Next planned:
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap.
 - Live NAS/mobile verify cocktail photo framing after deploy.
+- Live mobile browser verify homepage hero message clearance (narrow Android, iPhone, tablet) after deploy — automated CSS/source tests cover structure; real device underlap still worth a glance.
 - SearXNG health/backoff follow-up.
 - PR163 remaining: Keeper-review conflict rules beyond decoded-UPC precedence.
 - PR164: progressive Keeper scanner UX (Read front label on miss).
