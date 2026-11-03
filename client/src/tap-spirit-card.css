@@ -38,6 +38,18 @@
 .tap-card.empty-tap .domain-card-main{min-height:130px}
 .tap-card.kicked-tap .domain-card-gauge>span{background:color-mix(in srgb,#e4a84e 72%,var(--accent))}
 
+.tap-reassign-modal{width:min(440px,100%)}
+.tap-reassign-lead{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
+.tap-reassign-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:min(52vh,420px);overflow:auto}
+.tap-reassign-option{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;min-height:56px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--text);text-align:left;cursor:pointer}
+.tap-reassign-option:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 46%,var(--line))}
+.tap-reassign-option:disabled{opacity:.55;cursor:not-allowed}
+.tap-reassign-option.empty{background:color-mix(in srgb,var(--surface) 70%,var(--surface-2))}
+.tap-reassign-option-kicker{display:flex;align-items:center;gap:8px;width:100%;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tap-reassign-option-kicker strong{color:var(--accent-2);font-weight:750}
+.tap-reassign-option-title{font-size:15px;font-weight:650;line-height:1.25}
+.tap-reassign-option-meta{font-size:12px;color:var(--muted)}
+
 @media(max-width:720px){
   .domain-card-main{grid-template-columns:78px minmax(0,1fr);gap:12px;padding:13px}
   .domain-card-media{width:78px}
@@ -49,6 +61,7 @@
   .keeper-card-controls .secondary{width:100%;justify-content:center;min-height:46px;padding:0 8px}
   .domain-card-context{padding:0 13px 10px}
   .homebrew-link{min-height:44px}
+  .tap-reassign-option{min-height:62px;padding:14px}
 }
 
 @media(max-width:390px){

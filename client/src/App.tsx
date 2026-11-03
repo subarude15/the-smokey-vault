@@ -1920,9 +1920,17 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
             key={item.id}
             item={item}
             admin={admin}
+            taps={items}
             onOpenDetail={() => openBottleDetail(item, module.id)}
             onEdit={() => setEditing(item)}
             onUpdated={(next) => setItems((current) => current.map((row) => Number(row.id) === Number(next.id) ? next : row))}
+            onTapsReassigned={(next) => {
+              setItems(next);
+              setViewing((current) => {
+                if (!current) return current;
+                return next.find((row) => Number(row.id) === Number(current.id)) ?? current;
+              });
+            }}
             onClearTap={() => { void clearTap(item); }}
             onOpenBreweryLab={openBreweryLab}
           />;

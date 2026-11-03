@@ -1,13 +1,14 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-10-11
+Last updated: 2026-11-03
 
 ## Current position
 
 Most recently ready for review:
-- **Patron visit history + daily check-in log** (draft [#180](https://github.com/subarude15/the-smokey-vault/pull/180)). Additive `patron_visits` table; Keeper check-in timestamps, per-patron history, vault-day Visit Log (4 AM), duplicate confirmation, void-by-visit-id. Cumulative `visit_count` / guest leaderboard ranking unchanged; no fabricated dated rows for legacy counts.
+- **Keeper tap reassignment** (draft [#181](https://github.com/subarude15/the-smokey-vault/pull/181)). Move/swap by exchanging `tap_number`, preserving row `id` and beer fields. Keeper-only `POST /api/inventory/taps/:id/reassign` + touch-friendly “Move to tap” destination picker on occupied tap cards.
 
 Previously ready / merged:
+- **PR180** — Patron visit history + daily check-in log.
 - **PR179** — Barcode-first label scan pipeline (`identifyFromLabelImageBuffer`).
 - **PR178** — Optional Ollama → Gemini AI fallback (`callLlm`).
 - **PR177** — Per-event RSVP tracker.
@@ -27,6 +28,8 @@ Next planned:
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
 
 ## Recent architectural decisions
+
+- Tap reassignment swaps `tap_number` between existing tap rows inside a SQLite transaction (temp negative number avoids UNIQUE collisions). Beer content, enrichment jobs, reviews, and votes stay on the same `taps.id`. Empty destination = move; occupied = swap (with Keeper confirm). No schema migration.
 
 - Patron check-ins: `patron_visits` stores dated rows (`id`, `patron_id`, `checked_in_at` UTC ISO). `visit_count` remains the leaderboard source of truth and must stay ≥ recorded dated rows (`updatePatron` enforces this). Legacy surplus = `visit_count - COUNT(visits)`. Vault-day rollover (4 AM) and Keeper time labels use `America/New_York`, not host/browser TZ (DST can make a vault day 23h or 25h). Same vault-day repeats need Keeper confirmation (`force` / `confirm_duplicate`). Void removes a specific visit row and decrements count; Minus only reduces legacy surplus. Invalid `?date=` on the Visit Log is HTTP 400.
 

@@ -66,9 +66,12 @@ test("empty taps stay visible and are not inferred from raw remaining liters", (
 test("Keeper tap controls reuse existing pour and established clear flow", () => {
   assert.match(cardSrc, /remaining_l: pourPint\(remaining\)/);
   assert.match(cardSrc, /onClearTap/);
+  assert.match(cardSrc, /Move to tap/);
+  assert.match(cardSrc, /\/inventory\/taps\/\$\{item\.id\}\/reassign/);
   assert.match(appSrc, /async function clearTap\(item: Item\)/);
   assert.match(appSrc, /JSON\.stringify\(emptyTapBeerFields\(\)\)/);
   assert.match(appSrc, /onClearTap=\{\(\) => \{ void clearTap\(item\); \}\}/);
+  assert.match(appSrc, /onTapsReassigned=/);
 });
 
 test("Keeper spirit controls reuse current mutation semantics", () => {
