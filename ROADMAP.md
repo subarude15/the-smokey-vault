@@ -83,7 +83,7 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ### Ready for review — Editable Homepage Message + Mobile Hero Layout
 
-Keeper Settings gains a Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content persists in existing `settings` keys (`homepage_message`, `homepage_message_enabled`), is sanitized as plain text (max 200), and is published to guests via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow stays independent. Mobile hero layout fix: sticky underlap no longer covers the message (shallower overlap + `--hero-underlap-pad`), message sits under the wordmark with Light/Dark contrast, multiline `pre-wrap`, no oversized `min-height` hero on phones. Wordmark/filigree/nav unchanged.
+Keeper Settings gains a Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content persists in existing `settings` keys (`homepage_message`, `homepage_message_enabled`), is sanitized as plain text (max 200), and is published to guests via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow stays independent; `overviewHeroLede` stays a separate description. When disabled, the statement is hidden for Guest and Keeper (no alternate greeting fallback). Mobile hero layout fix: sticky underlap no longer covers the message (shallower overlap + `--hero-underlap-pad`), message sits under the wordmark with Light/Dark contrast, multiline `pre-wrap`, no oversized `min-height` hero on phones. Wordmark/filigree/nav unchanged. Rebased onto PR181 tip for sequential merge (#181 then #182).
 
 ### Recently completed — PR160 Interface Depth & Motion System
 
