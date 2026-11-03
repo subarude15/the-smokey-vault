@@ -154,16 +154,18 @@ test("disabled homepage message hides for Guest and Keeper with no greeting fall
   assert.match(appSrc, /homepageMessage \? <p className="hero-message">\{homepageMessage\}<\/p> : null/);
   assert.doesNotMatch(appSrc, /homepageMessage \?[\s\S]*admin \?[\s\S]*hero-greeting/);
   assert.doesNotMatch(appSrc, /greeting\.line.*greeting\.emphasize/);
-  // overviewHeroLede stays a separate description under the optional statement.
-  assert.match(appSrc, /className="hero-lede">\{overviewHeroLede\(!admin\)\}/);
+  // Redundant descriptive paragraph under the message is gone from the homepage hero.
+  assert.doesNotMatch(appSrc, /className="hero-lede"/);
+  assert.doesNotMatch(appSrc, /\boverviewHeroLede\b/);
 });
 
 test("hero message sits under the wordmark with contrast and underlap padding", () => {
-  // Message is inside hero-copy after the wordmark (not orphaned under filigree).
+  // Message is inside hero-copy after the wordmark (not orphaned under filigree); no lede after it.
   assert.match(
     appSrc,
-    /className="hero-wordmark"[\s\S]*?homepageMessage[\s\S]*?className="hero-message"[\s\S]*?className="hero-lede"/,
+    /className="hero-wordmark"[\s\S]*?homepageMessage[\s\S]*?className="hero-message"[\s\S]*?HopFiligree/,
   );
+  assert.doesNotMatch(appSrc, /className="hero-lede"/);
   assert.match(homeHeroCss, /\.hero \.hero-message\{/);
   assert.match(homeHeroCss, /white-space:\s*pre-wrap/);
   assert.match(homeHeroCss, /--hero-underlap-pad/);
