@@ -81,17 +81,21 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
-### Ready for review — Remove redundant homepage hero-lede
+### Ready for review — Fix homepage hero gradient obscuring text (#184)
 
-Guest homepage drops the obsolete static `hero-lede` paragraph under the configurable Homepage Message so the stack is eyebrow → wordmark → message → CTAs. Unused `.hero-lede` CSS cleaned; `overviewHeroLede` kept as `overviewHeroCopy` empty-house fallback. Keeper Homepage Message settings from #182 unchanged. Draft only — do not merge/deploy until reviewed.
+Removes PR160 sticky hero underlap + upward `.home-content::before` scrim that painted over the configurable Homepage Message (especially on ≤700px). Hero → CTAs → rest is normal document flow; intentional seam is content-plane padding + hairline only. Chromium computed-style regression covers message lengths and phone viewports. Draft only — do not merge/deploy until reviewed.
+
+### Recently completed — Remove redundant homepage hero-lede (#183)
+
+Guest homepage drops the obsolete static `hero-lede` paragraph under the configurable Homepage Message so the stack is eyebrow → wordmark → message → CTAs. Unused `.hero-lede` CSS cleaned; `overviewHeroLede` kept as `overviewHeroCopy` empty-house fallback.
 
 ### Recently completed — Editable Homepage Message + Mobile Hero Layout (#182)
 
-Keeper Settings Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content in `settings` keys (`homepage_message`, `homepage_message_enabled`), sanitized plain text (max 200), published via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow independent; disabled hides for Guest and Keeper. Mobile hero underlap/contrast/spacing so the message stays under the wordmark and clear of CTAs.
+Keeper Settings Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content in `settings` keys (`homepage_message`, `homepage_message_enabled`), sanitized plain text (max 200), published via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow independent; disabled hides for Guest and Keeper.
 
 ### Recently completed — PR160 Interface Depth & Motion System
 
-Shared frontend elevation + motion language is implemented (`client/src/depth-motion.css`): Depth 0–4 surface/elevation tokens with clear resting card float (contact + ambient shadow, edge highlight, restrained warm bounce-light), fine-pointer hover lift (~8–9px + ~1.012–1.015 scale into Depth 3), Depth-4 overlays (modal/More/lightbox), touch press scale, brief page/grid enters, layered homepage hero reveal, CSS sticky homepage hero underlap (content scrolls over the hero with a soft leading scrim; no parallax / no scroll listeners), and `prefers-reduced-motion` (movement off, static elevation kept). No backend/schema/API changes; Guest redaction unchanged; Smokey Barrel brand art preserved as separate vectors.
+Shared frontend elevation + motion language is implemented (`client/src/depth-motion.css`): Depth 0–4 surface/elevation tokens with clear resting card float (contact + ambient shadow, edge highlight, restrained warm bounce-light), fine-pointer hover lift (~8–9px + ~1.012–1.015 scale into Depth 3), Depth-4 overlays (modal/More/lightbox), touch press scale, brief page/grid enters, layered homepage hero reveal, and `prefers-reduced-motion` (movement off, static elevation kept). Sticky homepage hero underlap + climbing foreground scrim were removed after they obscured the Homepage Message — hero→content is normal document flow with a content-plane seam. No backend/schema/API changes; Guest redaction unchanged; Smokey Barrel brand art preserved as separate vectors.
 
 ### Recently completed (uncommitted) — Optional Ollama → Gemini AI fallback
 

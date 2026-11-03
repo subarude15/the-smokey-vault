@@ -159,7 +159,7 @@ test("disabled homepage message hides for Guest and Keeper with no greeting fall
   assert.doesNotMatch(appSrc, /\boverviewHeroLede\b/);
 });
 
-test("hero message sits under the wordmark with contrast and underlap padding", () => {
+test("hero message sits under the wordmark with contrast and clear of content overlays", () => {
   // Message is inside hero-copy after the wordmark (not orphaned under filigree); no lede after it.
   assert.match(
     appSrc,
@@ -168,13 +168,16 @@ test("hero message sits under the wordmark with contrast and underlap padding", 
   assert.doesNotMatch(appSrc, /className="hero-lede"/);
   assert.match(homeHeroCss, /\.hero \.hero-message\{/);
   assert.match(homeHeroCss, /white-space:\s*pre-wrap/);
-  assert.match(homeHeroCss, /--hero-underlap-pad/);
+  assert.match(homeHeroCss, /--hero-pad-bottom/);
+  assert.doesNotMatch(homeHeroCss, /--hero-underlap-pad/);
   assert.match(homeHeroCss, /color-mix\(in srgb,var\(--text\)/);
   // Light + Dark both use primary-text mixes (not muted-only).
   assert.match(homeHeroCss, /\[data-theme="light"\] \.hero \.hero-message/);
   assert.match(homeHeroCss, /\[data-theme="dark"\] \.hero \.hero-message/);
-  // Underlap must not dive a full topbar-height into the hero (message protection).
-  assert.match(depthCss, /min\(28vh,220px\) \+ 40px/);
-  assert.match(depthCss, /min\(18vh,132px\) \+ 32px/);
+  // Normal flow: no sticky underlap pull-up / climbing scrim.
+  assert.match(depthCss, /\.home-content\{[\s\S]*?margin-top:\s*0/);
+  assert.match(depthCss, /\.home-content::before\{[\s\S]*?content:\s*none/);
+  assert.doesNotMatch(depthCss, /min\(28vh,220px\)/);
+  assert.doesNotMatch(depthCss, /min\(18vh,132px\)/);
   assert.doesNotMatch(homeHeroCss, /min-height:\s*clamp\(340px/);
 });

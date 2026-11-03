@@ -392,10 +392,17 @@ body,
 }
 
 /* -------------------------------------------------------------------------- */
-/* Homepage hero underlap — sticky back plane + foreground scrim (CSS-first)  */
-/* Depth 0 hero sticks inside a short opening runway; content (Depth 2+)      */
-/* pulls up over it. Soft leading scrim darkens the hero as cards approach.   */
-/* Hero leaves naturally when the opening region ends. No JS scroll listeners. */
+/* Homepage hero → content transition (normal document flow)                    */
+/*                                                                              */
+/* PR160 sticky underlap + upward `.home-content::before` scrim painted over the */
+/* configurable homepage message. On mobile the scrim climbed 112–132px into the */
+/* hero while `.home-content` (z-index:2) stacked above `.home-hero-pin` (z:0).  */
+/* On desktop, sticky + hero negative-margin collapse also mis-placed the runway */
+/* so the “shallow bite” became a deep overlap.                                  */
+/*                                                                              */
+/* Fix: hero → CTAs → rest in normal flow at every breakpoint. No sticky pin, no */
+/* runway hold, no upward pseudo/mask/gradient may cross message text at any     */
+/* length. Intentional seam is spacing + hairline on the content plane only.     */
 /* -------------------------------------------------------------------------- */
 
 .home-stack{
@@ -404,140 +411,52 @@ body,
   overflow:visible;
 }
 
-/*
- * Sticky runway MUST be taller than the hero pin. A min-height alone fails when
- * the hero is already ~viewport-tall (common on phones) — sticky never engages.
- * padding-bottom creates an explicit hold region below the pin.
- */
 .home-opening{
   position:relative;
-  z-index:0;
   overflow:visible;
   min-height:0;
-  padding-bottom:0;
 }
 
 .home-hero-pin{
-  position:sticky;
-  /* Sit under the sticky topbar (72px) so engagement does not jump under chrome */
-  top:72px;
-  z-index:0;
+  position:relative;
+  top:auto;
   overflow:visible;
 }
 
-/* Explicit in-flow sticky runway (more reliable than parent padding-bottom). */
+/* Kept in the DOM for markup stability; height collapsed — no sticky hold. */
 .home-hero-runway{
-  height:min(28vh,220px);
+  height:0;
   pointer-events:none;
 }
 
-/* Hero keeps its own overflow clip for filigree; the pin must not clip. */
 .home-hero-pin .hero{
   margin-bottom:0;
 }
 
 .home-content{
   position:relative;
-  z-index:2;
   overflow:visible;
   background:var(--surface-base);
-  /* Pull across the runway and only a shallow strip of hero padding (not the message). */
-  margin-top:calc(-1 * (min(28vh,220px) + 40px));
-  padding-top:12px;
+  margin-top:0;
+  padding-top:20px;
+  /* Hero→CTA seam lives on the content plane — never extends upward over text. */
+  border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent);
 }
 
-/* Leading scrim travels with the foreground plane and obscures the hero. */
+/* Explicitly kill any residual / future upward scrim on this plane. */
 .home-content::before{
-  content:"";
-  position:absolute;
-  left:0;
-  right:0;
-  top:-176px;
-  height:176px;
-  pointer-events:none;
-  z-index:0;
-  background:
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb,var(--surface-base) 28%,transparent) 34%,
-      color-mix(in srgb,var(--surface-base) 62%,transparent) 62%,
-      color-mix(in srgb,var(--surface-base) 88%,transparent) 84%,
-      var(--surface-base) 100%
-    );
+  content:none;
 }
 
-.home-content > *{
-  position:relative;
-  z-index:1;
-}
-
-/* Dark: deepen into whiskey-cellar shadow, not a flat pure-black fade. */
-[data-theme="dark"] .home-content::before{
-  background:
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb,var(--surface-base) 32%,transparent) 28%,
-      color-mix(in srgb,var(--surface-base) 55%,#000 18%) 52%,
-      color-mix(in srgb,var(--surface-base) 82%,#000 12%) 78%,
-      var(--surface-base) 100%
-    );
-}
-
-/* Light: warmer cream transition from existing surface tokens. */
-[data-theme="light"] .home-content::before{
-  background:
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb,var(--surface-base) 22%,transparent) 30%,
-      color-mix(in srgb,var(--surface-base) 55%,var(--surface) 8%) 58%,
-      color-mix(in srgb,var(--surface-base) 86%,var(--surface) 4%) 82%,
-      var(--surface-base) 100%
-    );
-}
-
-/* Mobile-first: shorter sticky hold; keep underlap inside hero padding. */
 @media (max-width:700px){
-  .home-hero-runway{
-    height:min(22vh,160px);
-  }
   .home-content{
-    margin-top:calc(-1 * (min(22vh,160px) + 36px));
-    padding-top:8px;
-  }
-  .home-content::before{
-    top:-132px;
-    height:132px;
+    padding-top:18px;
   }
 }
 
-@media (max-width:430px){
-  .home-hero-runway{
-    height:min(18vh,132px);
-  }
-  .home-content{
-    margin-top:calc(-1 * (min(18vh,132px) + 32px));
-    padding-top:4px;
-  }
-  .home-content::before{
-    top:-112px;
-    height:112px;
-  }
-}
-
-/* Unusually short viewports: skip sticky so the opening never traps scroll. */
 @media (max-height:520px){
-  .home-hero-runway{
-    height:0;
-  }
-  .home-hero-pin{
-    position:relative;
-    top:auto;
-  }
   .home-content{
-    margin-top:-16px;
+    padding-top:14px;
   }
 }
 
