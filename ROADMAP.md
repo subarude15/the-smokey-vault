@@ -131,9 +131,14 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The hybrid barcode + AI label scanner continues in PR162–PR164; PR161 is tooling-only and does not consume a product slot. Patron visit history / daily check-in log is an additional Keeper usability item in flight.
+These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The hybrid barcode + AI label scanner continues in PR162–PR164; PR161 is tooling-only and does not consume a product slot. Keeper tap reassignment is an additional usability item in flight.
 
-**Patron visit history + daily check-in log** (draft [#180](https://github.com/subarude15/the-smokey-vault/pull/180) — in review)
+**Keeper tap reassignment** (draft — in review)
+- Occupied tap cards gain Keeper-only **Move to tap** beside Edit/Clear (no drag-and-drop).
+- Destination picker lists taps 1–7 with empty/occupied + beer name; empty destination moves, occupied confirms a swap.
+- Server `POST /api/inventory/taps/:id/reassign` atomically exchanges `tap_number` so beer fields, row `id`, and enrichment/reviews/votes stay with each beer. No schema migration.
+
+**Patron visit history + daily check-in log** (merged [#180](https://github.com/subarude15/the-smokey-vault/pull/180))
 - Additive `patron_visits` (id, patron_id, checked_in_at UTC). Never fabricates dated rows for historical `visit_count`.
 - Keeper Regulars: last check-in label, check-in success toast with time, per-patron history modal, Visit Log (vault day 4 AM), duplicate same-day confirmation, void specific visit.
 - Guest leaderboard unchanged (top 15, no check-in metadata). Event RSVP check-ins untouched.
@@ -257,7 +262,8 @@ These are explicitly desired near-term product improvements based on real househ
 - `src/ingestion/llm-enrichment.ts` / `src/vision_label.ts` / `src/ai_providers.ts` — current local vision schema, cloud label parsing, and provider/failover configuration targeted by PR162.
 - `client/src/depth-motion.css` — PR160 shared elevation + motion tokens and site-wide depth/lift/press/reveal behaviors (imported from `main.tsx` after `styles.css` and `home-hero.css`).
 - `client/src/shell-nav.ts` — pure shell navigation helpers (primary/More selection, Guest/Keeper partition, tab visibility/order); PR142 `landingFeedbackCtaEnabled` shares `pageEnabled("next")` with Guest nav.
-- `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path.
+- `client/src/TapSpiritInventoryCard.tsx` / `client/src/tap-spirit-card.css` — PR135 Tap/Spirit card hierarchy and layered Keeper controls; Guest availability stays on the coarse helper path. Keeper tap reassignment destination modal lives here.
+- `src/tap-reassign.ts` — atomic move/swap of `tap_number` between tap rows (preserves `id`).
 - `client/src/api.ts` — shared client fetch helper, Keeper bearer storage, and central authenticated-401 → session-rejected signal.
 - `client/src/App.tsx` — responsive shell (phone bottom nav / rail), bottle-detail route, Keeper actions, Speakeasy/event entry points, and Guest handoff (`handToGuest`, idle lock, auth-rejected wiring).
 - `src/overview.ts` / `src/overview.test.ts` — Overview snapshot and hero-copy behavior; PR150 should keep the response contract and remove redundant presentation, not add a second count source.

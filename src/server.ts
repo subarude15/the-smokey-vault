@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { createAdminToken, isAdmin as isAdminSession, pinAccepted, requireAdmin as requireAdminSession, resolveSessionSecret } from "./auth.js";
 import { db, dbPath, createBackup, getSetting, setPin, setSetting, verifyPin } from "./db.js";
 import { applyBrewImageOwnershipOnWrite, prepareBrewWrite, preparePackagedWrite, prepareSpiritWrite, spiritInventoryRowLooksLikeBeer } from "./catalog.js";
+import { parseTapDestination, reassignTap } from "./tap-reassign.js";
 import { canonicalGtin } from "./cola_client.js";
 import { parseGeneratedRecipe, parseGeneratedRecipeSave, AiRecipeParseError, type GeneratedRecipe } from "./ai_recipe.js";
 import { guestCocktailExpiresAt, listActiveCocktails, purgeExpiredCocktails, sqliteUtc } from "./cocktail_expiry.js";
@@ -1027,6 +1028,37 @@ app.post<{
     return reply.code(result.statusCode).send({ error: result.error });
   }
   return result;
+});
+
+/**
+ * Keeper-only: move a beer to another tap position, or swap with an occupied tap.
+ * Exchanges tap_number only — row ids (and enrichment/reviews/votes) stay with each beer.
+ */
+app.post<{ Params: { id: string }; Body: { to_tap_number?: unknown } }>("/api/inventory/taps/:id/reassign", {
+  schema: {
+    tags: ["Admin"],
+    summary: "Move or swap a tap beer to another tap number"
+  }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  const id = Number(request.params.id);
+  const toTapNumber = parseTapDestination(request.body?.to_tap_number);
+  if (toTapNumber == null) {
+    return reply.code(400).send({ error: "to_tap_number must be an integer from 1 to 7" });
+  }
+  const result = reassignTap(id, toTapNumber);
+  if (!result.ok) {
+    return reply.code(result.statusCode).send({ error: result.error });
+  }
+  return {
+    noop: result.noop,
+    swapped: result.swapped,
+    from_tap_number: result.from_tap_number,
+    to_tap_number: result.to_tap_number,
+    taps: result.taps.map((row) =>
+      serializeInventoryItemForCaller("taps", withInventoryDisplayFields("taps", row), { admin: true })
+    )
+  };
 });
 
 /**

@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import { Beer, FlaskConical, Settings, WineOff } from "lucide-react";
+import { ArrowLeftRight, Beer, FlaskConical, Settings, WineOff, X } from "lucide-react";
 import { api, type Item } from "./api";
 import {
   BLOCKED_RIBBON_LABEL,
@@ -15,6 +15,7 @@ import {
   pourPint,
   pourSpirit,
   spiritStockLabel,
+  TAP_COUNT,
   tapTitle
 } from "./catalog";
 import {
@@ -35,7 +36,31 @@ type CardProps = {
   onUpdated: (item: Item) => void;
   onClearTap?: () => void;
   onOpenBreweryLab?: () => void;
+  /** Sibling taps (1–7) for the Keeper move destination picker. */
+  taps?: Item[];
+  /** Called after a successful move/swap so the collection can refresh. */
+  onTapsReassigned?: (taps: Item[]) => void;
 };
+
+type ReassignResponse = {
+  noop: boolean;
+  swapped: boolean;
+  from_tap_number: number;
+  to_tap_number: number;
+  taps: Item[];
+};
+
+function tapDestinationOptions(taps: Item[], currentTapNumber: number): Item[] {
+  const byNumber = new Map(taps.map((tap) => [Number(tap.tap_number), tap]));
+  return Array.from({ length: TAP_COUNT }, (_, index) => {
+    const tapNumber = index + 1;
+    return byNumber.get(tapNumber) ?? {
+      id: -tapNumber,
+      tap_number: tapNumber,
+      brewery_batch: ""
+    } as Item;
+  }).filter((tap) => Number(tap.tap_number) !== currentTapNumber);
+}
 
 function stop(event: MouseEvent<HTMLElement>) {
   event.stopPropagation();
@@ -86,6 +111,64 @@ function Availability({ pct, label, keeper }: { pct: number; label: string; keep
   </div>;
 }
 
+export function TapReassignModal({
+  item,
+  taps,
+  busy,
+  error,
+  onClose,
+  onChoose
+}: {
+  item: Item;
+  taps: Item[];
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onChoose: (destination: Item) => void;
+}) {
+  const options = tapDestinationOptions(taps, Number(item.tap_number));
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Move to tap">
+    <section className="modal form-modal tap-reassign-modal">
+      <header className="modal-header">
+        <div>
+          <span className="eyebrow">MOVE TO TAP</span>
+          <h2>{tapTitle(item)}</h2>
+          <p className="tap-reassign-lead">Currently on Tap {item.tap_number}. Choose an empty line to move, or an occupied line to swap.</p>
+        </div>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Close" disabled={busy}><X/></button>
+      </header>
+      <ul className="tap-reassign-list">
+        {options.map((destination) => {
+          const emptyDest = isTapEmpty(destination);
+          const label = emptyDest
+            ? `Tap ${destination.tap_number}, empty`
+            : `Tap ${destination.tap_number}, ${tapTitle(destination)}`;
+          return <li key={Number(destination.tap_number)}>
+            <button
+              type="button"
+              className={`tap-reassign-option${emptyDest ? " empty" : ""}`}
+              disabled={busy || Number(destination.id) <= 0}
+              aria-label={label}
+              onClick={() => onChoose(destination)}
+            >
+              <span className="tap-reassign-option-kicker">
+                <strong>Tap {destination.tap_number}</strong>
+                <span className={`status-pill${emptyDest ? " muted" : ""}`}>{emptyDest ? "Empty" : "Occupied"}</span>
+              </span>
+              <span className="tap-reassign-option-title">{emptyDest ? "Ready for a keg" : tapTitle(destination)}</span>
+              {!emptyDest && text(destination.maker) ? <span className="tap-reassign-option-meta">{text(destination.maker)}</span> : null}
+            </button>
+          </li>;
+        })}
+      </ul>
+      {error ? <p className="domain-card-error" role="alert">{error}</p> : null}
+      <footer className="modal-footer">
+        <button type="button" className="secondary" onClick={onClose} disabled={busy}>Cancel</button>
+      </footer>
+    </section>
+  </div>;
+}
+
 export function TapInventoryCard({
   item,
   admin,
@@ -93,10 +176,14 @@ export function TapInventoryCard({
   onEdit,
   onUpdated,
   onClearTap,
-  onOpenBreweryLab
+  onOpenBreweryLab,
+  taps = [],
+  onTapsReassigned
 }: CardProps) {
-  const [acting, setActing] = useState<"pour" | "">("");
+  const [acting, setActing] = useState<"pour" | "move" | "">("");
   const [error, setError] = useState("");
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveError, setMoveError] = useState("");
   const empty = isTapEmpty(item);
   const homebrew = !empty && isHomebrew(item);
   const guestPct = !admin ? readAvailabilityPct(item) : null;
@@ -127,6 +214,46 @@ export function TapInventoryCard({
     stop(event);
     if (remaining <= 0) return;
     void patch({ remaining_l: pourPint(remaining) }, "Could not pour a pint", "pour");
+  }
+
+  function openMove(event: MouseEvent<HTMLButtonElement>) {
+    stop(event);
+    setMoveError("");
+    setMoveOpen(true);
+  }
+
+  async function chooseDestination(destination: Item) {
+    if (!admin || acting) return;
+    const toTap = Number(destination.tap_number);
+    if (toTap === Number(item.tap_number)) {
+      setMoveOpen(false);
+      return;
+    }
+    if (!isTapEmpty(destination)) {
+      const ok = confirm(
+        `Swap Tap ${item.tap_number} (${tapTitle(item)}) with Tap ${toTap} (${tapTitle(destination)})?`
+      );
+      if (!ok) return;
+    }
+    setActing("move");
+    setMoveError("");
+    setError("");
+    try {
+      const result = await api<ReassignResponse>(`/inventory/taps/${item.id}/reassign`, {
+        method: "POST",
+        body: JSON.stringify({ to_tap_number: toTap })
+      });
+      setMoveOpen(false);
+      if (onTapsReassigned) onTapsReassigned(result.taps);
+      else {
+        const next = result.taps.find((row) => Number(row.id) === Number(item.id));
+        if (next) onUpdated(next);
+      }
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : "Could not move this beer");
+    } finally {
+      setActing("");
+    }
   }
 
   const availability = admin
@@ -177,9 +304,20 @@ export function TapInventoryCard({
         {acting === "pour" ? "Pouring…" : "− Pour pint"}
       </button> : null}
       <button type="button" className="secondary" onClick={onEdit}><Settings size={15}/> {empty ? "Put a beer on" : "Edit tap"}</button>
+      {!empty ? <button type="button" className="secondary" disabled={Boolean(acting)} onClick={openMove}>
+        <ArrowLeftRight size={15}/> {acting === "move" ? "Moving…" : "Move to tap"}
+      </button> : null}
       {!empty && onClearTap ? <button type="button" className="secondary danger" onClick={onClearTap}>Clear tap</button> : null}
     </div> : null}
     {error ? <p className="domain-card-error" role="alert">{error}</p> : null}
+    {admin && moveOpen ? <TapReassignModal
+      item={item}
+      taps={taps}
+      busy={acting === "move"}
+      error={moveError}
+      onClose={() => { if (acting !== "move") setMoveOpen(false); }}
+      onChoose={(destination) => { void chooseDestination(destination); }}
+    /> : null}
   </article>;
 }
 
