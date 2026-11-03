@@ -5,7 +5,7 @@ Last updated: 2026-11-03
 ## Current position
 
 Most recently ready for review:
-- **Keeper tap reassignment** (move/swap by exchanging `tap_number`, preserving row `id` and beer fields). Draft PR on this branch — Keeper-only `POST /api/inventory/taps/:id/reassign` + touch-friendly “Move to tap” destination picker on occupied tap cards.
+- **Keeper tap reassignment** (draft [#181](https://github.com/subarude15/the-smokey-vault/pull/181)). Move/swap by exchanging `tap_number`, preserving row `id` and beer fields. Keeper-only `POST /api/inventory/taps/:id/reassign` + touch-friendly “Move to tap” destination picker on occupied tap cards.
 
 Previously ready / merged:
 - **PR180** — Patron visit history + daily check-in log.

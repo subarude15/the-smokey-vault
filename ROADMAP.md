@@ -133,7 +133,7 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The hybrid barcode + AI label scanner continues in PR162–PR164; PR161 is tooling-only and does not consume a product slot. Keeper tap reassignment is an additional usability item in flight.
 
-**Keeper tap reassignment** (draft — in review)
+**Keeper tap reassignment** (draft [#181](https://github.com/subarude15/the-smokey-vault/pull/181) — in review)
 - Occupied tap cards gain Keeper-only **Move to tap** beside Edit/Clear (no drag-and-drop).
 - Destination picker lists taps 1–7 with empty/occupied + beer name; empty destination moves, occupied confirms a swap.
 - Server `POST /api/inventory/taps/:id/reassign` atomically exchanges `tap_number` so beer fields, row `id`, and enrichment/reviews/votes stay with each beer. No schema migration.
