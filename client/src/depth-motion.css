@@ -361,8 +361,7 @@ body,
   opacity:.95;
 }
 
-.hero .hero-copy,
-.hero .hero-lede{
+.hero .hero-copy{
   position:relative;
   z-index:2;
 }
@@ -381,14 +380,10 @@ body,
   animation-delay:60ms;
 }
 
-.hero .hero-greeting{
+.hero .hero-greeting,
+.hero .hero-message{
   animation:depth-hero-reveal calc(var(--motion-reveal) * .85) var(--ease-standard) both;
   animation-delay:90ms;
-}
-
-.hero .hero-lede{
-  animation:depth-hero-reveal calc(var(--motion-reveal) * .8) var(--ease-standard) both;
-  animation-delay:120ms;
 }
 
 @keyframes depth-hero-reveal{
@@ -602,7 +597,7 @@ body,
   .hero .hero-wordmark,
   .hero .hero-filigree,
   .hero .hero-greeting,
-  .hero .hero-lede{
+  .hero .hero-message{
     animation:none !important;
   }
 

@@ -73,7 +73,7 @@ import {
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   spiritFamilyFromLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, recipeIngredientMatchesBottle, shelfBottleFromItem, shelfKindForModule,
-  overviewGreeting, overviewHeroLede, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
+  overviewGreeting, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
   DEFAULT_HOMEPAGE_MESSAGE, MAX_HOMEPAGE_MESSAGE, publishedHomepageMessage, sanitizeHomepageMessage,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
@@ -948,8 +948,9 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
   const [snap, setSnap] = useState<OverviewSnapshot>();
   const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
   const [error, setError] = useState("");
-  // Eyebrow = time-of-day only. Configurable homepage message is a separate hero statement;
+  // Eyebrow = time-of-day only. Configurable homepage message is the sole hero statement;
   // when disabled it is hidden for Guest and Keeper alike (no alternate greeting fallback).
+  // Empty-house fallback copy stays in overview helpers — not rendered in this hero.
   const greeting = overviewGreeting(new Date(), !admin);
   const homepageMessage = publishedHomepageMessage(settings);
   function load() {
@@ -978,7 +979,6 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
           <SmokeyBarrelWordmark/>
         </span>
         {homepageMessage ? <p className="hero-message">{homepageMessage}</p> : null}
-        <p className="hero-lede">{overviewHeroLede(!admin)}</p>
       </div>
       {/* Decorative hop-vine filigree only — non-interactive, aria-hidden, and it
           fades out before the CTAs (PR159). */}

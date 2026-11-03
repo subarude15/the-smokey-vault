@@ -90,9 +90,10 @@ test("PR150 preserves each metric's existing navigation destination id", () => {
 });
 
 test("PR150 removes the duplicate six-count hero sentence", () => {
-  // The hero lede is now count-free prose; the count sentence formatter is gone from the client.
-  assert.doesNotMatch(appSrc, /overviewHeroCopy/);
-  assert.match(appSrc, /className="hero-lede">\{overviewHeroLede\(!admin\)\}/);
+  // Count sentence formatter and static hero-lede stay out of the homepage UI.
+  assert.doesNotMatch(appSrc, /\boverviewHeroCopy\b/);
+  assert.doesNotMatch(appSrc, /className="hero-lede"/);
+  assert.doesNotMatch(appSrc, /\boverviewHeroLede\b/);
 });
 
 test("hero brand motif is decorative — no duplicated live count or invented zero", () => {

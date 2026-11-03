@@ -5,9 +5,10 @@ Last updated: 2026-11-03
 ## Current position
 
 Most recently ready for review:
-- **Editable Homepage Message + Mobile Hero Layout** (draft [#182](https://github.com/subarude15/the-smokey-vault/pull/182)). Keeper Settings edit/preview/enable/reset for a plain-text homepage message (settings keys, no new table). Guests read via `/api/house` only. Disabled hides the statement for Guest and Keeper (no alternate greeting fallback). Hero underlap/contrast/spacing fixed so the message stays under the wordmark and clear of CTAs / bottom nav. Rebased onto `origin/main` after [#181](https://github.com/subarude15/the-smokey-vault/pull/181) merged.
+- **Remove redundant homepage hero-lede** (draft, stacks on merged #182). Guest homepage drops the obsolete “Browse the collection…” paragraph between the configurable message and CTAs. Time-of-day eyebrow, wordmark, Homepage Message settings, and `overviewHeroLede` helper (empty-house fallback for `overviewHeroCopy`) stay.
 
 Previously ready / merged:
+- **PR182** — Editable Homepage Message + Mobile Hero Layout (Keeper Settings + guest `/api/house` publish; hero underlap/contrast).
 - **PR181** — Keeper tap reassignment (move/swap by exchanging `tap_number`, preserving row `id`; TapReassignModal portals to `document.body`).
 - **PR180** — Patron visit history + daily check-in log.
 - **PR179** — Barcode-first label scan pipeline (`identifyFromLabelImageBuffer`).
@@ -31,7 +32,7 @@ Next planned:
 
 ## Recent architectural decisions
 
-- Homepage message: reuse `settings` + `PUBLIC_SETTING_KEYS` (`homepage_message`, `homepage_message_enabled`). Sanitize on write (`src/homepage-message.ts`); React text nodes for display (no HTML). Disable hides without clearing for Guest and Keeper. Time-of-day `overviewGreeting` eyebrow stays independent of the configurable message; `overviewHeroLede` remains a separate description.
+- Homepage message: reuse `settings` + `PUBLIC_SETTING_KEYS` (`homepage_message`, `homepage_message_enabled`). Sanitize on write (`src/homepage-message.ts`); React text nodes for display (no HTML). Disable hides without clearing for Guest and Keeper. Time-of-day `overviewGreeting` eyebrow stays independent of the configurable message. Homepage hero no longer shows `overviewHeroLede`; that helper remains only as `overviewHeroCopy`'s empty-house fallback.
 
 - Tap reassignment swaps `tap_number` between existing tap rows inside a SQLite transaction (temp negative number avoids UNIQUE collisions). Beer content, enrichment jobs, reviews, and votes stay on the same `taps.id`. Empty destination = move; occupied = swap (with Keeper confirm). No schema migration.
 
@@ -52,7 +53,7 @@ Next planned:
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap.
 - Live NAS/mobile verify cocktail photo framing after deploy.
-- Live mobile browser verify homepage hero message clearance (narrow Android, iPhone, tablet) after deploy — automated CSS/source tests cover structure; real device underlap still worth a glance.
+- Live mobile browser verify homepage hero (message above CTAs, no leftover lede gap) after the hero-lede removal deploys — automated CSS/source tests cover structure; real device underlap still worth a glance.
 - SearXNG health/backoff follow-up.
 - PR163 remaining: Keeper-review conflict rules beyond decoded-UPC precedence.
 - PR164: progressive Keeper scanner UX (Read front label on miss).

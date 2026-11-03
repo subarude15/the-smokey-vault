@@ -81,9 +81,13 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
-### Ready for review — Editable Homepage Message + Mobile Hero Layout
+### Ready for review — Remove redundant homepage hero-lede
 
-Keeper Settings gains a Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content persists in existing `settings` keys (`homepage_message`, `homepage_message_enabled`), is sanitized as plain text (max 200), and is published to guests via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow stays independent; `overviewHeroLede` stays a separate description. When disabled, the statement is hidden for Guest and Keeper (no alternate greeting fallback). Mobile hero layout fix: sticky underlap no longer covers the message (shallower overlap + `--hero-underlap-pad`), message sits under the wordmark with Light/Dark contrast, multiline `pre-wrap`, no oversized `min-height` hero on phones. Wordmark/filigree/nav unchanged. Stacks on merged PR181 / `origin/main`.
+Guest homepage drops the obsolete static `hero-lede` paragraph under the configurable Homepage Message so the stack is eyebrow → wordmark → message → CTAs. Unused `.hero-lede` CSS cleaned; `overviewHeroLede` kept as `overviewHeroCopy` empty-house fallback. Keeper Homepage Message settings from #182 unchanged. Draft only — do not merge/deploy until reviewed.
+
+### Recently completed — Editable Homepage Message + Mobile Hero Layout (#182)
+
+Keeper Settings Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content in `settings` keys (`homepage_message`, `homepage_message_enabled`), sanitized plain text (max 200), published via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow independent; disabled hides for Guest and Keeper. Mobile hero underlap/contrast/spacing so the message stays under the wordmark and clear of CTAs.
 
 ### Recently completed — PR160 Interface Depth & Motion System
 
