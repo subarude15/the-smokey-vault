@@ -83,7 +83,7 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ### Ready for review — Editable Homepage Message + Mobile Hero Layout
 
-Keeper Settings gains a Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content persists in existing `settings` keys (`homepage_message`, `homepage_message_enabled`), is sanitized as plain text (max 200), and is published to guests via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow stays independent; `overviewHeroLede` stays a separate description. When disabled, the statement is hidden for Guest and Keeper (no alternate greeting fallback). Mobile hero layout fix: sticky underlap no longer covers the message (shallower overlap + `--hero-underlap-pad`), message sits under the wordmark with Light/Dark contrast, multiline `pre-wrap`, no oversized `min-height` hero on phones. Wordmark/filigree/nav unchanged. Rebased onto PR181 tip for sequential merge (#181 then #182).
+Keeper Settings gains a Homepage Message section (multiline textarea, live preview, enable/disable without wiping text, reset to default). Content persists in existing `settings` keys (`homepage_message`, `homepage_message_enabled`), is sanitized as plain text (max 200), and is published to guests via `/api/house`. Default: “Pull up a stool. Tonight's yours.” Time-of-day eyebrow stays independent; `overviewHeroLede` stays a separate description. When disabled, the statement is hidden for Guest and Keeper (no alternate greeting fallback). Mobile hero layout fix: sticky underlap no longer covers the message (shallower overlap + `--hero-underlap-pad`), message sits under the wordmark with Light/Dark contrast, multiline `pre-wrap`, no oversized `min-height` hero on phones. Wordmark/filigree/nav unchanged. Stacks on merged PR181 / `origin/main`.
 
 ### Recently completed — PR160 Interface Depth & Motion System
 
@@ -135,12 +135,12 @@ Ops / evidence-driven hardening (does not displace the next product PR):
 
 ### Track C — Product usability (next)
 
-These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The hybrid barcode + AI label scanner continues in PR162–PR164; PR161 is tooling-only and does not consume a product slot. Keeper tap reassignment is an additional usability item in flight.
+These are explicitly desired near-term product improvements based on real household use and the post-PR148 UX review. PR136–PR160 are complete. The hybrid barcode + AI label scanner continues in PR162–PR164; PR161 is tooling-only and does not consume a product slot. Editable homepage message (#182) is the open usability item on top of merged tap reassignment.
 
-**Keeper tap reassignment** (draft [#181](https://github.com/subarude15/the-smokey-vault/pull/181) — in review)
+**Keeper tap reassignment** (merged [#181](https://github.com/subarude15/the-smokey-vault/pull/181))
 - Occupied tap cards gain Keeper-only **Move to tap** beside Edit/Clear (no drag-and-drop).
 - Destination picker lists taps 1–7 with empty/occupied + beer name; empty destination moves, occupied confirms a swap.
-- Server `POST /api/inventory/taps/:id/reassign` atomically exchanges `tap_number` so beer fields, row `id`, and enrichment/reviews/votes stay with each beer. No schema migration.
+- Server `POST /api/inventory/taps/:id/reassign` atomically exchanges `tap_number` so beer fields, row `id`, and enrichment/reviews/votes stay with each beer. No schema migration. TapReassignModal portals to `document.body`.
 
 **Patron visit history + daily check-in log** (merged [#180](https://github.com/subarude15/the-smokey-vault/pull/180))
 - Additive `patron_visits` (id, patron_id, checked_in_at UTC). Never fabricates dated rows for historical `visit_count`.

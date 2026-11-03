@@ -5,10 +5,10 @@ Last updated: 2026-11-03
 ## Current position
 
 Most recently ready for review:
-- **Editable Homepage Message + Mobile Hero Layout** (draft [#182](https://github.com/subarude15/the-smokey-vault/pull/182)). Keeper Settings edit/preview/enable/reset for a plain-text homepage message (settings keys, no new table). Guests read via `/api/house` only. Disabled hides the statement for Guest and Keeper (no alternate greeting fallback). Hero underlap/contrast/spacing fixed so the message stays under the wordmark and clear of CTAs / bottom nav. Rebased onto [#181](https://github.com/subarude15/the-smokey-vault/pull/181) tip for sequential merge.
-- **Keeper tap reassignment** (draft [#181](https://github.com/subarude15/the-smokey-vault/pull/181)). Move/swap by exchanging `tap_number`, preserving row `id` and beer fields. Keeper-only `POST /api/inventory/taps/:id/reassign` + touch-friendly “Move to tap” destination picker on occupied tap cards.
+- **Editable Homepage Message + Mobile Hero Layout** (draft [#182](https://github.com/subarude15/the-smokey-vault/pull/182)). Keeper Settings edit/preview/enable/reset for a plain-text homepage message (settings keys, no new table). Guests read via `/api/house` only. Disabled hides the statement for Guest and Keeper (no alternate greeting fallback). Hero underlap/contrast/spacing fixed so the message stays under the wordmark and clear of CTAs / bottom nav. Rebased onto `origin/main` after [#181](https://github.com/subarude15/the-smokey-vault/pull/181) merged.
 
 Previously ready / merged:
+- **PR181** — Keeper tap reassignment (move/swap by exchanging `tap_number`, preserving row `id`; TapReassignModal portals to `document.body`).
 - **PR180** — Patron visit history + daily check-in log.
 - **PR179** — Barcode-first label scan pipeline (`identifyFromLabelImageBuffer`).
 - **PR178** — Optional Ollama → Gemini AI fallback (`callLlm`).
