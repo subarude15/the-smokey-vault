@@ -5,7 +5,7 @@ Last updated: 2026-11-03
 ## Current position
 
 Most recently ready for review:
-- **Fix Homepage Hero Gradient Obscuring Text** (draft [#184](https://github.com/subarude15/the-smokey-vault/pull/184)). Removes PR160 sticky underlap + upward `.home-content::before` scrim that darkened the configurable Homepage Message on mobile (and mis-stacked on desktop). Hero → CTAs → rest is normal document flow; clearance does not depend on message length. Chromium computed-style regression in `src/homepage-hero-mobile-underlap.test.ts`.
+- **Fix Homepage Hero Gradient Obscuring Text** (draft [#184](https://github.com/subarude15/the-smokey-vault/pull/184)). Removes PR160 sticky underlap + upward `.home-content::before` scrim that darkened the configurable Homepage Message on mobile (and mis-stacked on desktop). Hero → CTAs → rest is normal document flow; clearance does not depend on message length. Chromium computed-style regression in `src/homepage-hero-mobile-underlap.test.ts`. Real guest-homepage screenshots via `scripts/visual-verify-homepage-hero.mjs` (wordmark SVG, filigree, short + 200-char message, CTAs, nav).
 
 Previously ready / merged:
 - **PR183** — Remove redundant homepage hero-lede.
