@@ -5,10 +5,11 @@ Last updated: 2026-11-03
 ## Current position
 
 Most recently ready for review:
-- **Remove redundant homepage hero-lede** (draft, stacks on merged #182). Guest homepage drops the obsolete “Browse the collection…” paragraph between the configurable message and CTAs. Time-of-day eyebrow, wordmark, Homepage Message settings, and `overviewHeroLede` helper (empty-house fallback for `overviewHeroCopy`) stay.
+- **Fix Homepage Hero Gradient Obscuring Text** (draft PR on this branch). Removes PR160 sticky underlap + upward `.home-content::before` scrim that darkened the configurable Homepage Message on mobile (and mis-stacked on desktop). Hero → CTAs → rest is normal document flow; clearance does not depend on message length. Chromium computed-style regression in `src/homepage-hero-mobile-underlap.test.ts`.
 
 Previously ready / merged:
-- **PR182** — Editable Homepage Message + Mobile Hero Layout (Keeper Settings + guest `/api/house` publish; hero underlap/contrast).
+- **PR183** — Remove redundant homepage hero-lede.
+- **PR182** — Editable Homepage Message + Mobile Hero Layout.
 - **PR181** — Keeper tap reassignment (move/swap by exchanging `tap_number`, preserving row `id`; TapReassignModal portals to `document.body`).
 - **PR180** — Patron visit history + daily check-in log.
 - **PR179** — Barcode-first label scan pipeline (`identifyFromLabelImageBuffer`).
@@ -23,16 +24,18 @@ Previously ready / merged:
 - **PR169** — AI brew recipe parser.
 - **PR168** — Keeper-only brew sheet foundation.
 - **PR165** — Conversational AI Mixologist phase 3.
-- **PR160** — Interface Depth & Motion System.
+- **PR160** — Interface Depth & Motion System (sticky hero underlap since rolled back for message clearance).
 
 Next planned:
 - PR163 remaining precedence/ownership and PR164 Keeper progressive scanner UX.
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
-- Live phone/tablet verify homepage message + hero underlap after this PR deploys.
+- Live phone/tablet verify homepage message clearance after this underlap fix deploys.
 
 ## Recent architectural decisions
 
-- Homepage message: reuse `settings` + `PUBLIC_SETTING_KEYS` (`homepage_message`, `homepage_message_enabled`). Sanitize on write (`src/homepage-message.ts`); React text nodes for display (no HTML). Disable hides without clearing for Guest and Keeper. Time-of-day `overviewGreeting` eyebrow stays independent of the configurable message. Homepage hero no longer shows `overviewHeroLede`; that helper remains only as `overviewHeroCopy`'s empty-house fallback.
+- Homepage hero→content: normal document flow. No sticky pin, no runway hold, no upward content scrim. Intentional seam is `.home-content` padding + hairline border on the content plane only. `--hero-pad-bottom` is breathing room, not an underlap reserve.
+
+- Homepage message: reuse `settings` + `PUBLIC_SETTING_KEYS` (`homepage_message`, `homepage_message_enabled`). Sanitize on write (`src/homepage-message.ts`); React text nodes for display (no HTML). Disable hides without clearing for Guest and Keeper. Time-of-day `overviewGreeting` eyebrow stays independent of the configurable message; static hero-lede removed in #183 (`overviewHeroCopy` remains empty-house fallback only).
 
 - Tap reassignment swaps `tap_number` between existing tap rows inside a SQLite transaction (temp negative number avoids UNIQUE collisions). Beer content, enrichment jobs, reviews, and votes stay on the same `taps.id`. Empty destination = move; occupied = swap (with Keeper confirm). No schema migration.
 
@@ -53,7 +56,7 @@ Next planned:
 
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap.
 - Live NAS/mobile verify cocktail photo framing after deploy.
-- Live mobile browser verify homepage hero (message above CTAs, no leftover lede gap) after the hero-lede removal deploys — automated CSS/source tests cover structure; real device underlap still worth a glance.
+- Live mobile browser glance after underlap-fix deploy (automation covers computed styles + screenshots; real device still worth a look).
 - SearXNG health/backoff follow-up.
 - PR163 remaining: Keeper-review conflict rules beyond decoded-UPC precedence.
 - PR164: progressive Keeper scanner UX (Read front label on miss).

@@ -1,17 +1,17 @@
 /* PR159: the ornament belongs to the hero edge, never to a content column.
    PR160: keep vector layers separate so depth/motion can treat them as planes.
-   Homepage message: sit under the wordmark with readable contrast; keep clear of
-   sticky underlap / CTAs / mobile bottom nav (overlap is decorative only). */
+   Homepage message: sit under the wordmark with readable contrast. Hero→CTA
+   uses normal document flow (no sticky underlap / upward scrim). --hero-pad-bottom
+   is breathing room before the content seam — not an underlap reserve. */
 .hero{
   --hero-gutter:clamp(22px,5vw,82px);
-  /* Reserve room so PR160 underlap covers padding, not the message. */
-  --hero-underlap-pad:72px;
+  --hero-pad-bottom:36px;
   position:relative;
   isolation:isolate;
   overflow:hidden;
   min-height:0;
   margin:-54px calc(-1 * var(--hero-gutter)) 52px;
-  padding:78px var(--hero-gutter) var(--hero-underlap-pad);
+  padding:78px var(--hero-gutter) var(--hero-pad-bottom);
 }
 .hero .hero-copy{
   position:relative;
@@ -66,7 +66,7 @@
 
 @media(max-width:1050px){
   .hero{
-    --hero-underlap-pad:64px;
+    --hero-pad-bottom:32px;
     margin-top:-38px;
     margin-bottom:0;
     padding-top:64px;
@@ -76,7 +76,7 @@
 @media(max-width:700px){
   .hero{
     --hero-gutter:16px;
-    --hero-underlap-pad:56px;
+    --hero-pad-bottom:24px;
     margin-top:-30px;
     margin-bottom:0;
     padding-top:52px;
@@ -88,7 +88,7 @@
 }
 @media(max-width:430px){
   .hero{
-    --hero-underlap-pad:52px;
+    --hero-pad-bottom:20px;
     padding-top:44px;
   }
   .hero .hero-wordmark{margin:10px 0 8px}
@@ -102,10 +102,10 @@
   .hero .hero-filigree{width:76%}
 }
 
-/* Short viewports: pack the stack; underlap pad can shrink with sticky disabled. */
+/* Short viewports: pack the stack. */
 @media(max-height:520px){
   .hero{
-    --hero-underlap-pad:28px;
+    --hero-pad-bottom:16px;
     padding-top:36px;
   }
 }
