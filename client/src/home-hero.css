@@ -1,45 +1,125 @@
 /* PR159: the ornament belongs to the hero edge, never to a content column.
-   PR160: keep vector layers separate so depth/motion can treat them as planes. */
+   PR160: keep vector layers separate so depth/motion can treat them as planes.
+   Homepage message: sit under the wordmark with readable contrast; keep clear of
+   sticky underlap / CTAs / mobile bottom nav (overlap is decorative only). */
 .hero{
   --hero-gutter:clamp(22px,5vw,82px);
+  /* Reserve room so PR160 underlap covers padding, not the message. */
+  --hero-underlap-pad:72px;
   position:relative;
   isolation:isolate;
   overflow:hidden;
   min-height:0;
   margin:-54px calc(-1 * var(--hero-gutter)) 52px;
-  padding:78px var(--hero-gutter) 34px;
+  padding:78px var(--hero-gutter) var(--hero-underlap-pad);
 }
-.hero .hero-copy{position:relative;z-index:2}
-.hero .hero-wordmark{margin:20px 0 24px;width:320px;max-width:62%}
+.hero .hero-copy{
+  position:relative;
+  z-index:2;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:0;
+  max-width:min(100%,52ch);
+}
+.hero .hero-wordmark{margin:18px 0 14px;width:320px;max-width:62%}
 .hero .hero-wordmark svg{width:100%;height:auto;max-width:100%}
-.hero .hero-greeting{font-size:26px;line-height:1.35;margin:0 0 22px}
-.hero .hero-greeting em{display:block}
-.hero .hero-lede{position:relative;z-index:2;max-width:52ch;margin:0;font-size:16px;line-height:1.75}
+.hero .hero-greeting,
+.hero .hero-message{
+  position:relative;
+  z-index:2;
+  margin:0 0 12px;
+  max-width:36ch;
+  font-family:var(--font-serif),"Playfair Display",serif;
+  font-size:clamp(20px,2.4vw,28px);
+  font-weight:500;
+  line-height:1.3;
+  text-wrap:pretty;
+  /* Prefer primary text over muted so Light/Dark both stay readable over filigree. */
+  color:color-mix(in srgb,var(--text) 94%,var(--muted));
+}
+.hero .hero-message{
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.hero .hero-greeting em{display:block;color:var(--accent-2);font-style:italic;font-weight:600}
+.hero .hero-lede{
+  position:relative;
+  z-index:2;
+  max-width:42ch;
+  margin:0;
+  font-size:15px;
+  line-height:1.65;
+  color:color-mix(in srgb,var(--muted) 70%,var(--text));
+}
 .hero .hero-filigree{
   position:absolute;inset:0 0 auto auto;
   width:min(72%,650px);height:auto;aspect-ratio:1;
   color:color-mix(in srgb,var(--line) 72%,var(--text));
   background:none;
-  opacity:.72;pointer-events:none;z-index:1;
+  opacity:.55;pointer-events:none;z-index:1;
   -webkit-mask-image:linear-gradient(#000 65%,transparent 100%);
   mask-image:linear-gradient(#000 65%,transparent 100%);
 }
 .hero .hero-filigree::after{content:none}
+
+[data-theme="light"] .hero .hero-greeting,
+[data-theme="light"] .hero .hero-message{
+  color:color-mix(in srgb,var(--text) 96%,#000);
+}
+[data-theme="light"] .hero .hero-lede{
+  color:color-mix(in srgb,var(--muted) 55%,var(--text));
+}
+[data-theme="dark"] .hero .hero-greeting,
+[data-theme="dark"] .hero .hero-message{
+  color:color-mix(in srgb,var(--text) 96%,var(--accent-2));
+}
+
 @media(max-width:1050px){
-  /* Bottom margin is owned by the PR160 underlap stack (.home-content overlap). */
-  .hero{margin-top:-38px;padding-top:70px;margin-bottom:0}
-  .hero .hero-wordmark{width:290px}
+  .hero{
+    --hero-underlap-pad:64px;
+    margin-top:-38px;
+    margin-bottom:0;
+    padding-top:64px;
+  }
+  .hero .hero-wordmark{width:290px;margin:14px 0 12px}
 }
 @media(max-width:700px){
-  /* Bottom margin is owned by the PR160 underlap stack (.home-content overlap). */
-  .hero{--hero-gutter:16px;margin-top:-30px;margin-bottom:0;padding-top:62px;padding-bottom:26px}
-  .hero .hero-wordmark{width:50vw;max-width:220px;margin:16px 0 22px}
-  .hero .hero-greeting{font-size:22px;line-height:1.35;margin-bottom:20px}
-  .hero .hero-lede{font-size:15px;max-width:36ch}
-  .hero .hero-filigree{width:78%;opacity:.65}
+  .hero{
+    --hero-gutter:16px;
+    --hero-underlap-pad:56px;
+    margin-top:-30px;
+    margin-bottom:0;
+    padding-top:52px;
+  }
+  .hero .hero-wordmark{width:50vw;max-width:220px;margin:12px 0 10px}
+  .hero .hero-greeting,
+  .hero .hero-message{font-size:clamp(18px,5.2vw,22px);margin-bottom:10px;max-width:34ch}
+  .hero .hero-lede{font-size:14px;max-width:34ch;line-height:1.55}
+  .hero .hero-filigree{width:78%;opacity:.48}
+}
+@media(max-width:430px){
+  .hero{
+    --hero-underlap-pad:52px;
+    padding-top:44px;
+  }
+  .hero .hero-wordmark{margin:10px 0 8px}
+  .hero .hero-greeting,
+  .hero .hero-message{font-size:18px;margin-bottom:8px}
+  .hero .hero-lede{font-size:13.5px}
 }
 @media(max-width:360px){
   .hero .hero-wordmark{width:52vw}
-  .hero .hero-greeting{font-size:20px}
+  .hero .hero-greeting,
+  .hero .hero-message{font-size:17px}
   .hero .hero-filigree{width:76%}
+}
+
+/* Short viewports: pack the stack; underlap pad can shrink with sticky disabled. */
+@media(max-height:520px){
+  .hero{
+    --hero-underlap-pad:28px;
+    padding-top:36px;
+  }
 }

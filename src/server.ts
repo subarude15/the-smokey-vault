@@ -19,6 +19,12 @@ import { mixologistGenerateRequest, mixologistLlmPrompt, mixologistRefineRequest
 import { buildOverview } from "./overview.js";
 import { buildRestockList, createWanted, deleteWanted, listRestockGot, listWanted, parseRestockThresholds, restockSummary, setRestockGot } from "./restock.js";
 import { clipKeeperName, DEFAULT_KEEPER_NAME, MAX_KEEPER_NAME } from "./shared-types.js";
+import {
+  HOMEPAGE_MESSAGE_ENABLED_KEY,
+  HOMEPAGE_MESSAGE_KEY,
+  normalizeHomepageMessageEnabled,
+  sanitizeHomepageMessage
+} from "./homepage-message.js";
 import { listTonightPours, maybeInventoryPour } from "./pours.js";
 import { fetchPublicHtml, metaContent, parseRecipeHtml, recipeTextForAi, RecipeImportError } from "./recipe_import.js";
 import {
@@ -281,7 +287,8 @@ const PUBLIC_SETTING_KEYS = [
   "enabled_tabs", "tab_order", "bar_location_text", "house_tip_blurb", "guest_bartender_enabled", "facebook_group_url",
   "tip_venmo", "tip_cashapp", "tip_paypal",
   "guest_bartender_name", "guest_bartender_bio", "guest_bartender_photo", "guest_bartender_applecash",
-  "guest_bartender_venmo", "guest_bartender_cashapp", "guest_bartender_paypal"
+  "guest_bartender_venmo", "guest_bartender_cashapp", "guest_bartender_paypal",
+  "homepage_message", "homepage_message_enabled"
 ] as const;
 
 function publicSettings() {
@@ -2616,6 +2623,14 @@ app.put<{ Body: Record<string, string> }>("/api/settings", async (request, reply
     }
     if (key === "guest_bartender_enabled") {
       setSetting(key, String(value) === "1" || String(value) === "true" ? "1" : "0");
+      continue;
+    }
+    if (key === HOMEPAGE_MESSAGE_KEY) {
+      setSetting(key, sanitizeHomepageMessage(value));
+      continue;
+    }
+    if (key === HOMEPAGE_MESSAGE_ENABLED_KEY) {
+      setSetting(key, normalizeHomepageMessageEnabled(value));
       continue;
     }
     if (key.startsWith("restock")) {

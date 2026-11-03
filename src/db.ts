@@ -8,6 +8,11 @@ import { COCKTAIL_RECIPES } from "./cocktail-recipes.js";
 import {
   DEFAULT_BAR_LOCATION_TEXT, DEFAULT_ENABLED_TABS_JSON, DEFAULT_HOUSE_TIP_BLURB, DEFAULT_TAB_ORDER_JSON
 } from "./speakeasy-shared.js";
+import {
+  DEFAULT_HOMEPAGE_MESSAGE,
+  HOMEPAGE_MESSAGE_ENABLED_KEY,
+  HOMEPAGE_MESSAGE_KEY
+} from "./homepage-message.js";
 
 export const dbPath = process.env.DB_PATH ?? (process.env.NODE_ENV === "production" ? "/data/smokeyvault.db" : "./data/smokeyvault.db");
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -409,6 +414,8 @@ if (getSetting("house_tip_blurb") === undefined) setSetting("house_tip_blurb", D
 if (getSetting("guest_bartender_enabled") === undefined) setSetting("guest_bartender_enabled", "0");
 if (getSetting("discord_webhook_url") === undefined) setSetting("discord_webhook_url", "");
 if (getSetting("facebook_group_url") === undefined) setSetting("facebook_group_url", "");
+if (getSetting(HOMEPAGE_MESSAGE_KEY) === undefined) setSetting(HOMEPAGE_MESSAGE_KEY, DEFAULT_HOMEPAGE_MESSAGE);
+if (getSetting(HOMEPAGE_MESSAGE_ENABLED_KEY) === undefined) setSetting(HOMEPAGE_MESSAGE_ENABLED_KEY, "1");
 
 const insertCocktail = db.prepare("INSERT OR IGNORE INTO cocktails(name,collection,ingredients,glassware,garnish,method,notes,season) VALUES(?,?,?,?,?,?,?,?)");
 const updatePlaceholder = db.prepare("UPDATE cocktails SET collection=?,ingredients=?,glassware=?,garnish=?,method=?,notes=?,season=? WHERE id=?");

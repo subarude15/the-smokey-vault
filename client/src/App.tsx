@@ -74,6 +74,7 @@ import {
   spiritFamilyFromLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, recipeIngredientMatchesBottle, shelfBottleFromItem, shelfKindForModule,
   overviewGreeting, overviewHeroLede, type OverviewSnapshot, type OverviewPour, type RestockItem, type RestockThresholds,
+  DEFAULT_HOMEPAGE_MESSAGE, MAX_HOMEPAGE_MESSAGE, publishedHomepageMessage, sanitizeHomepageMessage,
   parseRestockThresholds, RESTOCK_PACKAGED_STOPS, RESTOCK_WINE_STOPS, MAX_WANTED_NAME, MAX_WANTED_NOTE,
   formatRestockShare, extractSharedRecipeUrl, type WantedLabel,
   type NextBoards, type NextItem, type NextKind, MAX_NEXT_NAME,
@@ -943,11 +944,14 @@ export default function App() {
 }
 
 function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }) {
-  const { keeperName, enabledTabs, aiConfigured } = useHouse();
+  const { keeperName, enabledTabs, aiConfigured, settings } = useHouse();
   const [snap, setSnap] = useState<OverviewSnapshot>();
   const [restock, setRestock] = useState<{ items: RestockItem[]; open: number; total: number }>();
   const [error, setError] = useState("");
+  // Eyebrow = time-of-day only. Configurable homepage message is a separate hero statement;
+  // when disabled it is hidden for Guest and Keeper alike (no alternate greeting fallback).
   const greeting = overviewGreeting(new Date(), !admin);
+  const homepageMessage = publishedHomepageMessage(settings);
   function load() {
     setError("");
     api<OverviewSnapshot>("/overview")
@@ -973,12 +977,12 @@ function Dashboard({ admin, go }: { admin: boolean; go: (page: string) => void }
         <span className="hero-wordmark" role="heading" aria-level={1}>
           <SmokeyBarrelWordmark/>
         </span>
-        <p className="hero-greeting">{greeting.line} <em>{greeting.emphasize}</em></p>
+        {homepageMessage ? <p className="hero-message">{homepageMessage}</p> : null}
+        <p className="hero-lede">{overviewHeroLede(!admin)}</p>
       </div>
       {/* Decorative hop-vine filigree only — non-interactive, aria-hidden, and it
           fades out before the CTAs (PR159). */}
       <HopFiligree className="hero-filigree"/>
-      <p className="hero-lede">{overviewHeroLede(!admin)}</p>
     </div>
     </div>
     {/* In-flow spacer: padding alone is not a reliable sticky runway in all engines. */}
@@ -3487,12 +3491,14 @@ function lastBrewfatherSyncLabel(iso?: string) {
 function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setTheme:(v:ThemeName)=>void;onHouseChange:(next:Partial<HouseInfo>)=>void;go:(page:string)=>void}) {
   const [settings,setSettings] = useState<Record<string, string | boolean>>({});
   const [keeperDraft,setKeeperDraft] = useState(DEFAULT_KEEPER_NAME);
+  const [homepageDraft,setHomepageDraft] = useState(DEFAULT_HOMEPAGE_MESSAGE);
   const { notice: message, setNotice: setMessage } = useTransientNotice();
   const [syncing,setSyncing]=useState(false);
   useEffect(()=>{
     api<Record<string, string | boolean>>("/settings").then((values) => {
       setSettings(values);
       setKeeperDraft(clipKeeperName(String(values.keeperName ?? "")));
+      setHomepageDraft(sanitizeHomepageMessage(String(values.homepage_message ?? DEFAULT_HOMEPAGE_MESSAGE)));
     }).catch((err)=>setMessage(err instanceof Error?err.message:"Could not load settings"));
   },[]);
   async function saveKeeper() {
@@ -3591,6 +3597,57 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setThem
   const restockRules = parseRestockThresholds(settings);
   const brewfatherOn = settings.brewfatherConfigured === true || settings.brewfatherConfigured === "true";
   const bartenderOn = text("guest_bartender_enabled") === "1";
+  const homepageOn = text("homepage_message_enabled") !== "0";
+  const homepagePreview = sanitizeHomepageMessage(homepageDraft).trimEnd() || DEFAULT_HOMEPAGE_MESSAGE;
+  async function saveHomepageMessage() {
+    const cleaned = sanitizeHomepageMessage(homepageDraft);
+    try {
+      await api("/settings", { method: "PUT", body: JSON.stringify({ homepage_message: cleaned }) });
+      setHomepageDraft(cleaned);
+      setSettings((current) => ({ ...current, homepage_message: cleaned }));
+      onHouseChange({ settings: { homepage_message: cleaned } });
+      setMessage("Homepage message saved");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not save the homepage message");
+    }
+  }
+  async function setHomepageEnabled(enabled: boolean) {
+    const value = enabled ? "1" : "0";
+    try {
+      await api("/settings", { method: "PUT", body: JSON.stringify({ homepage_message_enabled: value }) });
+      setSettings((current) => ({ ...current, homepage_message_enabled: value }));
+      onHouseChange({ settings: { homepage_message_enabled: value } });
+      setMessage(enabled ? "Homepage message shown" : "Homepage message hidden");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not update homepage message");
+    }
+  }
+  async function resetHomepageMessage() {
+    setHomepageDraft(DEFAULT_HOMEPAGE_MESSAGE);
+    try {
+      await api("/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          homepage_message: DEFAULT_HOMEPAGE_MESSAGE,
+          homepage_message_enabled: "1"
+        })
+      });
+      setSettings((current) => ({
+        ...current,
+        homepage_message: DEFAULT_HOMEPAGE_MESSAGE,
+        homepage_message_enabled: "1"
+      }));
+      onHouseChange({
+        settings: {
+          homepage_message: DEFAULT_HOMEPAGE_MESSAGE,
+          homepage_message_enabled: "1"
+        }
+      });
+      setMessage("Homepage message reset to default");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not reset the homepage message");
+    }
+  }
   return <>
     <PageTitle
       eyebrow="THE KEEPER"
@@ -3604,6 +3661,34 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setThem
         <p>Used on Give us your 2 cents and guest copy instead of a hardcoded name.</p>
         <label><span>Name</span><input value={keeperDraft} maxLength={MAX_KEEPER_NAME} onChange={(e)=>setKeeperDraft(e.target.value)} placeholder={DEFAULT_KEEPER_NAME}/></label>
         <button type="button" className="primary" onClick={() => void saveKeeper()}>Save house name</button>
+      </section>
+      <section className="settings-card homepage-message-card">
+        <span className="eyebrow">HOMEPAGE</span>
+        <h3>Homepage message</h3>
+        <p>Shown under the Smokey Barrel wordmark. Guests see the published line only — the time-of-day greeting stays separate.</p>
+        <label className="toggle-field">
+          <input type="checkbox" checked={homepageOn} onChange={(e)=>void setHomepageEnabled(e.target.checked)}/>
+          <span><strong>Show on homepage</strong><small> Turning off hides the message without deleting it.</small></span>
+        </label>
+        <label>
+          <span>Message</span>
+          <textarea
+            value={homepageDraft}
+            maxLength={MAX_HOMEPAGE_MESSAGE}
+            rows={4}
+            onChange={(e)=>setHomepageDraft(sanitizeHomepageMessage(e.target.value))}
+            placeholder={DEFAULT_HOMEPAGE_MESSAGE}
+          />
+        </label>
+        <small className="field-hint homepage-message-count">{homepageDraft.length} / {MAX_HOMEPAGE_MESSAGE}</small>
+        <div className="homepage-message-preview" aria-live="polite">
+          <span className="eyebrow">PREVIEW</span>
+          <p className="hero-message">{homepagePreview}</p>
+        </div>
+        <div className="settings-card-actions">
+          <button type="button" className="primary" onClick={() => void saveHomepageMessage()}>Save message</button>
+          <button type="button" className="secondary" onClick={() => void resetHomepageMessage()}>Reset to default</button>
+        </div>
       </section>
       <section className="settings-card">
         <span className="eyebrow">UNLOCK</span>

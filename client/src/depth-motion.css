@@ -432,7 +432,7 @@ body,
 
 /* Explicit in-flow sticky runway (more reliable than parent padding-bottom). */
 .home-hero-runway{
-  height:min(36vh,300px);
+  height:min(28vh,220px);
   pointer-events:none;
 }
 
@@ -446,8 +446,8 @@ body,
   z-index:2;
   overflow:visible;
   background:var(--surface-base);
-  /* Pull across the runway and into the hero so cards meet the back plane */
-  margin-top:calc(-1 * (min(36vh,300px) + 72px));
+  /* Pull across the runway and only a shallow strip of hero padding (not the message). */
+  margin-top:calc(-1 * (min(28vh,220px) + 40px));
   padding-top:12px;
 }
 
@@ -503,36 +503,32 @@ body,
     );
 }
 
-/* Mobile-first: shorter sticky hold, earlier card entry over the brand. */
+/* Mobile-first: shorter sticky hold; keep underlap inside hero padding. */
 @media (max-width:700px){
   .home-hero-runway{
-    height:min(30vh,240px);
+    height:min(22vh,160px);
   }
   .home-content{
-    margin-top:calc(-1 * (min(30vh,240px) + 64px));
+    margin-top:calc(-1 * (min(22vh,160px) + 36px));
     padding-top:8px;
   }
   .home-content::before{
-    top:-156px;
-    height:156px;
+    top:-132px;
+    height:132px;
   }
 }
 
 @media (max-width:430px){
   .home-hero-runway{
-    height:min(28vh,210px);
-  }
-  .home-hero-pin .hero{
-    padding-top:54px;
-    padding-bottom:18px;
+    height:min(18vh,132px);
   }
   .home-content{
-    margin-top:calc(-1 * (min(28vh,210px) + 56px));
+    margin-top:calc(-1 * (min(18vh,132px) + 32px));
     padding-top:4px;
   }
   .home-content::before{
-    top:-144px;
-    height:144px;
+    top:-112px;
+    height:112px;
   }
 }
 

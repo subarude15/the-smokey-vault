@@ -87,6 +87,15 @@ export type { TastingProfile } from "../../src/tasting-profile";
 export { overviewGreeting, overviewHeroCopy, overviewHeroLede } from "../../src/overview";
 export type { OverviewSnapshot, OverviewPour } from "../../src/overview";
 export {
+  DEFAULT_HOMEPAGE_MESSAGE,
+  MAX_HOMEPAGE_MESSAGE,
+  HOMEPAGE_MESSAGE_KEY,
+  HOMEPAGE_MESSAGE_ENABLED_KEY,
+  sanitizeHomepageMessage,
+  normalizeHomepageMessageEnabled,
+  publishedHomepageMessage
+} from "../../src/homepage-message";
+export {
   type RestockKind,
   type WantedLabel,
   type RestockThresholds,

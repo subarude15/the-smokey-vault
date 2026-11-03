@@ -95,7 +95,7 @@ test("corner is a continuous responsive vector treatment", () => {
   assert.match(filigreeSrc, /fillRule="evenodd"/);
   assert.match(filigreeSrc, /preserveAspectRatio="xMaxYMin meet"/);
   assert.doesNotMatch(filigreeSrc, /<image|\.png|\.jpe?g/);
-  assert.match(cssSrc, /\.hero \.hero-greeting em\{display:block\}/);
+  assert.match(cssSrc, /\.hero \.hero-greeting em\{[^}]*display:\s*block/);
   assert.match(cssSrc, /linear-gradient\(#000 65%,transparent 100%\)/);
 });
 
