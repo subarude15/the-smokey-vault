@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeftRight, Beer, FlaskConical, Settings, WineOff, X } from "lucide-react";
 import { api, type Item } from "./api";
 import {
@@ -50,16 +51,18 @@ type ReassignResponse = {
   taps: Item[];
 };
 
-function tapDestinationOptions(taps: Item[], currentTapNumber: number): Item[] {
+/** Build destination rows for taps 1–7 except the current slot (empty slots included). */
+export function tapDestinationOptions(taps: Item[], currentTapNumber: number): Item[] {
   const byNumber = new Map(taps.map((tap) => [Number(tap.tap_number), tap]));
-  return Array.from({ length: TAP_COUNT }, (_, index) => {
-    const tapNumber = index + 1;
-    return byNumber.get(tapNumber) ?? {
-      id: -tapNumber,
-      tap_number: tapNumber,
-      brewery_batch: ""
-    } as Item;
-  }).filter((tap) => Number(tap.tap_number) !== currentTapNumber);
+  return Array.from({ length: TAP_COUNT }, (_, index) => index + 1)
+    .filter((tapNumber) => tapNumber !== Number(currentTapNumber))
+    .map((tapNumber) => {
+      return byNumber.get(tapNumber) ?? {
+        id: 0,
+        tap_number: tapNumber,
+        brewery_batch: ""
+      } as Item;
+    });
 }
 
 function stop(event: MouseEvent<HTMLElement>) {
@@ -127,7 +130,10 @@ export function TapReassignModal({
   onChoose: (destination: Item) => void;
 }) {
   const options = tapDestinationOptions(taps, Number(item.tap_number));
-  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Move to tap">
+  // Portal to document.body: .inventory-grid > * keeps depth-card-enter transform
+  // (animation-fill-mode: both) and .domain-card uses overflow:hidden, so an in-card
+  // position:fixed backdrop is clipped to the card instead of covering the viewport.
+  const modal = <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Move to tap">
     <section className="modal form-modal tap-reassign-modal">
       <header className="modal-header">
         <div>
@@ -147,7 +153,7 @@ export function TapReassignModal({
             <button
               type="button"
               className={`tap-reassign-option${emptyDest ? " empty" : ""}`}
-              disabled={busy || Number(destination.id) <= 0}
+              disabled={busy}
               aria-label={label}
               onClick={() => onChoose(destination)}
             >
@@ -167,6 +173,8 @@ export function TapReassignModal({
       </footer>
     </section>
   </div>;
+  if (typeof document === "undefined") return modal;
+  return createPortal(modal, document.body);
 }
 
 export function TapInventoryCard({

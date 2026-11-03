@@ -80,9 +80,10 @@ export function reassignTap(sourceId: number, toTapNumber: number): TapReassignR
   const destId = Number(dest.id);
   const swapped = !isTapEmpty(dest);
   // Temporary slot avoids UNIQUE(tap_number) collisions mid-swap.
-  // ponytail: negative temps are fine while TAP_COUNT stays small; upgrade to a deferred
-  // unique or staging column if tap slots ever grow past a few dozen.
-  const tempTapNumber = -fromTapNumber;
+  // Schema is INTEGER NOT NULL UNIQUE with no CHECK(1..7), so negatives are legal.
+  // Use a per-row reserved temp far below the public 1..TAP_COUNT range so concurrent
+  // moves from different sources cannot collide on the same negative.
+  const tempTapNumber = temporaryTapNumberForSwap(sourceId);
 
   const tx = db.transaction(() => {
     db.prepare("UPDATE taps SET tap_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
@@ -96,6 +97,7 @@ export function reassignTap(sourceId: number, toTapNumber: number): TapReassignR
   try {
     tx();
   } catch (err) {
+    // better-sqlite3 rolls the transaction back on throw — assignments stay as before.
     return {
       ok: false,
       statusCode: 500,
@@ -113,9 +115,28 @@ export function reassignTap(sourceId: number, toTapNumber: number): TapReassignR
   };
 }
 
+/** Reserved temporary tap_number used inside the swap transaction (never 1..TAP_COUNT). */
+export function temporaryTapNumberForSwap(sourceId: number): number {
+  return -(1_000_000 + sourceId);
+}
+
+/** Tap numbers shown in the Keeper destination picker (all slots except the current one). */
+export function tapReassignDestinationNumbers(currentTapNumber: number): number[] {
+  const current = Number(currentTapNumber);
+  return Array.from({ length: TAP_COUNT }, (_, index) => index + 1).filter((n) => n !== current);
+}
+
 /** Destination picker labels for Keeper UI / tests. */
 export function tapDestinationLabel(tap: TapRow): string {
   const num = Number(tap.tap_number);
   if (isTapEmpty(tap)) return `Tap ${num} · Empty`;
   return `Tap ${num} · ${tapTitle(tap)}`;
+}
+
+/** True when every tap row uses a public 1..TAP_COUNT slot (no leftover swap temps). */
+export function tapsHaveOnlyPublicNumbers(rows: TapRow[]): boolean {
+  return rows.every((row) => {
+    const n = Number(row.tap_number);
+    return Number.isInteger(n) && n >= 1 && n <= TAP_COUNT;
+  });
 }
