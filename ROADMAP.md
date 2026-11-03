@@ -81,7 +81,7 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
-### Ready for review — Fix homepage hero gradient obscuring text
+### Ready for review — Fix homepage hero gradient obscuring text (#184)
 
 Removes PR160 sticky hero underlap + upward `.home-content::before` scrim that painted over the configurable Homepage Message (especially on ≤700px). Hero → CTAs → rest is normal document flow; intentional seam is content-plane padding + hairline only. Chromium computed-style regression covers message lengths and phone viewports. Draft only — do not merge/deploy until reviewed.
 
