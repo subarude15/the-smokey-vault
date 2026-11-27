@@ -179,12 +179,18 @@ export function spiritFlavorFacetOptions(options: {
   familyKey?: string;
   availability?: string;
   isAvailable?: (item: Record<string, unknown>) => boolean;
+  isZeroStock?: (item: Record<string, unknown>) => boolean;
 }): string[] {
   const familyKey = options.familyKey ?? "category";
   const present = new Set<string>();
   for (const item of options.items) {
     if (options.family !== "All" && String(item[familyKey] ?? "") !== options.family) continue;
-    if (options.availability && options.availability !== "All" && options.isAvailable) {
+    if (options.availability === "zero") {
+      const zero = options.isZeroStock
+        ? options.isZeroStock(item)
+        : (item.stock_count != null && String(item.stock_count).trim() !== "" && Number(item.stock_count) <= 0);
+      if (!zero) continue;
+    } else if (options.availability && options.availability !== "All" && options.isAvailable) {
       const available = options.isAvailable(item);
       if (options.availability === "available" && !available) continue;
       if (options.availability === "out" && available) continue;

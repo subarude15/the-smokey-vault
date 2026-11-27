@@ -8,7 +8,9 @@ import {
   displayCanonicalFamily,
   displayCanonicalType,
   fillStopLabel,
+  isSpiritEmpty,
   isTapEmpty,
+  isZeroStockShelfItem,
   kegSizeLabel,
   nearestFillStop,
   openNextSpirit,
@@ -330,9 +332,11 @@ export function TapInventoryCard({
 }
 
 export function SpiritInventoryCard({ item, admin, onOpenDetail, onEdit, onUpdated }: CardProps) {
-  const [acting, setActing] = useState<"pour" | "open" | "block" | "">("");
+  const [acting, setActing] = useState<"pour" | "open" | "restock" | "block" | "">("");
   const [error, setError] = useState("");
   const blocked = Number(item.blocked_from_ordering ?? 0) === 1;
+  const outOfStock = typeof item.out_of_stock === "boolean" ? item.out_of_stock : isSpiritEmpty(item);
+  const zeroStock = admin ? isZeroStockShelfItem("spirits", item) : false;
   const guestPct = !admin ? readAvailabilityPct(item) : null;
   const gaugePct = spiritGaugePct(item, admin);
   const fill = nearestFillStop(item.fill_level);
@@ -370,6 +374,12 @@ export function SpiritInventoryCard({ item, admin, onOpenDetail, onEdit, onUpdat
     void patch(nextSpirit, "Could not open the next bottle", "open");
   }
 
+  function restockOne(event: MouseEvent<HTMLButtonElement>) {
+    stop(event);
+    if (!zeroStock) return;
+    void patch({ stock_count: 1, fill_level: 100 }, "Could not add a bottle", "restock");
+  }
+
   function toggleBlock(event: MouseEvent<HTMLButtonElement>) {
     stop(event);
     void patch({ blocked_from_ordering: blocked ? 0 : 1 }, "Could not update patron access", "block");
@@ -378,7 +388,7 @@ export function SpiritInventoryCard({ item, admin, onOpenDetail, onEdit, onUpdat
   const guestLabel = guestPct == null ? "" : guestSpiritAvailabilityLabel(guestPct);
   const keeperLabel = `${fillStopLabel(fill)} · ${spiritStockLabel(item.stock_count)}`;
 
-  return <article className={`domain-card spirit-card${blocked ? " blocked-bottle" : ""}`}>
+  return <article className={`domain-card spirit-card${blocked ? " blocked-bottle" : ""}${outOfStock ? " out-of-stock" : ""}`}>
     {blocked ? <span className="blocked-ribbon">{BLOCKED_RIBBON_LABEL}</span> : null}
     <div
       className="domain-card-main"
@@ -392,7 +402,7 @@ export function SpiritInventoryCard({ item, admin, onOpenDetail, onEdit, onUpdat
       <div className="domain-card-copy">
         <div className="domain-card-kicker">
           <span>{text(item.brand) || family || "Bottle Library"}</span>
-          {blocked ? <span className="status-pill warning">Patrons blocked</span> : null}
+          {blocked ? <span className="status-pill warning">Patrons blocked</span> : outOfStock ? <span className="status-pill muted">Out of stock</span> : null}
         </div>
         <h3>{text(item.name) || "Untitled"}</h3>
         <div className="domain-card-meta">
@@ -418,6 +428,9 @@ export function SpiritInventoryCard({ item, admin, onOpenDetail, onEdit, onUpdat
       <button type="button" className="secondary" disabled={fill <= 0 || Boolean(acting)} onClick={pour}>
         {acting === "pour" ? "Pouring…" : "− Pour"}
       </button>
+      {zeroStock ? <button type="button" className="secondary" disabled={Boolean(acting)} onClick={restockOne}>
+        {acting === "restock" ? "Adding…" : "+ Add bottle"}
+      </button> : null}
       {nextSpirit ? <button type="button" className="secondary" disabled={Boolean(acting)} onClick={openNext}>
         {acting === "open" ? "Opening…" : "+ Open next"}
       </button> : null}

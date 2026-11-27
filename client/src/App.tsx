@@ -43,7 +43,7 @@ import {
   resolveSpiritDisplayFlavors,
   spiritFlavorFacetOptions
 } from "./spirit-flavors";
-import { bottleSearchHaystack, matchesBottleSearch, spiritIsAvailable } from "./spirit-search";
+import { bottleSearchHaystack, matchesBottleSearch, shelfItemMatchesAvailability, spiritIsAvailable } from "./spirit-search";
 import {
   guestSpiritAvailabilityLabel,
   guestTapAvailabilityLabel,
@@ -69,7 +69,7 @@ import {
   TAP_COUNT, emptyTapBeerFields, firstEmptyTapNumber, isTapEmpty, tapTitle,
   brewAbv, compareBrews, formatAbv, formatGravity, nextBrewStatus, normalizeBrewStatus,
   onTapLabel, parseGravity, tapsForBatch, compareBottleCollectionByName, drinkOnePackaged, normalizeBeerVessel,
-  packagedCount, packagedStockLabel, FILL_STOPS, fillStopLabel, isSpiritEmpty,
+  packagedCount, packagedStockLabel, FILL_STOPS, fillStopLabel, isSpiritEmpty, isZeroStockShelfItem,
   nearestFillStop, openNextSpirit, pourSpirit, spiritStock, spiritStockLabel,
   spiritFamilyFromLabel,
   SEASONS, collectionGroup, compareCocktails, currentSeason, findRecipesForBottle, guestSafeRecipe, moduleSupportsFindDrink, recipeIngredientMatchesBottle, shelfBottleFromItem, shelfKindForModule,
@@ -109,6 +109,7 @@ import { canFindCocktailPhoto, cocktailImageDiscoveryDiagnosticLines, cocktailIm
 import { EnrichmentMaintenance } from "./EnrichmentMaintenance";
 import { EnrichmentServicesHealth } from "./EnrichmentServicesHealth";
 import { InventoryCleanupPreview } from "./InventoryCleanupPreview";
+import { InventoryRecountCard } from "./InventoryRecountCard";
 import { ScanSession, ScanSessionSummary } from "./ScanSession";
 import {
   type ShelfSessionMode,
@@ -617,12 +618,25 @@ export default function App() {
     if (!module) return;
     if (hit.source === "vault") {
       const id = itemId(hit.product);
-      const nextValues = { ...hit.product, upc: String(hit.product.upc ?? "").trim() || upc };
-      if (id && upc && !String(hit.product.upc ?? "").trim()) {
+      const zeroStock = isZeroStockShelfItem(table, hit.product);
+      const restockPatch: Record<string, unknown> = zeroStock
+        ? (table === "spirits"
+          ? { stock_count: 1, fill_level: 100 }
+          : table === "wines"
+            ? { bottle_count: 1 }
+            : { count: 1 })
+        : {};
+      const hadBlankUpc = Boolean(upc && !String(hit.product.upc ?? "").trim());
+      let nextValues: Record<string, unknown> = {
+        ...hit.product,
+        ...restockPatch,
+        upc: String(hit.product.upc ?? "").trim() || upc
+      };
+      if (id && (hadBlankUpc || zeroStock)) {
         try {
-          await api(`/inventory/${table}/${id}`, { method: "PUT", body: JSON.stringify(nextValues) });
+          nextValues = await api<Item>(`/inventory/${table}/${id}`, { method: "PUT", body: JSON.stringify(nextValues) });
         } catch {
-          // Still open the bottle; the UPC can be saved from the form later.
+          // Still open the bottle; the UPC/count can be saved from the form later.
         }
       }
       setScanMiss(null);
@@ -1615,6 +1629,8 @@ function ScanPage({
         </button>
       </section>
     </div>
+
+    <InventoryRecountCard/>
   </>;
 }
 
@@ -1752,6 +1768,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
   const [tag,setTag] = useState("All");
   const [flavor,setFlavor] = useState("All");
   const [avail,setAvail] = useState("All");
+  const supportsShelfAvailability = module.id === "spirits" || module.id === "wines" || module.id === "packaged_beer";
+  useEffect(() => {
+    if (!admin && avail === "zero") setAvail("All");
+  }, [admin, avail]);
+  useEffect(() => {
+    setAvail("All");
+  }, [module.id]);
   // PR152: the Bottle Library (spirits) derives canonical Guest-facing flavor
   // facets and uses flavor-aware, multi-word search + availability. Other
   // modules keep the existing simple filter behavior.
@@ -1771,7 +1794,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       family: kind,
       familyKey: module.kindKey,
       availability: avail,
-      isAvailable: spiritIsAvailable
+      isAvailable: spiritIsAvailable,
+      isZeroStock: (item) => isZeroStockShelfItem("spirits", item)
     });
   }, [items, derivedFlavorsById, isBottleLibrary, kind, avail, module.kindKey]);
   useEffect(() => {
@@ -1790,9 +1814,13 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       if (kind !== "All" && String(item[module.kindKey] ?? "") !== kind) return false;
       if (flavor !== "All" && !derived.some((value) => value.toLowerCase() === flavor.toLowerCase())) return false;
       if (avail !== "All") {
-        const available = spiritIsAvailable(item);
-        if (avail === "available" && !available) return false;
-        if (avail === "out" && available) return false;
+        if (avail === "zero") {
+          if (admin && !isZeroStockShelfItem("spirits", item)) return false;
+        } else {
+          const available = spiritIsAvailable(item);
+          if (avail === "available" && !available) return false;
+          if (avail === "out" && available) return false;
+        }
       }
       return true;
     }
@@ -1807,11 +1835,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
     }
     if (tag !== "All" && !parseList(item.tags).some((value) => value.toLowerCase() === tag.toLowerCase())) return false;
     if (flavor !== "All" && !parseList(item.flavors).some((value) => value.toLowerCase() === flavor.toLowerCase())) return false;
+    if (supportsShelfAvailability && !shelfItemMatchesAvailability(module.id, item, avail, admin)) return false;
     return true;
   });
   const activeFilters = isBottleLibrary
     ? kind !== "All" || flavor !== "All" || avail !== "All" || Boolean(search.trim())
-    : maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || Boolean(search.trim());
+    : maker !== "All" || kind !== "All" || tag !== "All" || flavor !== "All" || (supportsShelfAvailability && avail !== "All") || Boolean(search.trim());
   function clearFilters() {
     setSearch(""); setMaker("All"); setKind("All"); setTag("All"); setFlavor("All"); setAvail("All");
   }
@@ -1900,6 +1929,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         <option value="All">Any availability</option>
         <option value="available">On the shelf</option>
         <option value="out">Out of stock</option>
+        {admin && <option value="zero">0 in stock</option>}
       </select>
       {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
     </div> : <div className="filter-row">
@@ -1907,6 +1937,12 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
       <select value={kind} onChange={(e)=>setKind(e.target.value)} aria-label="Filter by type">{kinds.map((value)=><option key={value} value={value}>{value === "All" ? (module.id === "wines" ? "All wine types" : "All styles") : value}</option>)}</select>
       <select value={tag} onChange={(e)=>setTag(e.target.value)} aria-label="Filter by tag">{tags.map((value)=><option key={value} value={value}>{value === "All" ? "All tags" : `#${value}`}</option>)}</select>
       <select value={flavor} onChange={(e)=>setFlavor(e.target.value)} aria-label="Filter by flavor">{flavors.map((value)=><option key={value} value={value}>{value === "All" ? "All flavors" : value}</option>)}</select>
+      {supportsShelfAvailability && <select value={avail} onChange={(e)=>setAvail(e.target.value)} aria-label="Filter by availability">
+        <option value="All">Any availability</option>
+        <option value="available">On the shelf</option>
+        <option value="out">Out of stock</option>
+        {admin && <option value="zero">0 in stock</option>}
+      </select>}
       {activeFilters && <button type="button" className="secondary" onClick={clearFilters}>Clear</button>}
     </div>)}
     {viewState === "error" ? <div className="ai-error load-error"><CircleAlert/><div><strong>Could not load this section</strong><span>{loadError}</span></div><button className="secondary" onClick={() => load()}>Retry</button></div> :
@@ -1953,7 +1989,8 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
         const outOfStock = typeof item.out_of_stock === "boolean"
           ? item.out_of_stock
           : (module.id === "packaged_beer" && packagedCount(item.count) <= 0)
-            || (module.id === "spirits" && isSpiritEmpty(item));
+            || (module.id === "spirits" && isSpiritEmpty(item))
+            || (module.id === "wines" && Math.max(0, Math.floor(Number(item.bottle_count ?? 0))) <= 0);
         const blocked = Number(item.blocked_from_ordering ?? 0) === 1;
         return <button type="button" className={`inventory-card inventory-card-button${module.id === "taps" && isTapEmpty(item) ? " empty-tap" : ""}${archived ? " archived-brew" : ""}${outOfStock ? " out-of-stock" : ""}${blocked ? " blocked-bottle" : ""}`} key={item.id} onClick={() => openBottleDetail(item, module.id)}>
         {blocked && <span className="blocked-ribbon">{BLOCKED_RIBBON_LABEL}</span>}
@@ -1983,6 +2020,7 @@ function Inventory({ module, admin, scanDraft, finishScanReview, openScanner, op
             {module.id === "brews" && parseList(item.hops).slice(0,3).map((value) => <span key={`hop-${value}`}>{value}</span>)}
             {module.id === "brews" && parseList(item.flavors).slice(0,3).map((value) => <span key={`flavor-${value}`}>{value}</span>)}
             {module.id !== "taps" && module.id !== "brews" && module.id !== "packaged_beer" && item.tap_number != null && String(item.tap_number).trim() !== "" ? <span>Tap {item.tap_number}</span> : null}
+            {!admin && outOfStock ? <span className="stock-chip">Out of stock</span> : null}
             {admin && item.bottle_count != null && module.id !== "packaged_beer" ? <span className="stock-chip">{item.bottle_count} bottles</span> : null}
             {admin && module.id === "spirits" ? <span className="stock-chip">{spiritStockLabel(item.stock_count)}</span> : null}
             {admin && module.id === "packaged_beer" ? <span className="stock-chip">{packagedStockLabel(item.count, item.vessel)}</span> : admin && item.count != null ? <span className="stock-chip">{item.count} packaged</span> : null}
@@ -2170,6 +2208,9 @@ function BottleDetail({ module, item, admin, onBack, onEdit, onDelete, onUpdated
           if (pct == null) return null;
           return <div className="full availability-line"><span>ON THE SHELF</span><strong>{guestSpiritAvailabilityLabel(pct)}</strong></div>;
         })()}
+        {!admin && (module.id === "wines" || module.id === "packaged_beer") && item.out_of_stock === true ? (
+          <div className="full availability-line"><span>ON THE SHELF</span><strong>Out of stock</strong></div>
+        ) : null}
         {module.id === "wines" && <div className="full"><span>Sweetness</span><WineSweetnessScale type={String(item.type ?? "")} style={String(item.style ?? "")} value={wineSweetness}/></div>}
         {module.id === "wines" && <div><span>Body</span><strong>{wineBodyLabel(item.body)}</strong></div>}
         {module.id === "wines" && drinkBy ? <div><span>Drink by</span><strong>{overdue ? `${drinkBy} · past` : drinkBy}</strong></div> : null}
@@ -3730,6 +3771,7 @@ function SettingsPage({theme,setTheme,onHouseChange,go}:{theme:ThemeName;setThem
       <BulkImport onMessage={setMessage} onQueued={() => go("import")}/>
       <EnrichmentServicesHealth/>
       <EnrichmentMaintenance onMessage={setMessage}/>
+      <InventoryRecountCard onMessage={setMessage} onStartScan={() => go("scan")}/>
       <InventoryCleanupPreview/>
       <section className="settings-card">
         <span className="eyebrow">GUEST PORTAL</span>

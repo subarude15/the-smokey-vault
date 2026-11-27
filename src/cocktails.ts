@@ -60,6 +60,7 @@ export function spiritOnShelf(item: Record<string, unknown> | null | undefined):
   const fill = Number(item.fill_level ?? 0);
   const raw = item.stock_count;
   const stock = raw == null || String(raw).trim() === "" ? 1 : Math.max(0, Math.floor(Number(raw)) || 0);
+  if (stock <= 0) return false;
   return fill > 1 || stock > 1;
 }
 

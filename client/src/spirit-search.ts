@@ -1,4 +1,4 @@
-import { parseList } from "./catalog";
+import { isZeroStockShelfItem, packagedCount, parseList } from "./catalog";
 import { flavorSearchAliases } from "./spirit-flavors";
 
 /**
@@ -46,10 +46,47 @@ export function spiritIsAvailable(item: Record<string, unknown>): boolean {
   const flag = item.out_of_stock;
   if (flag === true || flag === 1 || flag === "1") return false;
   if (flag === false || flag === 0 || flag === "0") return true;
-  const stock = Number(item.stock_count);
-  if (Number.isFinite(stock) && stock > 0) return true;
-  const fill = Number(item.fill_level);
-  if (Number.isFinite(fill) && fill > 0) return true;
+  const hasStock = item.stock_count != null && String(item.stock_count).trim() !== "";
+  const hasFill = item.fill_level != null && String(item.fill_level).trim() !== "";
+  const stock = hasStock ? Number(item.stock_count) : Number.NaN;
+  const fill = hasFill ? Number(item.fill_level) : Number.NaN;
+  if (Number.isFinite(stock) && stock <= 0) return false;
+  if (Number.isFinite(stock) && stock > 1) return true;
+  if (Number.isFinite(fill)) return fill > 0;
+  if (Number.isFinite(stock)) return stock > 0;
   // No availability signal at all → treat as available (don't hide bottles).
-  return !(Number.isFinite(stock) || Number.isFinite(fill));
+  return true;
+}
+
+export function shelfItemIsAvailable(moduleId: string, item: Record<string, unknown>): boolean {
+  if (moduleId === "spirits") return spiritIsAvailable(item);
+  const flag = item.out_of_stock;
+  if (flag === true || flag === 1 || flag === "1") return false;
+  if (flag === false || flag === 0 || flag === "0") return true;
+  if (moduleId === "wines") {
+    if (item.bottle_count == null || String(item.bottle_count).trim() === "") return true;
+    return Math.max(0, Math.floor(Number(item.bottle_count))) > 0;
+  }
+  if (moduleId === "packaged_beer") {
+    if (item.count == null || String(item.count).trim() === "") return true;
+    return packagedCount(item.count) > 0;
+  }
+  return true;
+}
+
+export function shelfItemMatchesAvailability(
+  moduleId: string,
+  item: Record<string, unknown>,
+  avail: string,
+  admin: boolean
+): boolean {
+  if (!avail || avail === "All") return true;
+  if (avail === "zero") {
+    if (!admin) return true;
+    return isZeroStockShelfItem(moduleId, item);
+  }
+  const available = shelfItemIsAvailable(moduleId, item);
+  if (avail === "available") return available;
+  if (avail === "out") return !available;
+  return true;
 }

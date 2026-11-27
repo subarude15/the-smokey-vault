@@ -80,6 +80,7 @@ export const GUEST_INVENTORY_FIELDS: Readonly<Record<string, readonly string[]>>
     "tags",
     "base_ingredient",
     "blocked_from_ordering",
+    "out_of_stock",
     ...GUEST_VOTE_FIELDS
   ],
   packaged_beer: [
@@ -180,6 +181,7 @@ export function guestInventoryOutOfStock(
 ): boolean | undefined {
   if (table === "spirits") return isSpiritEmpty(row);
   if (table === "packaged_beer") return packagedCount(row.count) <= 0;
+  if (table === "wines") return Math.max(0, Math.floor(Number(row.bottle_count ?? 0))) <= 0;
   return undefined;
 }
 
@@ -196,6 +198,7 @@ export function guestInventoryAvailabilityPct(
   row: Record<string, unknown>
 ): number | undefined {
   if (table === "spirits") {
+    if (isSpiritEmpty(row)) return 0;
     const openFill = nearestFillStop(row.fill_level);
     if (openFill > 0) return openFill;
     // Empty open bottle + spare(s) → patron can still be poured a full bottle.

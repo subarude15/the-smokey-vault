@@ -490,6 +490,24 @@ export function spiritStockLabel(count: unknown): string {
   return n === 1 ? "1 bottle" : `${n} bottles`;
 }
 
+export function isZeroStockShelfItem(
+  table: string,
+  item: Record<string, unknown> | null | undefined
+): boolean {
+  if (!item) return true;
+  if (table === "spirits") {
+    if (item.stock_count == null || String(item.stock_count).trim() === "") return false;
+    return spiritStock(item.stock_count) <= 0;
+  }
+  if (table === "wines") {
+    return Math.max(0, Math.floor(Number(item.bottle_count ?? 0))) <= 0;
+  }
+  if (table === "packaged_beer") {
+    return packagedCount(item.count) <= 0;
+  }
+  return false;
+}
+
 export function isSpiritEmpty(item: Record<string, unknown> | null | undefined): boolean {
   if (!item) return true;
   // Guest inventory responses redact fill/stock and send coarse out_of_stock instead.
@@ -501,6 +519,7 @@ export function isSpiritEmpty(item: Record<string, unknown> | null | undefined):
     return item.out_of_stock;
   }
   const stock = item.stock_count == null || String(item.stock_count).trim() === "" ? 1 : spiritStock(item.stock_count);
+  if (stock <= 0) return true;
   return nearestFillStop(item.fill_level) <= 0 && stock <= 1;
 }
 

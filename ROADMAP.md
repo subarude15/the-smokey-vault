@@ -81,9 +81,13 @@ Historical note — the sequenced product-polish work was PR149–PR154: guest t
 
 ## Next work
 
-### Ready for review — Fix homepage hero gradient obscuring text (#184)
+### Ready for review — Keeper physical re-inventory (zero shelf counts + 0-in-stock workflow)
 
-Removes PR160 sticky hero underlap + upward `.home-content::before` scrim that painted over the configurable Homepage Message (especially on ≤700px). Hero → CTAs → rest is normal document flow; intentional seam is content-plane padding + hairline only. Chromium computed-style regression covers message lengths and phone viewports. Draft only — do not merge/deploy until reviewed.
+Per-section Keeper **Zero shelf counts** (`spirits`, `wines`, `packaged_beer`; Draft Taps & Homebrew untouched) resets shelf counts/fill to `0` inside a single SQLite transaction while preserving every bottle row, UPC, photo, tasting profile, enrichment artifact, review, vote, and lookup cache without logging fake pours. Scanning a `0`-stock bottle back in via Shelf Scan (`0 → 1`) restores spirits to Full (`100%` fill, `stock_count = 1`), `0`-stock items show as **Out of stock** to Guests across Spirits, Wines, and Packaged Beer while staying off automatic Restock, and Keepers gain a **0 in stock** availability filter plus one-tap **+ Add bottle** on `0`-stock Spirit cards.
+
+### Recently completed — Fix homepage hero gradient obscuring text (#184)
+
+Removes PR160 sticky hero underlap + upward `.home-content::before` scrim that painted over the configurable Homepage Message (especially on ≤700px). Hero → CTAs → rest is normal document flow; intentional seam is content-plane padding + hairline only. Chromium computed-style regression covers message lengths and phone viewports.
 
 ### Recently completed — Remove redundant homepage hero-lede (#183)
 

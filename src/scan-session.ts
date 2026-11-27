@@ -194,7 +194,14 @@ function readQuantity(table: ImportTable, row: Record<string, unknown>): number 
 }
 
 function writeQuantity(table: ImportTable, row: Record<string, unknown>, next: number): Record<string, unknown> {
-  if (table === "spirits") return prepareSpiritWrite({ ...row, stock_count: next });
+  if (table === "spirits") {
+    const before = readQuantity("spirits", row);
+    const patch: Record<string, unknown> = { ...row, stock_count: next };
+    if (before <= 0 && next >= 1) {
+      patch.fill_level = 100;
+    }
+    return prepareSpiritWrite(patch);
+  }
   if (table === "wines") return { ...row, bottle_count: spiritStock(next) };
   return preparePackagedWrite({ ...row, count: next });
 }
