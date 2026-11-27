@@ -1,4 +1,4 @@
-import { parseVolumeMl, type ProductSchema } from "./cola_client.js";
+import { barcodeVariants, parseVolumeMl, type ProductSchema } from "./cola_client.js";
 
 export const FWGS_SEARCH_URL = "https://www.finewineandgoodspirits.com/search";
 export const FWGS_TIMEOUT_MS = 12_000;
@@ -274,6 +274,75 @@ export async function searchFwgsByQuery(query: string, limit = 6): Promise<FwgsP
   }
 }
 
+function barcodeMatchesVariants(raw: unknown, expected: Set<string>): boolean {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return false;
+  if (expected.has(digits)) return true;
+  return barcodeVariants(digits).some((variant) => expected.has(variant));
+}
+
+function snippetContainsBarcode(snippet: string, expected: Set<string>): boolean {
+  const matches = snippet.match(/\b\d{8,14}\b/g);
+  if (!matches) return false;
+  return matches.some((digits) => barcodeMatchesVariants(digits, expected));
+}
+
+function jsonLdCodes(node: Record<string, unknown>): string[] {
+  const keys = ["gtin", "gtin8", "gtin12", "gtin13", "gtin14", "upc", "ean"];
+  const codes: string[] = [];
+  for (const key of keys) {
+    const value = node[key];
+    if (typeof value === "string" || typeof value === "number") {
+      const digits = String(value).replace(/\D/g, "");
+      if (digits.length >= 8) codes.push(digits);
+    }
+  }
+  return codes;
+}
+
+/**
+ * Barcode-safe parser for FWGS UPC searches.
+ *
+ * Unlike name search (`parseFwgsHtmlAll`), a UPC lookup must never blindly grab
+ * the first featured/trending product on an unfiltered or fallback page (e.g.
+ * Everclear shown when a UPC misses). Only accept a product when its JSON-LD
+ * GTIN/UPC or product-card markup explicitly corroborates the queried barcode.
+ */
+export function parseFwgsBarcodeHtml(html: string, upc: string): FwgsProduct | null {
+  const text = String(html ?? "");
+  const code = String(upc ?? "").replace(/\D/g, "");
+  if (!text.trim() || !code || emptySearch(text)) return null;
+
+  const expected = new Set(barcodeVariants(code).filter((variant) => variant.length >= 8));
+  if (!expected.size) return null;
+
+  const jsonBlocks = [...text.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const block of jsonBlocks) {
+    try {
+      const parsed: unknown = JSON.parse(block[1] ?? "");
+      for (const node of jsonLdNodes(parsed)) {
+        const product = productFromJsonLd(node);
+        if (!product) continue;
+        const codes = jsonLdCodes(node);
+        if (codes.some((candidate) => barcodeMatchesVariants(candidate, expected))) {
+          return product;
+        }
+      }
+    } catch {
+      // Markup drift; try the next block.
+    }
+  }
+
+  const cards = pickCardHtml(text);
+  for (const card of cards) {
+    if (!snippetContainsBarcode(card, expected)) continue;
+    const product = productFromCard(card);
+    if (product) return product;
+  }
+
+  return null;
+}
+
 export async function searchFwgs(upc: string): Promise<FwgsProduct | null> {
   const code = String(upc ?? "").replace(/\D/g, "");
   if (!code) return null;
@@ -292,7 +361,7 @@ export async function searchFwgs(upc: string): Promise<FwgsProduct | null> {
     });
     if (!response.ok) return null;
     const html = await response.text();
-    return parseFwgsHtml(html);
+    return parseFwgsBarcodeHtml(html, code);
   } catch {
     return null;
   }
