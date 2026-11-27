@@ -5,9 +5,10 @@ Last updated: 2026-11-27
 ## Current position
 
 Most recently ready for review:
-- **Keeper Physical Re-Inventory (Zero Shelf Counts + 0-in-Stock Workflow)** (`src/inventory-recount.ts`, `client/src/InventoryRecountCard.tsx`). Per-section Keeper count reset (`spirits`, `wines`, `packaged_beer`) preserves all bottle rows, UPCs, photos, tasting notes, enrichment history, reviews, votes, and lookup caches while leaving Taps & Homebrew untouched and recording no pours. Shelf Scan `0 → 1` restores spirits to `100%` fill (`stock_count = 1`); `0`-stock items render as **Out of stock** to Guests across Spirits/Wines/Packaged Beer while staying off automatic Restock; Keepers gain a **0 in stock** filter across all three shelf sections plus one-tap **+ Add bottle** on `0`-stock Spirit cards.
+- **Barcode Lookup Corroboration & Non-Beverage Guards** (`src/fwgs.ts`, `src/ingestion/catalogs/upcitemdb.ts`, `src/barcode-lookup-guards.test.ts`). Prevents FWGS UPC lookups from grabbing unrelated featured/fallback products (e.g., Everclear returned for Buffalo Trace `080244009250`) by requiring explicit UPC corroboration in JSON-LD or product-card markup (`parseFwgsBarcodeHtml`), and blocks non-beverage/hardware merchandise (e.g., bolts returned for Ardbeg `083300072045`) or mismatched UPCs in `lookupUpcItemDb`.
 
 Previously ready / merged:
+- **PR185** — Keeper Physical Re-Inventory (Zero Shelf Counts + 0-in-Stock Workflow).
 - **PR184** — Fix Homepage Hero Gradient Obscuring Text.
 - **PR183** — Remove redundant homepage hero-lede.
 - **PR182** — Editable Homepage Message + Mobile Hero Layout.
