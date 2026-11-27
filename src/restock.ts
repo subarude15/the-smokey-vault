@@ -2,6 +2,7 @@ import { db } from "./db.js";
 import {
   fillStopLabel,
   isSpiritEmpty,
+  isZeroStockShelfItem,
   nearestFillStop,
   openNextSpirit,
   packagedCount,
@@ -147,6 +148,7 @@ export function buildRestockList(input: {
   }
 
   for (const item of input.spirits ?? []) {
+    if (isZeroStockShelfItem("spirits", item)) continue;
     if (openNextSpirit(item)) continue;
     const fill = nearestFillStop(item.fill_level);
     const empty = isSpiritEmpty(item);
@@ -196,14 +198,14 @@ export function buildRestockList(input: {
 
   for (const item of input.packaged ?? []) {
     const count = packagedCount(item.count);
-    if (count >= thresholds.packagedBelow) continue;
+    if (count <= 0 || count >= thresholds.packagedBelow) continue;
     items.push({
       key: `packaged_beer:${itemId(item.id)}`,
       kind: "packaged_beer",
       module: "packaged_beer",
       id: itemId(item.id),
       name: bottleName(item, "brewery"),
-      reason: count <= 0 ? "Out of stock" : packagedStockLabel(count, item.vessel),
+      reason: packagedStockLabel(count, item.vessel),
       image_url: text(item.image_url),
       got: false
     });

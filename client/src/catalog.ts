@@ -61,7 +61,7 @@ export {
   onTapLabel, parseGravity, tapsForBatch, brewDisplayName, brewPresentationName, brewGuestStatusLabel,
   brewKeeperOwnsImage,
   compareBottleCollectionByName, comparePackagedBeer, drinkOnePackaged, normalizeBeerVessel, packagedCount, packagedStockLabel,
-  compareSpirits, fillStopLabel, isSpiritEmpty, nearestFillStop, openNextSpirit, pourSpirit,
+  compareSpirits, fillStopLabel, isSpiritEmpty, isZeroStockShelfItem, nearestFillStop, openNextSpirit, pourSpirit,
   spiritStock, spiritStockLabel, spiritFamilyFromLabel, wineBodyLabel, wineBodyValue, wineDrinkByOverdue, WINE_BODY_STOPS
 } from "../../src/catalog";
 

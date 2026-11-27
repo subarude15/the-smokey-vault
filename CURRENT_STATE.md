@@ -1,13 +1,14 @@
 # Smokey Vault — Current Development State
 
-Last updated: 2026-11-03
+Last updated: 2026-11-27
 
 ## Current position
 
 Most recently ready for review:
-- **Fix Homepage Hero Gradient Obscuring Text** (draft [#184](https://github.com/subarude15/the-smokey-vault/pull/184)). Removes PR160 sticky underlap + upward `.home-content::before` scrim that darkened the configurable Homepage Message on mobile (and mis-stacked on desktop). Hero → CTAs → rest is normal document flow; clearance does not depend on message length. Chromium computed-style regression in `src/homepage-hero-mobile-underlap.test.ts`. Real guest-homepage screenshots via `scripts/visual-verify-homepage-hero.mjs` (wordmark SVG, filigree, short + 200-char message, CTAs, nav).
+- **Keeper Physical Re-Inventory (Zero Shelf Counts + 0-in-Stock Workflow)** (`src/inventory-recount.ts`, `client/src/InventoryRecountCard.tsx`). Per-section Keeper count reset (`spirits`, `wines`, `packaged_beer`) preserves all bottle rows, UPCs, photos, tasting notes, enrichment history, reviews, votes, and lookup caches while leaving Taps & Homebrew untouched and recording no pours. Shelf Scan `0 → 1` restores spirits to `100%` fill (`stock_count = 1`); `0`-stock items render as **Out of stock** to Guests across Spirits/Wines/Packaged Beer while staying off automatic Restock; Keepers gain a **0 in stock** filter across all three shelf sections plus one-tap **+ Add bottle** on `0`-stock Spirit cards.
 
 Previously ready / merged:
+- **PR184** — Fix Homepage Hero Gradient Obscuring Text.
 - **PR183** — Remove redundant homepage hero-lede.
 - **PR182** — Editable Homepage Message + Mobile Hero Layout.
 - **PR181** — Keeper tap reassignment (move/swap by exchanging `tap_number`, preserving row `id`; TapReassignModal portals to `document.body`).
@@ -29,9 +30,10 @@ Previously ready / merged:
 Next planned:
 - PR163 remaining precedence/ownership and PR164 Keeper progressive scanner UX.
 - Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
-- Live phone/tablet verify homepage message clearance after this underlap fix deploys.
 
 ## Recent architectural decisions
+
+- Physical re-inventory (`src/inventory-recount.ts`): `POST /api/admin/inventory/zero-counts` (`confirm: "ZERO"`) zeroes `stock_count = 0, fill_level = 0` (`spirits`), `bottle_count = 0` (`wines`), and/or `count = 0` (`packaged_beer`) in one transaction with an admin audit event, never deleting rows or caches (no bulk purge). `isSpiritEmpty` and `spiritOnShelf` treat `stock_count <= 0` as empty/off-shelf; `saveScanSessionBottle` sets `fill_level = 100` when incrementing a spirit `0 → 1` (with full snapshot Undo). Guest responses expose coarse `out_of_stock` on `wines` as well as `spirits`/`packaged_beer`; automatic Restock skips `0`-stock items (`isZeroStockShelfItem`) while keeping empty open spirit bottles (`stock_count = 1, fill_level = 0`) and Wanted items.
 
 - Homepage hero→content: normal document flow. No sticky pin, no runway hold, no upward content scrim. Intentional seam is `.home-content` padding + hairline border on the content plane only. `--hero-pad-bottom` is breathing room, not an underlap reserve.
 

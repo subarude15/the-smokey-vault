@@ -190,6 +190,7 @@ import { DISCORD_ALERT_INTERVAL_MS, flushDiscordAlerts } from "./discord.js";
 import { acceptGuestMessage, relevantPageUrl, vaultLinkFromRequest } from "./message-notification.js";
 import { deleteInventoryItemSafely, isInventoryTable } from "./inventory-delete.js";
 import { previewInventoryCleanup } from "./inventory-cleanup-preview.js";
+import { normalizeRecountTables, previewShelfRecount, zeroShelfCountsForRecount } from "./inventory-recount.js";
 import { serializeEnrichmentViewForCaller, serializeInventoryItemForCaller, serializeOverviewForCaller } from "./guest-inventory-response.js";
 
 /**
@@ -882,6 +883,27 @@ app.get("/api/admin/inventory/cleanup-preview", {
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
   return previewInventoryCleanup();
+});
+
+app.get("/api/admin/inventory/recount-preview", {
+  schema: { tags: ["Admin"], summary: "Preview per-section shelf counts before zeroing for a physical re-inventory" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  return previewShelfRecount();
+});
+
+app.post<{ Body: { tables?: unknown; confirm?: string } }>("/api/admin/inventory/zero-counts", {
+  schema: { tags: ["Admin"], summary: "Zero stock counts on selected shelf sections while preserving all bottle records and metadata" }
+}, async (request, reply) => {
+  if (requireAdmin(request, reply)) return;
+  if (request.body?.confirm !== "ZERO") {
+    return reply.code(400).send({ error: "Confirm zeroing shelf counts before proceeding" });
+  }
+  const tables = normalizeRecountTables(request.body?.tables);
+  if (!tables.length) {
+    return reply.code(400).send({ error: "Select at least one shelf section to zero" });
+  }
+  return zeroShelfCountsForRecount(tables);
 });
 
 /**

@@ -131,6 +131,7 @@
   color:var(--muted);
   font-size:14px;
 }
+.spirit-card.out-of-stock .domain-card-main{opacity:.78}
 @media(prefers-reduced-motion:reduce){
   .spirit-skel-line{animation:none}
 }
