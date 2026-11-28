@@ -2,6 +2,7 @@
  * Execute tasting-note enrichment: authoritative official notes + optional AI house profile.
  * Never mutates inventory identity or personal notes fields.
  */
+import { fetchSafeHttp, headerValue, parseSafeHttpUrl } from "../../network_safety.js";
 import type { BottleCandidate } from "../candidate/types.js";
 import { searchWebHits, type WebSearchHit } from "../web-search.js";
 import { extractSearchTokens, identityFromCandidate } from "./search-query.js";
@@ -22,9 +23,100 @@ import type { OfficialSourceType } from "../jobs/product-content.js";
 
 export type TastingNotesEnrichmentDeps = {
   searchWebHits?: (query: string, limit?: number) => Promise<WebSearchHit[]>;
+  fetchPageHtml?: (url: string) => Promise<string | null>;
   extractOfficial?: typeof extractOfficialTastingNotes;
   generateHouseProfile?: typeof generateHouseTastingProfile;
 };
+
+const MAX_AUTHORITATIVE_PAGES_TO_FETCH = 2;
+const MAX_PAGE_EXCERPT_CHARS = 2_400;
+const MAX_HTML_FETCH_BYTES = 200_000;
+
+/**
+ * SSRF-safe bounded HTML fetch using fetchSafeHttp (pins public DNS addresses
+ * and revalidates every redirect hop).
+ */
+async function fetchSafeBoundedHtml(url: string): Promise<string | null> {
+  try {
+    const response = await fetchSafeHttp(url, {
+      timeoutMs: 8_000,
+      headers: { Accept: "text/html" }
+    });
+    if (response.status < 200 || response.status >= 300) {
+      response.body.resume();
+      return null;
+    }
+    const contentType = (headerValue(response.headers, "content-type") ?? "").toLowerCase();
+    if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+      response.body.resume();
+      return null;
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of response.body) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = MAX_HTML_FETCH_BYTES - total;
+      if (remaining <= 0) {
+        response.body.destroy();
+        break;
+      }
+      chunks.push(buf.length > remaining ? buf.subarray(0, remaining) : buf);
+      total += Math.min(buf.length, remaining);
+      if (total >= MAX_HTML_FETCH_BYTES) {
+        response.body.destroy();
+        break;
+      }
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;|&#0*38;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#0*39;|&apos;|&rsquo;|&lsquo;/gi, "'")
+    .replace(/&ldquo;|&rdquo;/gi, "\"")
+    .replace(/&mdash;|&ndash;/gi, " - ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+/**
+ * Extract a bounded plain-text tasting-notes excerpt from an authoritative product page.
+ * Prioritizes text around tasting-notes headings/labels (nose, aroma, palate, taste, finish)
+ * while stripping scripts, styles, nav, headers, and footers.
+ */
+export function extractTastingNotesExcerptFromHtml(
+  html: string,
+  maxChars = MAX_PAGE_EXCERPT_CHARS
+): string {
+  if (!html || !html.trim()) return "";
+  const cleaned = html
+    .replace(/<(script|style|svg|noscript|nav|header|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<\/(?:p|div|li|section|article|tr|dd|dt|h[1-6])>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+  const text = decodeHtmlEntities(cleaned)
+    .replace(/[ \t\r]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+
+  const anchor = text.search(
+    /\b(?:tasting\s+notes?|nose|aroma|palate|taste|flavour|flavor|finish|character|appearance)\b/i
+  );
+  if (anchor >= 0) {
+    const start = Math.max(0, anchor - 200);
+    return text.slice(start, start + maxChars).trim();
+  }
+  return text.slice(0, maxChars).trim();
+}
 
 export type TastingNotesExecutionResult = {
   officialNotes: string | null;
@@ -140,14 +232,50 @@ export async function executeTastingNotesEnrichment(
   );
 
   if (wantOfficial) {
-    const authoritative = formatAuthoritativeSnippets(classifiedHits);
+    const fetchPage =
+      deps.fetchPageHtml !== undefined
+        ? deps.fetchPageHtml
+        : deps.searchWebHits
+          ? null
+          : fetchSafeBoundedHtml;
+    let enrichedHits = classifiedHits;
+    if (fetchPage) {
+      const authIndexes: number[] = [];
+      for (let i = 0; i < classifiedHits.length && authIndexes.length < MAX_AUTHORITATIVE_PAGES_TO_FETCH; i += 1) {
+        if (isAuthoritativeSource(classifiedHits[i].sourceClass) && classifiedHits[i].url) {
+          authIndexes.push(i);
+        }
+      }
+      if (authIndexes.length > 0) {
+        enrichedHits = [...classifiedHits];
+        await Promise.all(
+          authIndexes.map(async (idx) => {
+            const hit = classifiedHits[idx];
+            try {
+              const safeUrl = parseSafeHttpUrl(hit.url).toString();
+              const html = await fetchPage(safeUrl);
+              const excerpt = html ? extractTastingNotesExcerptFromHtml(html) : "";
+              if (excerpt) {
+                enrichedHits[idx] = {
+                  ...hit,
+                  content: `${hit.content.trim()}\nPage excerpt:\n${excerpt}`.trim()
+                };
+              }
+            } catch {
+              // Keep search snippet fallback if URL is unsafe or page fetch fails.
+            }
+          })
+        );
+      }
+    }
+    const authoritative = formatAuthoritativeSnippets(enrichedHits);
     if (authoritative.trim()) {
       try {
         const extracted = await extractOfficial({
           candidate,
           authoritativeSnippets: authoritative
         });
-        const sourceType = resolveOfficialSourceType(extracted, classifiedHits);
+        const sourceType = resolveOfficialSourceType(extracted, enrichedHits);
         if (extracted.official_notes && extracted.source_url && sourceType) {
           officialNotes = extracted.official_notes;
           officialSourceUrl = extracted.source_url;
