@@ -69,13 +69,18 @@ describe("enrichment dependency health helpers", () => {
     }
   });
 
-  it("reachable SearXNG returns connected with latency", async () => {
-    stubFetch(async () =>
-      new Response(JSON.stringify({ results: [] }), {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      })
-    );
+  it("reachable SearXNG returning results reports connected with latency", async () => {
+    stubFetch(async (input) => {
+      const url = String(input);
+      assert.match(url, /q=wikipedia/);
+      return new Response(
+        JSON.stringify({ results: [{ title: "Wikipedia", url: "https://en.wikipedia.org" }] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
     const result = await checkSearxngHealth();
     assert.equal(result.status, "connected");
     assert.equal(typeof result.latencyMs, "number");
@@ -83,6 +88,56 @@ describe("enrichment dependency health helpers", () => {
     assert.ok(result.host);
     assert.ok(!result.host.includes("q="));
     assert.ok(!result.host.includes("secret"));
+  });
+
+  it("SearXNG returning zero results with unresponsive_engines reports degraded", async () => {
+    stubFetch(async () =>
+      new Response(
+        JSON.stringify({
+          results: [],
+          unresponsive_engines: [["google", "Suspended: access denied"]]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    );
+    const result = await checkSearxngHealth();
+    assert.equal(result.status, "degraded");
+    assert.equal(typeof result.latencyMs, "number");
+    assert.match(String(result.error), /upstream engines failing/i);
+    assert.match(String(result.error), /google: Suspended: access denied/);
+  });
+
+  it("SearXNG returning zero results even without unresponsive_engines reports degraded", async () => {
+    stubFetch(async () =>
+      new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const result = await checkSearxngHealth();
+    assert.equal(result.status, "degraded");
+    assert.match(String(result.error), /no search results/i);
+  });
+
+  it("SearXNG returning hits alongside partial unresponsive_engines stays connected", async () => {
+    stubFetch(async () =>
+      new Response(
+        JSON.stringify({
+          results: [{ title: "Wikipedia", url: "https://en.wikipedia.org" }],
+          unresponsive_engines: [["google", "Suspended: access denied"]]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    );
+    const result = await checkSearxngHealth();
+    assert.equal(result.status, "connected");
+    assert.equal(result.error, null);
   });
 
   it("SearXNG timeout returns unreachable", async () => {
@@ -163,10 +218,13 @@ describe("enrichment dependency health helpers", () => {
           headers: { "content-type": "application/json" }
         });
       }
-      return new Response(JSON.stringify({ results: [] }), {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      });
+      return new Response(
+        JSON.stringify({ results: [{ title: "Wikipedia", url: "https://en.wikipedia.org" }] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
     });
     const health = await checkEnrichmentHealth({
       governmentCatalogHealth: () => ({
@@ -235,10 +293,13 @@ describe("GET /api/admin/enrichment/health", () => {
           headers: { "content-type": "application/json" }
         });
       }
-      return new Response(JSON.stringify({ results: [] }), {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      });
+      return new Response(
+        JSON.stringify({ results: [{ title: "Wikipedia", url: "https://en.wikipedia.org" }] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
     });
 
     const token = createTestAdminToken();

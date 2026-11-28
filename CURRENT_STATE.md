@@ -5,6 +5,7 @@ Last updated: 2026-11-27
 ## Current position
 
 Most recently ready for review:
+- **SearXNG Engine-Failure Detection, Functional Health Probe, Backoff & Optional Brave Search Fallback** (`src/ingestion/web-search.ts`, `src/ingestion/enrichment/health.ts`, `src/ingestion/enrichment/tasting-notes-extract.ts`, `client/src/EnrichmentMaintenance.tsx`, `src/enrichment-health.test.ts`, `src/searxng-search-resilience.test.ts`). Distinguishes SearXNG upstream engine failures (`results: []` with non-empty `unresponsive_engines`) from genuine empty results via `WebSearchError("engines_failed")` + 2-minute backoff after 3 consecutive failures, upgrades `probeSearxngConnectivity` to a real query (`q=wikipedia`) that reports `degraded` on zero results (and surfaces in `EnrichmentMaintenance`), unifies `tasting-notes-extract.ts` onto `ollamaChatUrl()`, and adds an opt-in `BRAVE_SEARCH_API_KEY` fallback for web + image search when SearXNG fails.
 - **Barcode Lookup Corroboration & Non-Beverage Guards** (`src/fwgs.ts`, `src/ingestion/catalogs/upcitemdb.ts`, `src/barcode-lookup-guards.test.ts`). Prevents FWGS UPC lookups from grabbing unrelated featured/fallback products (e.g., Everclear returned for Buffalo Trace `080244009250`) by requiring explicit UPC corroboration in JSON-LD or product-card markup (`parseFwgsBarcodeHtml`), and blocks non-beverage/hardware merchandise (e.g., bolts returned for Ardbeg `083300072045`) or mismatched UPCs in `lookupUpcItemDb`.
 
 Previously ready / merged:
@@ -30,7 +31,7 @@ Previously ready / merged:
 
 Next planned:
 - PR163 remaining precedence/ownership and PR164 Keeper progressive scanner UX.
-- Live NAS/mobile verify French 75 photo framing after deploy. SearXNG health/backoff remains follow-up.
+- Live NAS/mobile verify French 75 photo framing after deploy.
 
 ## Recent architectural decisions
 
@@ -60,7 +61,6 @@ Next planned:
 - Evidence-only beer discovery: open a focused PR only when production shows a reproducible gap.
 - Live NAS/mobile verify cocktail photo framing after deploy.
 - Live mobile browser glance after underlap-fix deploy (automation covers computed styles + screenshots; real device still worth a look).
-- SearXNG health/backoff follow-up.
 - PR163 remaining: Keeper-review conflict rules beyond decoded-UPC precedence.
 - PR164: progressive Keeper scanner UX (Read front label on miss).
 

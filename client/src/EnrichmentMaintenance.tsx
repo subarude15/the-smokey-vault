@@ -111,7 +111,10 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastQueue, setLastQueue] = useState<EnrichmentBackfillQueueResult | null>(null);
-  const [searxngUnreachable, setSearxngUnreachable] = useState(false);
+  const [searxngIssue, setSearxngIssue] = useState<{
+    status: "unreachable" | "degraded";
+    error: string | null;
+  } | null>(null);
 
   const [legacyPreview, setLegacyPreview] = useState<LegacyBeerAuditPreview | null>(null);
   const [legacyLoading, setLegacyLoading] = useState(true);
@@ -149,12 +152,17 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   const loadHealthHint = useCallback(async () => {
     try {
       const health = await api<{
-        searxng?: { status?: string };
+        searxng?: { status?: string; error?: string | null };
       }>("/admin/enrichment/health");
-      setSearxngUnreachable(health.searxng?.status === "unreachable");
+      const status = health.searxng?.status;
+      if (status === "unreachable" || status === "degraded") {
+        setSearxngIssue({ status, error: health.searxng?.error ?? null });
+      } else {
+        setSearxngIssue(null);
+      }
     } catch {
       // Health is advisory only — never block maintenance on a health check failure.
-      setSearxngUnreachable(false);
+      setSearxngIssue(null);
     }
   }, []);
 
@@ -252,9 +260,11 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
       }}>
         <RefreshCw size={16}/> {loading ? "Loading preview…" : "Refresh preview"}
       </button>
-      {searxngUnreachable ? (
+      {searxngIssue ? (
         <p className="enrichment-backfill-warning" role="status">
-          Metadata/image enrichment may fail because SearXNG is unavailable.
+          {searxngIssue.status === "unreachable"
+            ? "Metadata/image enrichment may fail because SearXNG is unavailable."
+            : `Metadata, tasting-note, and image enrichment may fail because SearXNG is degraded${searxngIssue.error ? `: ${searxngIssue.error}` : " (returning no results)"}.`}
         </p>
       ) : null}
       {error && <p className="error">{error}</p>}

@@ -4,8 +4,7 @@
  * House profile: separate AI-labeled structured tasting sketch.
  */
 import type { BottleCandidate } from "../candidate/types.js";
-
-const LOCAL_OLLAMA_CHAT_URL = "http://192.168.1.184:11434/api/chat";
+import { ollamaChatUrl } from "./ollama-config.js";
 
 export type OfficialNotesExtractRequest = {
   candidate: BottleCandidate;
@@ -63,7 +62,7 @@ async function ollamaJson(
   prompt: string,
   format: Record<string, unknown>
 ): Promise<Record<string, unknown> | null> {
-  const response = await fetch(LOCAL_OLLAMA_CHAT_URL, {
+  const response = await fetch(ollamaChatUrl(), {
     method: "POST",
     headers: { "content-type": "application/json" },
     signal: AbortSignal.timeout(60_000),

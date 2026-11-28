@@ -129,7 +129,7 @@ Still upcoming, and not part of phase 3:
 
 ### Idle — evidence-driven follow-up
 
-PR157–PR160 product items are complete. PR161 is an open tooling-only native-build fix and is not part of the product roadmap. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine failures must be distinguished from genuine empty results; caching/backoff and functional health reporting remain separate work.
+PR157–PR160 product items are complete. PR161 is an open tooling-only native-build fix and is not part of the product roadmap. Live NAS/mobile verification of French 75 framing remains pending deployment. SearXNG engine-failure detection, backoff, functional health reporting, and optional Brave Search API fallback are now implemented.
 
 Stability-first, but prioritize concrete product usability problems observed in the live bar. Prefer small, testable PRs. Do not open speculative discovery features. Start a new numbered Track C entry only when a concrete next item exists.
 
