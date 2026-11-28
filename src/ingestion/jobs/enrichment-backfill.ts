@@ -83,7 +83,8 @@ function normalizeJobTypes(types?: EnrichmentBackfillJobType[]): EnrichmentBackf
 
 function evaluateBottleEligibility(
   entityType: EnrichmentEntityType,
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  options: { includeNoResult?: boolean } = {}
 ): BottleEligibility {
   const entityId = Number(row.id);
   const conflicts = collectCacheConflicts(entityType, row);
@@ -118,17 +119,18 @@ function evaluateBottleEligibility(
   const metaAvail = metadataEnrichmentAvailability({ candidate, entityType, entityId });
   const tasteAvail = tastingNotesEnrichmentAvailability({ entityType, entityId });
   const imageAvail = imageEnrichmentAvailability({ entityType, entityId, row });
+  const forceRetry = options.includeNoResult === true;
 
   // Admin backfill uses force so completed-with-gaps metadata is requeue-eligible.
-  // Ordinary save/ensure keeps one-shot (force=false) to avoid endless auto-retries.
+  // Tasting notes and images stay one-shot by default unless includeNoResult=true is chosen.
   const metadata =
     shouldScheduleMetadataEnrichment({ candidate, entityType, entityId, force: true }) &&
     !hasActiveEnrichmentJob(entityType, entityId, "metadata");
   const tastingNotes =
-    shouldScheduleTastingNotesEnrichment({ entityType, entityId }) &&
+    shouldScheduleTastingNotesEnrichment({ entityType, entityId, force: forceRetry }) &&
     !hasActiveEnrichmentJob(entityType, entityId, "tasting_notes");
   const images =
-    shouldScheduleImageEnrichment({ entityType, entityId, row }) &&
+    shouldScheduleImageEnrichment({ entityType, entityId, row, force: forceRetry }) &&
     !hasActiveEnrichmentJob(entityType, entityId, "image");
 
   const actuallyComplete = bottleEnrichmentActuallyComplete({
@@ -190,7 +192,10 @@ function scanInventory(): Array<{ entityType: EnrichmentEntityType; row: Record<
   return items;
 }
 
-export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
+export function previewEnrichmentBackfill(options?: {
+  includeNoResult?: boolean;
+}): EnrichmentBackfillPreview {
+  const includeNoResult = options?.includeNoResult === true;
   const preview: EnrichmentBackfillPreview = {
     scanned: 0,
     eligible: 0,
@@ -208,7 +213,7 @@ export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
 
   for (const { entityType, row } of scanInventory()) {
     preview.scanned += 1;
-    const eligibility = evaluateBottleEligibility(entityType, row);
+    const eligibility = evaluateBottleEligibility(entityType, row, { includeNoResult });
     if (eligibility.skipReason === "unidentified") {
       preview.unidentified += 1;
       continue;
@@ -239,8 +244,10 @@ export function previewEnrichmentBackfill(): EnrichmentBackfillPreview {
 
 export function queueEnrichmentBackfill(options?: {
   types?: EnrichmentBackfillJobType[];
+  includeNoResult?: boolean;
 }): EnrichmentBackfillQueueResult {
   const types = normalizeJobTypes(options?.types);
+  const includeNoResult = options?.includeNoResult === true;
   const result: EnrichmentBackfillQueueResult = {
     scanned: 0,
     queued: { metadata: 0, tasting_notes: 0, image: 0 },
@@ -251,7 +258,7 @@ export function queueEnrichmentBackfill(options?: {
   const run = db.transaction(() => {
     for (const { entityType, row } of scanInventory()) {
       result.scanned += 1;
-      const eligibility = evaluateBottleEligibility(entityType, row);
+      const eligibility = evaluateBottleEligibility(entityType, row, { includeNoResult });
       if (eligibility.skipReason === "unidentified") {
         result.skipped.unidentified += 1;
         continue;
@@ -287,7 +294,8 @@ export function queueEnrichmentBackfill(options?: {
           entityType,
           entityId,
           row,
-          planOptions
+          planOptions,
+          force: includeNoResult
         });
         if (enqueue.enqueued && enqueue.created) {
           result.queued.tasting_notes += 1;
@@ -299,7 +307,8 @@ export function queueEnrichmentBackfill(options?: {
           entityType,
           entityId,
           row,
-          planOptions
+          planOptions,
+          force: includeNoResult
         });
         if (enqueue.enqueued && enqueue.created) {
           result.queued.image += 1;
@@ -319,7 +328,8 @@ export function queueEnrichmentBackfill(options?: {
     scanned: result.scanned,
     queued: result.queued,
     skipped: result.skipped,
-    types
+    types,
+    includeNoResult
   });
   result.auditId = audit.id;
   return result;

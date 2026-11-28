@@ -491,11 +491,13 @@ function parseBackfillJobTypes(raw: unknown): EnrichmentBackfillJobType[] | unde
   return types.length ? types : null;
 }
 
-app.get("/api/admin/enrichment/backfill", {
+app.get<{ Querystring: { include_no_result?: string } }>("/api/admin/enrichment/backfill", {
   schema: { tags: ["Admin"], summary: "Preview missing enrichment jobs across shelf inventory (dry run)" }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
-  return previewEnrichmentBackfill();
+  const includeNoResult =
+    request.query?.include_no_result === "1" || request.query?.include_no_result === "true";
+  return previewEnrichmentBackfill({ includeNoResult });
 });
 
 app.get("/api/admin/enrichment/health", {
@@ -527,7 +529,7 @@ app.get("/api/admin/enrichment/health", {
   };
 });
 
-app.post<{ Body: { types?: string[] } }>("/api/admin/enrichment/backfill", {
+app.post<{ Body: { types?: string[]; includeNoResult?: boolean } }>("/api/admin/enrichment/backfill", {
   schema: { tags: ["Admin"], summary: "Queue missing enrichment jobs for eligible shelf bottles" }
 }, async (request, reply) => {
   if (requireAdmin(request, reply)) return;
@@ -535,7 +537,11 @@ app.post<{ Body: { types?: string[] } }>("/api/admin/enrichment/backfill", {
   if (types === null) {
     return reply.code(400).send({ error: "types must be metadata, tasting_notes, and/or image" });
   }
-  return queueEnrichmentBackfill(types?.length ? { types } : undefined);
+  const includeNoResult = request.body?.includeNoResult === true;
+  return queueEnrichmentBackfill({
+    ...(types?.length ? { types } : {}),
+    includeNoResult
+  });
 });
 
 app.get("/api/admin/enrichment/legacy-beer-audit", {
