@@ -2,10 +2,18 @@
  * Local vision model as product-image verifier (structured JSON only).
  * Does not rewrite identity — identity is supplied as immutable context.
  */
+import sharp from "sharp";
 import { normalizeCanonicalTaxonomy } from "../../canonical-normalize.js";
 import type { BottleCandidate } from "../candidate/types.js";
 import type { VisionVerification } from "./image-score.js";
 import { ollamaChatUrl, ollamaVisionModel } from "./ollama-config.js";
+
+/**
+ * Maximum pixel edge sent to the local vision verifier.
+ * Keeps Qwen2.5-VL / llama.cpp vision prompts well below a 4096-token context
+ * ceiling while preserving bottle label legibility. Does not alter persisted images.
+ */
+export const VISION_VERIFY_MAX_EDGE_PX = 768;
 
 export type ImageVerifyRequest = {
   candidate: BottleCandidate;
@@ -105,6 +113,42 @@ export function parseVisionVerification(raw: string | Record<string, unknown> | 
   };
 }
 
+/**
+ * Downscale large images to a bounded JPEG copy before base64-encoding for
+ * vision verification. Falls back to the original bytes when sharp cannot decode
+ * (for example synthetic test stubs or unsupported formats).
+ */
+export async function prepareImageForVision(input: Buffer | string): Promise<string> {
+  const rawBuffer = typeof input === "string" ? Buffer.from(input, "base64") : input;
+  const fallback = typeof input === "string" ? input : input.toString("base64");
+  if (rawBuffer.length < 32) return fallback;
+  try {
+    const metadata = await sharp(rawBuffer, { failOn: "none" }).metadata();
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
+    if (!width || !height) return fallback;
+    const needsResize =
+      width > VISION_VERIFY_MAX_EDGE_PX || height > VISION_VERIFY_MAX_EDGE_PX;
+    const isLargePayload = rawBuffer.length > 200 * 1024;
+    if (!needsResize && !isLargePayload) {
+      return fallback;
+    }
+    const resized = await sharp(rawBuffer, { failOn: "none" })
+      .rotate()
+      .resize({
+        width: VISION_VERIFY_MAX_EDGE_PX,
+        height: VISION_VERIFY_MAX_EDGE_PX,
+        fit: "inside",
+        withoutEnlargement: true
+      })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    return resized.length > 0 ? resized.toString("base64") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function fetchImageBase64(url: string): Promise<string | null> {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
@@ -113,7 +157,7 @@ async function fetchImageBase64(url: string): Promise<string | null> {
     if (type && !type.startsWith("image/") && !type.includes("octet-stream")) return null;
     const buf = Buffer.from(await response.arrayBuffer());
     if (buf.length < 32) return null;
-    return buf.toString("base64");
+    return await prepareImageForVision(buf);
   } catch {
     return null;
   }
@@ -121,9 +165,10 @@ async function fetchImageBase64(url: string): Promise<string | null> {
 
 /** Local Ollama vision verifier (endpoint + model from shared ollama-config). */
 export async function verifyProductImage(request: ImageVerifyRequest): Promise<VisionVerification | null> {
-  const image =
-    request.imageBase64?.trim() ||
-    (await fetchImageBase64(request.imageUrl));
+  const provided = request.imageBase64?.trim();
+  const image = provided
+    ? await prepareImageForVision(provided)
+    : await fetchImageBase64(request.imageUrl);
   if (!image) {
     throw new Error("fetch_failed");
   }
