@@ -638,3 +638,74 @@ test("existing enrichment merge behavior remains unchanged after backfill queue 
     cleanup();
   }
 });
+
+test("admin backfill includeNoResult=true re-queues prior no-result tasting notes and images without touching Keeper photos", async () => {
+  cleanup();
+  const bottle = insertSpirit({
+    name: "Backfill Retry Bourbon",
+    brand: "Buffalo Trace",
+    upc: `${PREFIX}9991`,
+    category: "Bourbon",
+    abv: 45,
+    volume_ml: 750
+  });
+  const keeperBottle = insertSpirit({
+    name: "Backfill Keeper Photo Bourbon",
+    brand: "Buffalo Trace",
+    upc: `${PREFIX}9992`,
+    category: "Bourbon",
+    abv: 45,
+    volume_ml: 750,
+    image_url: "/api/media/images/keeper-photo.jpg"
+  });
+
+  // Simulate prior completed jobs that returned no official notes and no accepted image
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO enrichment_jobs (entity_type, entity_id, job_type, upc, status, attempts, created_at, updated_at)
+     VALUES (?, ?, 'tasting_notes', ?, 'completed', 1, ?, ?),
+            (?, ?, 'image', ?, 'completed', 1, ?, ?),
+            (?, ?, 'tasting_notes', ?, 'completed', 1, ?, ?),
+            (?, ?, 'image', ?, 'completed', 1, ?, ?)`
+  ).run(
+    "spirits", Number(bottle.id), `${PREFIX}9991`, now, now,
+    "spirits", Number(bottle.id), `${PREFIX}9991`, now, now,
+    "spirits", Number(keeperBottle.id), `${PREFIX}9992`, now, now,
+    "spirits", Number(keeperBottle.id), `${PREFIX}9992`, now, now
+  );
+
+  // Default preview keeps one-shot behavior (0 tastingNotes, 0 images for bottle)
+  const defaultPreview = previewEnrichmentBackfill();
+  assert.equal(defaultPreview.tastingNotes, 0);
+  assert.equal(defaultPreview.images, 0);
+  assert.ok(defaultPreview.noResultTastingNotes >= 1);
+  assert.ok(defaultPreview.noResultImages >= 1);
+
+  // Opt-in includeNoResult=true unlocks both for bottle, but still skips keeperBottle's image
+  const retryPreview = previewEnrichmentBackfill({ includeNoResult: true });
+  assert.ok(retryPreview.tastingNotes >= 1);
+  assert.equal(retryPreview.images, 1);
+
+  const token = createTestAdminToken();
+  const previewRes = await app.inject({
+    method: "GET",
+    url: "/api/admin/enrichment/backfill?include_no_result=1",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(previewRes.statusCode, 200);
+  const previewBody = previewRes.json() as { tastingNotes: number; images: number };
+  assert.ok(previewBody.tastingNotes >= 1);
+  assert.equal(previewBody.images, 1);
+
+  const queueRes = await app.inject({
+    method: "POST",
+    url: "/api/admin/enrichment/backfill",
+    headers: { authorization: `Bearer ${token}` },
+    payload: { types: ["tasting_notes", "image"], includeNoResult: true }
+  });
+  assert.equal(queueRes.statusCode, 200);
+  const queueBody = queueRes.json() as { queued: { tasting_notes: number; image: number } };
+  assert.ok(queueBody.queued.tasting_notes >= 1);
+  assert.equal(queueBody.queued.image, 1);
+  cleanup();
+});

@@ -111,6 +111,7 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastQueue, setLastQueue] = useState<EnrichmentBackfillQueueResult | null>(null);
+  const [includeNoResult, setIncludeNoResult] = useState(false);
   const [searxngIssue, setSearxngIssue] = useState<{
     status: "unreachable" | "degraded";
     error: string | null;
@@ -123,18 +124,21 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   const [legacyExpanded, setLegacyExpanded] = useState(false);
   const [lastLegacyQueue, setLastLegacyQueue] = useState<LegacyBeerAuditQueueResult | null>(null);
 
-  const loadPreview = useCallback(async () => {
+  const loadPreview = useCallback(async (retryNoResult = includeNoResult) => {
     setError("");
     setLoading(true);
     try {
-      const next = await api<EnrichmentBackfillPreview>("/admin/enrichment/backfill");
+      const path = retryNoResult
+        ? "/admin/enrichment/backfill?include_no_result=1"
+        : "/admin/enrichment/backfill";
+      const next = await api<EnrichmentBackfillPreview>(path);
       setPreview(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load enrichment preview");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeNoResult]);
 
   const loadLegacyPreview = useCallback(async () => {
     setLegacyError("");
@@ -167,10 +171,10 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
   }, []);
 
   useEffect(() => {
-    void loadPreview();
+    void loadPreview(includeNoResult);
     void loadLegacyPreview();
     void loadHealthHint();
-  }, [loadPreview, loadLegacyPreview, loadHealthHint]);
+  }, [includeNoResult, loadPreview, loadLegacyPreview, loadHealthHint]);
 
   async function queue(types?: JobType[]) {
     if (!preview) return;
@@ -191,14 +195,17 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
     setBusy(true);
     setError("");
     try {
+      const payload: { types?: JobType[]; includeNoResult?: boolean } = {};
+      if (types?.length) payload.types = types;
+      if (includeNoResult) payload.includeNoResult = true;
       const result = await api<EnrichmentBackfillQueueResult>("/admin/enrichment/backfill", {
         method: "POST",
-        body: JSON.stringify(types?.length ? { types } : {})
+        body: JSON.stringify(payload)
       });
       setLastQueue(result);
       const queued = totalQueued(result);
       onMessage(`Queued ${queued} enrichment job${queued === 1 ? "" : "s"}. The background worker will process them.`);
-      await loadPreview();
+      await loadPreview(includeNoResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not queue enrichment jobs");
     } finally {
@@ -288,6 +295,20 @@ export function EnrichmentMaintenance({ onMessage }: { onMessage: (value: string
               {preview.needsReview} bottle{preview.needsReview === 1 ? " is" : "s are"} skipped — review required in bottle detail.
             </p>
           )}
+          <label className="enrichment-backfill-note" style={{ display: "flex", alignItems: "center", gap: "0.55rem", cursor: "pointer", marginBottom: "0.75rem" }}>
+            <input
+              type="checkbox"
+              checked={includeNoResult}
+              disabled={busy || loading}
+              onChange={(e) => setIncludeNoResult(e.target.checked)}
+            />
+            <span>
+              Include previous no-result tasting notes &amp; images
+              {((preview.noResultTastingNotes ?? 0) > 0 || (preview.noResultImages ?? 0) > 0)
+                ? ` (${preview.noResultTastingNotes ?? 0} notes, ${preview.noResultImages ?? 0} images)`
+                : ""}
+            </span>
+          </label>
           <div className="enrichment-backfill-actions">
             <button
               type="button"

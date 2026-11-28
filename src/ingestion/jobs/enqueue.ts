@@ -94,11 +94,13 @@ export function maybeEnqueueMetadataEnrichment(options: {
 export function shouldScheduleTastingNotesEnrichment(options: {
   entityType: EnrichmentEntityType;
   entityId: number;
+  force?: boolean;
 }): boolean {
   const content = getProductContent(options.entityType, options.entityId);
   if (productContentFullyPopulated(content)) return false;
-  // One-shot: after a completed tasting_notes job, do not keep re-queueing null results.
-  if (hasCompletedJob(options.entityType, options.entityId, "tasting_notes")) {
+  // One-shot by default: after a completed tasting_notes job, do not keep re-queueing null results
+  // unless an explicit Keeper backfill retry (force=true) is requested.
+  if (!options.force && hasCompletedJob(options.entityType, options.entityId, "tasting_notes")) {
     return false;
   }
   return true;
@@ -106,7 +108,7 @@ export function shouldScheduleTastingNotesEnrichment(options: {
 
 /**
  * Enqueue tasting-note enrichment independently from metadata.
- * Gate: identified, not needsReview, content gaps remain, no prior completed job.
+ * Gate: identified, not needsReview, content gaps remain, no prior completed job (unless force=true).
  */
 export function maybeEnqueueTastingNotesEnrichment(options: {
   entityType: string;
@@ -114,6 +116,7 @@ export function maybeEnqueueTastingNotesEnrichment(options: {
   row: Record<string, unknown>;
   planOptions?: PlanEnrichmentOptions;
   logger?: EnrichmentLogger;
+  force?: boolean;
 }): MaybeEnqueueResult {
   if (!isEnrichmentEntityType(options.entityType)) {
     return { enqueued: false, reason: "unsupported_entity" };
@@ -124,7 +127,11 @@ export function maybeEnqueueTastingNotesEnrichment(options: {
 
   if (!plan.identified) return { enqueued: false, reason: "not_identified" };
   if (plan.needsReview) return { enqueued: false, reason: "needs_review" };
-  if (!shouldScheduleTastingNotesEnrichment({ entityType, entityId: options.entityId })) {
+  if (!shouldScheduleTastingNotesEnrichment({
+    entityType,
+    entityId: options.entityId,
+    force: options.force
+  })) {
     return { enqueued: false, reason: "already_complete" };
   }
 
@@ -141,6 +148,7 @@ export function shouldScheduleImageEnrichment(options: {
   entityType: EnrichmentEntityType;
   entityId: number;
   row: Record<string, unknown>;
+  force?: boolean;
 }): boolean {
   if (inventoryHasUserImage(options.row, options.entityType, options.entityId)) return false;
   // Durable local accepted images are done. Remote accepted images still need repair.
@@ -151,13 +159,13 @@ export function shouldScheduleImageEnrichment(options: {
     return false;
   }
   if (productImageNeedsLocalization(options.entityType, options.entityId)) return true;
-  if (hasCompletedJob(options.entityType, options.entityId, "image")) return false;
+  if (!options.force && hasCompletedJob(options.entityType, options.entityId, "image")) return false;
   return true;
 }
 
 /**
  * Enqueue image enrichment independently from metadata / tasting notes.
- * Skips when a user/shelf image already exists or a prior image job completed.
+ * Skips when a user/shelf image already exists or a prior image job completed (unless force=true).
  */
 export function maybeEnqueueImageEnrichment(options: {
   entityType: string;
@@ -165,6 +173,7 @@ export function maybeEnqueueImageEnrichment(options: {
   row: Record<string, unknown>;
   planOptions?: PlanEnrichmentOptions;
   logger?: EnrichmentLogger;
+  force?: boolean;
 }): MaybeEnqueueResult {
   if (!isEnrichmentEntityType(options.entityType)) {
     return { enqueued: false, reason: "unsupported_entity" };
@@ -178,7 +187,8 @@ export function maybeEnqueueImageEnrichment(options: {
   if (!shouldScheduleImageEnrichment({
     entityType,
     entityId: options.entityId,
-    row: options.row
+    row: options.row,
+    force: options.force
   })) {
     return { enqueued: false, reason: "already_complete" };
   }
