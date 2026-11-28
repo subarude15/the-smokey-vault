@@ -2,10 +2,9 @@
  * Execute tasting-note enrichment: authoritative official notes + optional AI house profile.
  * Never mutates inventory identity or personal notes fields.
  */
-import { parseSafeHttpUrl } from "../../network_safety.js";
+import { fetchSafeHttp, headerValue, parseSafeHttpUrl } from "../../network_safety.js";
 import type { BottleCandidate } from "../candidate/types.js";
 import { searchWebHits, type WebSearchHit } from "../web-search.js";
-import { fetchBoundedPageHtml } from "./page-extract.js";
 import { extractSearchTokens, identityFromCandidate } from "./search-query.js";
 import {
   classifyHit,
@@ -31,6 +30,48 @@ export type TastingNotesEnrichmentDeps = {
 
 const MAX_AUTHORITATIVE_PAGES_TO_FETCH = 2;
 const MAX_PAGE_EXCERPT_CHARS = 2_400;
+const MAX_HTML_FETCH_BYTES = 200_000;
+
+/**
+ * SSRF-safe bounded HTML fetch using fetchSafeHttp (pins public DNS addresses
+ * and revalidates every redirect hop).
+ */
+async function fetchSafeBoundedHtml(url: string): Promise<string | null> {
+  try {
+    const response = await fetchSafeHttp(url, {
+      timeoutMs: 8_000,
+      headers: { Accept: "text/html" }
+    });
+    if (response.status < 200 || response.status >= 300) {
+      response.body.resume();
+      return null;
+    }
+    const contentType = (headerValue(response.headers, "content-type") ?? "").toLowerCase();
+    if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+      response.body.resume();
+      return null;
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of response.body) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = MAX_HTML_FETCH_BYTES - total;
+      if (remaining <= 0) {
+        response.body.destroy();
+        break;
+      }
+      chunks.push(buf.length > remaining ? buf.subarray(0, remaining) : buf);
+      total += Math.min(buf.length, remaining);
+      if (total >= MAX_HTML_FETCH_BYTES) {
+        response.body.destroy();
+        break;
+      }
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return null;
+  }
+}
 
 function decodeHtmlEntities(text: string): string {
   return text
@@ -196,7 +237,7 @@ export async function executeTastingNotesEnrichment(
         ? deps.fetchPageHtml
         : deps.searchWebHits
           ? null
-          : fetchBoundedPageHtml;
+          : fetchSafeBoundedHtml;
     let enrichedHits = classifiedHits;
     if (fetchPage) {
       const authIndexes: number[] = [];
