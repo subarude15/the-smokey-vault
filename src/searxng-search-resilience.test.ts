@@ -14,7 +14,11 @@ import {
   searxngBackoffState,
   WebSearchError
 } from "./ingestion/web-search.js";
-import { executeTastingNotesEnrichment } from "./ingestion/enrichment/execute-tasting-notes.js";
+import {
+  buildTastingNotesQueries,
+  executeTastingNotesEnrichment
+} from "./ingestion/enrichment/execute-tasting-notes.js";
+import { classifySourceUrl } from "./ingestion/enrichment/tasting-notes-sources.js";
 import { generateHouseTastingProfile } from "./ingestion/enrichment/tasting-notes-extract.js";
 import type { BottleCandidate } from "./ingestion/candidate/types.js";
 
@@ -352,5 +356,176 @@ describe("tasting-notes-extract Ollama URL configuration", () => {
     const profile = await generateHouseTastingProfile({ candidate: sampleCandidate() });
     assert.equal(requestedUrl, "http://custom-ollama.local:11434/api/chat");
     assert.equal(profile.aroma, "vanilla");
+  });
+});
+
+describe("Image SVG/icon filtering and empty-result Brave fallback", () => {
+  afterEach(() => {
+    restoreEnvAndFetch();
+  });
+
+  it("drops .svg devicon junk and falls back to Brave Image Search when zero usable photos remain", async () => {
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-img-key";
+    let braveImageCalled = false;
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("api.search.brave.com/res/v1/images/search")) {
+        braveImageCalled = true;
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                url: "https://www.buffalotracedistillery.com/our-brands/buffalo-trace.html",
+                properties: {
+                  url: "https://www.buffalotracedistillery.com/images/bt-bottle.jpg",
+                  width: 900,
+                  height: 1200
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          results: [
+            {
+              img_src: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/dynatrace/dynatrace-original.svg",
+              url: "https://devicon.dev"
+            },
+            {
+              img_src: "https://www.svgrepo.com/show/12345/bottle.svg",
+              url: "https://www.svgrepo.com/svg/12345"
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const hits = await searchImageHitsFromSearx("buffalo trace bourbon bottle", 5);
+    assert.equal(braveImageCalled, true);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].url, "https://www.buffalotracedistillery.com/images/bt-bottle.jpg");
+  });
+
+  it("skips leading SVG icons and keeps real photo hits further down SearXNG results without calling Brave", async () => {
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-img-key";
+    let braveImageCalled = false;
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("api.search.brave.com")) {
+        braveImageCalled = true;
+        return new Response("should not be called", { status: 500 });
+      }
+      return new Response(
+        JSON.stringify({
+          results: [
+            {
+              img_src: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/dynatrace/dynatrace-original.svg",
+              url: "https://devicon.dev"
+            },
+            {
+              img_src: "https://www.buffalotracedistillery.com/media/bt.jpg",
+              url: "https://www.buffalotracedistillery.com/our-brands/buffalo-trace.html",
+              width: 800,
+              height: 1200
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const hits = await searchImageHitsFromSearx("buffalo trace bourbon bottle", 1);
+    assert.equal(braveImageCalled, false);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].url, "https://www.buffalotracedistillery.com/media/bt.jpg");
+  });
+});
+
+describe("Tasting-notes query hygiene and parent-company official domain matching", () => {
+  it("builds clean 2-tier tasting-notes queries without UPC, generic spirit, or duplicated brand", () => {
+    const queries = buildTastingNotesQueries(sampleCandidate());
+    assert.equal(queries.length, 2);
+    assert.equal(queries[0], "Buffalo Trace Bourbon official tasting notes");
+    assert.equal(queries[1], "Buffalo Trace Bourbon tasting notes");
+    assert.ok(!queries[0].includes("080244009250"));
+    assert.ok(!/\bspirit\b/i.test(queries[0]));
+  });
+
+  it("falls back to Tier 2 tasting-notes query only when Tier 1 finds no authoritative source", async () => {
+    const seenQueries: string[] = [];
+    const result = await executeTastingNotesEnrichment(
+      sampleCandidate(),
+      {
+        searchWebHits: async (query: string) => {
+          seenQueries.push(query);
+          if (seenQueries.length === 1) {
+            return [
+              {
+                title: "Total Wine Buffalo Trace",
+                content: "Retailer description",
+                url: "https://www.totalwine.com/spirits/bourbon/buffalo-trace"
+              }
+            ];
+          }
+          return [
+            {
+              title: "Buffalo Trace Distillery — Tasting Notes",
+              content: "Vanilla, mint, and molasses.",
+              url: "https://www.buffalotracedistillery.com/our-brands/buffalo-trace.html"
+            }
+          ];
+        },
+        extractOfficial: async ({ authoritativeSnippets }) => {
+          assert.match(authoritativeSnippets, /buffalotracedistillery\.com/);
+          return {
+            official_notes: "Vanilla, mint, and molasses.",
+            source_url: "https://www.buffalotracedistillery.com/our-brands/buffalo-trace.html",
+            confidence: "official"
+          };
+        }
+      },
+      { wantOfficial: true, wantHouseProfile: false }
+    );
+    assert.equal(seenQueries.length, 2);
+    assert.equal(result.officialNotes, "Vanilla, mint, and molasses.");
+    assert.equal(result.officialSourceType, "official");
+  });
+
+  it("classifies distinctive product-name domains as official under parent-company brands without false positives", () => {
+    assert.equal(
+      classifySourceUrl("https://www.eaglerare.com/bourbon", {
+        brand: "Sazerac",
+        name: "Eagle Rare 10 Year Kentucky Straight Bourbon"
+      }),
+      "official"
+    );
+    assert.equal(
+      classifySourceUrl("https://www.lagavulin.com/en-us/whiskies/lagavulin-16", {
+        brand: "Diageo",
+        name: "Lagavulin 16 Year Single Malt Scotch"
+      }),
+      "official"
+    );
+    // Generic category domains must stay unknown, and retailers/UGC stay blocked
+    assert.equal(
+      classifySourceUrl("https://www.bourbon.com/reviews/eagle-rare", {
+        brand: "Sazerac",
+        name: "Eagle Rare 10 Year Kentucky Straight Bourbon"
+      }),
+      "unknown"
+    );
+    assert.equal(
+      classifySourceUrl("https://www.totalwine.com/eaglerare", {
+        brand: "Sazerac",
+        name: "Eagle Rare 10 Year Kentucky Straight Bourbon"
+      }),
+      "retailer"
+    );
   });
 });
