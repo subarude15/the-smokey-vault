@@ -10,7 +10,8 @@ import {
   isWebSearchError,
   probeSearxngConnectivity,
   safeHostFromUrl,
-  searxngSafeHost
+  searxngSafeHost,
+  summarizeUnresponsiveEngines
 } from "../web-search.js";
 import { ollamaBaseUrl } from "./ollama-config.js";
 
@@ -57,6 +58,17 @@ function friendlySearxngError(error: unknown): { status: ServiceHealthStatus; er
     if (error.code === "invalid_json") {
       return { status: "degraded", error: "Malformed response" };
     }
+    if (error.code === "engines_failed") {
+      const detail = error.unresponsiveEngines?.length
+        ? summarizeUnresponsiveEngines(error.unresponsiveEngines)
+        : "";
+      return {
+        status: "degraded",
+        error: detail
+          ? `Upstream search engines failing (${detail})`
+          : "Upstream search engines failing"
+      };
+    }
     if (error.code === "timeout") {
       return { status: "unreachable", error: "Connection timed out" };
     }
@@ -79,6 +91,17 @@ export async function checkSearxngHealth(
       fetch: deps.fetch,
       timeoutMs: 3_000
     });
+    if (result.resultCount === 0) {
+      const detail = summarizeUnresponsiveEngines(result.unresponsiveEngines);
+      return {
+        status: "degraded",
+        host,
+        latencyMs: result.latencyMs,
+        error: detail
+          ? `No search results — upstream engines failing (${detail})`
+          : "No search results returned for health probe (check SearXNG engines)"
+      };
+    }
     return {
       status: "connected",
       host,
