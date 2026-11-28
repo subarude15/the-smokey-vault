@@ -452,7 +452,7 @@ export async function probeSearxngConnectivity(options?: {
   timeoutMs?: number;
 }): Promise<SearxngProbeResult> {
   const fetchFn = options?.fetch ?? fetch;
-  const timeoutMs = options?.timeoutMs ?? 3_000;
+  const timeoutMs = options?.timeoutMs ?? 6_000;
   const params = new URLSearchParams({ q: "wikipedia", format: "json" });
   const url = `${searxngSearchUrl()}?${params}`;
   const started = Date.now();

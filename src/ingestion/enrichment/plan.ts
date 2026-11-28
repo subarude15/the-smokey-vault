@@ -1,3 +1,4 @@
+import { isValidGtin } from "../../cola_client.js";
 import type { BottleCandidate, BottleCandidateFieldName, FieldConflict, ProductField } from "../candidate/types.js";
 import { isUnresolvedField, unresolvedFields } from "../candidate/index.js";
 import {
@@ -25,6 +26,30 @@ function candidateField(
 
 function isTrusted(field: ProductField<unknown>): boolean {
   return !isUnresolvedField(field) && field.confidence >= TRUSTED_MIN;
+}
+
+/** At least two alphabetic word tokens (excludes generic single-word names like "wine" or "95 rye"). */
+function hasMeaningfulMultiWordName(raw: unknown): boolean {
+  const tokens = String(raw ?? "")
+    .trim()
+    .split(/[\s,/|&-]+/)
+    .map((t) => t.replace(/[^a-z0-9]/gi, ""))
+    .filter((t) => t.length >= 2 && /[a-z]/i.test(t));
+  return tokens.length >= 2;
+}
+
+/**
+ * Government catalogs like Iowa omit a separate brand column (`vendor_not_brand`),
+ * leaving bottles with a full multi-word product name and valid GTIN barcode.
+ * Allow enrichment to proceed without mutating the Keeper's blank brand field.
+ */
+function hasTrustedNameAndGtinWithoutBrand(candidate: BottleCandidate): boolean {
+  if (!isUnresolvedField(candidate.brand)) return false;
+  if (!isTrusted(candidate.name) || !isTrusted(candidate.product_type)) return false;
+  if (!isTrusted(candidate.upc)) return false;
+  const upc = String(candidate.upc.value ?? "").trim();
+  if (!isValidGtin(upc)) return false;
+  return hasMeaningfulMultiWordName(candidate.name.value);
 }
 
 function needsEnrichment(field: ProductField<unknown>): boolean {
@@ -78,7 +103,9 @@ export function planEnrichment(
     pushTask(tasks, name, null);
   }
 
-  const identified = IDENTITY_FIELDS.every((name) => isTrusted(candidateField(candidate, name)));
+  const identified =
+    IDENTITY_FIELDS.every((name) => isTrusted(candidateField(candidate, name))) ||
+    hasTrustedNameAndGtinWithoutBrand(candidate);
 
   const reviewConflicts = conflicts.filter((conflict) => {
     if (!isIdentityField(conflict.field)) return false;
