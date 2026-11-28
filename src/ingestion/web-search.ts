@@ -347,6 +347,20 @@ export type ImageSearchSeed = {
   mimeType?: string | null;
 };
 
+function isNonPhotoImageUrl(rawUrl: string): boolean {
+  const lower = rawUrl.toLowerCase();
+  const pathOnly = lower.split(/[?#]/)[0] ?? lower;
+  if (pathOnly.endsWith(".svg")) return true;
+  if (
+    lower.includes("/gh/devicons/")
+    || lower.includes("simple-icons")
+    || lower.includes("svgrepo.com")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** SearXNG image-category search; throws WebSearchError on provider failure. */
 export async function searchImageHitsFromSearx(query: string, limit = 8): Promise<ImageSearchSeed[]> {
   let data: SearxSearchResponse;
@@ -364,10 +378,14 @@ export async function searchImageHitsFromSearx(query: string, limit = 8): Promis
     throw error;
   }
   const out: ImageSearchSeed[] = [];
-  for (const row of (data.results ?? []).slice(0, Math.max(0, limit))) {
+  const cap = Math.max(0, limit);
+  const scanLimit = Math.max(cap * 3, 24);
+  for (const row of (data.results ?? []).slice(0, scanLimit)) {
+    if (out.length >= cap) break;
     const imageUrl = String(row.img_src || row.thumbnail_src || row.thumbnail || row.url || "").trim();
     const pageUrl = String(row.url || "").trim() || null;
     if (!imageUrl.startsWith("http")) continue;
+    if (isNonPhotoImageUrl(imageUrl)) continue;
     const width = row.width != null ? Number(row.width) : null;
     const height = row.height != null ? Number(row.height) : null;
     out.push({
@@ -377,6 +395,16 @@ export async function searchImageHitsFromSearx(query: string, limit = 8): Promis
       height: Number.isFinite(height) ? height : null,
       mimeType: null
     });
+  }
+  if (out.length === 0 && cap > 0) {
+    const braveKey = braveSearchApiKey();
+    if (braveKey) {
+      try {
+        return await searchImageHitsFromBrave(query, limit, braveKey);
+      } catch {
+        return [];
+      }
+    }
   }
   return out;
 }

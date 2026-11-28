@@ -357,7 +357,7 @@ test("worker continues after tasting-note job failure", async () => {
 
   const deps = {
     searchWebHits: async (query: string) => {
-      if (query.includes("080686100012")) throw new Error("boom");
+      if (query.includes("TasteTest A")) throw new Error("boom");
       return [
         {
           title: "B",

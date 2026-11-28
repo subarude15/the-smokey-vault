@@ -4,6 +4,7 @@
  */
 import type { BottleCandidate } from "../candidate/types.js";
 import { searchWebHits, type WebSearchHit } from "../web-search.js";
+import { extractSearchTokens, identityFromCandidate } from "./search-query.js";
 import {
   classifyHit,
   formatAuthoritativeSnippets,
@@ -34,17 +35,28 @@ export type TastingNotesExecutionResult = {
   errors: string[];
 };
 
-function tastingNotesQuery(candidate: BottleCandidate): string {
-  const parts = [
-    candidate.brand.value,
-    candidate.name.value,
-    candidate.product_type.value,
-    candidate.upc.value,
-    "official tasting notes"
-  ]
+/**
+ * Clean 2-tier tasting-notes queries without UPC barcodes or generic "spirit" noise
+ * (official distillery/brewery/winery pages rarely include retail UPCs).
+ */
+export function buildTastingNotesQueries(candidate: BottleCandidate): string[] {
+  const tokens = extractSearchTokens(identityFromCandidate(candidate));
+  const core = [tokens.brandCore, ...tokens.productTokens]
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const fallbackCore = [candidate.brand.value, candidate.name.value]
     .map((p) => String(p ?? "").trim())
-    .filter(Boolean);
-  return parts.join(" ");
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const subject = core || fallbackCore;
+  if (!subject) return [];
+  return [
+    `${subject} official tasting notes`,
+    `${subject} tasting notes`
+  ];
 }
 
 function resolveOfficialSourceType(
@@ -92,12 +104,31 @@ export async function executeTastingNotesEnrichment(
   let officialSourceType: OfficialSourceType | null = null;
   let houseProfile: string | null = null;
 
-  let hits: WebSearchHit[] = [];
-  if (wantOfficial || wantHouseProfile) {
+  const hits: WebSearchHit[] = [];
+  const seenUrls = new Set<string>();
+  const queries = wantOfficial || wantHouseProfile ? buildTastingNotesQueries(candidate) : [];
+  for (let i = 0; i < queries.length; i += 1) {
     try {
-      hits = await search(tastingNotesQuery(candidate), 8);
+      const batch = await search(queries[i], 8);
+      for (const hit of batch) {
+        const key = hit.url || `${hit.title}|${hit.content}`;
+        if (seenUrls.has(key)) continue;
+        seenUrls.add(key);
+        hits.push(hit);
+      }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Web search failed");
+      break;
+    }
+    const currentClassified = hits.map((hit) =>
+      classifyHit(hit, {
+        brand: candidate.brand.value,
+        name: candidate.name.value
+      })
+    );
+    // Stop after Tier 1 if we already found an authoritative source (or don't need official notes).
+    if (!wantOfficial || currentClassified.some((h) => isAuthoritativeSource(h.sourceClass))) {
+      break;
     }
   }
 

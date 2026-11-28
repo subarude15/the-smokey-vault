@@ -144,6 +144,42 @@ export function hostLooksLikeBrandDomain(host: string, brand: string): boolean {
   });
 }
 
+const GENERIC_PRODUCT_TOKENS = new Set([
+  "bourbon", "whiskey", "whisky", "scotch", "vodka", "tequila", "mezcal",
+  "rum", "gin", "brandy", "cognac", "wine", "beer", "lager", "ale", "ipa",
+  "stout", "pilsner", "porter", "cider", "seltzer", "liqueur", "single",
+  "malt", "straight", "small", "batch", "reserve", "barrel", "proof", "cask",
+  "strength", "year", "years", "aged", "distillery", "distilling", "brewery",
+  "brewing", "winery", "vineyard", "vineyards", "cellars", "spirits", "spirit",
+  "liquor", "bottle", "edition", "limited", "special", "original", "classic",
+  "double", "triple", "black", "white", "gold", "silver", "blue", "green",
+  "red", "extra", "grand", "royal", "kentucky", "tennessee", "irish",
+  "japanese", "rye", "wheated", "sour", "mash", "spiced", "anejo", "reposado",
+  "blanco", "cabernet", "merlot", "pinot", "chardonnay", "sauvignon",
+  "riesling", "prosecco", "champagne", "brut", "rose", "dry", "sweet", "the"
+]);
+
+/**
+ * Conservative match for parent-company bottles (e.g. brand="Sazerac", name="Eagle Rare 10 Year"
+ * matching eaglerare.com) while never matching generic category domains like bourbon.com.
+ */
+function hostLooksLikeProductDomain(host: string, name: string): boolean {
+  const tokens = name
+    .toLowerCase()
+    .split(/[\s,/|&-]+/)
+    .map(normalizeToken)
+    .filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !GENERIC_PRODUCT_TOKENS.has(t));
+  if (!tokens.length) return false;
+  const hostNorm = normalizeToken(host);
+  // Check adjacent distinctive 2-word pairs (e.g. "eagle" + "rare" -> "eaglerare")
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const pair = `${tokens[i]}${tokens[i + 1]}`;
+    if (pair.length >= 7 && hostNorm.includes(pair)) return true;
+  }
+  // Or a single distinctive token of length >= 6 (e.g. "lagavulin", "ardbeg", "blantons")
+  return tokens.some((token) => token.length >= 6 && hostNorm.includes(token));
+}
+
 /**
  * Classify a hit URL using brand/product identity.
  * Prefer null official notes over mis-attributing retailer/blog copy.
@@ -161,6 +197,11 @@ export function classifySourceUrl(
 
   const brand = String(options.brand ?? "").trim();
   if (brand && hostLooksLikeBrandDomain(host, brand)) {
+    return "official";
+  }
+
+  const name = String(options.name ?? "").trim();
+  if (name && hostLooksLikeProductDomain(host, name)) {
     return "official";
   }
 
