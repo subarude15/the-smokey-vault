@@ -175,3 +175,38 @@ test("non-identity conflicts do not set needsReview", () => {
   assert.equal(plan.needsReview, false);
   assert.deepEqual(plan.reviewConflicts, []);
 });
+
+test("blank brand with trusted multi-word name and valid GTIN is identified (Iowa catalog pattern)", () => {
+  const candidate = candidateFromProduct(baseProduct({
+    name: "WhistlePig Smokestock Whiskey",
+    brand: "",
+    upc: "810080550360"
+  }), "vault");
+  const plan = planEnrichment(candidate);
+  assert.equal(plan.identified, true);
+  assert.equal(plan.needsReview, false);
+});
+
+test("blank brand with single-word generic name or invalid GTIN stays unidentified", () => {
+  const genericSingleWord = candidateFromProduct(baseProduct({
+    name: "wine",
+    brand: "",
+    upc: "082734001010",
+    product_type: "wine"
+  }), "vault");
+  assert.equal(planEnrichment(genericSingleWord).identified, false);
+
+  const numericPlusOneWord = candidateFromProduct(baseProduct({
+    name: "95 rye",
+    brand: "",
+    upc: "082000766070"
+  }), "vault");
+  assert.equal(planEnrichment(numericPlusOneWord).identified, false);
+
+  const invalidChecksumUpc = candidateFromProduct(baseProduct({
+    name: "WhistlePig Smokestock Whiskey",
+    brand: "",
+    upc: "080686200102"
+  }), "vault");
+  assert.equal(planEnrichment(invalidChecksumUpc).identified, false);
+});

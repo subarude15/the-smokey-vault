@@ -89,7 +89,7 @@ export async function checkSearxngHealth(
   try {
     const result = await probe({
       fetch: deps.fetch,
-      timeoutMs: 3_000
+      timeoutMs: 6_000
     });
     if (result.resultCount === 0) {
       const detail = summarizeUnresponsiveEngines(result.unresponsiveEngines);
