@@ -22,6 +22,8 @@ import {
   upsertProductContent,
   upsertProductImage
 } from "./ingestion/jobs/index.js";
+import { getProductImage, runImageJob } from "./ingestion/jobs/index.js";
+import { imageEnrichmentAvailability } from "./ingestion/jobs/enrichment-availability.js";
 import { db } from "./db.js";
 
 process.env.SMOKEY_TEST_NO_LISTEN = "1";
@@ -707,5 +709,54 @@ test("admin backfill includeNoResult=true re-queues prior no-result tasting note
   const queueBody = queueRes.json() as { queued: { tasting_notes: number; image: number } };
   assert.ok(queueBody.queued.tasting_notes >= 1);
   assert.equal(queueBody.queued.image, 1);
+  cleanup();
+});
+
+test("lookup-sourced local image is not misclassified as a user upload by availability or runImageJob", async () => {
+  cleanup();
+  const bottle = insertSpirit({
+    name: "Lookup Local Fallback Rye",
+    brand: "MGP",
+    upc: `${PREFIX}9993`,
+    category: "Rye",
+    abv: 45,
+    volume_ml: 750,
+    image_url: "/api/media/images/lookup-fallback-local.jpg"
+  });
+  const entityId = Number(bottle.id);
+
+  upsertProductImage({
+    entityType: "spirits",
+    entityId,
+    url: "/api/media/images/lookup-fallback-local.jpg",
+    sourceType: "lookup",
+    sourceUrl: "https://example.com/lookup.jpg",
+    score: 50,
+    verified: false,
+    rejectionReason: null
+  });
+
+  // Lookup provenance is not complete official enrichment and must stay distinguishable from user uploads.
+  assert.equal(
+    imageEnrichmentAvailability({ entityType: "spirits", entityId, row: bottle }),
+    "missing"
+  );
+
+  const { job } = enqueueImageJob({
+    entityType: "spirits",
+    entityId,
+    upc: `${PREFIX}9993`
+  });
+
+  const result = await runImageJob(job, {
+    searchImageHits: async () => [],
+    searchWebHits: async () => [],
+    verifyImage: async () => null
+  });
+
+  assert.equal(result.reason, undefined);
+  assert.equal(result.skipped, false);
+  // Must NOT overwrite lookup provenance with source_type: "user".
+  assert.notEqual(getProductImage("spirits", entityId)?.source_type, "user");
   cleanup();
 });

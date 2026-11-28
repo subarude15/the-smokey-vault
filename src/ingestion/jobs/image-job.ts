@@ -259,7 +259,7 @@ export async function runImageJob(
       resultPayload: { imageSaved: false }
     };
   }
-  if (inventoryHasUserImage(row)) {
+  if (inventoryHasUserImage(row, job.entity_type, job.entity_id)) {
     upsertProductImage({
       entityType: job.entity_type,
       entityId: job.entity_id,

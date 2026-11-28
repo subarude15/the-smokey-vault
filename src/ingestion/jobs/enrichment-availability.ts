@@ -77,7 +77,10 @@ export function imageEnrichmentAvailability(options: {
   row: Record<string, unknown>;
 }): EnrichmentAvailability {
   const { entityType, entityId, row } = options;
-  if (inventoryHasUserImage(row) || hasDurableAcceptedProductImage(entityType, entityId)) {
+  if (
+    inventoryHasUserImage(row, entityType, entityId) ||
+    hasDurableAcceptedProductImage(entityType, entityId)
+  ) {
     return "complete";
   }
   // Accepted remote hotlink still needs local persistence — not fully complete.
