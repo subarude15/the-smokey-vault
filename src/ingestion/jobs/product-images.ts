@@ -22,6 +22,7 @@ export type ProductImageRecord = {
   score: number | null;
   verified: boolean;
   rejection_reason: string | null;
+  lookup_fallback_url?: string | null;
   updated_at: string;
 };
 
@@ -39,12 +40,17 @@ export function ensureProductImagesTable() {
       score REAL,
       verified INTEGER NOT NULL DEFAULT 0,
       rejection_reason TEXT,
+      lookup_fallback_url TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (entity_type, entity_id)
     );
     CREATE INDEX IF NOT EXISTS idx_product_images_entity
       ON product_images(entity_type, entity_id);
   `);
+  const cols = db.prepare("PRAGMA table_info(product_images)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "lookup_fallback_url")) {
+    db.exec("ALTER TABLE product_images ADD COLUMN lookup_fallback_url TEXT");
+  }
 }
 
 ensureProductImagesTable();
@@ -61,6 +67,7 @@ type Row = {
   score: number | null;
   verified: number;
   rejection_reason: string | null;
+  lookup_fallback_url?: string | null;
   updated_at: string;
 };
 
@@ -78,6 +85,7 @@ function mapRow(row: Row): ProductImageRecord {
     score: row.score == null ? null : Number(row.score),
     verified: Boolean(row.verified),
     rejection_reason: row.rejection_reason,
+    lookup_fallback_url: row.lookup_fallback_url?.trim() || null,
     updated_at: row.updated_at
   };
 }
@@ -108,8 +116,9 @@ export function inventoryHasUserImage(
   if (!isLocalImagePath(url)) return false;
   if (entityType != null && entityId != null) {
     const stored = getProductImage(entityType, entityId);
-    if (stored?.source_type === "lookup") return false;
     if (stored?.source_type === "user") return true;
+    if (stored?.source_type === "lookup") return false;
+    if (stored?.lookup_fallback_url && stored.lookup_fallback_url === url) return false;
   }
   // Local media path without lookup provenance — treat as user/shelf upload.
   return true;
@@ -154,12 +163,18 @@ export function upsertProductImage(options: {
   // Never replace an existing verified user/official selection with empty.
   const nextUrl = options.url?.trim() || existing?.url || null;
   const writingNew = Boolean(options.url?.trim());
+  const nextLookupFallbackUrl =
+    options.sourceType === "lookup"
+      ? (options.url?.trim() || existing?.lookup_fallback_url || null)
+      : options.sourceType === "user"
+        ? null
+        : (existing?.lookup_fallback_url ?? (existing?.source_type === "lookup" ? existing.url : null));
 
   db.prepare(`
     INSERT INTO product_images (
       entity_type, entity_id, url, source_type, source_url,
-      width, height, mime_type, score, verified, rejection_reason, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      width, height, mime_type, score, verified, rejection_reason, lookup_fallback_url, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(entity_type, entity_id) DO UPDATE SET
       url = excluded.url,
       source_type = excluded.source_type,
@@ -170,6 +185,7 @@ export function upsertProductImage(options: {
       score = excluded.score,
       verified = excluded.verified,
       rejection_reason = excluded.rejection_reason,
+      lookup_fallback_url = excluded.lookup_fallback_url,
       updated_at = CURRENT_TIMESTAMP
   `).run(
     options.entityType,
@@ -182,7 +198,8 @@ export function upsertProductImage(options: {
     writingNew ? (options.mimeType ?? null) : (existing?.mime_type ?? options.mimeType ?? null),
     writingNew ? (options.score ?? null) : (existing?.score ?? options.score ?? null),
     writingNew ? (options.verified ? 1 : 0) : (existing?.verified ? 1 : options.verified ? 1 : 0),
-    writingNew ? (options.rejectionReason ?? null) : (options.rejectionReason ?? existing?.rejection_reason ?? null)
+    writingNew ? (options.rejectionReason ?? null) : (options.rejectionReason ?? existing?.rejection_reason ?? null),
+    nextLookupFallbackUrl
   );
 
   return getProductImage(options.entityType, options.entityId)!;

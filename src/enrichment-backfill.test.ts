@@ -22,7 +22,7 @@ import {
   upsertProductContent,
   upsertProductImage
 } from "./ingestion/jobs/index.js";
-import { getProductImage, runImageJob } from "./ingestion/jobs/index.js";
+import { getProductImage, resolveInventoryDisplayImageUrl, runImageJob } from "./ingestion/jobs/index.js";
 import { imageEnrichmentAvailability } from "./ingestion/jobs/enrichment-availability.js";
 import { db } from "./db.js";
 
@@ -758,5 +758,40 @@ test("lookup-sourced local image is not misclassified as a user upload by availa
   assert.equal(result.skipped, false);
   // Must NOT overwrite lookup provenance with source_type: "user".
   assert.notEqual(getProductImage("spirits", entityId)?.source_type, "user");
+
+  // Upgrading to an accepted official local image preserves lookup_fallback_url so
+  // the new official image displays and a subsequent job does not revert to source_type: "user".
+  const officialLocalUrl = "/api/media/images/official-verified-rye.jpg";
+  upsertProductImage({
+    entityType: "spirits",
+    entityId,
+    url: officialLocalUrl,
+    sourceType: "official",
+    sourceUrl: "https://mgp.example.com/rye",
+    width: 800,
+    height: 1200,
+    mimeType: "image/jpeg",
+    score: 95,
+    verified: true,
+    rejectionReason: null
+  });
+  assert.equal(resolveInventoryDisplayImageUrl("spirits", entityId, bottle), officialLocalUrl);
+
+  const secondResult = await runImageJob(job, {
+    searchImageHits: async () => [],
+    searchWebHits: async () => [],
+    verifyImage: async () => null
+  });
+  assert.equal(secondResult.skipped, true);
+  assert.equal(secondResult.reason, "already_complete");
+  assert.equal(getProductImage("spirits", entityId)?.source_type, "official");
+  assert.equal(getProductImage("spirits", entityId)?.url, officialLocalUrl);
+
+  // If Keeper later replaces inventory.image_url with a new photo, Keeper photo wins.
+  const keeperRow = { ...bottle, image_url: "/api/media/images/keeper-new-photo.jpg" };
+  assert.equal(
+    resolveInventoryDisplayImageUrl("spirits", entityId, keeperRow),
+    "/api/media/images/keeper-new-photo.jpg"
+  );
   cleanup();
 });
